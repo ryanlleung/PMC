@@ -31,6 +31,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS resource.mres)
 find_package(MikroC.Core REQUIRED)
 find_package_me(MikroSDK.LVGL.Common REQUIRED)
 find_package_me(MikroSDK.GraphicLibrary REQUIRED)
+find_package_me(MikroSDK.Log REQUIRED)
 
 lvgl_designer_generator(InitialTesting resource.mres main_screen.mscr)
 
@@ -39,6 +40,7 @@ target_link_libraries(InitialTesting
         MikroC.Core
         MikroSDK.LVGL.Common
         MikroSDK.GraphicLibrary
+        MikroSDK.Log
         lvgl
 )
 
