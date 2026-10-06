@@ -18,16 +18,16 @@
         {
             "kind": "flash",
             "name": "FLASH",
-            "percent": 42.1539306640625,
+            "percent": 42.417144775390625,
             "total": 1048576,
-            "used": 442016
+            "used": 444776
         }
     ],
-    "timestamp": "2026-10-06T04:05:04Z",
+    "timestamp": "2026-10-06T04:27:31Z",
     "totals": {
-        "flashPercent": 42.1539306640625,
+        "flashPercent": 42.417144775390625,
         "flashTotal": 1048576,
-        "flashUsed": 442016,
+        "flashUsed": 444776,
         "ramPercent": 63.519287109375,
         "ramTotal": 131072,
         "ramUsed": 83256

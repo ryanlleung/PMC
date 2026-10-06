@@ -6,6 +6,7 @@
 typedef struct {
 	
 	lv_obj_t* main_screen;
+	lv_obj_t* switch_0;
 
 
 } lvgl_main_screen_ui_t;

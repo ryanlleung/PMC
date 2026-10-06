@@ -17,7 +17,7 @@
 BUILD_LVGL_FROM_NECTO:STRING=TRUE
 
 //Build shared libraries
-BUILD_SHARED_LIBS:BOOL=OFF
+BUILD_SHARED_LIBS:STRING=OFF
 
 CMAKE_ADDR2LINE:STRING=C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/arm-none-eabi-addr2line.exe
 
@@ -257,13 +257,13 @@ LOG_INTERFACE:STRING=LOG_INTERFACE_STDOUT
 LVGL_VERSION:STRING=9.4.0
 
 //Simple include of "lv_conf.h" and "lv_drv_conf.h"
-LV_CONF_INCLUDE_SIMPLE:BOOL=ON
+LV_CONF_INCLUDE_SIMPLE:STRING=ON
 
 //Path defined for lv_conf.h
-LV_CONF_PATH:BOOL=OFF
+LV_CONF_PATH:STRING=OFF
 
 //Use #include "lvgl.h" instead of #include "../../lvgl.h"
-LV_LVGL_H_INCLUDE_SIMPLE:BOOL=ON
+LV_LVGL_H_INCLUDE_SIMPLE:STRING=ON
 
 MCU_FLASH:STRING=1048576
 

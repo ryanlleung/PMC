@@ -1,5 +1,184 @@
 {
     "children": [
+        {
+            "checked": false,
+            "events": {
+                "LV_EVENT_CLICKED": null,
+                "LV_EVENT_DEFOCUSED": null,
+                "LV_EVENT_DELETE": null,
+                "LV_EVENT_FOCUSED": null,
+                "LV_EVENT_PRESSED": null,
+                "LV_EVENT_PRESSING": null,
+                "LV_EVENT_RELEASED": null,
+                "LV_EVENT_SCROLL": null,
+                "LV_EVENT_SCROLL_BEGIN": null,
+                "LV_EVENT_SCROLL_END": null,
+                "LV_EVENT_SIZE_CHANGED": null,
+                "LV_EVENT_STYLE_CHANGED": null,
+                "LV_EVENT_VALUE_CHANGED": null
+            },
+            "geometry": {
+                "height": 50,
+                "width": 100,
+                "x": 193,
+                "y": 108
+            },
+            "name": "switch_0",
+            "stack_order": 0,
+            "styles": [
+                {
+                    "background": {
+                        "bg_color": "#2097f3",
+                        "bg_grad_color": "#000000",
+                        "bg_grad_dir": "LV_GRAD_DIR_NONE",
+                        "bg_opa": 100
+                    },
+                    "border": {
+                        "border_color": "#000000",
+                        "border_opa": 100,
+                        "border_post": false,
+                        "border_width": 0,
+                        "radius": 32767
+                    },
+                    "part": "LV_PART_INDICATOR",
+                    "shadow": {
+                        "shadow_color": "#000000",
+                        "shadow_ofs_x": 0,
+                        "shadow_ofs_y": 0,
+                        "shadow_opa": 100,
+                        "shadow_spread": 0,
+                        "shadow_width": 0
+                    },
+                    "state": "LV_STATE_CHECKED"
+                },
+                {
+                    "background": {
+                        "bg_color": "#e0e0e0",
+                        "bg_grad_color": "#000000",
+                        "bg_grad_dir": "LV_GRAD_DIR_NONE",
+                        "bg_opa": 100
+                    },
+                    "border": {
+                        "border_color": "#000000",
+                        "border_opa": 100,
+                        "border_post": false,
+                        "border_width": 0,
+                        "radius": 32767
+                    },
+                    "part": "LV_PART_INDICATOR",
+                    "shadow": {
+                        "shadow_color": "#000000",
+                        "shadow_ofs_x": 0,
+                        "shadow_ofs_y": 0,
+                        "shadow_opa": 100,
+                        "shadow_spread": 0,
+                        "shadow_width": 0
+                    },
+                    "state": "LV_STATE_DEFAULT"
+                },
+                {
+                    "background": {
+                        "bg_color": "#e0e0e0",
+                        "bg_grad_color": "#000000",
+                        "bg_grad_dir": "LV_GRAD_DIR_NONE",
+                        "bg_opa": 100
+                    },
+                    "border": {
+                        "border_color": "#000000",
+                        "border_opa": 100,
+                        "border_post": false,
+                        "border_width": 0
+                    },
+                    "knob_size": 0,
+                    "part": "LV_PART_KNOB",
+                    "shadow": {
+                        "shadow_color": "#000000",
+                        "shadow_ofs_x": 0,
+                        "shadow_ofs_y": 0,
+                        "shadow_opa": 100,
+                        "shadow_spread": 0,
+                        "shadow_width": 0
+                    },
+                    "state": "LV_STATE_CHECKED"
+                },
+                {
+                    "background": {
+                        "bg_color": "#ffffff",
+                        "bg_grad_color": "#000000",
+                        "bg_grad_dir": "LV_GRAD_DIR_NONE",
+                        "bg_opa": 100
+                    },
+                    "border": {
+                        "border_color": "#000000",
+                        "border_opa": 100,
+                        "border_post": false,
+                        "border_width": 0
+                    },
+                    "knob_size": 0,
+                    "part": "LV_PART_KNOB",
+                    "shadow": {
+                        "shadow_color": "#000000",
+                        "shadow_ofs_x": 0,
+                        "shadow_ofs_y": 0,
+                        "shadow_opa": 100,
+                        "shadow_spread": 0,
+                        "shadow_width": 0
+                    },
+                    "state": "LV_STATE_DEFAULT"
+                },
+                {
+                    "background": {
+                        "bg_color": "#e0e0e0",
+                        "bg_grad_color": "#000000",
+                        "bg_grad_dir": "LV_GRAD_DIR_NONE",
+                        "bg_opa": 100
+                    },
+                    "border": {
+                        "border_color": "#000000",
+                        "border_opa": 100,
+                        "border_post": false,
+                        "border_width": 0,
+                        "radius": 32767
+                    },
+                    "part": "LV_PART_MAIN",
+                    "shadow": {
+                        "shadow_color": "#000000",
+                        "shadow_ofs_x": 0,
+                        "shadow_ofs_y": 0,
+                        "shadow_opa": 100,
+                        "shadow_spread": 0,
+                        "shadow_width": 0
+                    },
+                    "state": "LV_STATE_CHECKED"
+                },
+                {
+                    "background": {
+                        "bg_color": "#e0e0e0",
+                        "bg_grad_color": "#000000",
+                        "bg_grad_dir": "LV_GRAD_DIR_NONE",
+                        "bg_opa": 100
+                    },
+                    "border": {
+                        "border_color": "#000000",
+                        "border_opa": 100,
+                        "border_post": false,
+                        "border_width": 0,
+                        "radius": 32767
+                    },
+                    "part": "LV_PART_MAIN",
+                    "shadow": {
+                        "shadow_color": "#000000",
+                        "shadow_ofs_x": 0,
+                        "shadow_ofs_y": 0,
+                        "shadow_opa": 100,
+                        "shadow_spread": 0,
+                        "shadow_width": 0
+                    },
+                    "state": "LV_STATE_DEFAULT"
+                }
+            ],
+            "type": "switch"
+        }
     ],
     "lvgl_version": "9.4.0",
     "name": "main_screen",

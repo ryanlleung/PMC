@@ -62,7 +62,7 @@
 				{
 					"directoryIndex" : 0,
 					"id" : "InitialTesting::@6890427a1f51a3e7e1df",
-					"jsonFile" : "target-InitialTesting-Debug-96b2d726a8bf143e1375.json",
+					"jsonFile" : "target-InitialTesting-Debug-66dd229a3ed1d316162a.json",
 					"name" : "InitialTesting",
 					"projectIndex" : 0
 				},
@@ -76,7 +76,7 @@
 				{
 					"directoryIndex" : 1,
 					"id" : "lvgl::@ffe480d16c09fdeeb6b3",
-					"jsonFile" : "target-lvgl-Debug-db7fe003bfe73d0afd95.json",
+					"jsonFile" : "target-lvgl-Debug-81b8fdb01e02cd9d2b71.json",
 					"name" : "lvgl",
 					"projectIndex" : 0
 				}

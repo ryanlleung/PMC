@@ -22,7 +22,7 @@
 					"value" : "Build shared libraries"
 				}
 			],
-			"type" : "BOOL",
+			"type" : "STRING",
 			"value" : "OFF"
 		},
 		{
@@ -1578,7 +1578,7 @@
 					"value" : "Simple include of \"lv_conf.h\" and \"lv_drv_conf.h\""
 				}
 			],
-			"type" : "BOOL",
+			"type" : "STRING",
 			"value" : "ON"
 		},
 		{
@@ -1590,7 +1590,7 @@
 					"value" : "Path defined for lv_conf.h"
 				}
 			],
-			"type" : "BOOL",
+			"type" : "STRING",
 			"value" : "OFF"
 		},
 		{
@@ -1602,7 +1602,7 @@
 					"value" : "Use #include \"lvgl.h\" instead of #include \"../../lvgl.h\""
 				}
 			],
-			"type" : "BOOL",
+			"type" : "STRING",
 			"value" : "ON"
 		},
 		{
