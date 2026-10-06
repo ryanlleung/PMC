@@ -13,7 +13,10 @@ void usb_serial_init(void);
 // Call often from the main loop: services the USB stack.
 void usb_serial_task(void);
 
-// printf-style output to the COM port. Dropped if no PC is connected.
+// Short text describing the USB link state, for on-screen diagnostics.
+const char *usb_serial_status(void);
+
+// printf-style output to the COM port. Dropped until the PC has enumerated the port.
 void usb_serial_printf(const char *fmt, ...);
 
 #endif // _USB_SERIAL_H_

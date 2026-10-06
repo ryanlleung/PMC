@@ -71,13 +71,24 @@ void usb_serial_task(void)
     tud_task();
 }
 
+const char *usb_serial_status(void)
+{
+    if (!tud_mounted())
+        return "USB: not enumerated";
+    if (!tud_cdc_connected())
+        return "USB: enumerated, port closed (no DTR)";
+    return "USB: port open";
+}
+
 void usb_serial_printf(const char *fmt, ...)
 {
     char buf[128];
     va_list args;
     int len;
 
-    if (!tud_cdc_connected())
+    // Only needs the PC to have enumerated the device. Do not wait for DTR:
+    // some terminals open the port without asserting it.
+    if (!tud_mounted())
         return;
 
     va_start(args, fmt);
