@@ -1,0 +1,221 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineSystem.cmake:200 (message)"
+      - "CMakeLists.txt:6 (project)"
+    message: |
+      The target system is: Generic - 1 - 
+      The host system is: Windows - 10.0.26100 - AMD64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:6 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" failed.
+      Compiler: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/arm-none-eabi-gcc.exe 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      1
+      C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/ld.exe: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib\\libc.a(libc_a-exit.o): in function `exit':
+      exit.c:(.text.exit+0x28): undefined reference to `_exit'
+      C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/ld.exe: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib\\libc.a(libc_a-closer.o): in function `_close_r':
+      closer.c:(.text._close_r+0x18): undefined reference to `_close'
+      C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/ld.exe: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib\\libc.a(libc_a-lseekr.o): in function `_lseek_r':
+      lseekr.c:(.text._lseek_r+0x24): undefined reference to `_lseek'
+      C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/ld.exe: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib\\libc.a(libc_a-readr.o): in function `_read_r':
+      readr.c:(.text._read_r+0x24): undefined reference to `_read'
+      C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/ld.exe: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib\\libc.a(libc_a-writer.o): in function `_write_r':
+      writer.c:(.text._write_r+0x24): undefined reference to `_write'
+      C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/ld.exe: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib\\libc.a(libc_a-sbrkr.o): in function `_sbrk_r':
+      sbrkr.c:(.text._sbrk_r+0x18): undefined reference to `_sbrk'
+      collect2.exe: error: ld returned 1 exit status
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:6 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/arm-none-eabi-gcc.exe 
+      Build flags: 
+      Id flags: -c 
+      
+      The output was:
+      0
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CMakeCCompilerId.o"
+      
+      The C compiler identification is GNU, found in:
+        C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/3.30.5/CompilerIdC/CMakeCCompilerId.o
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerId.cmake:1192 (message)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineASMCompiler.cmake:135 (CMAKE_DETERMINE_COMPILER_ID_VENDOR)"
+      - "CMakeLists.txt:6 (project)"
+    message: |
+      Checking whether the ASM compiler is GNU using "--version" matched "(GNU assembler)|(GCC)|(Free Software Foundation)":
+      arm-none-eabi-gcc.exe (xPack GNU Arm Embedded GCC x86_64) 14.2.1 20241119
+      Copyright (C) 2024 Free Software Foundation, Inc.
+      This is free software; see the source for copying conditions.  There is NO
+      warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:6 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/CMakeScratch/TryCompile-q7jsr3"
+      binary: "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/CMakeScratch/TryCompile-q7jsr3"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/cmake;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/core/ARM/gcc_clang/arm_gcc_clang_stm32f4x/cmake;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/mikroe_utils_common;C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/lib/cmake;;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/cmake;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/core/ARM/gcc_clang/arm_gcc_clang_stm32f4x/cmake;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/mikroe_utils_common;C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/lib/cmake;"
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/CMakeScratch/TryCompile-q7jsr3'
+        
+        Run Build Command(s): C:/MikroElektronika/MikroElektronika/NECTOStudio/bin/ninja.exe -v cmTC_67ac2
+        [1/2] C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-gcc.exe   -v -std=gnu99 -Wl,-Map=output.map,-gc-sections,--print-memory-usage -mcpu=cortex-m4 -mthumb -Wno-incompatible-pointer-types --specs=nosys.specs -mfloat-abi=hard -mfpu=fpv4-sp-d16 -ffunction-sections -fdata-sections -fno-common -fmessage-length=0 -Wno-int-conversion -Wno-incompatible-function-pointer-types -o CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj -c C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeCCompilerABI.c
+        Using built-in specs.
+        Reading specs from C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/nosys.specs
+        rename spec link_gcc_c_sequence to nosys_link_gcc_c_sequence
+        COLLECT_GCC=C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-gcc.exe
+        Target: arm-none-eabi
+        Configured with: /__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/sources/gcc/configure --prefix=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/application --with-sysroot=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/application/arm-none-eabi --with-native-system-header-dir=/include --infodir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/info --mandir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/man --htmldir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/html --pdfdir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/pdf --build=x86_64-pc-linux-gnu --host=x86_64-w64-mingw32 --target=arm-none-eabi --disable-nls --disable-shared --disable-threads --disable-tls --enable-checking=release --enable-languages=c,c++,fortran --enable-mingw-wildcard --with-gmp=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install --with-newlib --with-pkgversion='xPack GNU Arm Embedded GCC x86_64' --with-gnu-as --with-gnu-ld --with-system-zlib --with-headers=yes --enable-multilib --with-multilib-list=aprofile,rmprofile
+        Thread model: single
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.1 20241119 (xPack GNU Arm Embedded GCC x86_64) 
+        COLLECT_GCC_OPTIONS='-v' '-std=gnu99' '-mcpu=cortex-m4' '-mthumb' '-Wno-incompatible-pointer-types' '-specs=nosys.specs' '-mfloat-abi=hard' '-mfpu=fpv4-sp-d16' '-ffunction-sections' '-fdata-sections' '-fno-common' '-fmessage-length=0' '-Wno-int-conversion' '-Wno-incompatible-function-pointer-types' '-o' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj' '-c' '-mlibarch=armv7e-m+fp' '-march=armv7e-m+fp' '-dumpdir' 'CMakeFiles/cmTC_67ac2.dir/'
+         C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../libexec/gcc/arm-none-eabi/14.2.1/cc1.exe -quiet -v -imultilib thumb/v7e-m+fp/hard -iprefix C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/ -isysroot C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi -D__USES_INITFINI__ C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_67ac2.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -mlibarch=armv7e-m+fp -march=armv7e-m+fp -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-incompatible-function-pointer-types -std=gnu99 -version -ffunction-sections -fdata-sections -fno-common -fmessage-length=0 -o C:\\Users\\sample\\AppData\\Local\\Temp\\ccn0mVsf.s
+        GNU C99 (xPack GNU Arm Embedded GCC x86_64) version 14.2.1 20241119 (arm-none-eabi)
+        	compiled by GNU C version 13.2.0, GMP version 6.2.1, MPFR version 3.1.6, MPC version 1.0.3, isl version isl-0.15-GMP
+        
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/../../lib/gcc/arm-none-eabi/14.2.1/include"
+        ignoring nonexistent directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/application/lib/gcc/arm-none-eabi/14.2.1/../../../../include"
+        ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/../../lib/gcc/arm-none-eabi/14.2.1/include-fixed"
+        ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/../../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/include"
+        ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include
+         C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include-fixed
+         C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/include
+        End of search list.
+        Compiler executable checksum: aa0579eb544201d580576510a9798264
+        COLLECT_GCC_OPTIONS='-v' '-std=gnu99' '-mcpu=cortex-m4' '-mthumb' '-Wno-incompatible-pointer-types' '-specs=nosys.specs' '-mfloat-abi=hard' '-mfpu=fpv4-sp-d16' '-ffunction-sections' '-fdata-sections' '-fno-common' '-fmessage-length=0' '-Wno-int-conversion' '-Wno-incompatible-function-pointer-types' '-o' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj' '-c' '-mlibarch=armv7e-m+fp' '-march=armv7e-m+fp' '-dumpdir' 'CMakeFiles/cmTC_67ac2.dir/'
+         C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/as.exe -v -march=armv7e-m+fp -mfloat-abi=hard -mfpu=fpv4-sp-d16 -meabi=5 -o CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj C:\\Users\\sample\\AppData\\Local\\Temp\\ccn0mVsf.s
+        GNU assembler version 2.43.1 (arm-none-eabi) using BFD version (xPack GNU Arm Embedded GCC x86_64) 2.43.1.20241119
+        COMPILER_PATH=C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../libexec/gcc/arm-none-eabi/14.2.1/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../libexec/gcc/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/
+        LIBRARY_PATH=C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7e-m+fp/hard/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7e-m+fp/hard/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/lib/thumb/v7e-m+fp/hard/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/lib/\x0d
+        COLLECT_GCC_OPTIONS='-v' '-std=gnu99' '-mcpu=cortex-m4' '-mthumb' '-Wno-incompatible-pointer-types' '-specs=nosys.specs' '-mfloat-abi=hard' '-mfpu=fpv4-sp-d16' '-ffunction-sections' '-fdata-sections' '-fno-common' '-fmessage-length=0' '-Wno-int-conversion' '-Wno-incompatible-function-pointer-types' '-o' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj' '-c' '-mlibarch=armv7e-m+fp' '-march=armv7e-m+fp' '-dumpdir' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.'\x0d
+        [2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\CMake\\bin\\cmake.exe -E rm -f libcmTC_67ac2.a && C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-ar.exe qc libcmTC_67ac2.a  CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj && C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-ranlib.exe libcmTC_67ac2.a && cd ."
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:182 (message)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:6 (project)"
+    message: |
+      Parsed C implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include]
+          add: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include-fixed]
+          add: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/include]
+        end of search list found
+        collapse include dir [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include] ==> [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include]
+        collapse include dir [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include-fixed] ==> [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include-fixed]
+        collapse include dir [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/include] ==> [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/arm-none-eabi/include]
+        implicit include dirs: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/arm-none-eabi/14.2.1/include-fixed;C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/arm-none-eabi/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:6 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: 'C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/CMakeScratch/TryCompile-q7jsr3']
+        ignore line: []
+        ignore line: [Run Build Command(s): C:/MikroElektronika/MikroElektronika/NECTOStudio/bin/ninja.exe -v cmTC_67ac2]
+        ignore line: [[1/2] C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-gcc.exe   -v -std=gnu99 -Wl -Map=output.map -gc-sections --print-memory-usage -mcpu=cortex-m4 -mthumb -Wno-incompatible-pointer-types --specs=nosys.specs -mfloat-abi=hard -mfpu=fpv4-sp-d16 -ffunction-sections -fdata-sections -fno-common -fmessage-length=0 -Wno-int-conversion -Wno-incompatible-function-pointer-types -o CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj -c C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeCCompilerABI.c]
+        ignore line: [Using built-in specs.]
+        ignore line: [Reading specs from C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/nosys.specs]
+        ignore line: [rename spec link_gcc_c_sequence to nosys_link_gcc_c_sequence]
+        ignore line: [COLLECT_GCC=C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-gcc.exe]
+        ignore line: [Target: arm-none-eabi]
+        ignore line: [Configured with: /__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/sources/gcc/configure --prefix=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/application --with-sysroot=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/application/arm-none-eabi --with-native-system-header-dir=/include --infodir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/info --mandir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/man --htmldir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/html --pdfdir=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install/share/pdf --build=x86_64-pc-linux-gnu --host=x86_64-w64-mingw32 --target=arm-none-eabi --disable-nls --disable-shared --disable-threads --disable-tls --enable-checking=release --enable-languages=c,c++,fortran --enable-mingw-wildcard --with-gmp=/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/x86_64-w64-mingw32/install --with-newlib --with-pkgversion='xPack GNU Arm Embedded GCC x86_64' --with-gnu-as --with-gnu-ld --with-system-zlib --with-headers=yes --enable-multilib --with-multilib-list=aprofile,rmprofile]
+        ignore line: [Thread model: single]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.1 20241119 (xPack GNU Arm Embedded GCC x86_64) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-std=gnu99' '-mcpu=cortex-m4' '-mthumb' '-Wno-incompatible-pointer-types' '-specs=nosys.specs' '-mfloat-abi=hard' '-mfpu=fpv4-sp-d16' '-ffunction-sections' '-fdata-sections' '-fno-common' '-fmessage-length=0' '-Wno-int-conversion' '-Wno-incompatible-function-pointer-types' '-o' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj' '-c' '-mlibarch=armv7e-m+fp' '-march=armv7e-m+fp' '-dumpdir' 'CMakeFiles/cmTC_67ac2.dir/']
+        ignore line: [ C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../libexec/gcc/arm-none-eabi/14.2.1/cc1.exe -quiet -v -imultilib thumb/v7e-m+fp/hard -iprefix C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/ -isysroot C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi -D__USES_INITFINI__ C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_67ac2.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -mlibarch=armv7e-m+fp -march=armv7e-m+fp -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-incompatible-function-pointer-types -std=gnu99 -version -ffunction-sections -fdata-sections -fno-common -fmessage-length=0 -o C:\\Users\\sample\\AppData\\Local\\Temp\\ccn0mVsf.s]
+        ignore line: [GNU C99 (xPack GNU Arm Embedded GCC x86_64) version 14.2.1 20241119 (arm-none-eabi)]
+        ignore line: [	compiled by GNU C version 13.2.0  GMP version 6.2.1  MPFR version 3.1.6  MPC version 1.0.3  isl version isl-0.15-GMP]
+        ignore line: []
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/../../lib/gcc/arm-none-eabi/14.2.1/include"]
+        ignore line: [ignoring nonexistent directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/__w/arm-none-eabi-gcc-xpack/arm-none-eabi-gcc-xpack/build-assets/build/win32-x64/application/lib/gcc/arm-none-eabi/14.2.1/../../../../include"]
+        ignore line: [ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/../../lib/gcc/arm-none-eabi/14.2.1/include-fixed"]
+        ignore line: [ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/lib/gcc/../../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/include"]
+        ignore line: [ignoring duplicate directory "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include]
+        ignore line: [ C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/include-fixed]
+        ignore line: [ C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: aa0579eb544201d580576510a9798264]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-std=gnu99' '-mcpu=cortex-m4' '-mthumb' '-Wno-incompatible-pointer-types' '-specs=nosys.specs' '-mfloat-abi=hard' '-mfpu=fpv4-sp-d16' '-ffunction-sections' '-fdata-sections' '-fno-common' '-fmessage-length=0' '-Wno-int-conversion' '-Wno-incompatible-function-pointer-types' '-o' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj' '-c' '-mlibarch=armv7e-m+fp' '-march=armv7e-m+fp' '-dumpdir' 'CMakeFiles/cmTC_67ac2.dir/']
+        ignore line: [ C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/as.exe -v -march=armv7e-m+fp -mfloat-abi=hard -mfpu=fpv4-sp-d16 -meabi=5 -o CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj C:\\Users\\sample\\AppData\\Local\\Temp\\ccn0mVsf.s]
+        ignore line: [GNU assembler version 2.43.1 (arm-none-eabi) using BFD version (xPack GNU Arm Embedded GCC x86_64) 2.43.1.20241119]
+        ignore line: [COMPILER_PATH=C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../libexec/gcc/arm-none-eabi/14.2.1/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../libexec/gcc/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/bin/]
+        ignore line: [LIBRARY_PATH=C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/thumb/v7e-m+fp/hard/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/thumb/v7e-m+fp/hard/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/lib/thumb/v7e-m+fp/hard/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../lib/gcc/arm-none-eabi/14.2.1/../../../../arm-none-eabi/lib/]
+        ignore line: [C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/compilers/gcc/arm/gcc-arm-none-eabi/bin/../arm-none-eabi/lib/\x0d]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-std=gnu99' '-mcpu=cortex-m4' '-mthumb' '-Wno-incompatible-pointer-types' '-specs=nosys.specs' '-mfloat-abi=hard' '-mfpu=fpv4-sp-d16' '-ffunction-sections' '-fdata-sections' '-fno-common' '-fmessage-length=0' '-Wno-int-conversion' '-Wno-incompatible-function-pointer-types' '-o' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj' '-c' '-mlibarch=armv7e-m+fp' '-march=armv7e-m+fp' '-dumpdir' 'CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.'\x0d]
+        ignore line: [[2/2] C:\\WINDOWS\\system32\\cmd.exe /C "cd . && C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\CMake\\bin\\cmake.exe -E rm -f libcmTC_67ac2.a && C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-ar.exe qc libcmTC_67ac2.a  CMakeFiles/cmTC_67ac2.dir/CMakeCCompilerABI.c.obj && C:\\Users\\sample\\AppData\\Local\\MIKROE\\NECTOStudio7\\packages\\compilers\\gcc\\arm\\gcc-arm-none-eabi\\bin\\arm-none-eabi-ranlib.exe libcmTC_67ac2.a && cd ."]
+        ignore line: []
+        ignore line: []
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+...

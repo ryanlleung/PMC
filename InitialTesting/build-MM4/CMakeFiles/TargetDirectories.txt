@@ -1,0 +1,7 @@
+C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/InitialTesting.dir
+C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/InitialTesting_generated.dir
+C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/edit_cache.dir
+C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/CMakeFiles/rebuild_cache.dir
+C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/lvgl_940/CMakeFiles/lvgl.dir
+C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/lvgl_940/CMakeFiles/edit_cache.dir
+C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/lvgl_940/CMakeFiles/rebuild_cache.dir

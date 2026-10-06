@@ -1,0 +1,1708 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "InitialTesting"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_executable",
+			"add_link_options",
+			"include",
+			"project",
+			"target_link_options",
+			"add_ld_all_targets",
+			"target_link_libraries",
+			"set_target_properties",
+			"find_package",
+			"find_package_me",
+			"find_dependency",
+			"add_dependencies",
+			"lvgl_designer_generator",
+			"add_compile_options",
+			"target_compile_definitions",
+			"include_directories",
+			"target_include_directories",
+			"target_sources",
+			"add_startup_all_targets"
+		],
+		"files" : 
+		[
+			"CMakeLists.txt",
+			"build-MM4/toolchain.cmake",
+			"build-MM4/CMakeFiles/3.30.5/CMakeSystem.cmake",
+			"C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/cmake/mikroeUtilsCommon.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.LVGL.Common/MikroSDK.LVGL.CommonTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.LVGL.Common/MikroSDK.LVGL.CommonConfig.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.TouchController/MikroSDK.TouchControllerTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.TouchController/MikroSDK.TouchControllerConfig.cmake",
+			"C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/packages/CMake/share/cmake-3.30/Modules/CMakeFindDependencyMacro.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Driver.I2C.Master/MikroSDK.Driver.I2C.MasterTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Driver.I2C.Master/MikroSDK.Driver.I2C.MasterConfig.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Hal.I2C.Master/MikroSDK.Hal.I2C.MasterTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Hal.I2C.Master/MikroSDK.Hal.I2C.MasterConfig.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.GraphicLibrary/MikroSDK.GraphicLibraryTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.GraphicLibrary/MikroSDK.GraphicLibraryConfig.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Ssd1963/MikroSDK.Ssd1963Config.cmake",
+			".meproject/setup/Debug/lib/cmake/Components.TftBoard8/Components.TftBoard8Config.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Ssd1963/MikroSDK.Ssd1963Targets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Driver.GPIO.In/MikroSDK.Driver.GPIO.InTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Driver.GPIO.In/MikroSDK.Driver.GPIO.InConfig.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.HalInterface/MikroSDK.HalInterfaceTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.HalInterface/MikroSDK.HalInterfaceConfig.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Hal.GPIO/MikroSDK.Hal.GPIOConfig.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.Hal.GPIO/MikroSDK.Hal.GPIOTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.HalLowLevel.GPIO/MikroSDK.HalLowLevel.GPIOTargets.cmake",
+			".meproject/setup/Debug/lib/cmake/MikroSDK.HalLowLevel.GPIO/MikroSDK.HalLowLevel.GPIOConfig.cmake",
+			"C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/cmake/mikroeUtils.cmake",
+			"1ms_timer/TimerHeaderConfig.cmake"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 14,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 6,
+				"parent" : 0
+			},
+			{
+				"file" : 2,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 2,
+				"line" : 6,
+				"parent" : 3
+			},
+			{
+				"file" : 1,
+				"parent" : 4
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 167,
+				"parent" : 5
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 70,
+				"parent" : 0
+			},
+			{
+				"command" : 4,
+				"file" : 3,
+				"line" : 391,
+				"parent" : 7
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 37,
+				"parent" : 0
+			},
+			{
+				"command" : 9,
+				"file" : 0,
+				"line" : 32,
+				"parent" : 0
+			},
+			{
+				"command" : 8,
+				"file" : 3,
+				"line" : 19,
+				"parent" : 10
+			},
+			{
+				"file" : 5,
+				"parent" : 11
+			},
+			{
+				"command" : 2,
+				"file" : 5,
+				"line" : 32,
+				"parent" : 12
+			},
+			{
+				"file" : 4,
+				"parent" : 13
+			},
+			{
+				"command" : 7,
+				"file" : 4,
+				"line" : 61,
+				"parent" : 14
+			},
+			{
+				"command" : 10,
+				"file" : 5,
+				"line" : 29,
+				"parent" : 12
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 16
+			},
+			{
+				"file" : 7,
+				"parent" : 17
+			},
+			{
+				"command" : 2,
+				"file" : 7,
+				"line" : 36,
+				"parent" : 18
+			},
+			{
+				"file" : 6,
+				"parent" : 19
+			},
+			{
+				"command" : 7,
+				"file" : 6,
+				"line" : 61,
+				"parent" : 20
+			},
+			{
+				"command" : 10,
+				"file" : 7,
+				"line" : 31,
+				"parent" : 18
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 22
+			},
+			{
+				"file" : 10,
+				"parent" : 23
+			},
+			{
+				"command" : 2,
+				"file" : 10,
+				"line" : 31,
+				"parent" : 24
+			},
+			{
+				"file" : 9,
+				"parent" : 25
+			},
+			{
+				"command" : 7,
+				"file" : 9,
+				"line" : 61,
+				"parent" : 26
+			},
+			{
+				"command" : 10,
+				"file" : 10,
+				"line" : 29,
+				"parent" : 24
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 28
+			},
+			{
+				"file" : 12,
+				"parent" : 29
+			},
+			{
+				"command" : 2,
+				"file" : 12,
+				"line" : 32,
+				"parent" : 30
+			},
+			{
+				"file" : 11,
+				"parent" : 31
+			},
+			{
+				"command" : 7,
+				"file" : 11,
+				"line" : 61,
+				"parent" : 32
+			},
+			{
+				"command" : 10,
+				"file" : 7,
+				"line" : 33,
+				"parent" : 18
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 34
+			},
+			{
+				"file" : 16,
+				"parent" : 35
+			},
+			{
+				"command" : 10,
+				"file" : 16,
+				"line" : 31,
+				"parent" : 36
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 37
+			},
+			{
+				"file" : 15,
+				"parent" : 38
+			},
+			{
+				"command" : 10,
+				"file" : 15,
+				"line" : 30,
+				"parent" : 39
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 40
+			},
+			{
+				"file" : 14,
+				"parent" : 41
+			},
+			{
+				"command" : 2,
+				"file" : 14,
+				"line" : 31,
+				"parent" : 42
+			},
+			{
+				"file" : 13,
+				"parent" : 43
+			},
+			{
+				"command" : 7,
+				"file" : 13,
+				"line" : 61,
+				"parent" : 44
+			},
+			{
+				"command" : 2,
+				"file" : 15,
+				"line" : 34,
+				"parent" : 39
+			},
+			{
+				"file" : 17,
+				"parent" : 46
+			},
+			{
+				"command" : 7,
+				"file" : 17,
+				"line" : 61,
+				"parent" : 47
+			},
+			{
+				"command" : 10,
+				"file" : 7,
+				"line" : 30,
+				"parent" : 18
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 49
+			},
+			{
+				"file" : 19,
+				"parent" : 50
+			},
+			{
+				"command" : 2,
+				"file" : 19,
+				"line" : 31,
+				"parent" : 51
+			},
+			{
+				"file" : 18,
+				"parent" : 52
+			},
+			{
+				"command" : 7,
+				"file" : 18,
+				"line" : 61,
+				"parent" : 53
+			},
+			{
+				"command" : 10,
+				"file" : 19,
+				"line" : 29,
+				"parent" : 51
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 55
+			},
+			{
+				"file" : 22,
+				"parent" : 56
+			},
+			{
+				"command" : 10,
+				"file" : 22,
+				"line" : 29,
+				"parent" : 57
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 58
+			},
+			{
+				"file" : 21,
+				"parent" : 59
+			},
+			{
+				"command" : 2,
+				"file" : 21,
+				"line" : 30,
+				"parent" : 60
+			},
+			{
+				"file" : 20,
+				"parent" : 61
+			},
+			{
+				"command" : 7,
+				"file" : 20,
+				"line" : 61,
+				"parent" : 62
+			},
+			{
+				"command" : 2,
+				"file" : 22,
+				"line" : 32,
+				"parent" : 57
+			},
+			{
+				"file" : 23,
+				"parent" : 64
+			},
+			{
+				"command" : 7,
+				"file" : 23,
+				"line" : 61,
+				"parent" : 65
+			},
+			{
+				"command" : 10,
+				"file" : 22,
+				"line" : 30,
+				"parent" : 57
+			},
+			{
+				"command" : 8,
+				"file" : 8,
+				"line" : 76,
+				"parent" : 67
+			},
+			{
+				"file" : 25,
+				"parent" : 68
+			},
+			{
+				"command" : 2,
+				"file" : 25,
+				"line" : 32,
+				"parent" : 69
+			},
+			{
+				"file" : 24,
+				"parent" : 70
+			},
+			{
+				"command" : 7,
+				"file" : 24,
+				"line" : 61,
+				"parent" : 71
+			},
+			{
+				"command" : 12,
+				"file" : 0,
+				"line" : 35,
+				"parent" : 0
+			},
+			{
+				"command" : 11,
+				"file" : 26,
+				"line" : 185,
+				"parent" : 73
+			},
+			{
+				"command" : 13,
+				"file" : 1,
+				"line" : 165,
+				"parent" : 5
+			},
+			{
+				"command" : 14,
+				"file" : 0,
+				"line" : 45,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 9,
+				"parent" : 0
+			},
+			{
+				"file" : 26,
+				"parent" : 77
+			},
+			{
+				"command" : 2,
+				"file" : 26,
+				"line" : 194,
+				"parent" : 78
+			},
+			{
+				"file" : 3,
+				"parent" : 79
+			},
+			{
+				"command" : 15,
+				"file" : 3,
+				"line" : 39,
+				"parent" : 80
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 10,
+				"parent" : 0
+			},
+			{
+				"file" : 27,
+				"parent" : 82
+			},
+			{
+				"command" : 15,
+				"file" : 27,
+				"line" : 12,
+				"parent" : 83
+			},
+			{
+				"command" : 16,
+				"file" : 26,
+				"line" : 187,
+				"parent" : 73
+			},
+			{
+				"command" : 16,
+				"file" : 0,
+				"line" : 49,
+				"parent" : 0
+			},
+			{
+				"command" : 17,
+				"file" : 26,
+				"line" : 188,
+				"parent" : 73
+			},
+			{
+				"command" : 18,
+				"file" : 0,
+				"line" : 66,
+				"parent" : 0
+			},
+			{
+				"command" : 17,
+				"file" : 3,
+				"line" : 433,
+				"parent" : 88
+			},
+			{
+				"command" : 17,
+				"file" : 3,
+				"line" : 390,
+				"parent" : 7
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-std=gnu99"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wl,-Map=output.map,-gc-sections,--print-memory-usage"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mcpu=cortex-m4"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mthumb"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wno-incompatible-pointer-types"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "--specs=nosys.specs"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mfloat-abi=hard"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mfpu=fpv4-sp-d16"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-ffunction-sections"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-fdata-sections"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-fno-common"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-fmessage-length=0"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wno-int-conversion"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wno-incompatible-function-pointer-types"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 76,
+					"define" : "ARM_TIMER=1"
+				},
+				{
+					"backtrace" : 76,
+					"define" : "CLEAR_FLAG=0"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "DRV_TO_HAL=0"
+				},
+				{
+					"backtrace" : 76,
+					"define" : "INTERRUPT_ROUTINE=__attribute__ ((interrupt(\"IRQ\"))) void SysTick_Handler(void)"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "LV_CONF_INCLUDE_SIMPLE"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "LV_LVGL_H_INCLUDE_SIMPLE"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "MACRO_USAGE_I2C"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "MikroCCoreVersion=1"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "OSC_KHZ=168*1000UL"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "PI=M_PI"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "PREINIT_SUPPORTED"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "SELECTED_CONTROLLER=FT5X16_CONTROLLER"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F407ZG"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F407xx"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F40x"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F4xx"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TFT_DISPLAY_HEIGHT=272"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TFT_DISPLAY_WIDTH=480"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TFT_MAP_PINOUTS=TFT8_MAP_PINOUTS_16BIT"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TWO_PI=M_TWOPI"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_BOARD_=TFT_BOARD_4_CAPACITIVE"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_HEIGHT_=272"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_TP_ROTATE_=TP_ROTATE_0"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_WIDTH_=480"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__16_bit_interface__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__TFT_NON_TSC2003__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__TP_FT5XX6__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__TP_IC_FT5XX6_UNUSED__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__capacitive__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__cortex_m4__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__hal_ll_gpio_subset_1__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "code="
+				},
+				{
+					"backtrace" : 9,
+					"define" : "ft5xx6"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "stm32"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft8"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft_cfg_t=tft8_cfg_t"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft_init=tft8_init"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft_set_backlight=tft8_set_backlight"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_cfg_def=ft5xx6_cfg_t"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_cfg_setup=ft5xx6_cfg_setup"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_cfg_setup_param=&touch_ic_cfg,&FT5X16_CONTROLLER"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_context_def=ft5xx6_t"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_default_cfg=ft5xx6_default_cfg"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_init=ft5xx6_init"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_map_pins=FT5XX6_MAP_PINS"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_reconfigure_controller=ft5xx6_controller_reconfigure"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 81,
+					"path" : "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/cmake/include"
+				},
+				{
+					"backtrace" : 84,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/1ms_timer/arm"
+				},
+				{
+					"backtrace" : 85,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/generated"
+				},
+				{
+					"backtrace" : 86,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/driver"
+				},
+				{
+					"backtrace" : 86,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/1ms_timer"
+				},
+				{
+					"backtrace" : 86,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/."
+				},
+				{
+					"backtrace" : 9,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/lvgl_940"
+				},
+				{
+					"backtrace" : 9,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/lvgl_940/lv_conf/heavy"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/core"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/core/STM32F407ZG"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/core/common/cmsis"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/components/ssd1963"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/middleware/touch_controller"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/api/tp"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/drv"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/hal"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/platform"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/hal_ll_port"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/stm32f407zgtx"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/board"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/bsp/mikrobus"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/components/tft8"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/middleware/ssd1963"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/api/gl"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/middleware/ft5xx6"
+				}
+			],
+			"language" : "C",
+			"sourceIndexes" : 
+			[
+				2,
+				3,
+				7,
+				9,
+				10,
+				12
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-std=gnu99"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wl,-Map=output.map,-gc-sections,--print-memory-usage"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mcpu=cortex-m4"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mthumb"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wno-incompatible-pointer-types"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "--specs=nosys.specs"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mfloat-abi=hard"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-mfpu=fpv4-sp-d16"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-ffunction-sections"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-fdata-sections"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-fno-common"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-fmessage-length=0"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wno-int-conversion"
+				},
+				{
+					"backtrace" : 75,
+					"fragment" : "-Wno-incompatible-function-pointer-types"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 76,
+					"define" : "ARM_TIMER=1"
+				},
+				{
+					"backtrace" : 76,
+					"define" : "CLEAR_FLAG=0"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "DRV_TO_HAL=0"
+				},
+				{
+					"backtrace" : 76,
+					"define" : "INTERRUPT_ROUTINE=__attribute__ ((interrupt(\"IRQ\"))) void SysTick_Handler(void)"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "LV_CONF_INCLUDE_SIMPLE"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "LV_LVGL_H_INCLUDE_SIMPLE"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "MACRO_USAGE_I2C"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "MikroCCoreVersion=1"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "OSC_KHZ=168*1000UL"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "PI=M_PI"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "PREINIT_SUPPORTED"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "SELECTED_CONTROLLER=FT5X16_CONTROLLER"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F407ZG"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F407xx"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F40x"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "STM32F4xx"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TFT_DISPLAY_HEIGHT=272"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TFT_DISPLAY_WIDTH=480"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TFT_MAP_PINOUTS=TFT8_MAP_PINOUTS_16BIT"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "TWO_PI=M_TWOPI"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_BOARD_=TFT_BOARD_4_CAPACITIVE"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_HEIGHT_=272"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_TP_ROTATE_=TP_ROTATE_0"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "_TFT_WIDTH_=480"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__16_bit_interface__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__TFT_NON_TSC2003__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__TP_FT5XX6__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__TP_IC_FT5XX6_UNUSED__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__capacitive__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__cortex_m4__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "__hal_ll_gpio_subset_1__"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "code="
+				},
+				{
+					"backtrace" : 9,
+					"define" : "ft5xx6"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "stm32"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft8"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft_cfg_t=tft8_cfg_t"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft_init=tft8_init"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "tft_set_backlight=tft8_set_backlight"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_cfg_def=ft5xx6_cfg_t"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_cfg_setup=ft5xx6_cfg_setup"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_cfg_setup_param=&touch_ic_cfg,&FT5X16_CONTROLLER"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_context_def=ft5xx6_t"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_default_cfg=ft5xx6_default_cfg"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_init=ft5xx6_init"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_map_pins=FT5XX6_MAP_PINS"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "touch_ic_reconfigure_controller=ft5xx6_controller_reconfigure"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 81,
+					"path" : "C:/Users/sample/AppData/Local/MIKROE/NECTOStudio7/cmake/include"
+				},
+				{
+					"backtrace" : 84,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/1ms_timer/arm"
+				},
+				{
+					"backtrace" : 85,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/build-MM4/generated"
+				},
+				{
+					"backtrace" : 86,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/driver"
+				},
+				{
+					"backtrace" : 86,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/1ms_timer"
+				},
+				{
+					"backtrace" : 86,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/."
+				},
+				{
+					"backtrace" : 9,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/lvgl_940"
+				},
+				{
+					"backtrace" : 9,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/lvgl_940/lv_conf/heavy"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/core"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/core/STM32F407ZG"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/core/common/cmsis"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/components/ssd1963"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/middleware/touch_controller"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/api/tp"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/drv"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/hal"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/platform"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/hal_ll_port"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/stm32f407zgtx"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/board"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/bsp/mikrobus"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/components/tft8"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/middleware/ssd1963"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/api/gl"
+				},
+				{
+					"backtrace" : 9,
+					"isSystem" : true,
+					"path" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/Debug/include/middleware/ft5xx6"
+				}
+			],
+			"language" : "ASM",
+			"sourceIndexes" : 
+			[
+				14
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 9,
+			"id" : "lvgl::@ffe480d16c09fdeeb6b3"
+		},
+		{
+			"backtrace" : 74,
+			"id" : "InitialTesting_generated::@6890427a1f51a3e7e1df"
+		}
+	],
+	"id" : "InitialTesting::@6890427a1f51a3e7e1df",
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "-g",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-std=gnu99",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-Wl,-Map=output.map,-gc-sections,--print-memory-usage",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-mcpu=cortex-m4",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-mthumb",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-Wno-incompatible-pointer-types",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "--specs=nosys.specs",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-mfloat-abi=hard",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-mfpu=fpv4-sp-d16",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-ffunction-sections",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-fdata-sections",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-fno-common",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-fmessage-length=0",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-Wno-int-conversion",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "-Wno-incompatible-function-pointer-types",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 8,
+				"fragment" : "-T",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 8,
+				"fragment" : "C:/Users/sample/Downloads/PMC/PMC/InitialTesting/.meproject/setup/FileLinker/stm32f407zg.ld",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 9,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_core.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 9,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_gl.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 9,
+				"fragment" : "liblvgl.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 15,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_touch_controller.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 21,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_tft8.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 21,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_ft5xx6.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 21,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_tp.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 21,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_drv_digital_in.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 21,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_drv_i2c_master.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 27,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_hal_i2c_master.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 33,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_hal_ll_i2c_master.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 15,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_ssd1963.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 9,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_gl.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 45,
+				"fragment" : "-lm",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 48,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_drv_digital_out.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 48,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_drv_port.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 54,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_hal_gpio.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 63,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_ring.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 66,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_hal_ll_gpio.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 72,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_hal_ll_core.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 9,
+				"fragment" : "C:\\Users\\sample\\Downloads\\PMC\\PMC\\InitialTesting\\.meproject\\setup\\Debug\\lib\\lib_core.a",
+				"role" : "libraries"
+			}
+		],
+		"language" : "C"
+	},
+	"name" : "InitialTesting",
+	"nameOnDisk" : "InitialTesting",
+	"paths" : 
+	{
+		"build" : ".",
+		"source" : "."
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Header Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				4,
+				8,
+				11,
+				13
+			]
+		},
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				2,
+				3,
+				7,
+				9,
+				10,
+				12
+			]
+		},
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				5,
+				6,
+				14,
+				15
+			]
+		},
+		{
+			"name" : "CMake Rules",
+			"sourceIndexes" : 
+			[
+				16,
+				17
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"path" : "driver/display_lvgl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "driver/lv_port_indev.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "driver/display_lvgl.c",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "driver/lv_port_indev.c",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "1ms_Timer.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "resource.mres",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 1,
+			"path" : "main_screen.mscr",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "main_screen.c",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"path" : "main_screen.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "main.c",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 87,
+			"compileGroupIndex" : 0,
+			"isGenerated" : true,
+			"path" : "build-MM4/generated/scr_main_screen.c",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 87,
+			"isGenerated" : true,
+			"path" : "build-MM4/generated/scr_main_screen.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 87,
+			"compileGroupIndex" : 0,
+			"isGenerated" : true,
+			"path" : "build-MM4/generated/screens.c",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 87,
+			"isGenerated" : true,
+			"path" : "build-MM4/generated/screens.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 89,
+			"compileGroupIndex" : 1,
+			"path" : ".meproject/setup/FileStartup/stm32f407zg.s",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 90,
+			"path" : ".meproject/setup/FileLinker/stm32f407zg.ld",
+			"sourceGroupIndex" : 2
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "build-MM4/generated/scr_main_screen.c.rule",
+			"sourceGroupIndex" : 3
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "build-MM4/generated/screens.c.rule",
+			"sourceGroupIndex" : 3
+		}
+	],
+	"type" : "EXECUTABLE"
+}
