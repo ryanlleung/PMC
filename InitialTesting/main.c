@@ -26,9 +26,6 @@
  */
 void board_init()
 {
-    // USB virtual COM port for text output (also fixes the 48 MHz USB clock).
-    usb_serial_init();
-
     lv_init();
     lv_port_disp_init();
     lv_port_indev_init();
@@ -51,6 +48,12 @@ void application_init()
     // Show the main screen.
     // To display another screen, call its respective show function.
     show_main_screen();
+
+    // Draw the screen once first, so a USB start-up fault cannot leave it blank.
+    lv_timer_handler();
+
+    // USB virtual COM port for text output (also sets the 48 MHz USB clock).
+    usb_serial_init();
 }
 
 /**

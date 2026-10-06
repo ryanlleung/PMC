@@ -12,21 +12,26 @@
  *
  * The NECTO setup runs the PLL from HSI with PLLQ = 9, which gives the USB
  * peripheral 336 / 9 = 37.3 MHz. USB full speed needs exactly 48 MHz.
- * Rebuild the PLL as HSE 16 MHz / 16 * 336, P = 2 (SYSCLK 168 MHz, as now),
- * Q = 7 (48 MHz). If HSE does not start, stay on HSI with Q = 7
- * (48 MHz but HSI is +/-1 %, outside the USB spec, so may be unreliable).
+ * Rebuild the PLL as HSE 25 MHz (X3 on the board schematic) / 25 * 336,
+ * P = 2 (SYSCLK 168 MHz, as now), Q = 7 (48 MHz). If HSE does not start,
+ * stay on HSI 16 MHz / 16 with Q = 7 (48 MHz, but HSI is +/-1 %, outside
+ * the USB spec, so may be unreliable).
  * ------------------------------------------------------------------------ */
 #define HSE_STARTUP_TIMEOUT 500000UL
 
 static void usb_clock_48mhz(void)
 {
-    uint32_t pll_src = 0;  // HSI
+    uint32_t pll_src = 0;    // HSI
+    uint32_t pll_m = 16;     // 16 MHz HSI -> 1 MHz
     uint32_t timeout = HSE_STARTUP_TIMEOUT;
 
     RCC->CR |= RCC_CR_HSEON;
     while (!(RCC->CR & RCC_CR_HSERDY) && --timeout);
     if (RCC->CR & RCC_CR_HSERDY)
+    {
         pll_src = RCC_PLLCFGR_PLLSRC_HSE;
+        pll_m = 25;          // 25 MHz HSE -> 1 MHz
+    }
     else
         RCC->CR &= ~RCC_CR_HSEON;
 
@@ -40,7 +45,7 @@ static void usb_clock_48mhz(void)
     while (RCC->CR & RCC_CR_PLLRDY);
 
     RCC->PLLCFGR = pll_src
-                 | (16UL  << RCC_PLLCFGR_PLLM_Pos)   // 16 MHz / 16 = 1 MHz
+                 | (pll_m << RCC_PLLCFGR_PLLM_Pos)   // 1 MHz PLL input
                  | (336UL << RCC_PLLCFGR_PLLN_Pos)   // 336 MHz VCO
                  | (0UL   << RCC_PLLCFGR_PLLP_Pos)   // /2 -> 168 MHz SYSCLK
                  | (7UL   << RCC_PLLCFGR_PLLQ_Pos);  // /7 -> 48 MHz USB
