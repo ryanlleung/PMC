@@ -5,17 +5,14 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
 static lv_obj_t *switch_label;
 static lv_obj_t *usb_label;
-static uint32_t heartbeat;
 
 /**
- * @brief Every second: show the USB link state on screen and print a
- * heartbeat line, so the COM port can be checked without the switch.
+ * @brief Every second: show the USB link state on screen.
  */
 static void usb_status_timer_cb(lv_timer_t *t)
 {
     (void)t;
     lv_label_set_text(usb_label, usb_serial_status());
-    usb_serial_printf("Heartbeat %lu\r\n", (unsigned long)heartbeat++);
 }
 
 /**
