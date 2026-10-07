@@ -7,6 +7,7 @@
 #include "drv_digital_out.h"
 #include "lvgl.h"  // lv_snprintf
 #include "clicks.h"
+#include "cal.h"
 
 #define STATUS_LEN 192
 
@@ -337,37 +338,24 @@ static void powermonitor_init(void)
  * reading is the ratio r = Vshunt / Vbus, which cancels Boost 10 drift and
  * the INA228's shared reference. Both channels use the same 128 averages.
  *
- * Calibration (zero and span) from the sensor's own cal certificate
- * (option CA, zero/span data):
- *   r0    = zero output / cert supply
- *   rspan = span output / cert supply   (output at FS minus zero)
- *   P     = (r - r0) / rspan * 1034.214 mbar   (15 psia)
- * Until the cert values are entered the nominal 0 mV and 100 mV at 10 V are
- * used, and the screen says "nominal cal".
+ * Calibration: r is turned into pressure by cal.c, a table of r against
+ * pressure (a cert zero/span is the two-point case) stored in the on-board
+ * serial flash and loaded at start-up. With nothing stored the nominal
+ * 0 mV and 100 mV at 10 V are used, and the screen says "nominal cal".
  *
  * Integer maths: r in ppb (1 mV/V = 1 000 000 ppb).
  *   r = raw_shunt * 312.5 nV / (raw_bus * 195.3125 uV) = raw_shunt / raw_bus * 1.6e6 ppb
  * ------------------------------------------------------------------------ */
 #define DRUCK_VEXC_MIN_MV    7000      // datasheet supply range 7-12 V
 
-// Cal certificate values. Replace with the numbers on the Druck's cert.
-#define DRUCK_CAL_EXC_MV     10000     // supply voltage the cert was taken at
-#define DRUCK_CAL_ZERO_UV    0         // output at 0 mbar absolute, uV
-#define DRUCK_CAL_SPAN_UV    100000    // output at full scale minus zero, uV
-#define DRUCK_CAL_NOMINAL    1         // set to 0 once the cert values are in
-
-#define DRUCK_FS_MMBAR       1034214   // 15 psia in 0.001 mbar
-
+// The ratio-to-pressure table lives in cal.c (stored in serial flash).
 static char druck_value[24];
 
 // Pressure in 0.001 mbar from the INA228 raw readings.
 static int64_t druck_pressure_mmbar(int32_t raw_shunt, int32_t raw_bus, int64_t *r_ppb)
 {
-    const int64_t r0 = (int64_t)DRUCK_CAL_ZERO_UV * 1000000 / DRUCK_CAL_EXC_MV;
-    const int64_t rspan = (int64_t)DRUCK_CAL_SPAN_UV * 1000000 / DRUCK_CAL_EXC_MV;
-
     *r_ppb = (int64_t)raw_shunt * 1600000 / raw_bus;
-    return (*r_ppb - r0) * DRUCK_FS_MMBAR / rspan;
+    return cal_pressure_mmbar(*r_ppb);
 }
 
 static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
@@ -398,7 +386,7 @@ static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
     lv_snprintf(druck_status, STATUS_LEN,
                 "Druck: %s mbar abs  r %s%ld.%05ld mV/V  exc %ld mV  %s",
                 druck_value, r10 < 0 ? "-" : "", (long)(ra / 100000), (long)(ra % 100000),
-                (long)bus_mv, DRUCK_CAL_NOMINAL ? "nominal cal" : "cert cal");
+                (long)bus_mv, cal_is_default() ? "nominal cal" : cal_id());
 }
 
 static void powermonitor_poll(void)
@@ -497,5 +485,5 @@ const char *clicks_boost10_status(void)      { return boost10_status; }
 const char *clicks_powermonitor_status(void) { return powermonitor_status; }
 const char *clicks_druck_status(void)        { return druck_status; }
 const char *clicks_druck_value(void)         { return druck_value; }
-bool clicks_druck_cal_nominal(void)          { return DRUCK_CAL_NOMINAL; }
-const clicks_state_t *clicks_state(void)     { state.cal_nominal = DRUCK_CAL_NOMINAL; return &state; }
+bool clicks_druck_cal_nominal(void)          { return cal_is_default(); }
+const clicks_state_t *clicks_state(void)     { state.cal_nominal = cal_is_default(); return &state; }

@@ -21,6 +21,7 @@
 #include "screens.h"
 #include "usb_serial.h"
 #include "clicks.h"
+#include "cal.h"
 
 /**
  * @brief Initializes board peripherals for display, touch, and LVGL timing.
@@ -42,6 +43,9 @@ void application_init()
 {
     // Initialize board peripherals and LVGL drivers.
     board_init();
+
+    // Druck calibration from the on-board serial flash (nominal if none stored).
+    cal_init();
 
     // Click boards on the shield (no motor drive, no Boost 10 writes).
     clicks_init();
@@ -77,9 +81,12 @@ int main(void)
     application_init();
 
     ////////////////////////// LVGL timing routine (DO NOT REMOVE) //////////////////////////
+    char line[96];
     while (1)
     {
         usb_serial_task();
+        if (usb_serial_getline(line, sizeof line) && !cal_command(line))
+            usb_serial_printf("ERR unknown command\r\n");
         lv_timer_handler();
         Delay_ms(5);
     }

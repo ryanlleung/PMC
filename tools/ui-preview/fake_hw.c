@@ -6,6 +6,7 @@
 
 #include "clicks.h"
 #include "usb_serial.h"
+#include "cal.h"
 
 static clicks_state_t st;
 static char value[24];
@@ -33,6 +34,8 @@ void fake_hw_set_scenario(const char *name)
         st.bus_mv = 0;
         st.shunt_nv = 1200;
         strcpy(value, "----");
+    } else if (!strcmp(name, "cal")) {
+        st.cal_nominal = false;
     } else if (!strcmp(name, "trip")) {
         st.boost_tripped = true;
         st.boost_trip_mv = 11612;
@@ -52,6 +55,8 @@ const char *clicks_druck_status(void) { return "Druck: fake"; }
 const char *clicks_druck_value(void) { return value; }
 bool clicks_druck_cal_nominal(void) { return st.cal_nominal; }
 const clicks_state_t *clicks_state(void) { return &st; }
+bool cal_is_default(void) { return st.cal_nominal; }
+const char *cal_id(void) { return "cert 1234567"; }
 int32_t clicks_boost10_set_mv(int32_t mv) { return st.boost_tripped ? -1 : mv; }
 
 void usb_serial_init(void) {}

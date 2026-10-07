@@ -3,7 +3,7 @@
  * and generated designer code against LVGL 9.4 on a PC, with fake Click
  * readings (fake_hw.c), and writes one 480 x 272 frame as raw RGB565.
  *
- *   ./ui_preview <scenario> <out.raw>     scenario: ok | nopm | lowexc | trip
+ *   ./ui_preview <scenario> <out.raw>     scenario: ok | nopm | lowexc | trip | cal
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +33,7 @@ static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px)
 int main(int argc, char **argv)
 {
     if (argc != 3) {
-        fprintf(stderr, "usage: %s ok|nopm|lowexc|trip out.raw\n", argv[0]);
+        fprintf(stderr, "usage: %s ok|nopm|lowexc|trip|cal out.raw\n", argv[0]);
         return 2;
     }
     fake_hw_set_scenario(argv[1]);

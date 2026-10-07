@@ -116,6 +116,31 @@ void usb_serial_printf(const char *fmt, ...)
     }
 }
 
+bool usb_serial_getline(char *buf, size_t n)
+{
+    static char line[96];
+    static size_t len;
+
+    while (tud_cdc_available()) {
+        int32_t c = tud_cdc_read_char();
+        if (c < 0)
+            break;
+        if (c == '\r')
+            continue;
+        if (c == '\n') {
+            if (len == 0)
+                continue;
+            line[len] = '\0';
+            lv_strlcpy(buf, line, n);
+            len = 0;
+            return true;
+        }
+        if (len < sizeof line - 1)
+            line[len++] = (char)c;
+    }
+    return false;
+}
+
 /* --------------------------------------------------------------------------
  * Descriptors: one CDC ACM interface.
  * ------------------------------------------------------------------------ */

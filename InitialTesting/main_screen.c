@@ -3,6 +3,7 @@
 #include "main_screen.h"
 #include "usb_serial.h"
 #include "clicks.h"
+#include "cal.h"
 
 lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
@@ -142,9 +143,10 @@ static void status_timer_cb(lv_timer_t *t)
         lv_label_set_text_fmt(pressure_sub, "Boost tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
     else if (!s->reading_ok)
         lv_label_set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
+    else if (s->cal_nominal)
+        lv_label_set_text(pressure_sub, "Druck 15 psia, nominal cal");
     else
-        lv_label_set_text(pressure_sub, s->cal_nominal ? "Druck 15 psia, nominal cal"
-                                                       : "Druck 15 psia, cert cal");
+        lv_label_set_text_fmt(pressure_sub, "Druck 15 psia, cal %s", cal_id());
 
     // Readouts.
     if (s->pm_found) {
