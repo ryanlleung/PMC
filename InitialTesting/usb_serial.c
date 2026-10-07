@@ -82,7 +82,7 @@ const char *usb_serial_status(void)
 
 void usb_serial_printf(const char *fmt, ...)
 {
-    char buf[128];
+    char buf[256];
     va_list args;
     int len;
 
@@ -99,8 +99,46 @@ void usb_serial_printf(const char *fmt, ...)
     if (len >= (int)sizeof(buf))
         len = sizeof(buf) - 1;
 
-    tud_cdc_write(buf, (uint32_t)len);
-    tud_cdc_write_flush();
+    // The SDK's TinyUSB is built with a 32-byte CDC TX FIFO, so a longer
+    // line has to be fed in pieces while the stack sends. Give up after
+    // ~5 ms if the PC is not reading (port closed), dropping the rest.
+    uint32_t sent = 0;
+    uint32_t t0 = lv_tick_get();
+    while (sent < (uint32_t)len) {
+        uint32_t n = tud_cdc_write(buf + sent, (uint32_t)len - sent);
+        sent += n;
+        tud_cdc_write_flush();
+        if (n == 0) {
+            tud_task();
+            if (lv_tick_elaps(t0) > 5)
+                break;
+        }
+    }
+}
+
+bool usb_serial_getline(char *buf, size_t n)
+{
+    static char line[96];
+    static size_t len;
+
+    while (tud_cdc_available()) {
+        int32_t c = tud_cdc_read_char();
+        if (c < 0)
+            break;
+        if (c == '\r')
+            continue;
+        if (c == '\n') {
+            if (len == 0)
+                continue;
+            line[len] = '\0';
+            lv_strlcpy(buf, line, n);
+            len = 0;
+            return true;
+        }
+        if (len < sizeof line - 1)
+            line[len++] = (char)c;
+    }
+    return false;
 }
 
 /* --------------------------------------------------------------------------

@@ -44,6 +44,12 @@ static void touchpad_read(lv_indev_t * indev, lv_indev_data_t * data)
     static lv_coord_t last_x = 0;
     static lv_coord_t last_y = 0;
 
+    // Touch is polled here, in the main loop (LVGL's indev timer), not from
+    // the SysTick ISR: the SDK I2C driver is not safe to share between an
+    // interrupt and the main loop, and the ~1 ms transfer belongs outside
+    // an ISR.
+    process_tp();
+
     if(touchpad_is_pressed()) {
         touchpad_get_xy(&last_x, &last_y);
         data->state = LV_INDEV_STATE_PRESSED;
