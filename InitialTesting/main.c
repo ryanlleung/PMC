@@ -67,6 +67,27 @@ void application_init()
 }
 
 /**
+ * @brief Independent watchdog: resets the MCU if the main loop stops for
+ * more than ~3-4 s (LSI 32 kHz nominal, 17-47 kHz; /64, reload 2000).
+ * Covers hangs such as LV_ASSERT's while(1), HardFault and unbounded
+ * hardware waits. Started after init; a software-started IWDG is stopped
+ * by the reset it causes, so mikroBootloader is unaffected.
+ */
+static void watchdog_start(void)
+{
+    IWDG->KR = 0x5555;      // unlock PR/RLR
+    IWDG->PR = 4;           // /64
+    IWDG->RLR = 2000;
+    IWDG->KR = 0xAAAA;      // reload
+    IWDG->KR = 0xCCCC;      // start
+}
+
+static inline void watchdog_kick(void)
+{
+    IWDG->KR = 0xAAAA;
+}
+
+/**
  * @brief Application entry point.
  *
  * Initializes the MCU and LVGL environment, then enters
@@ -81,6 +102,7 @@ int main(void)
 
     // Initialize the application.
     application_init();
+    watchdog_start();
 
     ////////////////////////// LVGL timing routine (DO NOT REMOVE) //////////////////////////
     char line[96];
@@ -90,6 +112,7 @@ int main(void)
         if (link_getline(line, sizeof line) && !cal_command(line))
             link_printf("ERR unknown command\r\n");
         lv_timer_handler();
+        watchdog_kick();
         Delay_ms(5);
     }
     ////////////////////////////////////////////////////////////////////////////////////////
@@ -98,10 +121,9 @@ int main(void)
 }
 
 /**
- * @brief 1ms interrupt routine for LVGL tick and touch processing.
+ * @brief 1ms interrupt routine for the LVGL tick (and the CycloneTCP tick).
  *
- * This routine is automatically triggered by the configured timer
- * and updates the LVGL internal tick counter and touch controller.
+ * Touch is no longer polled here; see touchpad_read() in lv_port_indev.c.
  */
 static volatile uint32_t msCount = 0;
 
@@ -119,7 +141,6 @@ INTERRUPT_ROUTINE
     if (5 == msCount) {
         msCount = 0;
         lv_tick_inc(5);
-        process_tp();
     }
 
     CLEAR_FLAG;

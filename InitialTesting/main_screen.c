@@ -104,8 +104,11 @@ static void print_changed_lines(void)
     const char *line[4] = { clicks_stepper3_status(), clicks_boost10_status(),
                             clicks_powermonitor_status(), clicks_druck_status() };
 
+    // A PC that connects later still gets every line once.
+    bool resend = link_take_new_client();
+
     for (int i = 0; i < 4; i++) {
-        if (last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
+        if (resend || last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
             lv_strlcpy(line_copy[i], line[i], sizeof line_copy[i]);
             last_line[i] = line_copy[i];
             link_printf("%s\r\n", line[i]);

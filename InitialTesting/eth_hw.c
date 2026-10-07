@@ -15,7 +15,7 @@
  *
  * Clock: RMII needs exactly 50 MHz and MCO1 can only divide the main PLL
  * (or HSE, 25 MHz). 168 MHz / 3 = 56 MHz is out of spec, so the PLL is run
- * at HSE 25 / 25 * 300 = 300 MHz VCO, SYSCLK 150 MHz, MCO1 = 150 / 3 = 50 MHz.
+ * at HSE 25 / 13 * 156 = 300 MHz VCO, SYSCLK 150 MHz, MCO1 = 150 / 3 = 50 MHz.
  * 50 MHz and USB's 48 MHz cannot both come from one VCO (<= 432 MHz), so
  * the USB COM port is off in the Ethernet build.
  * ------------------------------------------------------------------------ */
@@ -68,21 +68,24 @@ bool eth_hw_clock_50mhz(void)
 
     RCC->CR &= ~RCC_CR_PLLON;
     while (RCC->CR & RCC_CR_PLLRDY);
+    // 25 / 13 = 1.92 MHz PLL input (RM0090 recommends 2 MHz for lowest
+    // jitter), x 156 = 300 MHz VCO exactly.
     RCC->PLLCFGR = RCC_PLLCFGR_PLLSRC_HSE
-                 | (25UL  << RCC_PLLCFGR_PLLM_Pos)   // 1 MHz PLL input
-                 | (300UL << RCC_PLLCFGR_PLLN_Pos)   // 300 MHz VCO
+                 | (13UL  << RCC_PLLCFGR_PLLM_Pos)
+                 | (156UL << RCC_PLLCFGR_PLLN_Pos)   // 300 MHz VCO
                  | (0UL   << RCC_PLLCFGR_PLLP_Pos)   // /2 -> 150 MHz SYSCLK
                  | (7UL   << RCC_PLLCFGR_PLLQ_Pos);  // 42.9 MHz, USB unused
-    RCC->CR |= RCC_CR_PLLON;
-    while (!(RCC->CR & RCC_CR_PLLRDY));
-    RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW) | RCC_CFGR_SW_PLL;
-    while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL);
 
-    // MCO1 = PLL / 3 = 50 MHz on PA8.
+    // MCO1 = PLL / 3 = 50 MHz on PA8. Set before the PLL starts (RM0090).
     RCC->CFGR = (RCC->CFGR & ~(RCC_CFGR_MCO1_Msk | RCC_CFGR_MCO1PRE_Msk))
               | (3UL << RCC_CFGR_MCO1_Pos) | (5UL << RCC_CFGR_MCO1PRE_Pos);
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
     pin_af(GPIOA, 8, 0);
+
+    RCC->CR |= RCC_CR_PLLON;
+    while (!(RCC->CR & RCC_CR_PLLRDY));
+    RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW) | RCC_CFGR_SW_PLL;
+    while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL);
 
     // The 1 ms SysTick was set up for 168 MHz.
     SYST_RVR = SYSCLK_HZ / 1000 - 1;

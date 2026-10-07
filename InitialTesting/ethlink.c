@@ -33,6 +33,14 @@ static uint32_t phy_id;
 static char ip_text[16] = "";
 static char status_text[80] = "Ethernet: not started";
 static const char *chip_err = "NET";   // short fault for the header
+static bool was_linked;
+static bool new_client;
+
+// Line assembly for client input; reset when a new client connects.
+static char line[96];
+static size_t line_len;
+static char rx[64];
+static size_t rx_len, rx_pos;
 
 // Called by the MAC driver (overrides the library's weak default).
 void stm32f4xxEthInitGpio(NetInterface *interface)
@@ -145,12 +153,24 @@ void ethlink_task(void)
         return;
     netTask();
 
+    // After the DHCP fallback, a cable unplug and replug (e.g. moving from a
+    // laptop to the site switch) tries DHCP again.
+    bool linked = netGetLinkState(ifc);
+    if (linked && !was_linked && fallback) {
+        ipv4SetHostAddr(ifc, IPV4_UNSPECIFIED_ADDR);
+        fallback = false;
+        dhcpClientStart(&dhcp);
+    }
+    was_linked = linked;
+
     // New connection replaces any existing one.
     Socket *s = socketAccept(listener, NULL, NULL);
     if (s) {
         drop_client();
         client = s;
         socketSetTimeout(client, 0);
+        line_len = rx_len = rx_pos = 0;
+        new_client = true;
     }
     if (client) {
         TcpState st = tcpGetState(client);
@@ -187,34 +207,41 @@ void ethlink_printf(const char *fmt, ...)
 
 bool ethlink_getline(char *buf, size_t n)
 {
-    static char line[96];
-    static size_t len;
-    char rx[32];
-    size_t got = 0;
-
     if (!client)
         return false;
-    // One small read per call; the main loop runs every ~5 ms.
-    if (socketReceive(client, rx, sizeof rx, &got, 0) != NO_ERROR || got == 0)
-        return false;
-    for (size_t i = 0; i < got; i++) {
-        char c = rx[i];
-        if (c == '\r')
-            continue;
-        if (c == '\n') {
-            if (len == 0)
-                continue;
-            line[len] = '\0';
-            lv_strlcpy(buf, line, n);
-            len = 0;
-            // Characters after the newline in this read are dropped; the
-            // PC tools send one command and wait for the reply.
-            return true;
+
+    for (;;) {
+        if (rx_pos >= rx_len) {
+            size_t got = 0;
+            rx_pos = rx_len = 0;
+            if (socketReceive(client, rx, sizeof rx, &got, 0) != NO_ERROR || got == 0)
+                return false;
+            rx_len = got;
         }
-        if (len < sizeof line - 1)
-            line[len++] = c;
+        // Bytes after a newline stay in rx for the next call.
+        while (rx_pos < rx_len) {
+            char c = rx[rx_pos++];
+            if (c == '\r')
+                continue;
+            if (c == '\n') {
+                if (line_len == 0)
+                    continue;
+                line[line_len] = '\0';
+                lv_strlcpy(buf, line, n);
+                line_len = 0;
+                return true;
+            }
+            if (line_len < sizeof line - 1)
+                line[line_len++] = c;
+        }
     }
-    return false;
+}
+
+bool ethlink_take_new_client(void)
+{
+    bool v = new_client;
+    new_client = false;
+    return v;
 }
 
 const char *ethlink_chip_text(void)

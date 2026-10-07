@@ -131,11 +131,12 @@ static bool parse_fixed(const char **s, int dec, int64_t *out)
             if (frac >= dec) { digits++; continue; }
             frac++;
         }
-        if (v > 900000000000000LL) return false;
+        if (v > 1000000000000LL) return false;   // 1e12: room for the 10^dec scaling
         v = v * 10 + (*p - '0');
         digits++;
     }
     if (!digits) return false;
+    if (*p && *p != ' ' && *p != '\t') return false;   // "1.2.3", "5x"
     for (int k = frac < 0 ? 0 : frac; k < dec; k++) v *= 10;
     *out = neg ? -v : v;
     *s = p;
@@ -174,6 +175,7 @@ static void save(void)
     cal_rec_t back;
 
     if (!flash_ok) { link_printf("ERR serial flash not found\r\n"); return; }
+    if (active_is_default) { link_printf("ERR nothing applied (CAL NEW, PT, APPLY first)\r\n"); return; }
     active.crc = rec_crc(&active);
     if (!extflash_erase_4k(CAL_FLASH_ADDR) ||
         !extflash_write(CAL_FLASH_ADDR, &active, sizeof active)) {

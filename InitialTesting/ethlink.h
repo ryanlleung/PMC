@@ -21,6 +21,9 @@ void ethlink_printf(const char *fmt, ...);
 // Non-blocking line input from the client, as usb_serial_getline().
 bool ethlink_getline(char *buf, size_t n);
 
+// True once after a new client connects (so status lines can be resent).
+bool ethlink_take_new_client(void);
+
 // Header text: the IP, or a short fault ("NO CABLE", "NET NO CLK", ...).
 const char *ethlink_chip_text(void);
 

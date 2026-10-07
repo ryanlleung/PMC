@@ -395,6 +395,20 @@ static void powermonitor_poll(void)
 
     if (pm_addr == 0) {
         pm_ack_addr = 0;
+        // With SCL held low (wiring fault) every clock edge would wait out
+        // the stretch limit, ~1 s per scan, starving the UI and network.
+        bb_pin(BB_SDA, 1);
+        GPIOF->BSRR = 1UL << BB_SCL;
+        bb_delay();
+        if (!bb_read(BB_SCL)) {
+            lv_snprintf(powermonitor_status, STATUS_LEN,
+                        "S4 Power Monitor: SCL held low (I2C wiring fault?)");
+            lv_snprintf(druck_value, sizeof druck_value, "----");
+            lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor not found)");
+            state.pm_found = false;
+            state.reading_ok = false;
+            return;
+        }
         for (uint8_t a = 0x40; a <= 0x4F && pm_addr == 0; a++)
             if (pm_probe(a))
                 pm_addr = a;

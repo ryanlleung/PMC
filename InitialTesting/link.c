@@ -16,6 +16,7 @@ const char *link_status(void)                { return ethlink_status(); }
 bool link_chip_ok(void)                      { return ethlink_link_up() && ethlink_ip()[0]; }
 
 const char *link_chip_text(void)            { return ethlink_chip_text(); }
+bool link_take_new_client(void)              { return ethlink_take_new_client(); }
 
 void link_printf(const char *fmt, ...)
 {
@@ -34,6 +35,15 @@ void link_task(void)                         { usb_serial_task(); }
 bool link_getline(char *buf, size_t n)       { return usb_serial_getline(buf, n); }
 const char *link_status(void)                { return usb_serial_status(); }
 const char *link_chip_text(void)             { return "USB"; }
+
+bool link_take_new_client(void)
+{
+    static bool was_open;
+    bool open = strstr(usb_serial_status(), "port open") != NULL;
+    bool v = open && !was_open;
+    was_open = open;
+    return v;
+}
 bool link_chip_ok(void)                      { return !strstr(usb_serial_status(), "not enumerated"); }
 
 void link_printf(const char *fmt, ...)

@@ -20,6 +20,9 @@ void link_printf(const char *fmt, ...);
 // Non-blocking: true with one complete line (no CR/LF) in buf.
 bool link_getline(char *buf, size_t n);
 
+// True once after a PC (re)connects, so one-off status lines can be resent.
+bool link_take_new_client(void);
+
 // Header chip: short text and whether the link is usable / in use.
 const char *link_chip_text(void);
 bool link_chip_ok(void);

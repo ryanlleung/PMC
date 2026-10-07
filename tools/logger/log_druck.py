@@ -7,7 +7,8 @@
 
 Writes druck_YYYYMMDD_HHMMSS.csv unless -o is given. Stop with Ctrl+C.
 Ethernet: TCP port 5000 (give host:port for another). The board takes one
-connection at a time; a new one replaces the old.
+connection at a time; a new one replaces the old, and the logger then
+reconnects on its own (so running druck_cal.py only leaves a short gap).
 USB: needs pyserial (pip install pyserial); close the NECTO UART Terminal
 first, only one program can hold the COM port.
 
@@ -21,6 +22,7 @@ import datetime as dt
 import re
 import socket
 import sys
+import time
 
 TCP_PORT = 5000
 
@@ -90,36 +92,53 @@ def main():
     a = ap.parse_args()
 
     out = a.out or dt.datetime.now().strftime("druck_%Y%m%d_%H%M%S.csv")
-    port = Link(a.target)
+    rows = 0
     with open(out, "w", newline="") as f:
         f.write("pc_time," + ",".join(FIELDS) + "\n")
         print(f"Logging {a.target} to {out}  (Ctrl+C to stop)")
-        rows = 0
         try:
+            # Reconnect if the board drops the connection (another tool took
+            # it, a cable was pulled, the board reset) or goes quiet for 10 s.
             while True:
-                line = port.readline()
-                if not line:
+                try:
+                    port = Link(a.target)
+                except OSError as e:
+                    print(f"\nconnect failed ({e}), retrying", file=sys.stderr)
+                    time.sleep(2)
                     continue
-                if not line.startswith("DATA,"):
-                    print(line)
-                    continue
-                vals = line.split(",")[1:]
-                if len(vals) != len(FIELDS):
-                    print("skipped malformed line:", line, file=sys.stderr)
-                    continue
-                now = dt.datetime.now().isoformat(timespec="milliseconds")
-                f.write(now + "," + ",".join(vals) + "\n")
-                f.flush()
-                rows += 1
-                p, exc = vals[1] or "----", vals[3]
-                print(f"\r{rows:6d}  {p:>10} mbar   exc {exc} mV   ", end="", flush=True)
+                try:
+                    rows = log_rows(port, f, rows)
+                except (ConnectionError, OSError) as e:
+                    print(f"\n{e}, reconnecting", file=sys.stderr)
+                finally:
+                    port.close()
+                time.sleep(2)
         except KeyboardInterrupt:
             print(f"\nStopped. {rows} rows in {out}")
-        except ConnectionError as e:
-            print(f"\n{e}. {rows} rows in {out}")
-        finally:
-            port.close()
 
+
+def log_rows(port, f, rows):
+    last = time.time()
+    while True:
+        line = port.readline()
+        if not line:
+            if time.time() - last > 10:
+                raise ConnectionError("no data for 10 s")
+            continue
+        last = time.time()
+        if not line.startswith("DATA,"):
+            print(line)
+            continue
+        vals = line.split(",")[1:]
+        if len(vals) != len(FIELDS):
+            print("skipped malformed line:", line, file=sys.stderr)
+            continue
+        now = dt.datetime.now().isoformat(timespec="milliseconds")
+        f.write(now + "," + ",".join(vals) + "\n")
+        f.flush()
+        rows += 1
+        p, exc = vals[1] or "----", vals[3]
+        print(f"\r{rows:6d}  {p:>10} mbar   exc {exc} mV   ", end="", flush=True)
 
 if __name__ == "__main__":
     main()

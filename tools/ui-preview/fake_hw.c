@@ -65,6 +65,7 @@ bool link_getline(char *buf, size_t n) { (void)buf; (void)n; return false; }
 const char *link_status(void) { return "Ethernet: 192.168.1.23 port 5000, client connected"; }
 const char *link_chip_text(void) { return "192.168.1.23"; }
 bool link_chip_ok(void) { return true; }
+bool link_take_new_client(void) { return false; }
 // Link output goes to stderr so the DATA line format can be checked.
 void link_printf(const char *fmt, ...)
 {
