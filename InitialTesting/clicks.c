@@ -116,7 +116,9 @@ static void powermonitor_init(void)
     cfg.scl = MIKROBUS_4_SCL;
     cfg.sda = MIKROBUS_4_SDA;
     cfg.speed = I2C_MASTER_SPEED_STANDARD;
-    pm_i2c_open = (i2c_master_open(&pm_i2c, &cfg) == I2C_MASTER_SUCCESS);
+    // i2c_master_open() returns the HAL acquire code: 1 on the first open,
+    // 0 when already open, -1 on failure. Only -1 is an error.
+    pm_i2c_open = (i2c_master_open(&pm_i2c, &cfg) != I2C_MASTER_ERROR);
     if (pm_i2c_open)
         i2c_master_set_timeout(&pm_i2c, 100);
 }
