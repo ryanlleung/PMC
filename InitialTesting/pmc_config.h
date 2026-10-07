@@ -16,7 +16,7 @@
 // 1: at boot, read the INA228 ID through the mikroSDK I2C2 driver (old
 // timeout 100, then default 10000) and send the result with the status
 // lines, before the bit-banged driver takes over. Bench diagnostic only.
-#define PMC_I2C_SDK_TEST  0
+#define PMC_I2C_SDK_TEST  1
 
 // Shown on screen and returned by VER?, with the build date and time.
 #define PMC_FW_VERSION    "0.3.0"
