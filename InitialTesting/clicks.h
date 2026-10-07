@@ -2,6 +2,7 @@
 #define _CLICKS_H_
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /**
  * @brief Bring-up checks for the Click boards on the mikroBUS shield.
@@ -22,6 +23,11 @@ void clicks_poll(void);
 
 // One status line per board, valid after clicks_init().
 const char *clicks_stepper3_status(void);
+
+// Sets the Boost 10 (Druck excitation), clamped to 9.0-11.0 V nominal.
+// Returns the nominal output in mV for the wiper written, or -1 if the
+// 11.5 V trip has latched (no change until reset).
+int32_t clicks_boost10_set_mv(int32_t mv);
 const char *clicks_boost10_status(void);
 const char *clicks_powermonitor_status(void);
 const char *clicks_druck_status(void);

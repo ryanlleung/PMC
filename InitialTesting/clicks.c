@@ -47,9 +47,11 @@ static void stepper3_init(void)
  * The digipot is write-only (no MISO) and powers up at mid-scale (~6.9 V).
  * There is no enable pin, so the output is live whenever the board is.
  *
- * At start-up the wiper is written once to BOOST10_WIPER_SET (~10.0 V
- * nominal, ~9.7-10.4 V with the digipot's +/-20% tolerance), the Druck
- * excitation. If the Power Monitor then reads VBUS above BOOST10_TRIP_MV
+ * At start-up the wiper is written to BOOST10_WIPER_SET (~10.0 V nominal,
+ * ~9.7-10.4 V with the digipot's +/-20% tolerance), the Druck excitation.
+ * clicks_boost10_set_mv() then lets the screen slider move it between
+ * 9.0 and 11.0 V nominal; the wiper is clamped to BOOST10_WIPER_11V..
+ * BOOST10_WIPER_9V whatever is asked. If the Power Monitor reads VBUS above BOOST10_TRIP_MV
  * the wiper goes to 0xFF (~5 V) and stays there until reset. That check
  * only works with VBUS wired to the Boost 10 output.
  *
@@ -57,6 +59,8 @@ static void stepper3_init(void)
  * the TPL0501 latches the byte on CS rising.
  * ------------------------------------------------------------------------ */
 #define BOOST10_WIPER_SET  33    // 1 + 620 / (56 + 12.9) = 10.0 V nominal
+#define BOOST10_WIPER_11V  15    // 1 + 620 / (56 + 5.9)  = 11.0 V nominal
+#define BOOST10_WIPER_9V   55    // 1 + 620 / (56 + 21.5) = 9.0 V nominal
 #define BOOST10_WIPER_MIN_V 0xFF // 1 + 620 / (56 + 99.6) = 5.0 V
 #define BOOST10_TRIP_MV    11500
 
@@ -111,6 +115,29 @@ static void boost10_init(void)
     boost10_write_wiper(BOOST10_WIPER_SET);
 }
 
+// Nominal output in mV for a wiper value: 1000 + 620000 / (56 + w * 100 / 256).
+static int32_t boost10_wiper_to_mv(uint8_t w)
+{
+    return 1000 + 158720000L / (14336L + 100L * w);
+}
+
+int32_t clicks_boost10_set_mv(int32_t mv)
+{
+    if (boost10_tripped)
+        return -1;
+    if (mv < 9000) mv = 9000;
+    if (mv > 11000) mv = 11000;
+
+    // Inverse of boost10_wiper_to_mv, rounded.
+    int32_t w = (158720000L / (mv - 1000) - 14336L + 50) / 100;
+    if (w < BOOST10_WIPER_11V) w = BOOST10_WIPER_11V;
+    if (w > BOOST10_WIPER_9V) w = BOOST10_WIPER_9V;
+
+    if ((uint8_t)w != boost10_wiper)
+        boost10_write_wiper((uint8_t)w);
+    return boost10_wiper_to_mv(boost10_wiper);
+}
+
 // Called with the latest VBUS reading, or -1 if the Power Monitor is absent.
 static void boost10_check(int32_t vbus_mv)
 {
@@ -130,8 +157,12 @@ static void boost10_poll(void)
                     "S3 Boost 10: TRIPPED at %ld mV, now ~5 V, %s",
                     (long)boost10_trip_mv, pg);
     else
+    {
+        int32_t mv = boost10_wiper_to_mv(boost10_wiper);
         lv_snprintf(boost10_status, STATUS_LEN,
-                    "S3 Boost 10: wiper %u (~10 V), %s", boost10_wiper, pg);
+                    "S3 Boost 10: wiper %u (%ld.%02ld V nom), %s", boost10_wiper,
+                    (long)(mv / 1000), (long)((mv % 1000 + 5) / 10), pg);
+    }
 }
 
 /* --------------------------------------------------------------------------

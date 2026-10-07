@@ -11,6 +11,7 @@ static lv_obj_t *usb_label;
 static lv_obj_t *click_label[4];
 static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
+static lv_obj_t *exc_label;
 
 /**
  * @brief Every second: re-check the Click boards, show their status and
@@ -39,6 +40,24 @@ static void status_timer_cb(lv_timer_t *t)
 }
 
 /**
+ * @brief Excitation slider: 90-110 = 9.0-11.0 V. Sets the Boost 10 and shows
+ * the nominal value actually set (the digipot steps are ~50 mV).
+ */
+static void exc_slider_event_cb(lv_event_t *e)
+{
+    lv_obj_t *sl = lv_event_get_target_obj(e);
+    int32_t mv = clicks_boost10_set_mv(lv_slider_get_value(sl) * 100);
+
+    if (mv < 0) {
+        lv_label_set_text(exc_label, "Exc: tripped");
+        return;
+    }
+    lv_label_set_text_fmt(exc_label, "Exc set %ld.%02ld V", (long)(mv / 1000), (long)((mv % 1000 + 5) / 10));
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED)
+        usb_serial_printf("Excitation set to %ld mV nominal\r\n", (long)mv);
+}
+
+/**
  * @brief Switch toggle handler: prints the new state to the USB COM port
  * and mirrors it on screen.
  */
@@ -56,8 +75,8 @@ void init_main_screen()
     init_main_screen_ui(&lvgl_main_screen_ui);
 
     // Test switch moved to the bottom left to free the middle for pressure.
-    lv_obj_set_pos(lvgl_main_screen_ui.switch_0, 10, 222);
-    lv_obj_set_size(lvgl_main_screen_ui.switch_0, 70, 36);
+    lv_obj_set_pos(lvgl_main_screen_ui.switch_0, 10, 238);
+    lv_obj_set_size(lvgl_main_screen_ui.switch_0, 50, 26);
 
     switch_label = lv_label_create(lvgl_main_screen_ui.main_screen);
     lv_label_set_text(switch_label, "Switch: OFF");
@@ -73,7 +92,7 @@ void init_main_screen()
     lv_obj_set_style_text_align(pressure_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_width(pressure_label, 280);
     lv_label_set_text(pressure_label, "----");
-    lv_obj_set_pos(pressure_label, 40, 128);
+    lv_obj_set_pos(pressure_label, 40, 122);
 
     lv_obj_t *unit = lv_label_create(lvgl_main_screen_ui.main_screen);
     lv_label_set_text(unit, "mbar abs");
@@ -83,7 +102,21 @@ void init_main_screen()
     lv_label_set_text(pressure_sub, clicks_druck_cal_nominal()
                       ? "Druck 15 psia, nominal cal (enter cert values)"
                       : "Druck 15 psia, cert cal");
-    lv_obj_align_to(pressure_sub, pressure_label, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 4);
+    lv_obj_align_to(pressure_sub, pressure_label, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 0);
+
+    // Excitation slider, 9.0-11.0 V in 0.1 V steps, starts at 10.0 V to
+    // match the start-up wiper.
+    lv_obj_t *exc_slider = lv_slider_create(lvgl_main_screen_ui.main_screen);
+    lv_slider_set_range(exc_slider, 90, 110);
+    lv_slider_set_value(exc_slider, 100, LV_ANIM_OFF);
+    lv_obj_set_size(exc_slider, 290, 10);
+    lv_obj_set_pos(exc_slider, 20, 214);
+    lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_RELEASED, NULL);
+
+    exc_label = lv_label_create(lvgl_main_screen_ui.main_screen);
+    lv_label_set_text(exc_label, "Exc set 10.00 V");
+    lv_obj_align_to(exc_label, exc_slider, LV_ALIGN_OUT_RIGHT_MID, 18, 0);
 
     // Click board status, top left, one block per socket.
     for (int i = 0; i < 4; i++) {
