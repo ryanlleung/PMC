@@ -20,6 +20,7 @@
 #include "1ms_Timer.h"
 #include "screens.h"
 #include "usb_serial.h"
+#include "clicks.h"
 
 /**
  * @brief Initializes board peripherals for display, touch, and LVGL timing.
@@ -41,6 +42,9 @@ void application_init()
 {
     // Initialize board peripherals and LVGL drivers.
     board_init();
+
+    // Click boards on the shield (no motor drive, no Boost 10 writes).
+    clicks_init();
 
     // Initialize all available screens.
     init_screens();

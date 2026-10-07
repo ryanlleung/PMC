@@ -23,6 +23,8 @@ add_executable(InitialTesting
     main_screen.h
     usb_serial.h
     usb_serial.c
+    clicks.h
+    clicks.c
     main.c
 )
 

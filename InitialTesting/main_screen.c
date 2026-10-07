@@ -1,17 +1,36 @@
+#include <string.h>
+
 #include "main_screen.h"
 #include "usb_serial.h"
+#include "clicks.h"
 
 lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
 static lv_obj_t *switch_label;
 static lv_obj_t *usb_label;
+static lv_obj_t *click_label[3];
 
 /**
- * @brief Every second: show the USB link state on screen.
+ * @brief Every second: re-check the Click boards, show their status and
+ * the USB link state on screen, and print any board line that changed.
  */
-static void usb_status_timer_cb(lv_timer_t *t)
+static void status_timer_cb(lv_timer_t *t)
 {
     (void)t;
+    const char *status[3];
+
+    clicks_poll();
+    status[0] = clicks_stepper3_status();
+    status[1] = clicks_boost10_status();
+    status[2] = clicks_powermonitor_status();
+
+    for (int i = 0; i < 3; i++) {
+        if (strcmp(lv_label_get_text(click_label[i]), status[i]) != 0) {
+            lv_label_set_text(click_label[i], status[i]);
+            usb_serial_printf("%s\r\n", status[i]);
+        }
+    }
+
     lv_label_set_text(usb_label, usb_serial_status());
 }
 
@@ -39,7 +58,17 @@ void init_main_screen()
     usb_label = lv_label_create(lvgl_main_screen_ui.main_screen);
     lv_label_set_text(usb_label, "USB: starting");
     lv_obj_align(usb_label, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_timer_create(usb_status_timer_cb, 1000, NULL);
+
+    // Click board status, top left, one block per socket.
+    for (int i = 0; i < 3; i++) {
+        click_label[i] = lv_label_create(lvgl_main_screen_ui.main_screen);
+        lv_label_set_text(click_label[i], "");
+        lv_obj_set_width(click_label[i], 470);
+        lv_label_set_long_mode(click_label[i], LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_set_pos(click_label[i], 5, 5 + 20 * i);
+    }
+
+    lv_timer_create(status_timer_cb, 1000, NULL);
 
     lv_obj_add_event_cb(lvgl_main_screen_ui.switch_0, switch_0_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
