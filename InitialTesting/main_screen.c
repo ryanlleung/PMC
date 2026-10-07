@@ -8,7 +8,7 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
 static lv_obj_t *switch_label;
 static lv_obj_t *usb_label;
-static lv_obj_t *click_label[3];
+static lv_obj_t *click_label[4];
 
 /**
  * @brief Every second: re-check the Click boards, show their status and
@@ -17,14 +17,15 @@ static lv_obj_t *click_label[3];
 static void status_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    const char *status[3];
+    const char *status[4];
 
     clicks_poll();
     status[0] = clicks_stepper3_status();
     status[1] = clicks_boost10_status();
     status[2] = clicks_powermonitor_status();
+    status[3] = clicks_druck_status();
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         if (strcmp(lv_label_get_text(click_label[i]), status[i]) != 0) {
             lv_label_set_text(click_label[i], status[i]);
             usb_serial_printf("%s\r\n", status[i]);
@@ -60,12 +61,12 @@ void init_main_screen()
     lv_obj_align(usb_label, LV_ALIGN_BOTTOM_MID, 0, -10);
 
     // Click board status, top left, one block per socket.
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         click_label[i] = lv_label_create(lvgl_main_screen_ui.main_screen);
         lv_label_set_text(click_label[i], "");
         lv_obj_set_width(click_label[i], 470);
         lv_label_set_long_mode(click_label[i], LV_LABEL_LONG_MODE_WRAP);
-        lv_obj_set_pos(click_label[i], 5, 5 + 20 * i);
+        lv_obj_set_pos(click_label[i], 5, 5 + 20 * i + (i == 3 ? 20 : 0));  // S4 is two lines
     }
 
     lv_timer_create(status_timer_cb, 1000, NULL);

@@ -9,7 +9,8 @@
  *   S3 Boost 10      (LT8337 + TPL0501)  SPI1 PA5/PA6/PB5, CS PF8, PG PG2
  *   S4 Power Monitor (INA228)   SCL PF1 / SDA PF0 (bit-banged I2C)
  *
- * Nothing here drives the motor or writes the Boost 10 digipot.
+ * Nothing here drives the motor. The Boost 10 is set to ~10 V at start-up
+ * for the Druck excitation, and drops to ~5 V if VBUS reads over 11.5 V.
  */
 
 void clicks_init(void);
@@ -21,5 +22,6 @@ void clicks_poll(void);
 const char *clicks_stepper3_status(void);
 const char *clicks_boost10_status(void);
 const char *clicks_powermonitor_status(void);
+const char *clicks_druck_status(void);
 
 #endif // _CLICKS_H_
