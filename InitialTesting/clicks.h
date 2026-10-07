@@ -1,6 +1,8 @@
 #ifndef _CLICKS_H_
 #define _CLICKS_H_
 
+#include <stdbool.h>
+
 /**
  * @brief Bring-up checks for the Click boards on the mikroBUS shield.
  *
@@ -23,5 +25,10 @@ const char *clicks_stepper3_status(void);
 const char *clicks_boost10_status(void);
 const char *clicks_powermonitor_status(void);
 const char *clicks_druck_status(void);
+
+// Druck pressure in mbar absolute as text ("1013.25"), "----" if no reading.
+const char *clicks_druck_value(void);
+// True while the calibration is the nominal 0 mV / 100 mV, not the cert.
+bool clicks_druck_cal_nominal(void);
 
 #endif // _CLICKS_H_

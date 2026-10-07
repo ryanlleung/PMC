@@ -290,33 +290,74 @@ static void powermonitor_init(void)
 }
 
 /* --------------------------------------------------------------------------
- * Druck UNIK 5000 PDCR50G1, 15 psia, mV output 10 mV/V
+ * Druck UNIK 5000 PDCR50G1, 15 psia absolute, mV linearised, 10 mV/V
  *
- * Wiring: Boost 10 VOUT -> Druck +Supply and Power Monitor VBUS; Druck
- * +Out -> IN+, -Out -> IN-; Druck -Supply, Boost 10 GND and Power Monitor
- * GND common. Pressure from the ratio, so the exact excitation does not
- * matter:
- *   P = (Vshunt / Vbus) / 10 mV/V * 1034.21 mbar
- *     = raw_shunt / raw_bus * (312.5n / 195.3125u) * 103421 = * 165.474
- * Uncalibrated: no zero or span correction yet.
+ * Wiring: Boost 10 VOUT -> Druck pin 1 (+Supply) and Power Monitor VBUS;
+ * pin 2 (+Out) -> IN+, pin 4 (-Out) -> IN-; pin 3 (-Supply), Boost 10 GND
+ * and Power Monitor GND common.
+ *
+ * Excitation compensation: the output is ratiometric to the supply, so the
+ * reading is the ratio r = Vshunt / Vbus, which cancels Boost 10 drift and
+ * the INA228's shared reference. Both channels use the same 128 averages.
+ *
+ * Calibration (zero and span) from the sensor's own cal certificate
+ * (option CA, zero/span data):
+ *   r0    = zero output / cert supply
+ *   rspan = span output / cert supply   (output at FS minus zero)
+ *   P     = (r - r0) / rspan * 1034.214 mbar   (15 psia)
+ * Until the cert values are entered the nominal 0 mV and 100 mV at 10 V are
+ * used, and the screen says "nominal cal".
+ *
+ * Integer maths: r in ppb (1 mV/V = 1 000 000 ppb).
+ *   r = raw_shunt * 312.5 nV / (raw_bus * 195.3125 uV) = raw_shunt / raw_bus * 1.6e6 ppb
  * ------------------------------------------------------------------------ */
-#define DRUCK_VEXC_MIN_MV 7000   // datasheet supply range 7-12 V
+#define DRUCK_VEXC_MIN_MV    7000      // datasheet supply range 7-12 V
+
+// Cal certificate values. Replace with the numbers on the Druck's cert.
+#define DRUCK_CAL_EXC_MV     10000     // supply voltage the cert was taken at
+#define DRUCK_CAL_ZERO_UV    0         // output at 0 mbar absolute, uV
+#define DRUCK_CAL_SPAN_UV    100000    // output at full scale minus zero, uV
+#define DRUCK_CAL_NOMINAL    1         // set to 0 once the cert values are in
+
+#define DRUCK_FS_MMBAR       1034214   // 15 psia in 0.001 mbar
+
+static char druck_value[24];
+
+// Pressure in 0.001 mbar from the INA228 raw readings.
+static int64_t druck_pressure_mmbar(int32_t raw_shunt, int32_t raw_bus, int64_t *r_ppb)
+{
+    const int64_t r0 = (int64_t)DRUCK_CAL_ZERO_UV * 1000000 / DRUCK_CAL_EXC_MV;
+    const int64_t rspan = (int64_t)DRUCK_CAL_SPAN_UV * 1000000 / DRUCK_CAL_EXC_MV;
+
+    *r_ppb = (int64_t)raw_shunt * 1600000 / raw_bus;
+    return (*r_ppb - r0) * DRUCK_FS_MMBAR / rspan;
+}
 
 static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 {
     if (bus_mv < DRUCK_VEXC_MIN_MV) {
+        lv_snprintf(druck_value, sizeof druck_value, "----");
         lv_snprintf(druck_status, STATUS_LEN,
                     "Druck: excitation %ld mV, below 7 V (VBUS not wired?)", (long)bus_mv);
         return;
     }
 
-    // Pressure in 0.01 mbar.
-    int64_t p = ((int64_t)raw_shunt * 1654740) / ((int64_t)raw_bus * 100);
-    int64_t pa = p < 0 ? -p : p;
+    int64_t r_ppb;
+    int64_t p = druck_pressure_mmbar(raw_shunt, raw_bus, &r_ppb);
 
+    // Round to 0.01 mbar.
+    int64_t pc = (p >= 0 ? p + 5 : p - 5) / 10;
+    int64_t pa = pc < 0 ? -pc : pc;
+    // r in mV/V to 5 decimals (units of 10 ppb).
+    int64_t r10 = r_ppb / 10;
+    int64_t ra = r10 < 0 ? -r10 : r10;
+
+    lv_snprintf(druck_value, sizeof druck_value, "%s%ld.%02ld",
+                pc < 0 ? "-" : "", (long)(pa / 100), (long)(pa % 100));
     lv_snprintf(druck_status, STATUS_LEN,
-                "Druck: %s%ld.%02ld mbar (uncal), exc %ld mV",
-                p < 0 ? "-" : "", (long)(pa / 100), (long)(pa % 100), (long)bus_mv);
+                "Druck: %s mbar abs  r %s%ld.%05ld mV/V  exc %ld mV  %s",
+                druck_value, r10 < 0 ? "-" : "", (long)(ra / 100000), (long)(ra % 100000),
+                (long)bus_mv, DRUCK_CAL_NOMINAL ? "nominal cal" : "cert cal");
 }
 
 static void powermonitor_poll(void)
@@ -341,6 +382,7 @@ static void powermonitor_poll(void)
                 lv_snprintf(powermonitor_status, STATUS_LEN,
                             "S4 Power Monitor: NOT FOUND (no reply at 0x40-0x4F,\n"
                             "   idle SCL %d SDA %d)", bb_scl_idle, bb_sda_idle);
+            lv_snprintf(druck_value, sizeof druck_value, "----");
             lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor not found)");
             return;
         }
@@ -380,6 +422,7 @@ lost:
     pm_addr = 0;
     lv_snprintf(powermonitor_status, STATUS_LEN,
                 "S4 Power Monitor: lost (I2C read failed)");
+    lv_snprintf(druck_value, sizeof druck_value, "----");
     lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor lost)");
 }
 
@@ -404,3 +447,5 @@ const char *clicks_stepper3_status(void)     { return stepper3_status; }
 const char *clicks_boost10_status(void)      { return boost10_status; }
 const char *clicks_powermonitor_status(void) { return powermonitor_status; }
 const char *clicks_druck_status(void)        { return druck_status; }
+const char *clicks_druck_value(void)         { return druck_value; }
+bool clicks_druck_cal_nominal(void)          { return DRUCK_CAL_NOMINAL; }

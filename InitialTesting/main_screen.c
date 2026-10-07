@@ -9,6 +9,8 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 static lv_obj_t *switch_label;
 static lv_obj_t *usb_label;
 static lv_obj_t *click_label[4];
+static lv_obj_t *pressure_label;
+static lv_obj_t *pressure_sub;
 
 /**
  * @brief Every second: re-check the Click boards, show their status and
@@ -32,6 +34,7 @@ static void status_timer_cb(lv_timer_t *t)
         }
     }
 
+    lv_label_set_text(pressure_label, clicks_druck_value());
     lv_label_set_text(usb_label, usb_serial_status());
 }
 
@@ -52,13 +55,35 @@ void init_main_screen()
 {
     init_main_screen_ui(&lvgl_main_screen_ui);
 
+    // Test switch moved to the bottom left to free the middle for pressure.
+    lv_obj_set_pos(lvgl_main_screen_ui.switch_0, 10, 222);
+    lv_obj_set_size(lvgl_main_screen_ui.switch_0, 70, 36);
+
     switch_label = lv_label_create(lvgl_main_screen_ui.main_screen);
     lv_label_set_text(switch_label, "Switch: OFF");
-    lv_obj_align_to(switch_label, lvgl_main_screen_ui.switch_0, LV_ALIGN_OUT_BOTTOM_MID, 0, 20);
+    lv_obj_align_to(switch_label, lvgl_main_screen_ui.switch_0, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
 
     usb_label = lv_label_create(lvgl_main_screen_ui.main_screen);
     lv_label_set_text(usb_label, "USB: starting");
-    lv_obj_align(usb_label, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_obj_align(usb_label, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+
+    // Druck pressure, large, in the middle.
+    pressure_label = lv_label_create(lvgl_main_screen_ui.main_screen);
+    lv_obj_set_style_text_font(pressure_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_align(pressure_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_width(pressure_label, 280);
+    lv_label_set_text(pressure_label, "----");
+    lv_obj_set_pos(pressure_label, 40, 128);
+
+    lv_obj_t *unit = lv_label_create(lvgl_main_screen_ui.main_screen);
+    lv_label_set_text(unit, "mbar abs");
+    lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_BOTTOM, 10, -8);
+
+    pressure_sub = lv_label_create(lvgl_main_screen_ui.main_screen);
+    lv_label_set_text(pressure_sub, clicks_druck_cal_nominal()
+                      ? "Druck 15 psia, nominal cal (enter cert values)"
+                      : "Druck 15 psia, cert cal");
+    lv_obj_align_to(pressure_sub, pressure_label, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 4);
 
     // Click board status, top left, one block per socket.
     for (int i = 0; i < 4; i++) {
