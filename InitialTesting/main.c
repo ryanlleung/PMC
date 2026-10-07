@@ -19,6 +19,8 @@
 #include "lv_port_indev.h"
 #include "1ms_Timer.h"
 #include "screens.h"
+#include "usb_serial.h"
+#include "clicks.h"
 
 /**
  * @brief Initializes board peripherals for display, touch, and LVGL timing.
@@ -41,12 +43,21 @@ void application_init()
     // Initialize board peripherals and LVGL drivers.
     board_init();
 
+    // Click boards on the shield (no motor drive, no Boost 10 writes).
+    clicks_init();
+
     // Initialize all available screens.
     init_screens();
 
     // Show the main screen.
     // To display another screen, call its respective show function.
     show_main_screen();
+
+    // Draw the screen once first, so a USB start-up fault cannot leave it blank.
+    lv_timer_handler();
+
+    // USB virtual COM port for text output (also sets the 48 MHz USB clock).
+    usb_serial_init();
 }
 
 /**
@@ -68,6 +79,7 @@ int main(void)
     ////////////////////////// LVGL timing routine (DO NOT REMOVE) //////////////////////////
     while (1)
     {
+        usb_serial_task();
         lv_timer_handler();
         Delay_ms(5);
     }
