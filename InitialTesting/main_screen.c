@@ -70,6 +70,34 @@ static void set_chip(lv_obj_t *chip, const char *text, lv_color_t col)
     lv_obj_set_style_text_color(chip, col, 0);
 }
 
+/*
+ * Once a second, one CSV line on COM3 for logging (tools/logger):
+ *   DATA,t_ms,p_mbar,signal_uV,exc_mV,ratio_mV_per_V,die_C,set_mV,ok
+ * p_mbar and ratio are empty when there is no valid reading (ok = 0).
+ * Lines not starting with DATA are status text.
+ */
+static void print_data_line(const clicks_state_t *s)
+{
+    char p[16] = "", r[16] = "";
+    int32_t sig = s->shunt_nv / 100;                 // 0.1 uV
+
+    if (s->reading_ok) {
+        int32_t pa = LV_ABS(s->p_mmbar);
+        lv_snprintf(p, sizeof p, "%s%ld.%03ld", s->p_mmbar < 0 ? "-" : "",
+                    (long)(pa / 1000), (long)(pa % 1000));
+        int32_t ra = LV_ABS(s->r_ppb);
+        lv_snprintf(r, sizeof r, "%s%ld.%06ld", s->r_ppb < 0 ? "-" : "",
+                    (long)(ra / 1000000), (long)(ra % 1000000));
+    }
+    int32_t da = LV_ABS(s->die_mc);
+    usb_serial_printf("DATA,%lu,%s,%s%ld.%ld,%ld,%s,%s%ld.%03ld,%ld,%d\r\n",
+                      (unsigned long)lv_tick_get(), p,
+                      sig < 0 ? "-" : "", (long)(LV_ABS(sig) / 10), (long)(LV_ABS(sig) % 10),
+                      (long)s->bus_mv, r,
+                      s->die_mc < 0 ? "-" : "", (long)(da / 1000), (long)(da % 1000),
+                      (long)s->boost_set_mv, s->reading_ok ? 1 : 0);
+}
+
 static void print_changed_lines(void)
 {
     const char *line[4] = { clicks_stepper3_status(), clicks_boost10_status(),
@@ -95,6 +123,8 @@ static void status_timer_cb(lv_timer_t *t)
     print_changed_lines();
 
     const clicks_state_t *s = clicks_state();
+    if (s->pm_found)
+        print_data_line(s);
 
     // Header status.
     set_chip(chip_pm, "PM", s->pm_found ? COL_OK : COL_FAULT);

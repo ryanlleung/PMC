@@ -24,6 +24,7 @@ typedef struct {
     int32_t bus_mv;       // excitation (Vbus), mV
     int32_t r_ppb;        // signal / excitation, ppb (1 mV/V = 1 000 000)
     int32_t p_mmbar;      // pressure, 0.001 mbar absolute
+    int32_t die_mc;       // INA228 die temperature, 0.001 degC
     bool cal_nominal;     // true until the cert values are entered
     bool boost_pg;        // Boost 10 regulating
     bool boost_tripped;   // 11.5 V trip latched

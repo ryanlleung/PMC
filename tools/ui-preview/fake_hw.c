@@ -22,6 +22,7 @@ void fake_hw_set_scenario(const char *name)
     st.r_ppb = 9358024;
     st.p_mmbar = 967819;
     st.reading_ok = true;
+    st.die_mc = 23516;
     strcpy(value, "967.82");
 
     if (!strcmp(name, "nopm")) {
@@ -56,4 +57,11 @@ int32_t clicks_boost10_set_mv(int32_t mv) { return st.boost_tripped ? -1 : mv; }
 void usb_serial_init(void) {}
 void usb_serial_task(void) {}
 const char *usb_serial_status(void) { return "USB: port open"; }
-void usb_serial_printf(const char *fmt, ...) { (void)fmt; }
+// COM3 output goes to stderr so the DATA line format can be checked.
+void usb_serial_printf(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+}

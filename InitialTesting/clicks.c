@@ -452,6 +452,7 @@ static void powermonitor_poll(void)
     state.pm_found = true;
     state.shunt_nv = (int32_t)(((int64_t)raw_shunt * 3125) / 10);
     state.bus_mv = bus_mv;
+    state.die_mc = (raw_temp * 125) / 16;   // 7.8125 m degC per LSB
     boost10_check(bus_mv);
     druck_update(raw_shunt, raw_bus, bus_mv);
 
