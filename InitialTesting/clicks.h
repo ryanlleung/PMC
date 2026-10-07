@@ -7,7 +7,7 @@
  * Socket layout (Ryan, 7 Oct 2026):
  *   S2 Stepper 3     (ULN2003)  AN PB0, RST PC3, CS PA15, PWM PD13
  *   S3 Boost 10      (LT8337 + TPL0501)  SPI1 PA5/PA6/PB5, CS PF8, PG PG2
- *   S4 Power Monitor (INA228)   I2C2 SCL PF1 / SDA PF0
+ *   S4 Power Monitor (INA228)   SCL PF1 / SDA PF0 (bit-banged I2C)
  *
  * Nothing here drives the motor or writes the Boost 10 digipot.
  */
