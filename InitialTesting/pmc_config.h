@@ -13,6 +13,9 @@
  */
 #define PMC_LINK_ETHERNET 1
 
+// Shown on screen and returned by VER?, with the build date and time.
+#define PMC_FW_VERSION    "0.3.0"
+
 #define PMC_TCP_PORT      5000
 #define PMC_HOSTNAME      "pmc"
 

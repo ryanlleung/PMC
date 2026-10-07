@@ -131,7 +131,7 @@ static bool parse_fixed(const char **s, int dec, int64_t *out)
             if (frac >= dec) { digits++; continue; }
             frac++;
         }
-        if (v > 1000000000000LL) return false;   // 1e12: room for the 10^dec scaling
+        if (v > 100000000000LL) return false;    // 1e11: room for the 10^dec scaling
         v = v * 10 + (*p - '0');
         digits++;
     }

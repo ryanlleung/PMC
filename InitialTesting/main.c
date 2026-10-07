@@ -21,6 +21,7 @@
 #include "screens.h"
 #include "pmc_config.h"
 #include "link.h"
+#include "sysinfo.h"
 #include "clicks.h"
 #include "cal.h"
 
@@ -42,6 +43,9 @@ void board_init()
  */
 void application_init()
 {
+    // Why the last reset happened (before anything else touches RCC).
+    sysinfo_init();
+
     // Initialize board peripherals and LVGL drivers.
     board_init();
 
@@ -109,7 +113,7 @@ int main(void)
     while (1)
     {
         link_task();
-        if (link_getline(line, sizeof line) && !cal_command(line))
+        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line))
             link_printf("ERR unknown command\r\n");
         lv_timer_handler();
         watchdog_kick();

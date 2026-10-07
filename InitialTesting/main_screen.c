@@ -4,6 +4,8 @@
 #include "link.h"
 #include "clicks.h"
 #include "cal.h"
+#include "sysinfo.h"
+#include "pmc_config.h"
 
 lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
@@ -30,8 +32,8 @@ static lv_obj_t *val_signal, *val_exc, *val_ratio;
 static lv_obj_t *exc_slider;
 static lv_obj_t *exc_label;
 
-static const char *last_line[4];
-static char line_copy[4][192];
+static const char *last_line[5];
+static char line_copy[5][192];
 
 static lv_obj_t *make_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
@@ -101,13 +103,13 @@ static void print_data_line(const clicks_state_t *s)
 
 static void print_changed_lines(void)
 {
-    const char *line[4] = { clicks_stepper3_status(), clicks_boost10_status(),
+    const char *line[5] = { sysinfo_line(), clicks_stepper3_status(), clicks_boost10_status(),
                             clicks_powermonitor_status(), clicks_druck_status() };
 
     // A PC that connects later still gets every line once.
     bool resend = link_take_new_client();
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
         if (resend || last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
             lv_strlcpy(line_copy[i], line[i], sizeof line_copy[i]);
             last_line[i] = line_copy[i];
@@ -239,6 +241,15 @@ void init_main_screen()
     lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_BOTTOM, 12, -10);
     pressure_sub = make_label(pc, "", COL_MUTED);
     lv_obj_align(pressure_sub, LV_ALIGN_BOTTOM_LEFT, 4, 0);
+
+    // Firmware version; after a watchdog or brown-out reset, also the cause
+    // in red. Normal reset causes are only on the link (VER?).
+    lv_obj_t *ver = make_label(pc, "", sysinfo_reset_abnormal() ? COL_FAULT : COL_MUTED);
+    if (sysinfo_reset_abnormal())
+        lv_label_set_text_fmt(ver, "v%s, reset: %s", PMC_FW_VERSION, sysinfo_reset_reason());
+    else
+        lv_label_set_text_fmt(ver, "v%s", PMC_FW_VERSION);
+    lv_obj_align(ver, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
 
     // Readouts.
     val_signal = make_readout(scr, 10, "Signal");

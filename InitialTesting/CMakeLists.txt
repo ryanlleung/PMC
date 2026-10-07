@@ -29,6 +29,8 @@ add_executable(InitialTesting
     extflash.c
     cal.h
     cal.c
+    sysinfo.h
+    sysinfo.c
     pmc_config.h
     link.h
     link.c

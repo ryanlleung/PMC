@@ -6,14 +6,17 @@
 
 #include "clicks.h"
 #include "link.h"
+#include "sysinfo.h"
 #include "cal.h"
 
 static clicks_state_t st;
+static bool fake_wdt;
 static char value[24];
 
 void fake_hw_set_scenario(const char *name)
 {
     memset(&st, 0, sizeof st);
+    fake_wdt = false;
     st.cal_nominal = true;
     st.boost_set_mv = 9999;
     st.pm_found = true;
@@ -36,6 +39,7 @@ void fake_hw_set_scenario(const char *name)
         strcpy(value, "----");
     } else if (!strcmp(name, "cal")) {
         st.cal_nominal = false;
+        fake_wdt = true;
     } else if (!strcmp(name, "trip")) {
         st.boost_tripped = true;
         st.boost_trip_mv = 11612;
@@ -66,6 +70,9 @@ const char *link_status(void) { return "Ethernet: 192.168.1.23 port 5000, client
 const char *link_chip_text(void) { return "192.168.1.23"; }
 bool link_chip_ok(void) { return true; }
 bool link_take_new_client(void) { return false; }
+const char *sysinfo_reset_reason(void) { return fake_wdt ? "watchdog" : "power-on"; }
+bool sysinfo_reset_abnormal(void) { return fake_wdt; }
+const char *sysinfo_line(void) { return "PMC firmware 0.3.0 (preview), last reset: power-on"; }
 // Link output goes to stderr so the DATA line format can be checked.
 void link_printf(const char *fmt, ...)
 {

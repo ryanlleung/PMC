@@ -125,7 +125,7 @@ class Board:
             line = self._readline()
             if not line or line.startswith("DATA,"):
                 continue
-            if line.startswith("CAL ") or line.startswith("OK") or line.startswith("ERR"):
+            if line.startswith(("CAL ", "PMC firmware", "OK", "ERR")):
                 got.append(line)
             if line.startswith("OK") or line.startswith("ERR"):
                 return got
@@ -164,6 +164,7 @@ def main():
     ap.add_argument("--dry", action="store_true", help="print commands, no port")
     sub = ap.add_subparsers(dest="what", required=True)
 
+    sub.add_parser("ver", help="firmware version and last reset cause")
     sub.add_parser("show")
     sub.add_parser("erase")
 
@@ -186,7 +187,9 @@ def main():
     a = ap.parse_args()
     board = Dry() if a.dry else Board(a.target)
 
-    if a.what == "show":
+    if a.what == "ver":
+        send(board, "VER?")
+    elif a.what == "show":
         send(board, "CAL?")
     elif a.what == "erase":
         send(board, "CAL ERASE")
