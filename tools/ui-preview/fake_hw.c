@@ -72,6 +72,7 @@ bool link_chip_ok(void) { return true; }
 bool link_take_new_client(void) { return false; }
 const char *sysinfo_reset_reason(void) { return fake_wdt ? "watchdog" : "power-on"; }
 bool sysinfo_reset_abnormal(void) { return fake_wdt; }
+const char *i2c_sdk_test_result(void) { return ""; }
 const char *sysinfo_line(void) { return "PMC firmware 0.3.0 (preview), last reset: power-on"; }
 // Link output goes to stderr so the DATA line format can be checked.
 void link_printf(const char *fmt, ...)

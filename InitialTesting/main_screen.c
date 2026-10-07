@@ -5,6 +5,7 @@
 #include "clicks.h"
 #include "cal.h"
 #include "sysinfo.h"
+#include "i2c_sdk_test.h"
 #include "pmc_config.h"
 
 lvgl_main_screen_ui_t lvgl_main_screen_ui;
@@ -32,8 +33,8 @@ static lv_obj_t *val_signal, *val_exc, *val_ratio;
 static lv_obj_t *exc_slider;
 static lv_obj_t *exc_label;
 
-static const char *last_line[5];
-static char line_copy[5][192];
+static const char *last_line[6];
+static char line_copy[6][192];
 
 static lv_obj_t *make_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
@@ -103,13 +104,16 @@ static void print_data_line(const clicks_state_t *s)
 
 static void print_changed_lines(void)
 {
-    const char *line[5] = { sysinfo_line(), clicks_stepper3_status(), clicks_boost10_status(),
-                            clicks_powermonitor_status(), clicks_druck_status() };
+    const char *line[6] = { sysinfo_line(), clicks_stepper3_status(), clicks_boost10_status(),
+                            clicks_powermonitor_status(), clicks_druck_status(),
+                            i2c_sdk_test_result() };
 
     // A PC that connects later still gets every line once.
     bool resend = link_take_new_client();
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 6; i++) {
+        if (!line[i][0])
+            continue;
         if (resend || last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
             lv_strlcpy(line_copy[i], line[i], sizeof line_copy[i]);
             last_line[i] = line_copy[i];

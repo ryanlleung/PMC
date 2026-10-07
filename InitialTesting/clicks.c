@@ -8,6 +8,7 @@
 #include "lvgl.h"  // lv_snprintf
 #include "clicks.h"
 #include "cal.h"
+#include "i2c_sdk_test.h"
 
 #define STATUS_LEN 192
 
@@ -483,6 +484,7 @@ lost:
 void clicks_init(void)
 {
     stepper3_init();
+    i2c_sdk_test_run();      // no-op unless PMC_I2C_SDK_TEST is 1
     powermonitor_init();
     boost10_init();
     clicks_poll();
