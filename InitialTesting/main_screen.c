@@ -28,7 +28,6 @@ static lv_obj_t *pressure_sub;
 static lv_obj_t *val_signal, *val_exc, *val_ratio;
 static lv_obj_t *exc_slider;
 static lv_obj_t *exc_label;
-static lv_obj_t *exc_switch;
 
 static const char *last_line[4];
 static char line_copy[4][192];
@@ -106,13 +105,11 @@ static void status_timer_cb(lv_timer_t *t)
     set_chip(chip_usb, "USB", strstr(usb_serial_status(), "not enumerated") ? COL_IDLE : COL_OK);
 
     // Pressure.
-    lv_label_set_text(pressure_label, s->boost_on ? clicks_druck_value() : "OFF");
+    lv_label_set_text(pressure_label, clicks_druck_value());
     if (!s->pm_found)
         lv_label_set_text(pressure_sub, "Power Monitor not responding");
     else if (s->boost_tripped)
         lv_label_set_text_fmt(pressure_sub, "Boost tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
-    else if (!s->boost_on)
-        lv_label_set_text(pressure_sub, "Druck excitation off (standby ~5 V)");
     else if (!s->reading_ok)
         lv_label_set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
     else
@@ -139,24 +136,8 @@ static void status_timer_cb(lv_timer_t *t)
         lv_label_set_text(val_ratio, "--");
     }
 
-    if (s->boost_tripped) {
+    if (s->boost_tripped)
         lv_obj_add_state(exc_slider, LV_STATE_DISABLED);
-        lv_obj_add_state(exc_switch, LV_STATE_DISABLED);
-        lv_obj_remove_state(exc_switch, LV_STATE_CHECKED);
-    }
-}
-
-/**
- * @brief Excitation on/off switch. Off = Boost 10 standby (~5 V).
- */
-static void exc_switch_event_cb(lv_event_t *e)
-{
-    lv_obj_t *sw = lv_event_get_target_obj(e);
-    bool on = clicks_boost10_enable(lv_obj_has_state(sw, LV_STATE_CHECKED));
-
-    if (!on)
-        lv_obj_remove_state(sw, LV_STATE_CHECKED);
-    usb_serial_printf("Druck excitation %s\r\n", on ? "ON" : "OFF (standby ~5 V)");
 }
 
 /**
@@ -229,20 +210,16 @@ void init_main_screen()
     val_exc = make_readout(scr, 166, "Excitation");
     val_ratio = make_readout(scr, 322, "Ratio");
 
-    // Excitation: on/off switch, then the setpoint, 9.0-11.0 V in 0.1 V
-    // steps, starting at 10.0 V. The setpoint applies when switched on.
+    // Excitation setpoint, 9.0-11.0 V in 0.1 V steps, starts at 10.0 V to
+    // match the start-up wiper.
     lv_obj_t *sc = make_card(scr, 10, 216, 460, 46);
-    lv_obj_t *cap = make_label(sc, "Excitation", COL_MUTED);
+    lv_obj_t *cap = make_label(sc, "Excitation set", COL_MUTED);
     lv_obj_align(cap, LV_ALIGN_LEFT_MID, 0, 0);
-    exc_switch = lv_switch_create(sc);   // starts off: Druck in standby
-    lv_obj_set_size(exc_switch, 50, 26);
-    lv_obj_align(exc_switch, LV_ALIGN_LEFT_MID, 82, 0);
-    lv_obj_add_event_cb(exc_switch, exc_switch_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     exc_slider = lv_slider_create(sc);
     lv_slider_set_range(exc_slider, 90, 110);
     lv_slider_set_value(exc_slider, 100, LV_ANIM_OFF);
-    lv_obj_set_size(exc_slider, 190, 10);
-    lv_obj_align(exc_slider, LV_ALIGN_LEFT_MID, 152, 0);
+    lv_obj_set_size(exc_slider, 220, 10);
+    lv_obj_align(exc_slider, LV_ALIGN_LEFT_MID, 120, 0);
     lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_RELEASED, NULL);
     exc_label = make_label(sc, "10.00 V", COL_TEXT);

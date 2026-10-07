@@ -113,9 +113,7 @@ static void boost10_init(void)
     // PG2 pull-up (PUPDR = 01).
     GPIOG->PUPDR = (GPIOG->PUPDR & ~(3UL << (2 * 2))) | (1UL << (2 * 2));
 
-    // Start in standby: lowest setting, ~5 V (a boost cannot go below its
-    // input, and there is no enable pin, so this is as off as it gets).
-    boost10_write_wiper(BOOST10_WIPER_MIN_V);
+    boost10_write_wiper(BOOST10_WIPER_SET);
 }
 
 // Nominal output in mV for a wiper value: 1000 + 620000 / (56 + w * 100 / 256).
@@ -123,9 +121,6 @@ static int32_t boost10_wiper_to_mv(uint8_t w)
 {
     return 1000 + 158720000L / (14336L + 100L * w);
 }
-
-static bool boost10_on;
-static uint8_t boost10_set_wiper = BOOST10_WIPER_SET;  // used when on
 
 int32_t clicks_boost10_set_mv(int32_t mv)
 {
@@ -138,20 +133,10 @@ int32_t clicks_boost10_set_mv(int32_t mv)
     int32_t w = (158720000L / (mv - 1000) - 14336L + 50) / 100;
     if (w < BOOST10_WIPER_11V) w = BOOST10_WIPER_11V;
     if (w > BOOST10_WIPER_9V) w = BOOST10_WIPER_9V;
-    boost10_set_wiper = (uint8_t)w;
 
-    if (boost10_on && boost10_set_wiper != boost10_wiper)
-        boost10_write_wiper(boost10_set_wiper);
-    return boost10_wiper_to_mv(boost10_set_wiper);
-}
-
-bool clicks_boost10_enable(bool on)
-{
-    if (boost10_tripped)
-        on = false;
-    boost10_on = on;
-    boost10_write_wiper(on ? boost10_set_wiper : BOOST10_WIPER_MIN_V);
-    return boost10_on;
+    if ((uint8_t)w != boost10_wiper)
+        boost10_write_wiper((uint8_t)w);
+    return boost10_wiper_to_mv(boost10_wiper);
 }
 
 // Called with the latest VBUS reading, or -1 if the Power Monitor is absent.
@@ -159,7 +144,6 @@ static void boost10_check(int32_t vbus_mv)
 {
     if (!boost10_tripped && vbus_mv > BOOST10_TRIP_MV) {
         boost10_write_wiper(BOOST10_WIPER_MIN_V);
-        boost10_on = false;
         boost10_tripped = true;
         boost10_trip_mv = vbus_mv;
     }
@@ -170,8 +154,7 @@ static void boost10_poll(void)
     state.boost_pg = digital_in_read(&boost10_pg) == 0;
     state.boost_tripped = boost10_tripped;
     state.boost_trip_mv = boost10_trip_mv;
-    state.boost_set_mv = boost10_wiper_to_mv(boost10_set_wiper);
-    state.boost_on = boost10_on;
+    state.boost_set_mv = boost10_wiper_to_mv(boost10_wiper);
 
     const char *pg = digital_in_read(&boost10_pg) == 0 ? "PG low = regulating"
                                                         : "PG high = NOT regulating";
@@ -183,8 +166,7 @@ static void boost10_poll(void)
     {
         int32_t mv = boost10_wiper_to_mv(boost10_wiper);
         lv_snprintf(boost10_status, STATUS_LEN,
-                    "S3 Boost 10: %s, wiper %u (%ld.%02ld V nom), %s",
-                    boost10_on ? "ON" : "standby", boost10_wiper,
+                    "S3 Boost 10: wiper %u (%ld.%02ld V nom), %s", boost10_wiper,
                     (long)(mv / 1000), (long)((mv % 1000 + 5) / 10), pg);
     }
 }

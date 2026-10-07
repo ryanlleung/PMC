@@ -12,9 +12,8 @@
  *   S3 Boost 10      (LT8337 + TPL0501)  SPI1 PA5/PA6/PB5, CS PF8, PG PG2
  *   S4 Power Monitor (INA228)   SCL PF1 / SDA PF0 (bit-banged I2C)
  *
- * Nothing here drives the motor. The Boost 10 starts in standby (~5 V) and
- * goes to the excitation setpoint (9-11 V) only when switched on; it drops
- * to ~5 V and latches if VBUS reads over 11.5 V.
+ * Nothing here drives the motor. The Boost 10 is set to ~10 V at start-up
+ * for the Druck excitation, and drops to ~5 V if VBUS reads over 11.5 V.
  */
 
 // Latest readings for the UI, valid after clicks_init(), updated by clicks_poll().
@@ -29,8 +28,7 @@ typedef struct {
     bool boost_pg;        // Boost 10 regulating
     bool boost_tripped;   // 11.5 V trip latched
     int32_t boost_trip_mv;
-    int32_t boost_set_mv; // nominal setpoint used when on
-    bool boost_on;        // false = standby (~5 V, below the Druck's 7 V minimum)
+    int32_t boost_set_mv; // nominal setpoint for the wiper written
 } clicks_state_t;
 
 void clicks_init(void);
@@ -45,11 +43,6 @@ const char *clicks_stepper3_status(void);
 // Returns the nominal output in mV for the wiper written, or -1 if the
 // 11.5 V trip has latched (no change until reset).
 int32_t clicks_boost10_set_mv(int32_t mv);
-
-// Druck excitation on (setpoint) or standby (~5 V). Starts in standby.
-// The Boost 10 has no enable pin and cannot go below its 5 V input, so
-// standby is not 0 V. Returns the new state (false if the trip has latched).
-bool clicks_boost10_enable(bool on);
 const char *clicks_boost10_status(void);
 const char *clicks_powermonitor_status(void);
 const char *clicks_druck_status(void);
