@@ -80,6 +80,21 @@ static void set_chip(lv_obj_t *chip, const char *text, lv_color_t col)
  * p_mbar and ratio are empty when there is no valid reading (ok = 0).
  * Lines not starting with DATA are status text.
  */
+// DATA lines once a second; DATA OFF pauses them (status lines still go out).
+static bool data_on = true;
+
+bool main_screen_data_command(const char *line)
+{
+    if (strcmp(line, "DATA OFF") == 0)
+        data_on = false;
+    else if (strcmp(line, "DATA ON") == 0)
+        data_on = true;
+    else
+        return false;
+    link_printf("OK data %s\r\n", data_on ? "on" : "off");
+    return true;
+}
+
 static void print_data_line(const clicks_state_t *s)
 {
     char p[16] = "", r[16] = "";
@@ -133,7 +148,7 @@ static void status_timer_cb(lv_timer_t *t)
     print_changed_lines();
 
     const clicks_state_t *s = clicks_state();
-    if (s->pm_found)
+    if (s->pm_found && data_on)
         print_data_line(s);
 
     // Header status.

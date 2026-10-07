@@ -25,6 +25,7 @@
 #include "clicks.h"
 #include "cal.h"
 #include "stepper3.h"
+#include "main_screen.h"
 
 /**
  * @brief Initializes board peripherals for display, touch, and LVGL timing.
@@ -116,7 +117,7 @@ int main(void)
     {
         link_task();
         if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) &&
-            !stepper3_command(line))
+            !stepper3_command(line) && !main_screen_data_command(line))
             link_printf("ERR unknown command\r\n");
         lv_timer_handler();
         watchdog_kick();

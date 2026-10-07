@@ -125,9 +125,8 @@ bool usb_serial_getline(char *buf, size_t n)
         int32_t c = tud_cdc_read_char();
         if (c < 0)
             break;
-        if (c == '\r')
-            continue;
-        if (c == '\n') {
+        // CR, LF or CRLF all end a line (terminals differ); empty lines ignored.
+        if (c == '\r' || c == '\n') {
             if (len == 0)
                 continue;
             line[len] = '\0';
