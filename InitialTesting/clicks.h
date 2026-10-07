@@ -16,6 +16,21 @@
  * for the Druck excitation, and drops to ~5 V if VBUS reads over 11.5 V.
  */
 
+// Latest readings for the UI, valid after clicks_init(), updated by clicks_poll().
+typedef struct {
+    bool pm_found;        // INA228 answering
+    bool reading_ok;      // pm_found and excitation >= 7 V
+    int32_t shunt_nv;     // Druck signal (Vshunt), nV
+    int32_t bus_mv;       // excitation (Vbus), mV
+    int32_t r_ppb;        // signal / excitation, ppb (1 mV/V = 1 000 000)
+    int32_t p_mmbar;      // pressure, 0.001 mbar absolute
+    bool cal_nominal;     // true until the cert values are entered
+    bool boost_pg;        // Boost 10 regulating
+    bool boost_tripped;   // 11.5 V trip latched
+    int32_t boost_trip_mv;
+    int32_t boost_set_mv; // nominal setpoint for the wiper written
+} clicks_state_t;
+
 void clicks_init(void);
 
 // Re-reads every board. Call about once a second.
@@ -36,5 +51,7 @@ const char *clicks_druck_status(void);
 const char *clicks_druck_value(void);
 // True while the calibration is the nominal 0 mV / 100 mV, not the cert.
 bool clicks_druck_cal_nominal(void);
+
+const clicks_state_t *clicks_state(void);
 
 #endif // _CLICKS_H_

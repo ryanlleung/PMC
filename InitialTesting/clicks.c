@@ -14,6 +14,7 @@ static char stepper3_status[STATUS_LEN];
 static char boost10_status[STATUS_LEN];
 static char powermonitor_status[STATUS_LEN];
 static char druck_status[STATUS_LEN];
+static clicks_state_t state;
 
 /* --------------------------------------------------------------------------
  * Stepper 3 (S2)
@@ -150,6 +151,11 @@ static void boost10_check(int32_t vbus_mv)
 
 static void boost10_poll(void)
 {
+    state.boost_pg = digital_in_read(&boost10_pg) == 0;
+    state.boost_tripped = boost10_tripped;
+    state.boost_trip_mv = boost10_trip_mv;
+    state.boost_set_mv = boost10_wiper_to_mv(boost10_wiper);
+
     const char *pg = digital_in_read(&boost10_pg) == 0 ? "PG low = regulating"
                                                         : "PG high = NOT regulating";
     if (boost10_tripped)
@@ -366,6 +372,7 @@ static int64_t druck_pressure_mmbar(int32_t raw_shunt, int32_t raw_bus, int64_t 
 
 static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 {
+    state.reading_ok = false;
     if (bus_mv < DRUCK_VEXC_MIN_MV) {
         lv_snprintf(druck_value, sizeof druck_value, "----");
         lv_snprintf(druck_status, STATUS_LEN,
@@ -375,6 +382,9 @@ static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 
     int64_t r_ppb;
     int64_t p = druck_pressure_mmbar(raw_shunt, raw_bus, &r_ppb);
+    state.reading_ok = true;
+    state.r_ppb = (int32_t)r_ppb;
+    state.p_mmbar = (int32_t)p;
 
     // Round to 0.01 mbar.
     int64_t pc = (p >= 0 ? p + 5 : p - 5) / 10;
@@ -415,6 +425,8 @@ static void powermonitor_poll(void)
                             "   idle SCL %d SDA %d)", bb_scl_idle, bb_sda_idle);
             lv_snprintf(druck_value, sizeof druck_value, "----");
             lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor not found)");
+            state.pm_found = false;
+            state.reading_ok = false;
             return;
         }
     }
@@ -437,6 +449,9 @@ static void powermonitor_poll(void)
     int32_t bus_mv = (int32_t)(((int64_t)raw_bus * 1953125) / 10000000);
     int32_t temp_d1 = (raw_temp * 5) / 64;           // 0.078125 x 0.1 C per LSB
 
+    state.pm_found = true;
+    state.shunt_nv = (int32_t)(((int64_t)raw_shunt * 3125) / 10);
+    state.bus_mv = bus_mv;
     boost10_check(bus_mv);
     druck_update(raw_shunt, raw_bus, bus_mv);
 
@@ -455,6 +470,8 @@ lost:
                 "S4 Power Monitor: lost (I2C read failed)");
     lv_snprintf(druck_value, sizeof druck_value, "----");
     lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor lost)");
+    state.pm_found = false;
+    state.reading_ok = false;
 }
 
 /* --------------------------------------------------------------------------
@@ -480,3 +497,4 @@ const char *clicks_powermonitor_status(void) { return powermonitor_status; }
 const char *clicks_druck_status(void)        { return druck_status; }
 const char *clicks_druck_value(void)         { return druck_value; }
 bool clicks_druck_cal_nominal(void)          { return DRUCK_CAL_NOMINAL; }
+const clicks_state_t *clicks_state(void)     { state.cal_nominal = DRUCK_CAL_NOMINAL; return &state; }

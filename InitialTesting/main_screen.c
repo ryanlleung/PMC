@@ -6,37 +6,138 @@
 
 lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
-static lv_obj_t *switch_label;
-static lv_obj_t *usb_label;
-static lv_obj_t *click_label[4];
+/*
+ * Screen layout, 480 x 272:
+ *   y   0-30   header: title, Power Monitor / Boost 10 / USB status
+ *   y  38-150  pressure card: value (48 px), unit, calibration / fault line
+ *   y 158-208  three readouts: signal, excitation, ratio
+ *   y 216-262  excitation setpoint slider
+ * Full per-board status lines go to COM3 only, when they change.
+ */
+#define COL_HEADER   lv_color_make(31, 41, 51)
+#define COL_CARD     lv_color_white()
+#define COL_TEXT     lv_color_make(31, 41, 51)
+#define COL_MUTED    lv_color_make(110, 120, 130)
+#define COL_OK       lv_color_make(46, 160, 67)
+#define COL_FAULT    lv_color_make(214, 48, 49)
+#define COL_IDLE     lv_color_make(150, 158, 166)
+
+static lv_obj_t *chip_pm, *chip_boost, *chip_usb;
 static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
+static lv_obj_t *val_signal, *val_exc, *val_ratio;
+static lv_obj_t *exc_slider;
 static lv_obj_t *exc_label;
 
+static const char *last_line[4];
+static char line_copy[4][192];
+
+static lv_obj_t *make_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    lv_obj_t *c = lv_obj_create(parent);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(c, x, y);
+    lv_obj_set_size(c, w, h);
+    lv_obj_set_style_bg_color(c, COL_CARD, 0);
+    lv_obj_set_style_border_width(c, 0, 0);
+    lv_obj_set_style_radius(c, 6, 0);
+    lv_obj_set_style_pad_all(c, 6, 0);
+    return c;
+}
+
+static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t col)
+{
+    lv_obj_t *l = lv_label_create(parent);
+    lv_label_set_text(l, text);
+    lv_obj_set_style_text_color(l, col, 0);
+    return l;
+}
+
+// One small readout: caption above, value below.
+static lv_obj_t *make_readout(lv_obj_t *parent, int32_t x, const char *caption)
+{
+    lv_obj_t *c = make_card(parent, x, 158, 148, 50);
+    lv_obj_t *cap = make_label(c, caption, COL_MUTED);
+    lv_obj_align(cap, LV_ALIGN_TOP_LEFT, 0, -2);
+    lv_obj_t *v = make_label(c, "--", COL_TEXT);
+    lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 0, 2);
+    return v;
+}
+
+static void set_chip(lv_obj_t *chip, const char *text, lv_color_t col)
+{
+    lv_label_set_text(chip, text);
+    lv_obj_set_style_text_color(chip, col, 0);
+}
+
+static void print_changed_lines(void)
+{
+    const char *line[4] = { clicks_stepper3_status(), clicks_boost10_status(),
+                            clicks_powermonitor_status(), clicks_druck_status() };
+
+    for (int i = 0; i < 4; i++) {
+        if (last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
+            lv_strlcpy(line_copy[i], line[i], sizeof line_copy[i]);
+            last_line[i] = line_copy[i];
+            usb_serial_printf("%s\r\n", line[i]);
+        }
+    }
+}
+
 /**
- * @brief Every second: re-check the Click boards, show their status and
- * the USB link state on screen, and print any board line that changed.
+ * @brief Every second: re-read the boards, refresh the screen, and print any
+ * changed status line to COM3.
  */
 static void status_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    const char *status[4];
-
     clicks_poll();
-    status[0] = clicks_stepper3_status();
-    status[1] = clicks_boost10_status();
-    status[2] = clicks_powermonitor_status();
-    status[3] = clicks_druck_status();
+    print_changed_lines();
 
-    for (int i = 0; i < 4; i++) {
-        if (strcmp(lv_label_get_text(click_label[i]), status[i]) != 0) {
-            lv_label_set_text(click_label[i], status[i]);
-            usb_serial_printf("%s\r\n", status[i]);
-        }
+    const clicks_state_t *s = clicks_state();
+
+    // Header status.
+    set_chip(chip_pm, "PM", s->pm_found ? COL_OK : COL_FAULT);
+    if (s->boost_tripped)
+        set_chip(chip_boost, "BOOST TRIP", COL_FAULT);
+    else
+        set_chip(chip_boost, "BOOST", s->boost_pg ? COL_OK : COL_FAULT);
+    set_chip(chip_usb, "USB", strstr(usb_serial_status(), "not enumerated") ? COL_IDLE : COL_OK);
+
+    // Pressure.
+    lv_label_set_text(pressure_label, clicks_druck_value());
+    if (!s->pm_found)
+        lv_label_set_text(pressure_sub, "Power Monitor not responding");
+    else if (s->boost_tripped)
+        lv_label_set_text_fmt(pressure_sub, "Boost tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
+    else if (!s->reading_ok)
+        lv_label_set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
+    else
+        lv_label_set_text(pressure_sub, s->cal_nominal ? "Druck 15 psia, nominal cal"
+                                                       : "Druck 15 psia, cert cal");
+
+    // Readouts.
+    if (s->pm_found) {
+        int32_t sig_uv = s->shunt_nv / 1000;          // whole uV
+        int32_t sig_mv = sig_uv / 1000;
+        int32_t sig_frac = LV_ABS(sig_uv % 1000);
+        lv_label_set_text_fmt(val_signal, "%s%ld.%03ld mV", sig_uv < 0 ? "-" : "",
+                              (long)LV_ABS(sig_mv), (long)sig_frac);
+        lv_label_set_text_fmt(val_exc, "%ld.%03ld V", (long)(s->bus_mv / 1000), (long)(s->bus_mv % 1000));
+    } else {
+        lv_label_set_text(val_signal, "--");
+        lv_label_set_text(val_exc, "--");
+    }
+    if (s->reading_ok) {
+        int32_t r10 = s->r_ppb / 10;   // mV/V to 5 decimals
+        lv_label_set_text_fmt(val_ratio, "%s%ld.%05ld mV/V", r10 < 0 ? "-" : "",
+                              (long)(LV_ABS(r10) / 100000), (long)(LV_ABS(r10) % 100000));
+    } else {
+        lv_label_set_text(val_ratio, "--");
     }
 
-    lv_label_set_text(pressure_label, clicks_druck_value());
-    lv_label_set_text(usb_label, usb_serial_status());
+    if (s->boost_tripped)
+        lv_obj_add_state(exc_slider, LV_STATE_DISABLED);
 }
 
 /**
@@ -49,87 +150,82 @@ static void exc_slider_event_cb(lv_event_t *e)
     int32_t mv = clicks_boost10_set_mv(lv_slider_get_value(sl) * 100);
 
     if (mv < 0) {
-        lv_label_set_text(exc_label, "Exc: tripped");
+        lv_label_set_text(exc_label, "tripped");
         return;
     }
-    lv_label_set_text_fmt(exc_label, "Exc set %ld.%02ld V", (long)(mv / 1000), (long)((mv % 1000 + 5) / 10));
+    lv_label_set_text_fmt(exc_label, "%ld.%02ld V", (long)(mv / 1000), (long)((mv % 1000 + 5) / 10));
     if (lv_event_get_code(e) == LV_EVENT_RELEASED)
         usb_serial_printf("Excitation set to %ld mV nominal\r\n", (long)mv);
-}
-
-/**
- * @brief Switch toggle handler: prints the new state to the USB COM port
- * and mirrors it on screen.
- */
-static void switch_0_event_cb(lv_event_t *e)
-{
-    lv_obj_t *sw = lv_event_get_target_obj(e);
-    bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
-
-    usb_serial_printf("Switch toggled: %s\r\n", on ? "ON" : "OFF");
-    lv_label_set_text(switch_label, on ? "Switch: ON" : "Switch: OFF");
 }
 
 void init_main_screen()
 {
     init_main_screen_ui(&lvgl_main_screen_ui);
+    lv_obj_t *scr = lvgl_main_screen_ui.main_screen;
 
-    // Test switch moved to the bottom left to free the middle for pressure.
-    lv_obj_set_pos(lvgl_main_screen_ui.switch_0, 10, 238);
-    lv_obj_set_size(lvgl_main_screen_ui.switch_0, 50, 26);
+    // The designer's test switch is no longer used.
+    lv_obj_add_flag(lvgl_main_screen_ui.switch_0, LV_OBJ_FLAG_HIDDEN);
 
-    switch_label = lv_label_create(lvgl_main_screen_ui.main_screen);
-    lv_label_set_text(switch_label, "Switch: OFF");
-    lv_obj_align_to(switch_label, lvgl_main_screen_ui.switch_0, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    // Header.
+    lv_obj_t *hdr = lv_obj_create(scr);
+    lv_obj_remove_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(hdr, 0, 0);
+    lv_obj_set_size(hdr, 480, 30);
+    lv_obj_set_style_bg_color(hdr, COL_HEADER, 0);
+    lv_obj_set_style_radius(hdr, 0, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_pad_hor(hdr, 10, 0);
+    lv_obj_set_style_pad_ver(hdr, 0, 0);
 
-    usb_label = lv_label_create(lvgl_main_screen_ui.main_screen);
-    lv_label_set_text(usb_label, "USB: starting");
-    lv_obj_align(usb_label, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
+    lv_obj_t *title = make_label(hdr, "PMC  Druck pressure", lv_color_white());
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    // Status words, right-aligned row; green = ok, red = fault, grey = idle.
+    lv_obj_t *chips = lv_obj_create(hdr);
+    lv_obj_remove_flag(chips, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(chips, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(chips, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(chips, 0, 0);
+    lv_obj_set_style_pad_all(chips, 0, 0);
+    lv_obj_set_flex_flow(chips, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(chips, 14, 0);
+    lv_obj_align(chips, LV_ALIGN_RIGHT_MID, 0, 0);
+    chip_pm = make_label(chips, "PM", COL_IDLE);
+    chip_boost = make_label(chips, "BOOST", COL_IDLE);
+    chip_usb = make_label(chips, "USB", COL_IDLE);
 
-    // Druck pressure, large, in the middle.
-    pressure_label = lv_label_create(lvgl_main_screen_ui.main_screen);
+    // Pressure card.
+    lv_obj_t *pc = make_card(scr, 10, 38, 460, 112);
+    pressure_label = make_label(pc, "----", COL_TEXT);
     lv_obj_set_style_text_font(pressure_label, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_align(pressure_label, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_width(pressure_label, 280);
-    lv_label_set_text(pressure_label, "----");
-    lv_obj_set_pos(pressure_label, 40, 122);
+    lv_obj_set_width(pressure_label, 300);
+    lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 0, 4);
+    lv_obj_t *unit = make_label(pc, "mbar abs", COL_MUTED);
+    lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_BOTTOM, 12, -10);
+    pressure_sub = make_label(pc, "", COL_MUTED);
+    lv_obj_align(pressure_sub, LV_ALIGN_BOTTOM_LEFT, 4, 0);
 
-    lv_obj_t *unit = lv_label_create(lvgl_main_screen_ui.main_screen);
-    lv_label_set_text(unit, "mbar abs");
-    lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_BOTTOM, 10, -8);
+    // Readouts.
+    val_signal = make_readout(scr, 10, "Signal");
+    val_exc = make_readout(scr, 166, "Excitation");
+    val_ratio = make_readout(scr, 322, "Ratio");
 
-    pressure_sub = lv_label_create(lvgl_main_screen_ui.main_screen);
-    lv_label_set_text(pressure_sub, clicks_druck_cal_nominal()
-                      ? "Druck 15 psia, nominal cal (enter cert values)"
-                      : "Druck 15 psia, cert cal");
-    lv_obj_align_to(pressure_sub, pressure_label, LV_ALIGN_OUT_BOTTOM_RIGHT, 0, 0);
-
-    // Excitation slider, 9.0-11.0 V in 0.1 V steps, starts at 10.0 V to
+    // Excitation setpoint, 9.0-11.0 V in 0.1 V steps, starts at 10.0 V to
     // match the start-up wiper.
-    lv_obj_t *exc_slider = lv_slider_create(lvgl_main_screen_ui.main_screen);
+    lv_obj_t *sc = make_card(scr, 10, 216, 460, 46);
+    lv_obj_t *cap = make_label(sc, "Excitation set", COL_MUTED);
+    lv_obj_align(cap, LV_ALIGN_LEFT_MID, 0, 0);
+    exc_slider = lv_slider_create(sc);
     lv_slider_set_range(exc_slider, 90, 110);
     lv_slider_set_value(exc_slider, 100, LV_ANIM_OFF);
-    lv_obj_set_size(exc_slider, 290, 10);
-    lv_obj_set_pos(exc_slider, 20, 214);
+    lv_obj_set_size(exc_slider, 220, 10);
+    lv_obj_align(exc_slider, LV_ALIGN_LEFT_MID, 120, 0);
     lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_RELEASED, NULL);
-
-    exc_label = lv_label_create(lvgl_main_screen_ui.main_screen);
-    lv_label_set_text(exc_label, "Exc set 10.00 V");
-    lv_obj_align_to(exc_label, exc_slider, LV_ALIGN_OUT_RIGHT_MID, 18, 0);
-
-    // Click board status, top left, one block per socket.
-    for (int i = 0; i < 4; i++) {
-        click_label[i] = lv_label_create(lvgl_main_screen_ui.main_screen);
-        lv_label_set_text(click_label[i], "");
-        lv_obj_set_width(click_label[i], 470);
-        lv_label_set_long_mode(click_label[i], LV_LABEL_LONG_MODE_WRAP);
-        lv_obj_set_pos(click_label[i], 5, 5 + 20 * i + (i == 3 ? 20 : 0));  // S4 is two lines
-    }
+    exc_label = make_label(sc, "10.00 V", COL_TEXT);
+    lv_obj_align(exc_label, LV_ALIGN_RIGHT_MID, 0, 0);
 
     lv_timer_create(status_timer_cb, 1000, NULL);
-
-    lv_obj_add_event_cb(lvgl_main_screen_ui.switch_0, switch_0_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 void show_main_screen()
