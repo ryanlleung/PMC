@@ -89,6 +89,10 @@ static i2c_master_t pm_i2c;
 static bool pm_i2c_open;
 static uint8_t pm_addr;  // 0 = not found
 
+// Scan diagnostics: first address that answered and the ID it returned.
+static uint8_t pm_ack_addr;
+static uint16_t pm_ack_mfr;
+
 static bool pm_read(uint8_t reg, uint8_t *buf, size_t len)
 {
     return i2c_master_write_then_read(&pm_i2c, &reg, 1, buf, len) == I2C_MASTER_SUCCESS;
@@ -101,6 +105,10 @@ static bool pm_probe(uint8_t addr)
     i2c_master_set_slave_address(&pm_i2c, addr);
     if (!pm_read(INA228_REG_MFR_ID, buf, 2))
         return false;
+    if (pm_ack_addr == 0) {
+        pm_ack_addr = addr;
+        pm_ack_mfr = (uint16_t)((buf[0] << 8) | buf[1]);
+    }
     if (((buf[0] << 8) | buf[1]) != INA228_MFR_TI)
         return false;
     if (!pm_read(INA228_REG_DEV_ID, buf, 2))
@@ -119,8 +127,8 @@ static void powermonitor_init(void)
     // i2c_master_open() returns the HAL acquire code: 1 on the first open,
     // 0 when already open, -1 on failure. Only -1 is an error.
     pm_i2c_open = (i2c_master_open(&pm_i2c, &cfg) != I2C_MASTER_ERROR);
-    if (pm_i2c_open)
-        i2c_master_set_timeout(&pm_i2c, 100);
+    // Keep the driver's default timeout (10000 retries). A shorter one
+    // times out before a byte at 100 kHz completes.
 }
 
 static void powermonitor_poll(void)
@@ -134,12 +142,18 @@ static void powermonitor_poll(void)
     }
 
     if (pm_addr == 0) {
+        pm_ack_addr = 0;
         for (uint8_t a = 0x40; a <= 0x4F && pm_addr == 0; a++)
             if (pm_probe(a))
                 pm_addr = a;
         if (pm_addr == 0) {
-            lv_snprintf(powermonitor_status, STATUS_LEN,
-                        "S4 Power Monitor: NOT FOUND (no INA228 at 0x40-0x4F)");
+            if (pm_ack_addr)
+                lv_snprintf(powermonitor_status, STATUS_LEN,
+                            "S4 Power Monitor: 0x%02X answered but ID 0x%04X is not an INA228",
+                            pm_ack_addr, pm_ack_mfr);
+            else
+                lv_snprintf(powermonitor_status, STATUS_LEN,
+                            "S4 Power Monitor: NOT FOUND (no I2C reply at 0x40-0x4F)");
             return;
         }
     }
