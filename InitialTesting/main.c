@@ -24,6 +24,7 @@
 #include "sysinfo.h"
 #include "clicks.h"
 #include "cal.h"
+#include "stepper3.h"
 
 /**
  * @brief Initializes board peripherals for display, touch, and LVGL timing.
@@ -52,7 +53,8 @@ void application_init()
     // Druck calibration from the on-board serial flash (nominal if none stored).
     cal_init();
 
-    // Click boards on the shield (no motor drive, no Boost 10 writes).
+    // Click boards on the shield. Stepper coils off; the motor only moves
+    // on a MOT MOVE command.
     clicks_init();
 
     // Initialize all available screens.
@@ -113,7 +115,8 @@ int main(void)
     while (1)
     {
         link_task();
-        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line))
+        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) &&
+            !stepper3_command(line))
             link_printf("ERR unknown command\r\n");
         lv_timer_handler();
         watchdog_kick();

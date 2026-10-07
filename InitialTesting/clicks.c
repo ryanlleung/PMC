@@ -9,37 +9,14 @@
 #include "clicks.h"
 #include "cal.h"
 #include "i2c_sdk_test.h"
+#include "stepper3.h"
 
 #define STATUS_LEN 192
 
-static char stepper3_status[STATUS_LEN];
 static char boost10_status[STATUS_LEN];
 static char powermonitor_status[STATUS_LEN];
 static char druck_status[STATUS_LEN];
 static clicks_state_t state;
-
-/* --------------------------------------------------------------------------
- * Stepper 3 (S2)
- *
- * ULN2003 Darlington array: four inputs, no outputs back to the MCU, so the
- * board cannot be detected. All four inputs are driven low, which leaves
- * every coil off.
- * ------------------------------------------------------------------------ */
-static digital_out_t stepper3_in[4];
-
-static void stepper3_init(void)
-{
-    const pin_name_t pins[4] = { MIKROBUS_2_AN, MIKROBUS_2_RST,
-                                 MIKROBUS_2_CS, MIKROBUS_2_PWM };
-
-    for (int i = 0; i < 4; i++) {
-        digital_out_init(&stepper3_in[i], pins[i]);
-        digital_out_low(&stepper3_in[i]);
-    }
-
-    lv_snprintf(stepper3_status, STATUS_LEN,
-                "S2 Stepper 3: pins set, coils off (no readback)");
-}
 
 /* --------------------------------------------------------------------------
  * Boost 10 (S3)
@@ -496,7 +473,7 @@ void clicks_poll(void)
     boost10_poll();
 }
 
-const char *clicks_stepper3_status(void)     { return stepper3_status; }
+const char *clicks_stepper3_status(void)     { return stepper3_status(); }
 const char *clicks_boost10_status(void)      { return boost10_status; }
 const char *clicks_powermonitor_status(void) { return powermonitor_status; }
 const char *clicks_druck_status(void)        { return druck_status; }

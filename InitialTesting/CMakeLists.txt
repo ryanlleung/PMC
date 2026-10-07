@@ -25,6 +25,8 @@ add_executable(InitialTesting
     usb_serial.c
     clicks.h
     clicks.c
+    stepper3.h
+    stepper3.c
     extflash.h
     extflash.c
     cal.h
