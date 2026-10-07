@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "clicks.h"
-#include "usb_serial.h"
+#include "link.h"
 #include "cal.h"
 
 static clicks_state_t st;
@@ -59,11 +59,14 @@ bool cal_is_default(void) { return st.cal_nominal; }
 const char *cal_id(void) { return "cert 1234567"; }
 int32_t clicks_boost10_set_mv(int32_t mv) { return st.boost_tripped ? -1 : mv; }
 
-void usb_serial_init(void) {}
-void usb_serial_task(void) {}
-const char *usb_serial_status(void) { return "USB: port open"; }
-// COM3 output goes to stderr so the DATA line format can be checked.
-void usb_serial_printf(const char *fmt, ...)
+void link_init(void) {}
+void link_task(void) {}
+bool link_getline(char *buf, size_t n) { (void)buf; (void)n; return false; }
+const char *link_status(void) { return "Ethernet: 192.168.1.23 port 5000, client connected"; }
+const char *link_chip_text(void) { return "192.168.1.23"; }
+bool link_chip_ok(void) { return true; }
+// Link output goes to stderr so the DATA line format can be checked.
+void link_printf(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);

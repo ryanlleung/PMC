@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Show, load or erase the Druck calibration stored on the board.
 
-    python druck_cal.py COM3 show
-    python druck_cal.py COM3 zs --id "cert 1234567" --exc 10 --zero 0.12 --span 99.85
-    python druck_cal.py COM3 load table.txt --id "OI table" --xunits V --exc 10 --punits mbar
-    python druck_cal.py COM3 erase
+    python druck_cal.py 192.168.1.23 show
+    python druck_cal.py 192.168.1.23 zs --id "cert 1234567" --exc 10 --zero 0.12 --span 99.85
+    python druck_cal.py 192.168.1.23 load table.txt --id "OI table" --xunits V --exc 10
+    python druck_cal.py 192.168.1.23 erase
 
-Needs pyserial (pip install pyserial). Close the NECTO UART Terminal and
-log_druck.py first: only one program can hold the COM port.
+The first argument is the board's IP (Ethernet build, TCP port 5000, or
+host:port) or its COM port (USB build, needs pip install pyserial).
+Stop log_druck.py first: the board takes one connection at a time (a new
+one replaces the old), and only one program can hold a COM port.
 
 The board keeps one table of ratio (sensor output / excitation, mV/V)
 against pressure (mbar), up to 32 points, linear between points. It is
@@ -25,8 +27,11 @@ what is in flash. Use --dry to print the commands without a port.
 """
 import argparse
 import re
+import socket
 import sys
 import time
+
+TCP_PORT = 5000
 
 FS_MBAR = 1034.214           # 15 psia
 MAX_POINTS = 32
@@ -67,27 +72,64 @@ def check(pts):
             sys.exit(f"ratios not strictly ascending at {a[0]:.6f} / {b[0]:.6f} mV/V")
 
 
+class LineSock:
+    """Minimal line reader over TCP that survives read timeouts."""
+
+    def __init__(self, sock):
+        self.sock, self.buf = sock, b""
+
+    def readline(self):
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(1024)     # socket.timeout if nothing arrives
+            if not chunk:
+                line, self.buf = self.buf, b""
+                return line                  # b"" = closed
+            self.buf += chunk
+        line, _, self.buf = self.buf.partition(b"\n")
+        return line + b"\n"
+
+    def write(self, data):
+        self.sock.sendall(data)
+
+    def close(self):
+        self.sock.close()
+
+
 class Board:
-    def __init__(self, port):
-        import serial
-        self.s = serial.Serial(port, 115200, timeout=0.2)
-        self.s.dtr = True
-        time.sleep(0.2)
-        self.s.reset_input_buffer()
+    def __init__(self, target):
+        self.sock = None
+        if re.match(r"^(COM\d+|/dev/)", target, re.I):
+            import serial
+            self.s = serial.Serial(target, 115200, timeout=0.2)
+            self.s.dtr = True
+            time.sleep(0.2)
+            self.s.reset_input_buffer()
+        else:
+            host, _, port = target.partition(":")
+            self.sock = socket.create_connection((host, int(port or TCP_PORT)), timeout=5)
+            self.sock.settimeout(0.2)
+            self.s = LineSock(self.sock)
+            time.sleep(0.2)
+
+    def _readline(self):
+        try:
+            return self.s.readline().decode("ascii", errors="replace").strip()
+        except (socket.timeout, TimeoutError):
+            return ""
 
     def cmd(self, text, timeout=3.0):
         """Sends one line, returns the reply lines up to and including OK/ERR."""
         self.s.write((text + "\n").encode("ascii"))
         got, end = [], time.time() + timeout
         while time.time() < end:
-            line = self.s.readline().decode("ascii", errors="replace").strip()
+            line = self._readline()
             if not line or line.startswith("DATA,"):
                 continue
             if line.startswith("CAL ") or line.startswith("OK") or line.startswith("ERR"):
                 got.append(line)
             if line.startswith("OK") or line.startswith("ERR"):
                 return got
-        sys.exit(f"no reply to '{text}' (old firmware, or wrong port?)")
+        sys.exit(f"no reply to '{text}' (old firmware, or wrong address/port?)")
 
 
 class Dry:
@@ -118,7 +160,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog="\n".join(__doc__.splitlines()[1:]))
-    ap.add_argument("port", help="COM port, e.g. COM3 (ignored with --dry)")
+    ap.add_argument("target", help="board IP or COM port (ignored with --dry)")
     ap.add_argument("--dry", action="store_true", help="print commands, no port")
     sub = ap.add_subparsers(dest="what", required=True)
 
@@ -142,7 +184,7 @@ def main():
     ld.add_argument("--no-save", action="store_true")
 
     a = ap.parse_args()
-    board = Dry() if a.dry else Board(a.port)
+    board = Dry() if a.dry else Board(a.target)
 
     if a.what == "show":
         send(board, "CAL?")

@@ -1,7 +1,7 @@
 #include <string.h>
 
 #include "main_screen.h"
-#include "usb_serial.h"
+#include "link.h"
 #include "clicks.h"
 #include "cal.h"
 
@@ -91,7 +91,7 @@ static void print_data_line(const clicks_state_t *s)
                     (long)(ra / 1000000), (long)(ra % 1000000));
     }
     int32_t da = LV_ABS(s->die_mc);
-    usb_serial_printf("DATA,%lu,%s,%s%ld.%ld,%ld,%s,%s%ld.%03ld,%ld,%d\r\n",
+    link_printf("DATA,%lu,%s,%s%ld.%ld,%ld,%s,%s%ld.%03ld,%ld,%d\r\n",
                       (unsigned long)lv_tick_get(), p,
                       sig < 0 ? "-" : "", (long)(LV_ABS(sig) / 10), (long)(LV_ABS(sig) % 10),
                       (long)s->bus_mv, r,
@@ -108,7 +108,7 @@ static void print_changed_lines(void)
         if (last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
             lv_strlcpy(line_copy[i], line[i], sizeof line_copy[i]);
             last_line[i] = line_copy[i];
-            usb_serial_printf("%s\r\n", line[i]);
+            link_printf("%s\r\n", line[i]);
         }
     }
 }
@@ -133,7 +133,7 @@ static void status_timer_cb(lv_timer_t *t)
         set_chip(chip_boost, "BOOST TRIP", COL_FAULT);
     else
         set_chip(chip_boost, "BOOST", s->boost_pg ? COL_OK : COL_FAULT);
-    set_chip(chip_usb, "USB", strstr(usb_serial_status(), "not enumerated") ? COL_IDLE : COL_OK);
+    set_chip(chip_usb, link_chip_text(), link_chip_ok() ? COL_OK : COL_IDLE);
 
     // Pressure.
     lv_label_set_text(pressure_label, clicks_druck_value());
@@ -187,7 +187,7 @@ static void exc_slider_event_cb(lv_event_t *e)
     }
     lv_label_set_text_fmt(exc_label, "%ld.%02ld V", (long)(mv / 1000), (long)((mv % 1000 + 5) / 10));
     if (lv_event_get_code(e) == LV_EVENT_RELEASED)
-        usb_serial_printf("Excitation set to %ld mV nominal\r\n", (long)mv);
+        link_printf("Excitation set to %ld mV nominal\r\n", (long)mv);
 }
 
 void init_main_screen()

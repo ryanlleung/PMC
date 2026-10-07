@@ -29,6 +29,13 @@ add_executable(InitialTesting
     extflash.c
     cal.h
     cal.c
+    pmc_config.h
+    link.h
+    link.c
+    eth_hw.h
+    eth_hw.c
+    ethlink.h
+    ethlink.c
     main.c
 )
 
@@ -40,6 +47,7 @@ find_package(MikroC.Core REQUIRED)
 find_package_me(MikroSDK.LVGL.Common REQUIRED)
 find_package_me(MikroSDK.GraphicLibrary REQUIRED)
 find_package_me(MikroSDK.USB.Tiny REQUIRED)
+find_package_me(MikroSDK.Ethernet.CycloneTCP REQUIRED)
 
 lvgl_designer_generator(InitialTesting resource.mres main_screen.mscr)
 
@@ -49,6 +57,7 @@ target_link_libraries(InitialTesting
         MikroSDK.LVGL.Common
         MikroSDK.GraphicLibrary
         MikroSDK.USB.Tiny
+        MikroSDK.Ethernet.CycloneTCP
         lvgl
 )
 

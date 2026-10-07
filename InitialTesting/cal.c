@@ -2,7 +2,7 @@
 #include <string.h>
 
 #include "lvgl.h"        // lv_snprintf
-#include "usb_serial.h"
+#include "link.h"
 #include "extflash.h"
 #include "cal.h"
 
@@ -158,44 +158,44 @@ static void print_fixed(char *buf, size_t n, int64_t v, int dec)
 static void show(void)
 {
     char r[20], p[20];
-    usb_serial_printf("CAL source=%s id=%s points=%lu flash=%s\r\n",
+    link_printf("CAL source=%s id=%s points=%lu flash=%s\r\n",
                       active_is_default ? "default" : "flash", active.id,
                       (unsigned long)active.npts, flash_ok ? "ok" : "missing");
     for (uint32_t i = 0; i < active.npts; i++) {
         print_fixed(r, sizeof r, active.r_ppb[i], 6);
         print_fixed(p, sizeof p, active.p_mmbar[i], 3);
-        usb_serial_printf("CAL PT %s %s\r\n", r, p);
+        link_printf("CAL PT %s %s\r\n", r, p);
     }
-    usb_serial_printf("OK\r\n");
+    link_printf("OK\r\n");
 }
 
 static void save(void)
 {
     cal_rec_t back;
 
-    if (!flash_ok) { usb_serial_printf("ERR serial flash not found\r\n"); return; }
+    if (!flash_ok) { link_printf("ERR serial flash not found\r\n"); return; }
     active.crc = rec_crc(&active);
     if (!extflash_erase_4k(CAL_FLASH_ADDR) ||
         !extflash_write(CAL_FLASH_ADDR, &active, sizeof active)) {
-        usb_serial_printf("ERR flash write timed out\r\n");
+        link_printf("ERR flash write timed out\r\n");
         return;
     }
     extflash_read(CAL_FLASH_ADDR, &back, sizeof back);
     if (memcmp(&back, &active, sizeof back) != 0) {
-        usb_serial_printf("ERR flash verify failed\r\n");
+        link_printf("ERR flash verify failed\r\n");
         return;
     }
     active_is_default = false;
-    usb_serial_printf("OK saved %s\r\n", active.id);
+    link_printf("OK saved %s\r\n", active.id);
 }
 
 static void erase(void)
 {
-    if (!flash_ok) { usb_serial_printf("ERR serial flash not found\r\n"); return; }
-    if (!extflash_erase_4k(CAL_FLASH_ADDR)) { usb_serial_printf("ERR erase timed out\r\n"); return; }
+    if (!flash_ok) { link_printf("ERR serial flash not found\r\n"); return; }
+    if (!extflash_erase_4k(CAL_FLASH_ADDR)) { link_printf("ERR erase timed out\r\n"); return; }
     active = cal_default;
     active_is_default = true;
-    usb_serial_printf("OK erased, using nominal\r\n");
+    link_printf("OK erased, using nominal\r\n");
 }
 
 bool cal_command(const char *line)
@@ -213,33 +213,33 @@ bool cal_command(const char *line)
         staging.magic = CAL_MAGIC;
         staging.version = CAL_VERSION;
         lv_strlcpy(staging.id, *id ? id : "unnamed", CAL_ID_LEN);
-        usb_serial_printf("OK new %s\r\n", staging.id);
+        link_printf("OK new %s\r\n", staging.id);
     } else if (strncmp(a, " PT ", 4) == 0) {
         const char *s = a + 4;
         int64_t r, p;
-        if (staging.magic != CAL_MAGIC) { usb_serial_printf("ERR CAL NEW first\r\n"); return true; }
-        if (staging.npts >= CAL_MAX_POINTS) { usb_serial_printf("ERR table full (32)\r\n"); return true; }
+        if (staging.magic != CAL_MAGIC) { link_printf("ERR CAL NEW first\r\n"); return true; }
+        if (staging.npts >= CAL_MAX_POINTS) { link_printf("ERR table full (32)\r\n"); return true; }
         if (!parse_fixed(&s, 6, &r) || !parse_fixed(&s, 3, &p) ||
             r < -50000000 || r > 50000000 || p < -10000000 || p > 100000000) {
-            usb_serial_printf("ERR expected: CAL PT <mV/V> <mbar>\r\n");
+            link_printf("ERR expected: CAL PT <mV/V> <mbar>\r\n");
             return true;
         }
         staging.r_ppb[staging.npts] = (int32_t)r;
         staging.p_mmbar[staging.npts] = (int32_t)p;
         staging.npts++;
-        usb_serial_printf("OK pt %lu\r\n", (unsigned long)staging.npts);
+        link_printf("OK pt %lu\r\n", (unsigned long)staging.npts);
     } else if (strcmp(a, " APPLY") == 0) {
         const char *why = rec_check(&staging);
-        if (why) { usb_serial_printf("ERR %s\r\n", why); return true; }
+        if (why) { link_printf("ERR %s\r\n", why); return true; }
         active = staging;
         active_is_default = false;
-        usb_serial_printf("OK applied %s (not saved)\r\n", active.id);
+        link_printf("OK applied %s (not saved)\r\n", active.id);
     } else if (strcmp(a, " SAVE") == 0) {
         save();
     } else if (strcmp(a, " ERASE") == 0) {
         erase();
     } else {
-        usb_serial_printf("ERR unknown CAL command\r\n");
+        link_printf("ERR unknown CAL command\r\n");
     }
     return true;
 }

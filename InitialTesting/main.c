@@ -19,7 +19,8 @@
 #include "lv_port_indev.h"
 #include "1ms_Timer.h"
 #include "screens.h"
-#include "usb_serial.h"
+#include "pmc_config.h"
+#include "link.h"
 #include "clicks.h"
 #include "cal.h"
 
@@ -57,11 +58,12 @@ void application_init()
     // To display another screen, call its respective show function.
     show_main_screen();
 
-    // Draw the screen once first, so a USB start-up fault cannot leave it blank.
+    // Draw the screen once first, so a link start-up fault cannot leave it blank.
     lv_timer_handler();
 
-    // USB virtual COM port for text output (also sets the 48 MHz USB clock).
-    usb_serial_init();
+    // Text link to the PC (pmc_config.h): USB COM port (sets the 48 MHz USB
+    // clock) or Ethernet (sets SYSCLK 150 MHz and the 50 MHz RMII clock).
+    link_init();
 }
 
 /**
@@ -84,9 +86,9 @@ int main(void)
     char line[96];
     while (1)
     {
-        usb_serial_task();
-        if (usb_serial_getline(line, sizeof line) && !cal_command(line))
-            usb_serial_printf("ERR unknown command\r\n");
+        link_task();
+        if (link_getline(line, sizeof line) && !cal_command(line))
+            link_printf("ERR unknown command\r\n");
         lv_timer_handler();
         Delay_ms(5);
     }
@@ -103,9 +105,16 @@ int main(void)
  */
 static volatile uint32_t msCount = 0;
 
+#if PMC_LINK_ETHERNET
+extern volatile uint32_t systemTicks;   // CycloneTCP time base, 1 ms
+#endif
+
 INTERRUPT_ROUTINE
 {
     msCount++;
+#if PMC_LINK_ETHERNET
+    systemTicks++;
+#endif
 
     if (5 == msCount) {
         msCount = 0;

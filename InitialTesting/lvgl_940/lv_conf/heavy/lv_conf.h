@@ -565,7 +565,9 @@
 #define LV_ATTRIBUTE_LARGE_CONST
 
 /** Compiler prefix for a large array declaration in RAM */
-#define LV_ATTRIBUTE_LARGE_RAM_ARRAY
+/* PMC: the 64 KB LVGL heap goes in the F407's 64 KB CCM RAM (CPU-only, never
+ * DMA'd), leaving main SRAM for the Ethernet DMA buffers and TCP/IP stack. */
+#define LV_ATTRIBUTE_LARGE_RAM_ARRAY __attribute__((section(".ccmram")))
 
 /** Place performance critical functions into a faster memory (e.g RAM) */
 #define LV_ATTRIBUTE_FAST_MEM

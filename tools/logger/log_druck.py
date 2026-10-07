@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Log the board's once-a-second DATA lines from the USB COM port to CSV.
+"""Log the board's once-a-second DATA lines to CSV, over USB or Ethernet.
 
-    python log_druck.py COM3                 # writes druck_YYYYMMDD_HHMMSS.csv
-    python log_druck.py COM3 -o run1.csv
+    python log_druck.py 192.168.1.23         # Ethernet build: IP shown on the board
+    python log_druck.py COM3                 # USB build
+    python log_druck.py 192.168.1.23 -o run1.csv
 
-Needs pyserial (pip install pyserial). Close the NECTO UART Terminal first:
-only one program can hold the COM port. Stop with Ctrl+C.
+Writes druck_YYYYMMDD_HHMMSS.csv unless -o is given. Stop with Ctrl+C.
+Ethernet: TCP port 5000 (give host:port for another). The board takes one
+connection at a time; a new one replaces the old.
+USB: needs pyserial (pip install pyserial); close the NECTO UART Terminal
+first, only one program can hold the COM port.
 
 Columns: pc_time (local, ISO), then the board's fields:
 t_ms, p_mbar, signal_uV, exc_mV, ratio_mV_per_V, die_C, set_mV, ok.
@@ -14,29 +18,86 @@ to the console only.
 """
 import argparse
 import datetime as dt
+import re
+import socket
 import sys
 
-import serial
+TCP_PORT = 5000
 
 FIELDS = ["t_ms", "p_mbar", "signal_uV", "exc_mV", "ratio_mV_per_V", "die_C", "set_mV", "ok"]
 
 
+class LineSock:
+    """Minimal line reader over TCP that survives read timeouts."""
+
+    def __init__(self, sock):
+        self.sock, self.buf = sock, b""
+
+    def readline(self):
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(1024)     # socket.timeout if nothing arrives
+            if not chunk:
+                line, self.buf = self.buf, b""
+                return line                  # b"" = closed
+            self.buf += chunk
+        line, _, self.buf = self.buf.partition(b"\n")
+        return line + b"\n"
+
+    def write(self, data):
+        self.sock.sendall(data)
+
+    def close(self):
+        self.sock.close()
+
+
+class Link:
+    """Line-based link to the board: a COM port, or TCP to host[:port]."""
+
+    def __init__(self, target, timeout=2.0):
+        self.sock = None
+        if re.match(r"^(COM\d+|/dev/)", target, re.I):
+            import serial
+            self.port = serial.Serial(target, 115200, timeout=timeout)
+            self.port.dtr = True    # baud is ignored by USB CDC
+        else:
+            host, _, port = target.partition(":")
+            self.sock = socket.create_connection((host, int(port or TCP_PORT)), timeout=5)
+            self.sock.settimeout(timeout)
+            self.port = LineSock(self.sock)
+
+    def readline(self):
+        try:
+            line = self.port.readline()
+        except (socket.timeout, TimeoutError):
+            return ""
+        if self.sock is not None and line == b"":
+            raise ConnectionError("board closed the connection")
+        return line.decode("ascii", errors="replace").strip()
+
+    def write(self, text):
+        self.port.write(text.encode("ascii"))
+
+    def close(self):
+        self.port.close()
+        if self.sock is not None:
+            self.sock.close()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("port", help="COM port, e.g. COM3")
+    ap.add_argument("target", help="board IP (Ethernet) or COM port (USB)")
     ap.add_argument("-o", "--out", help="output CSV file")
     a = ap.parse_args()
 
     out = a.out or dt.datetime.now().strftime("druck_%Y%m%d_%H%M%S.csv")
-    # Baud rate is ignored by USB CDC but pyserial needs one.
-    with serial.Serial(a.port, 115200, timeout=2) as port, open(out, "w", newline="") as f:
-        port.dtr = True
+    port = Link(a.target)
+    with open(out, "w", newline="") as f:
         f.write("pc_time," + ",".join(FIELDS) + "\n")
-        print(f"Logging {a.port} to {out}  (Ctrl+C to stop)")
+        print(f"Logging {a.target} to {out}  (Ctrl+C to stop)")
         rows = 0
         try:
             while True:
-                line = port.readline().decode("ascii", errors="replace").strip()
+                line = port.readline()
                 if not line:
                     continue
                 if not line.startswith("DATA,"):
@@ -54,6 +115,10 @@ def main():
                 print(f"\r{rows:6d}  {p:>10} mbar   exc {exc} mV   ", end="", flush=True)
         except KeyboardInterrupt:
             print(f"\nStopped. {rows} rows in {out}")
+        except ConnectionError as e:
+            print(f"\n{e}. {rows} rows in {out}")
+        finally:
+            port.close()
 
 
 if __name__ == "__main__":
