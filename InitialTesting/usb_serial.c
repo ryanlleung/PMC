@@ -116,6 +116,8 @@ void usb_serial_printf(const char *fmt, ...)
     }
 }
 
+#define LINE_IDLE_MS 200
+
 static uint32_t rx_bytes;
 
 uint32_t usb_serial_rx_bytes(void)
@@ -127,6 +129,7 @@ bool usb_serial_getline(char *buf, size_t n)
 {
     static char line[96];
     static size_t len;
+    static uint32_t last_rx;
 
     while (tud_cdc_available()) {
         int32_t c = tud_cdc_read_char();
@@ -144,6 +147,17 @@ bool usb_serial_getline(char *buf, size_t n)
         }
         if (len < sizeof line - 1)
             line[len++] = (char)c;
+        last_rx = lv_tick_get();
+    }
+
+    // The NECTO UART Terminal sends the text with no line ending, so a line
+    // also ends after LINE_IDLE_MS with nothing more received. A terminal
+    // that sends each key as it is typed needs CR or LF instead.
+    if (len > 0 && lv_tick_elaps(last_rx) >= LINE_IDLE_MS) {
+        line[len] = '\0';
+        lv_strlcpy(buf, line, n);
+        len = 0;
+        return true;
     }
     return false;
 }
