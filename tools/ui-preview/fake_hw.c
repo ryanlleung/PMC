@@ -12,11 +12,13 @@
 static clicks_state_t st;
 static bool fake_wdt;
 static char value[24];
+static bool fake_saved, fake_atm;
 
 void fake_hw_set_scenario(const char *name)
 {
     memset(&st, 0, sizeof st);
     fake_wdt = false;
+    fake_saved = fake_atm = false;
     st.cal_nominal = true;
     st.boost_set_mv = 9999;
     st.pm_found = true;
@@ -39,6 +41,11 @@ void fake_hw_set_scenario(const char *name)
         strcpy(value, "----");
     } else if (!strcmp(name, "cal")) {
         st.cal_nominal = false;
+        fake_saved = fake_atm = true;
+        st.p_mmbar = 1013200;
+        strcpy(value, "1013.20");
+    } else if (!strcmp(name, "unsaved")) {
+        st.cal_nominal = false;
         fake_wdt = true;
     } else if (!strcmp(name, "trip")) {
         st.boost_tripped = true;
@@ -60,7 +67,9 @@ const char *clicks_druck_value(void) { return value; }
 bool clicks_druck_cal_nominal(void) { return st.cal_nominal; }
 const clicks_state_t *clicks_state(void) { return &st; }
 bool cal_is_default(void) { return st.cal_nominal; }
-const char *cal_id(void) { return "cert 1234567"; }
+const char *cal_id(void) { return fake_atm ? "Druck 3842117+atm" : "Druck 3842117"; }
+bool cal_saved(void) { return fake_saved; }
+bool cal_atm_applied(void) { return fake_atm; }
 int32_t clicks_boost10_set_mv(int32_t mv) { return st.boost_tripped ? -1 : mv; }
 
 void link_init(void) {}

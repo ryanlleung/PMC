@@ -36,6 +36,11 @@ int64_t cal_pressure_mmbar(int64_t r_ppb);
 
 bool cal_is_default(void);
 const char *cal_id(void);
+// True once the active table has been written to flash (or was loaded from
+// it), false after APPLY or ATM until CAL SAVE.
+bool cal_saved(void);
+// True if CAL ATM has scaled the active table (its id ends in "+atm").
+bool cal_atm_applied(void);
 
 // Handles one command line from COM3. Returns false if it is not a CAL command.
 bool cal_command(const char *line);

@@ -36,6 +36,7 @@ static const cal_rec_t cal_default = {
 static cal_rec_t active;
 static cal_rec_t staging;
 static bool active_is_default = true;
+static bool active_saved;          // active matches what is in flash
 static bool flash_ok;
 
 static uint32_t crc32(const void *data, size_t len)
@@ -84,6 +85,7 @@ void cal_init(void)
         r.id[CAL_ID_LEN - 1] = '\0';
         active = r;
         active_is_default = false;
+        active_saved = true;
     }
 }
 
@@ -125,6 +127,17 @@ bool cal_is_default(void)
 const char *cal_id(void)
 {
     return active.id;
+}
+
+bool cal_saved(void)
+{
+    return active_saved;
+}
+
+bool cal_atm_applied(void)
+{
+    size_t n = strlen(active.id);
+    return n >= 4 && strcmp(active.id + n - 4, "+atm") == 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -177,7 +190,7 @@ static void show(void)
 {
     char r[20], p[20];
     link_printf("CAL source=%s id=%s points=%lu flash=%s\r\n",
-                      active_is_default ? "default" : "flash", active.id,
+                      active_is_default ? "default" : active_saved ? "flash" : "ram", active.id,
                       (unsigned long)active.npts, flash_ok ? "ok" : "missing");
     for (uint32_t i = 0; i < active.npts; i++) {
         print_fixed(r, sizeof r, active.r_ppb[i], 6);
@@ -205,6 +218,7 @@ static void save(void)
         return;
     }
     active_is_default = false;
+    active_saved = true;
     link_printf("OK saved %s\r\n", active.id);
 }
 
@@ -255,6 +269,7 @@ static void atm(const char *s)
     print_fixed(b, sizeof b, st->p_mmbar, 3);
     active = r;
     active_is_default = false;
+    active_saved = false;
     link_printf("OK ratios x %s (was reading %s mbar), not saved: CAL SAVE to keep\r\n", a, b);
 }
 
@@ -264,6 +279,7 @@ static void erase(void)
     if (!extflash_erase_4k(CAL_FLASH_ADDR)) { link_printf("ERR erase timed out\r\n"); return; }
     active = cal_default;
     active_is_default = true;
+    active_saved = false;
     link_printf("OK erased, using nominal\r\n");
 }
 
@@ -302,6 +318,7 @@ bool cal_command(const char *line)
         if (why) { link_printf("ERR %s\r\n", why); return true; }
         active = staging;
         active_is_default = false;
+        active_saved = false;
         link_printf("OK applied %s (not saved)\r\n", active.id);
     } else if (strncmp(a, " ATM ", 5) == 0) {
         atm(a + 5);

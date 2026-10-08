@@ -13,9 +13,10 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 /*
  * Screen layout, 480 x 272:
  *   y   0-30   header: title, Power Monitor / Boost 10 / USB status
- *   y  38-150  pressure card: value (48 px), unit, calibration / fault line
- *   y 158-208  three readouts: signal, excitation, ratio
- *   y 216-262  excitation setpoint slider
+ *   y  38-150  pressure card: calibrated value (48 px), unit, sensor / fault line
+ *   y 158-208  four readouts: signal, ratio, excitation, INA228 die temperature
+ *   y 216-262  calibration: table id, ATM correction, stored or not
+ * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
  * Full per-board status lines go to COM3 only, when they change.
  */
 #define COL_HEADER   lv_color_make(31, 41, 51)
@@ -25,13 +26,13 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 #define COL_OK       lv_color_make(46, 160, 67)
 #define COL_FAULT    lv_color_make(214, 48, 49)
 #define COL_IDLE     lv_color_make(150, 158, 166)
+#define COL_WARN     lv_color_make(214, 130, 0)
 
 static lv_obj_t *chip_pm, *chip_boost, *chip_usb;
 static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
-static lv_obj_t *val_signal, *val_exc, *val_ratio;
-static lv_obj_t *exc_slider;
-static lv_obj_t *exc_label;
+static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die;
+static lv_obj_t *cal_table, *cal_atm, *cal_store;
 
 static const char *last_line[6];
 static char line_copy[6][192];
@@ -57,15 +58,20 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t col)
     return l;
 }
 
-// One small readout: caption above, value below.
+// Caption above, value below, inside an existing card.
+static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, const char *caption)
+{
+    lv_obj_t *cap = make_label(parent, caption, COL_MUTED);
+    lv_obj_align(cap, LV_ALIGN_TOP_LEFT, x, -2);
+    lv_obj_t *v = make_label(parent, "--", COL_TEXT);
+    lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, x, 2);
+    return v;
+}
+
+// One small readout card in the row at y 158.
 static lv_obj_t *make_readout(lv_obj_t *parent, int32_t x, const char *caption)
 {
-    lv_obj_t *c = make_card(parent, x, 158, 148, 50);
-    lv_obj_t *cap = make_label(c, caption, COL_MUTED);
-    lv_obj_align(cap, LV_ALIGN_TOP_LEFT, 0, -2);
-    lv_obj_t *v = make_label(c, "--", COL_TEXT);
-    lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 0, 2);
-    return v;
+    return make_field(make_card(parent, x, 158, 109, 50), 0, caption);
 }
 
 static void set_chip(lv_obj_t *chip, const char *text, lv_color_t col)
@@ -172,9 +178,12 @@ static void status_timer_cb(lv_timer_t *t)
     else if (!s->reading_ok)
         lv_label_set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
     else if (s->cal_nominal)
-        lv_label_set_text(pressure_sub, "Druck 15 psia, nominal cal");
+        lv_label_set_text(pressure_sub, "Druck 15 psia, NOT calibrated (nominal)");
     else
-        lv_label_set_text_fmt(pressure_sub, "Druck 15 psia, cal %s", cal_id());
+        lv_label_set_text(pressure_sub, "Druck 15 psia, calibrated");
+    lv_obj_set_style_text_color(pressure_sub,
+                                (!s->pm_found || s->boost_tripped || !s->reading_ok) ? COL_FAULT :
+                                s->cal_nominal ? COL_WARN : COL_MUTED, 0);
 
     // Readouts.
     if (s->pm_found) {
@@ -184,9 +193,13 @@ static void status_timer_cb(lv_timer_t *t)
         lv_label_set_text_fmt(val_signal, "%s%ld.%03ld mV", sig_uv < 0 ? "-" : "",
                               (long)LV_ABS(sig_mv), (long)sig_frac);
         lv_label_set_text_fmt(val_exc, "%ld.%03ld V", (long)(s->bus_mv / 1000), (long)(s->bus_mv % 1000));
+        int32_t d10 = s->die_mc / 100;                // 0.1 C
+        lv_label_set_text_fmt(val_die, "%s%ld.%ld C", d10 < 0 ? "-" : "",
+                              (long)(LV_ABS(d10) / 10), (long)(LV_ABS(d10) % 10));
     } else {
         lv_label_set_text(val_signal, "--");
         lv_label_set_text(val_exc, "--");
+        lv_label_set_text(val_die, "--");
     }
     if (s->reading_ok) {
         int32_t r10 = s->r_ppb / 10;   // mV/V to 5 decimals
@@ -196,27 +209,37 @@ static void status_timer_cb(lv_timer_t *t)
         lv_label_set_text(val_ratio, "--");
     }
 
-    if (s->boost_tripped)
-        lv_obj_add_state(exc_slider, LV_STATE_DISABLED);
-}
-
-/**
- * @brief Excitation slider: 90-110 = 9.0-11.0 V. Sets the Boost 10 and shows
- * the nominal value actually set (the digipot steps are ~50 mV).
- */
-static void exc_slider_event_cb(lv_event_t *e)
-{
-    lv_obj_t *sl = lv_event_get_target_obj(e);
-    int32_t mv = clicks_boost10_set_mv(lv_slider_get_value(sl) * 100);
-
-    if (mv < 0) {
-        lv_label_set_text(exc_label, "tripped");
-        return;
+    // Calibration.
+    if (cal_is_default()) {
+        lv_label_set_text(cal_table, "nominal 0-100 mV");
+        lv_obj_set_style_text_color(cal_table, COL_WARN, 0);
+    } else {
+        // The "+atm" suffix is shown in the ATM column instead.
+        char id[CAL_ID_LEN];
+        lv_strlcpy(id, cal_id(), sizeof id);
+        size_t n = strlen(id);
+        if (cal_atm_applied())
+            id[n - 4] = '\0';
+        lv_label_set_text(cal_table, id);
+        lv_obj_set_style_text_color(cal_table, COL_TEXT, 0);
     }
-    int32_t cv = (mv + 5) / 10;   // 10 mV, rounded (9999 mV shows 10.00 V)
-    lv_label_set_text_fmt(exc_label, "%ld.%02ld V", (long)(cv / 100), (long)(cv % 100));
-    if (lv_event_get_code(e) == LV_EVENT_RELEASED)
-        link_printf("Excitation set to %ld mV nominal\r\n", (long)mv);
+    if (cal_atm_applied()) {
+        lv_label_set_text(cal_atm, "applied");
+        lv_obj_set_style_text_color(cal_atm, COL_OK, 0);
+    } else {
+        lv_label_set_text(cal_atm, cal_is_default() ? "--" : "not applied");
+        lv_obj_set_style_text_color(cal_atm, cal_is_default() ? COL_MUTED : COL_WARN, 0);
+    }
+    if (cal_is_default()) {
+        lv_label_set_text(cal_store, "nothing stored");
+        lv_obj_set_style_text_color(cal_store, COL_MUTED, 0);
+    } else if (cal_saved()) {
+        lv_label_set_text(cal_store, "saved in flash");
+        lv_obj_set_style_text_color(cal_store, COL_OK, 0);
+    } else {
+        lv_label_set_text(cal_store, "not saved");
+        lv_obj_set_style_text_color(cal_store, COL_WARN, 0);
+    }
 }
 
 void init_main_screen()
@@ -275,25 +298,17 @@ void init_main_screen()
         lv_label_set_text_fmt(ver, "v%s", PMC_FW_VERSION);
     lv_obj_align(ver, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
 
-    // Readouts.
+    // Readouts. Excitation is the measured VBUS; the setpoint is fixed.
     val_signal = make_readout(scr, 10, "Signal");
-    val_exc = make_readout(scr, 166, "Excitation");
-    val_ratio = make_readout(scr, 322, "Ratio");
+    val_ratio = make_readout(scr, 127, "Ratio");
+    val_exc = make_readout(scr, 244, "Exc. (10 V set)");
+    val_die = make_readout(scr, 361, "INA228 die");
 
-    // Excitation setpoint, 9.0-11.0 V in 0.1 V steps, starts at 10.0 V to
-    // match the start-up wiper.
-    lv_obj_t *sc = make_card(scr, 10, 216, 460, 46);
-    lv_obj_t *cap = make_label(sc, "Excitation set", COL_MUTED);
-    lv_obj_align(cap, LV_ALIGN_LEFT_MID, 0, 0);
-    exc_slider = lv_slider_create(sc);
-    lv_slider_set_range(exc_slider, 90, 110);
-    lv_slider_set_value(exc_slider, 100, LV_ANIM_OFF);
-    lv_obj_set_size(exc_slider, 220, 10);
-    lv_obj_align(exc_slider, LV_ALIGN_LEFT_MID, 120, 0);
-    lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(exc_slider, exc_slider_event_cb, LV_EVENT_RELEASED, NULL);
-    exc_label = make_label(sc, "10.00 V", COL_TEXT);
-    lv_obj_align(exc_label, LV_ALIGN_RIGHT_MID, 0, 0);
+    // Calibration status.
+    lv_obj_t *cc = make_card(scr, 10, 216, 460, 46);
+    cal_table = make_field(cc, 0, "Cal table");
+    cal_atm = make_field(cc, 190, "ATM correction");
+    cal_store = make_field(cc, 310, "Stored");
 
     lv_timer_create(status_timer_cb, 1000, NULL);
 }

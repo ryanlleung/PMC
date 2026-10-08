@@ -3,7 +3,7 @@
  * and generated designer code against LVGL 9.4 on a PC, with fake Click
  * readings (fake_hw.c), and writes one 480 x 272 frame as raw RGB565.
  *
- *   ./ui_preview <scenario> <out.raw>     scenario: ok | nopm | lowexc | trip | cal
+ *   ./ui_preview <scenario> <out.raw>     scenario: ok | nopm | lowexc | trip | cal | unsaved
  */
 #include <stdio.h>
 #include <stdlib.h>

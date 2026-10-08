@@ -31,9 +31,9 @@ static clicks_state_t state;
  *
  * At start-up the wiper is written to BOOST10_WIPER_SET (~10.0 V nominal,
  * ~9.7-10.4 V with the digipot's +/-20% tolerance), the Druck excitation.
- * clicks_boost10_set_mv() then lets the screen slider move it between
- * 9.0 and 11.0 V nominal; the wiper is clamped to BOOST10_WIPER_11V..
- * BOOST10_WIPER_9V whatever is asked. If the Power Monitor reads VBUS above BOOST10_TRIP_MV
+ * It stays there: the screen has no setpoint control. Only PM DIAG moves it
+ * (clicks_boost10_set_mv(), 9.0-11.0 V nominal, wiper clamped to
+ * BOOST10_WIPER_11V..BOOST10_WIPER_9V) and puts it back afterwards. If the Power Monitor reads VBUS above BOOST10_TRIP_MV
  * the wiper goes to 0xFF (~5 V) and stays there until reset. That check
  * only works with VBUS wired to the Boost 10 output.
  *

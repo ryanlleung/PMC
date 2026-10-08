@@ -26,9 +26,9 @@ gcc $CFLAGS -o "$OUT/ui_preview" \
   "$PROJ/build-MM4/generated/screens.c" \
   "$OUT/liblvgl.a" -lm
 
-for s in ok nopm lowexc trip cal; do
+for s in ok nopm lowexc trip cal unsaved; do
   "$OUT/ui_preview" "$s" "$OUT/$s.raw"
   python3 "$HERE/render.py" "$OUT/$s.raw" "$OUT/$s.png"
   rm "$OUT/$s.raw"
 done
-echo "Wrote $OUT/{ok,nopm,lowexc,trip,cal}.png"
+echo "Wrote $OUT/{ok,nopm,lowexc,trip,cal,unsaved}.png"
