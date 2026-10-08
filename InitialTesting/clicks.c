@@ -132,23 +132,25 @@ static void boost10_check(int32_t vbus_mv)
 
 static void boost10_poll(void)
 {
-    state.boost_pg = digital_in_read(&boost10_pg) == 0;
+    // LT8337 PG is open drain, pulled low when the output is out of
+    // regulation (100k pull-up on the Click, schematic v101). PM DIAG saw PG
+    // high with VBUS on the setpoint, so high = regulating.
+    state.boost_pg = digital_in_read(&boost10_pg) != 0;
     state.boost_tripped = boost10_tripped;
     state.boost_trip_mv = boost10_trip_mv;
     state.boost_set_mv = boost10_wiper_to_mv(boost10_wiper);
 
-    const char *pg = digital_in_read(&boost10_pg) == 0 ? "PG low = regulating"
-                                                        : "PG high = NOT regulating";
+    const char *pg = state.boost_pg ? "PG high = regulating" : "PG low = NOT regulating";
     if (boost10_tripped)
         lv_snprintf(boost10_status, STATUS_LEN,
                     "S3 Boost 10: TRIPPED at %ld mV, now ~5 V, %s",
                     (long)boost10_trip_mv, pg);
     else
     {
-        int32_t mv = boost10_wiper_to_mv(boost10_wiper);
+        int32_t cv = (boost10_wiper_to_mv(boost10_wiper) + 5) / 10;  // 10 mV
         lv_snprintf(boost10_status, STATUS_LEN,
                     "S3 Boost 10: wiper %u (%ld.%02ld V nom), %s", boost10_wiper,
-                    (long)(mv / 1000), (long)((mv % 1000 + 5) / 10), pg);
+                    (long)(cv / 100), (long)(cv % 100), pg);
     }
 }
 

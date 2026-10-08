@@ -5,6 +5,7 @@
 #include "link.h"
 #include "extflash.h"
 #include "cal.h"
+#include "clicks.h"   // live ratio for CAL ATM
 
 /* --------------------------------------------------------------------------
  * Stored record. Little-endian, fixed layout, CRC32 (IEEE) over everything
@@ -100,6 +101,22 @@ int64_t cal_pressure_mmbar(int64_t r)
     return p0 + (r - r0) * (p1 - p0) / (r1 - r0);
 }
 
+// Inverse of cal_pressure_mmbar: ratio in ppb for a pressure in 0.001 mbar.
+static int64_t ratio_for_pressure(int64_t p)
+{
+    const cal_rec_t *c = &active;
+    uint32_t i = 0;
+
+    while (i + 2 < c->npts && p > c->p_mmbar[i + 1])
+        i++;
+
+    int64_t r0 = c->r_ppb[i], r1 = c->r_ppb[i + 1];
+    int64_t p0 = c->p_mmbar[i], p1 = c->p_mmbar[i + 1];
+    if (p1 == p0)
+        return 0;
+    return r0 + (p - p0) * (r1 - r0) / (p1 - p0);
+}
+
 bool cal_is_default(void)
 {
     return active_is_default;
@@ -191,6 +208,56 @@ static void save(void)
     link_printf("OK saved %s\r\n", active.id);
 }
 
+/*
+ * CAL ATM <mbar>: the INA228 loads the Druck output (92 kohm differential
+ * input against a few kohm source), which scales the whole signal down by a
+ * fixed factor, zero and span alike. A cert table describes the unloaded
+ * output, so this scales the table's ratios by measured / expected at one
+ * known pressure (the room, from a barometer). Pressures are untouched.
+ */
+static void atm(const char *s)
+{
+    int64_t p;
+    char a[20], b[20];
+
+    if (!parse_fixed(&s, 3, &p) || p < 500000 || p > 1100000) {
+        link_printf("ERR expected: CAL ATM <mbar>, 500 to 1100\r\n");
+        return;
+    }
+    const clicks_state_t *st = clicks_state();
+    if (!st->reading_ok) {
+        link_printf("ERR no valid Druck reading\r\n");
+        return;
+    }
+    int64_t r_now = st->r_ppb;
+    int64_t r_exp = ratio_for_pressure(p);
+    if (r_exp <= 0 || r_now <= 0) {
+        link_printf("ERR ratio not positive, check CAL?\r\n");
+        return;
+    }
+    int64_t k_ppm = r_now * 1000000 / r_exp;
+    if (k_ppm < 850000 || k_ppm > 1150000) {
+        print_fixed(a, sizeof a, k_ppm, 6);
+        link_printf("ERR factor %s is more than 15%% from 1, check CAL? and the pressure\r\n", a);
+        return;
+    }
+
+    cal_rec_t r = active;
+    for (uint32_t i = 0; i < r.npts; i++)
+        r.r_ppb[i] = (int32_t)((int64_t)r.r_ppb[i] * r_now / r_exp);
+    const char *why = rec_check(&r);
+    if (why) { link_printf("ERR %s\r\n", why); return; }
+    size_t n = strlen(r.id);
+    if (n + 4 < CAL_ID_LEN && (n < 4 || strcmp(r.id + n - 4, "+atm") != 0))
+        memcpy(r.id + n, "+atm", 5);
+
+    print_fixed(a, sizeof a, k_ppm, 6);
+    print_fixed(b, sizeof b, st->p_mmbar, 3);
+    active = r;
+    active_is_default = false;
+    link_printf("OK ratios x %s (was reading %s mbar), not saved: CAL SAVE to keep\r\n", a, b);
+}
+
 static void erase(void)
 {
     if (!flash_ok) { link_printf("ERR serial flash not found\r\n"); return; }
@@ -236,6 +303,8 @@ bool cal_command(const char *line)
         active = staging;
         active_is_default = false;
         link_printf("OK applied %s (not saved)\r\n", active.id);
+    } else if (strncmp(a, " ATM ", 5) == 0) {
+        atm(a + 5);
     } else if (strcmp(a, " SAVE") == 0) {
         save();
     } else if (strcmp(a, " ERASE") == 0) {

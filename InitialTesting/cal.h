@@ -18,6 +18,9 @@
  *   CAL NEW <id text>          start a new table (id up to 23 chars)
  *   CAL PT <mV/V> <mbar>       add a point, ratio ascending
  *   CAL APPLY                  check the new table and use it (RAM only)
+ *   CAL ATM <mbar>             scale the active table's ratios so the
+ *                              live reading equals <mbar> (corrects the
+ *                              INA228 input loading; RAM only, then SAVE)
  *   CAL SAVE                   write the active table to flash
  *   CAL ERASE                  erase flash and go back to the default
  * Replies start with OK or ERR.

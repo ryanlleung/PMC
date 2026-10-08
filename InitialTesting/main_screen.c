@@ -213,7 +213,8 @@ static void exc_slider_event_cb(lv_event_t *e)
         lv_label_set_text(exc_label, "tripped");
         return;
     }
-    lv_label_set_text_fmt(exc_label, "%ld.%02ld V", (long)(mv / 1000), (long)((mv % 1000 + 5) / 10));
+    int32_t cv = (mv + 5) / 10;   // 10 mV, rounded (9999 mV shows 10.00 V)
+    lv_label_set_text_fmt(exc_label, "%ld.%02ld V", (long)(cv / 100), (long)(cv % 100));
     if (lv_event_get_code(e) == LV_EVENT_RELEASED)
         link_printf("Excitation set to %ld mV nominal\r\n", (long)mv);
 }
