@@ -83,7 +83,7 @@ static void check_detail_tabs(bool show_raw)
     lv_obj_t *scr = lv_screen_active();
     lv_obj_t *raw_tab = find_label(scr, "Chip readings");
     lv_obj_t *cal_tab = find_label(scr, "Calibration");
-    lv_obj_t *raw_field = find_label(scr, "INA228 signal");
+    lv_obj_t *raw_field = find_label(scr, "INA228 signal (ratio)");
     lv_obj_t *cal_field = find_label(scr, "Druck serial number");
     assert(raw_tab && cal_tab && raw_field && cal_field);
     lv_obj_t *raw_panel = lv_obj_get_parent(raw_field);

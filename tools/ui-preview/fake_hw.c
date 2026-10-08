@@ -9,6 +9,7 @@
 #include "sysinfo.h"
 #include "cal.h"
 #include "rtclock.h"
+#include "uncert.h"
 
 static clicks_state_t st;
 static bool fake_wdt;
@@ -97,3 +98,10 @@ void link_printf(const char *fmt, ...)
 }
 bool rtclock_valid(void) { return !st.cal_nominal; }
 const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "12:34  08 Oct"; }
+void uncert_update(const clicks_state_t *s) { (void)s; }
+const char *uncert_screen_text(bool *warn)
+{
+    *warn = st.cal_nominal;
+    if (!st.reading_ok) return "";
+    return st.cal_nominal ? "+/- ? (not calibrated)" : "+/- 1.08 mbar";
+}

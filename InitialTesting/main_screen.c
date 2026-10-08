@@ -7,6 +7,7 @@
 #include "cal.h"
 #include "sysinfo.h"
 #include "rtclock.h"
+#include "uncert.h"
 #include "i2c_sdk_test.h"
 #include "pmc_config.h"
 
@@ -39,7 +40,8 @@ static lv_obj_t *pressure_sub;
 static lv_obj_t *pressure_card;
 static lv_font_t pressure_font;
 static lv_obj_t *detail_cal, *detail_raw, *tab_cal, *tab_raw;
-static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die, *val_pg;
+static lv_obj_t *val_signal, *val_exc, *val_die, *val_pg;
+static lv_obj_t *pressure_unc;
 static lv_obj_t *cal_table, *cal_zero, *cal_span, *cal_atm, *cal_store;
 
 static const char *last_line[6];
@@ -276,6 +278,7 @@ static void status_timer_cb(lv_timer_t *t)
     print_changed_lines();
 
     const clicks_state_t *s = clicks_state();
+    uncert_update(s);
     if (s->pm_found && data_on && !s->pm_diag)
         print_data_line(s);
 
@@ -310,7 +313,16 @@ static void status_timer_cb(lv_timer_t *t)
 
     // Readouts, 2 decimals (the DATA lines keep full resolution).
     if (s->pm_found) {
-        set_fixed2(val_signal, s->shunt_nv, 6, "mV");
+        // Signal with the ratio it gives (mV/V, the sensor's own quantity,
+        // to check against the cert); the ratio needs a valid excitation.
+        char sig[24], rat[24];
+        fmt_fixed2(sig, sizeof sig, s->shunt_nv, 6, "mV");
+        if (s->reading_ok) {
+            fmt_fixed2(rat, sizeof rat, s->r_ppb, 6, "mV/V");
+            set_text_fmt(val_signal, "%s  (%s)", sig, rat);
+        } else {
+            set_text(val_signal, sig);
+        }
         set_fixed2(val_exc, s->bus_mv, 3, "V");
         set_fixed2(val_die, s->die_mc, 3, "C");
     } else {
@@ -318,10 +330,9 @@ static void status_timer_cb(lv_timer_t *t)
         set_text(val_exc, "--");
         set_text(val_die, "--");
     }
-    if (s->reading_ok)
-        set_fixed2(val_ratio, s->r_ppb, 6, "mV/V");
-    else
-        set_text(val_ratio, "-- mV/V");
+    bool unc_warn;
+    set_text(pressure_unc, uncert_screen_text(&unc_warn));
+    set_color(pressure_unc, unc_warn ? COL_WARN : COL_MUTED);
 
     if (s->boost_tripped) {
         set_text(val_pg, "tripped");
@@ -436,8 +447,9 @@ void init_main_screen()
     lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 40, -4);
     lv_obj_t *unit = make_label(pc, "mbar abs", COL_MUTED);
     lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_TOP, 12, 10);
-    val_ratio = make_label(pc, "-- mV/V", COL_MUTED);
-    lv_obj_align_to(val_ratio, unit, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
+    // Uncertainty of the reading (uncert.c), under the unit.
+    pressure_unc = make_label(pc, "", COL_MUTED);
+    lv_obj_align_to(pressure_unc, unit, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
     pressure_sub = make_label(pc, "", COL_MUTED);
     lv_obj_set_width(pressure_sub, 436);
     lv_label_set_long_mode(pressure_sub, LV_LABEL_LONG_DOT);
@@ -476,7 +488,7 @@ void init_main_screen()
     cal_span = make_field(detail_cal, 236, 36, "Certificate span at 10 V");
 
     detail_raw = make_detail_panel(details);
-    val_signal = make_field(detail_raw, 6, 0, "INA228 signal");
+    val_signal = make_field(detail_raw, 6, 0, "INA228 signal (ratio)");
     val_exc = make_field(detail_raw, 236, 0, "INA228 excitation");
     val_die = make_field(detail_raw, 6, 36, "INA228 temperature");
     val_pg = make_field(detail_raw, 236, 36, "Boost 10 supply");
