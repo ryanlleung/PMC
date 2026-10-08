@@ -96,6 +96,46 @@ static void check_detail_tabs(bool show_raw)
     if (show_raw) lv_obj_send_event(lv_obj_get_parent(raw_tab), LV_EVENT_CLICKED, NULL);
 }
 
+/* A tap through a real pointer input device, so hit-testing is checked too
+ * (lv_obj_send_event above skips it): press and release at a point. */
+static lv_point_t touch_point;
+static bool touch_down;
+
+static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    (void)indev;
+    data->point = touch_point;
+    data->state = touch_down ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
+static void tap(int32_t x, int32_t y)
+{
+    touch_point.x = x;
+    touch_point.y = y;
+    touch_down = true;
+    for (int i = 0; i < 4; i++) { lv_tick_inc(40); lv_timer_handler(); }
+    touch_down = false;
+    for (int i = 0; i < 4; i++) { lv_tick_inc(40); lv_timer_handler(); }
+}
+
+// Taps the centre of each tab button and checks the matching panel shows.
+static void check_touch_tabs(void)
+{
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_t *raw_tab = lv_obj_get_parent(find_label(scr, "Chip readings"));
+    lv_obj_t *cal_tab = lv_obj_get_parent(find_label(scr, "Calibration"));
+    lv_obj_t *cal_panel = lv_obj_get_parent(find_label(scr, "Druck serial number"));
+    lv_area_t a;
+
+    lv_obj_update_layout(scr);
+    lv_obj_get_coords(cal_tab, &a);
+    tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+    assert(!lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_get_coords(raw_tab, &a);
+    tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+    assert(lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 3 && argc != 4) {
@@ -119,6 +159,10 @@ int main(int argc, char **argv)
         lv_tick_inc(1100);
         lv_timer_handler();
     }
+    lv_indev_t *touch = lv_indev_create();
+    lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(touch, touch_read);
+    check_touch_tabs();
     check_detail_tabs(argc == 4 && !strcmp(argv[3], "raw"));
     lv_obj_update_layout(lv_screen_active());
     int pressure_labels = 0;

@@ -37,6 +37,8 @@ void clicks_init(void);
 
 // Re-reads every board. Call about once a second.
 void clicks_poll(void);
+// Sets up the Power Monitor again (pins and INA228), e.g. after I2C TEST.
+void clicks_powermonitor_reinit(void);
 
 // One status line per board, valid after clicks_init().
 const char *clicks_stepper3_status(void);

@@ -714,10 +714,15 @@ bool clicks_command(const char *line) { (void)line; return false; }
 void clicks_init(void)
 {
     stepper3_init();
-    i2c_sdk_test_run();      // no-op unless PMC_I2C_SDK_TEST is 1
     powermonitor_init();
     boost10_init();
     clicks_poll();
+}
+
+// After the I2C2 SDK test has had PF0/PF1: bit-banged pins and INA228 again.
+void clicks_powermonitor_reinit(void)
+{
+    powermonitor_init();
 }
 
 void clicks_poll(void)

@@ -1,5 +1,9 @@
+#include <string.h>
+
 #include "pmc_config.h"
 #include "i2c_sdk_test.h"
+#include "link.h"
+#include "clicks.h"
 
 #if PMC_I2C_SDK_TEST
 
@@ -79,9 +83,20 @@ const char *i2c_sdk_test_result(void)
     return result;
 }
 
+bool i2c_sdk_test_command(const char *line)
+{
+    if (strcmp(line, "I2C TEST") != 0)
+        return false;
+    i2c_sdk_test_run();
+    clicks_powermonitor_reinit();
+    link_printf("%s\r\nOK\r\n", result);
+    return true;
+}
+
 #else
 
 void i2c_sdk_test_run(void) {}
 const char *i2c_sdk_test_result(void) { return ""; }
+bool i2c_sdk_test_command(const char *line) { (void)line; return false; }
 
 #endif

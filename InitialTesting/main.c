@@ -23,6 +23,7 @@
 #include "link.h"
 #include "sysinfo.h"
 #include "rtclock.h"
+#include "i2c_sdk_test.h"
 #include "clicks.h"
 #include "cal.h"
 #include "stepper3.h"
@@ -119,7 +120,7 @@ int main(void)
     {
         link_task();
         rtclock_poll();
-        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) && !rtclock_command(line) &&
+        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) && !rtclock_command(line) && !i2c_sdk_test_command(line) && !touch_command(line) &&
             !stepper3_command(line) && !clicks_command(line) &&
             !main_screen_data_command(line))
             link_printf("ERR unknown command\r\n");

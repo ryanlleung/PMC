@@ -1,5 +1,8 @@
+#include <string.h>
+
 #include "lv_port_indev.h"
 #include "lvgl_common.h"
+#include "link.h"
 
 /* LVGL v9: read_cb signature changed, and lv_indev_drv_t is removed */
 static void touchpad_init(void);
@@ -9,9 +12,18 @@ static void touchpad_get_xy(lv_coord_t * x, lv_coord_t * y);
 
 lv_indev_t * indev_touchpad;
 
+// For TOUCH?: how often the controller is read, and presses seen.
+static uint32_t touch_reads, touch_presses;
+static bool touch_was_pressed;
+
+static tp_err_t touch_last_err;
+static uint32_t touch_errors;
+
 void process_tp(void)
 {
-    tp_process(&tp);
+    touch_last_err = tp_process(&tp);
+    if(touch_last_err != TP_OK)
+        touch_errors++;
 }
 
 void lv_port_indev_init(void)
@@ -49,17 +61,34 @@ static void touchpad_read(lv_indev_t * indev, lv_indev_data_t * data)
     // interrupt and the main loop, and the ~1 ms transfer belongs outside
     // an ISR.
     process_tp();
+    touch_reads++;
 
-    if(touchpad_is_pressed()) {
+    bool pressed = touchpad_is_pressed();
+    if(pressed) {
         touchpad_get_xy(&last_x, &last_y);
         data->state = LV_INDEV_STATE_PRESSED;
     }
     else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
+    if(pressed && !touch_was_pressed)
+        touch_presses++;
+    touch_was_pressed = pressed;
 
     data->point.x = last_x;
     data->point.y = last_y;
+}
+
+bool touch_command(const char *line)
+{
+    if(strcmp(line, "TOUCH?") != 0)
+        return false;
+    link_printf("TOUCH reads=%lu errors=%lu last_err=%d presses=%lu now=%s last=%d,%d\r\nOK\r\n",
+                (unsigned long)touch_reads, (unsigned long)touch_errors, (int)touch_last_err,
+                (unsigned long)touch_presses,
+                touch_was_pressed ? "pressed" : "released",
+                (int)tp.touch.point[0].coord_x, (int)tp.touch.point[0].coord_y);
+    return true;
 }
 
 /* Return true if the touchpad is pressed. */
