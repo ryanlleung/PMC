@@ -307,6 +307,8 @@ static void status_timer_cb(lv_timer_t *t)
         set_text(pressure_sub, "Druck ADC (Power Monitor) not responding");
     else if (s->boost_tripped)
         set_text_fmt(pressure_sub, "10 V supply tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
+    else if (s->druck_absent)
+        set_text(pressure_sub, "No Druck signal, check the sensor is connected");
     else if (!s->reading_ok)
         set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
     else if (s->cal_nominal)
@@ -452,7 +454,8 @@ void init_main_screen()
     lv_obj_set_width(pressure_label, 250);
     lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 40, -4);
     lv_obj_t *unit = make_label(pc, "mbar abs", COL_MUTED);
-    lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_TOP, 12, 10);
+    // Unit sits on the digits' baseline (the label box includes descender room).
+    lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_BOTTOM, 12, -7);
     // Uncertainty of the reading (uncert.c), under the unit.
     pressure_unc = make_label(pc, "", COL_MUTED);
     lv_obj_align_to(pressure_unc, unit, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);

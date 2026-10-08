@@ -19,7 +19,8 @@
 // Latest readings for the UI, valid after clicks_init(), updated by clicks_poll().
 typedef struct {
     bool pm_found;        // INA228 answering
-    bool reading_ok;      // pm_found and excitation >= 7 V
+    bool reading_ok;      // pm_found, excitation >= 7 V and a plausible Druck signal
+    bool druck_absent;    // excitation fine but the signal is outside what a Druck gives
     int32_t shunt_nv;     // Druck signal (Vshunt), nV
     int32_t bus_mv;       // excitation (Vbus), mV
     int32_t r_ppb;        // signal / excitation, ppb (1 mV/V = 1 000 000)

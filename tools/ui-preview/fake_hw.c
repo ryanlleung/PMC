@@ -46,6 +46,11 @@ void fake_hw_set_scenario(const char *name)
         fake_saved = fake_atm = true;
         st.p_mmbar = 1013200;
         strcpy(value, "1013.20");
+    } else if (!strcmp(name, "nodruck")) {
+        st.reading_ok = false;
+        st.druck_absent = true;
+        st.shunt_nv = 3100;
+        strcpy(value, "----");
     } else if (!strcmp(name, "unsaved")) {
         st.cal_nominal = false;
         fake_wdt = true;

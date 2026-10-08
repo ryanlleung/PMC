@@ -330,6 +330,15 @@ static void powermonitor_init(void)
  * ------------------------------------------------------------------------ */
 #define DRUCK_VEXC_MIN_MV    7000      // datasheet supply range 7-12 V
 
+/* A connected Druck gives about 0.13 mV/V at vacuum (cert zero 1.337 mV at
+ * 10 V, less the ~4 % input loading) up to about 10.2 mV/V at 15 psia. Well
+ * outside that, the sensor is unplugged or faulty. The limits leave room
+ * for other sensors' zero spread and some overrange. Not tested with the
+ * Druck unplugged yet: if the open inputs happen to float inside this
+ * window, the check will not catch it. */
+#define DRUCK_R_MIN_PPB      50000     // 0.05 mV/V
+#define DRUCK_R_MAX_PPB      11000000  // 11 mV/V
+
 // The ratio-to-pressure table lives in cal.c (stored in serial flash).
 static char druck_value[24];
 
@@ -343,6 +352,7 @@ static int64_t druck_pressure_mmbar(int32_t raw_shunt, int32_t raw_bus, int64_t 
 static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 {
     state.reading_ok = false;
+    state.druck_absent = false;
     if (bus_mv < DRUCK_VEXC_MIN_MV) {
         lv_snprintf(druck_value, sizeof druck_value, "----");
         lv_snprintf(druck_status, STATUS_LEN,
@@ -352,8 +362,17 @@ static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 
     int64_t r_ppb;
     int64_t p = druck_pressure_mmbar(raw_shunt, raw_bus, &r_ppb);
-    state.reading_ok = true;
     state.r_ppb = (int32_t)r_ppb;
+    if (r_ppb < DRUCK_R_MIN_PPB || r_ppb > DRUCK_R_MAX_PPB) {
+        int64_t ra = r_ppb < 0 ? -r_ppb : r_ppb;
+        state.druck_absent = true;
+        lv_snprintf(druck_value, sizeof druck_value, "----");
+        lv_snprintf(druck_status, STATUS_LEN,
+                    "Druck: signal %s%ld.%03ld mV/V, outside 0.05-11 mV/V (not connected?)",
+                    r_ppb < 0 ? "-" : "", (long)(ra / 1000000), (long)(ra % 1000000 / 1000));
+        return;
+    }
+    state.reading_ok = true;
     state.p_mmbar = (int32_t)p;
 
     // Round to 0.01 mbar.
