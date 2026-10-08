@@ -152,7 +152,7 @@ static void status_timer_cb(lv_timer_t *t)
     print_changed_lines();
 
     const clicks_state_t *s = clicks_state();
-    if (s->pm_found && data_on)
+    if (s->pm_found && data_on && !s->pm_diag)
         print_data_line(s);
 
     // Header status.

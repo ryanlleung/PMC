@@ -18,8 +18,13 @@
 // lines, before the bit-banged driver takes over. Bench diagnostic only.
 #define PMC_I2C_SDK_TEST  1
 
+// 1: "PM DIAG" command on the link: INA228 register readback and a sweep of
+// conversion times, modes and excitation, one line a second. Harmless when
+// not asked for; it moves the excitation 9-11 V and puts it back.
+#define PMC_PM_DIAG       1
+
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.3.1"
+#define PMC_FW_VERSION    "0.3.2"
 
 #define PMC_TCP_PORT      5000
 #define PMC_HOSTNAME      "pmc"

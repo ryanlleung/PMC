@@ -30,6 +30,7 @@ typedef struct {
     bool boost_tripped;   // 11.5 V trip latched
     int32_t boost_trip_mv;
     int32_t boost_set_mv; // nominal setpoint for the wiper written
+    bool pm_diag;         // PM DIAG running (readings frozen)
 } clicks_state_t;
 
 void clicks_init(void);
@@ -54,5 +55,9 @@ const char *clicks_druck_value(void);
 bool clicks_druck_cal_nominal(void);
 
 const clicks_state_t *clicks_state(void);
+
+// "PM DIAG": Power Monitor input diagnostic, one result line per second on
+// the link (PMC_PM_DIAG). Returns false if the line is not a PM command.
+bool clicks_command(const char *line);
 
 #endif // _CLICKS_H_

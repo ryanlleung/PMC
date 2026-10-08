@@ -117,7 +117,8 @@ int main(void)
     {
         link_task();
         if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) &&
-            !stepper3_command(line) && !main_screen_data_command(line))
+            !stepper3_command(line) && !clicks_command(line) &&
+            !main_screen_data_command(line))
             link_printf("ERR unknown command\r\n");
         lv_timer_handler();
         watchdog_kick();
