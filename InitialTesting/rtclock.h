@@ -27,7 +27,7 @@ void rtclock_poll(void);
 // True once the time has been set (and the crystal is running).
 bool rtclock_valid(void);
 
-// "HH:MM:SS  DD Mon" for the screen, or "time not set".
+// "HH:MM  DD Mon" for the screen, or "time not set".
 const char *rtclock_screen_text(void);
 
 // "YYYY-MM-DD HH:MM:SS", or "" if not set.

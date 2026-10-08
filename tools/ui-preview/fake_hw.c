@@ -96,4 +96,4 @@ void link_printf(const char *fmt, ...)
     va_end(ap);
 }
 bool rtclock_valid(void) { return !st.cal_nominal; }
-const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "12:34:56  08 Oct"; }
+const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "12:34  08 Oct"; }

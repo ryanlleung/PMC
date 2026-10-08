@@ -72,7 +72,7 @@ const char *rtclock_screen_text(void)
         return "time not set";
     read_now(&y, &mo, &d, &h, &mi, &s);
     if (mo < 1 || mo > 12) mo = 1;
-    lv_snprintf(text, sizeof text, "%02d:%02d:%02d  %02d %s", h, mi, s, d, mon[mo - 1]);
+    lv_snprintf(text, sizeof text, "%02d:%02d  %02d %s", h, mi, d, mon[mo - 1]);
     return text;
 }
 

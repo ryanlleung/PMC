@@ -5,6 +5,7 @@
  *
  *   ./ui_preview <scenario> <out.raw>     scenario: ok | nopm | lowexc | trip | cal | unsaved
  */
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,6 +31,39 @@ static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px)
     lv_display_flush_ready(d);
 }
 
+/* Exercise the font actually attached to the pressure label, including
+ * digit-pair kerning and crossing 999.99 -> 1000.00. */
+static void check_pressure_spacing(lv_obj_t *obj, int *found)
+{
+    if (lv_obj_check_type(obj, &lv_label_class)) {
+        const lv_font_t *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+        if (font->line_height == lv_font_montserrat_48.line_height) {
+            (*found)++;
+            for (char c = '0'; c <= '9'; c++) {
+                for (char next = '0'; next <= '9'; next++)
+                    assert(lv_font_get_glyph_width(font, c, next) == 32);
+                assert(lv_font_get_glyph_width(font, c, '.') == 32);
+            }
+            const char *values[] = { "111.11", "888.88", "999.99", "1000.00", "-1.23" };
+            int32_t decimal_x = -1;
+            for (unsigned i = 0; i < sizeof values / sizeof values[0]; i++) {
+                lv_point_t full, prefix;
+                char integer[16];
+                size_t n = (size_t)(strchr(values[i], '.') - values[i]);
+                memcpy(integer, values[i], n);
+                integer[n] = '\0';
+                lv_text_get_size(&full, values[i], font, 0, 0, 1000, LV_TEXT_FLAG_NONE);
+                lv_text_get_size(&prefix, integer, font, 0, 0, 1000, LV_TEXT_FLAG_NONE);
+                int32_t x = lv_obj_get_content_width(obj) - full.x + prefix.x;
+                if (i == 0) decimal_x = x;
+                assert(x == decimal_x);
+            }
+        }
+    }
+    for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++)
+        check_pressure_spacing(lv_obj_get_child(obj, i), found);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 3) {
@@ -53,6 +87,10 @@ int main(int argc, char **argv)
         lv_tick_inc(1100);
         lv_timer_handler();
     }
+    lv_obj_update_layout(lv_screen_active());
+    int pressure_labels = 0;
+    check_pressure_spacing(lv_screen_active(), &pressure_labels);
+    assert(pressure_labels == 1);
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(d);
 

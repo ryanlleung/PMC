@@ -15,9 +15,10 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
  * Screen layout, 480 x 272:
  *   y   0-30   header: PMC, clock (RTC), Druck ADC (Power Monitor) / excitation (Boost 10) / link
  *   y  38-130  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
- *   y 138-196  calibration (12 px): Druck s/n, cert zero and span, ATM correction; stored
- *   y 204-262  raw chip readings (12 px): INA228 shunt, bus, die temperature; Boost 10 PG
- * Cards are 8 px apart; both small cards use the same four columns.
+ *   y 138-192  calibration (12 px): Druck s/n, cert zero and span, ATM correction; stored
+ *   y 198-252  raw chip readings (12 px): INA228 shunt, bus, die temperature; Boost 10 PG
+ * y 256-270  firmware and reset cause, separate from fault messages
+ * Cards are 6-8 px apart; both small cards use the same four columns.
  * The top two are the useful values; the bottom card is what the chips report.
  * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
  * Full per-board status lines go to COM3 only, when they change.
@@ -25,7 +26,7 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 #define COL_HEADER   lv_color_make(31, 41, 51)
 #define COL_CARD     lv_color_white()
 #define COL_TEXT     lv_color_make(31, 41, 51)
-#define COL_MUTED    lv_color_make(110, 120, 130)
+#define COL_MUTED    lv_color_make(84, 99, 116)
 #define COL_OK       lv_color_make(46, 160, 67)
 #define COL_FAULT    lv_color_make(214, 48, 49)
 #define COL_IDLE     lv_color_make(150, 158, 166)
@@ -35,11 +36,30 @@ static lv_obj_t *chip_pm, *chip_boost, *chip_usb;
 static lv_obj_t *clock_label;
 static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
+static lv_obj_t *pressure_card;
+static lv_font_t pressure_font;
 static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die, *val_pg;
 static lv_obj_t *cal_table, *cal_zero, *cal_span, *cal_atm, *cal_store;
 
 static const char *last_line[6];
 static char line_copy[6][192];
+
+/* Reuse the existing glyph bitmaps, with tabular advances for the readout.
+ * Right alignment alone cannot stop proportional digits moving the decimal.
+ * Disabling kerning also keeps neighbouring digit pairs from changing width. */
+static bool pressure_glyph_dsc(const lv_font_t *font, lv_font_glyph_dsc_t *dsc,
+                               uint32_t letter, uint32_t next)
+{
+    (void)font;
+    (void)next;
+    if (!lv_font_montserrat_48.get_glyph_dsc(&lv_font_montserrat_48, dsc, letter, 0))
+        return false;
+    if ((letter >= '0' && letter <= '9') || letter == '-') {
+        dsc->adv_w = 32;
+        dsc->ofs_x = (32 - (int32_t)dsc->box_w) / 2;
+    }
+    return true;
+}
 
 static lv_obj_t *make_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
 {
@@ -65,7 +85,7 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t col)
 // Section card, 12 px text, with a title line; fields go below the title.
 static lv_obj_t *make_section(lv_obj_t *parent, int32_t y, const char *title)
 {
-    lv_obj_t *c = make_card(parent, 10, y, 460, 58);
+    lv_obj_t *c = make_card(parent, 10, y, 460, 54);
     lv_obj_set_style_text_font(c, &lv_font_montserrat_12, 0);
     lv_obj_t *t = make_label(c, title, COL_HEADER);
     lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, -2);
@@ -82,6 +102,8 @@ static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, const char *caption)
     lv_obj_align(cap, LV_ALIGN_TOP_LEFT, x, 14);
     lv_obj_t *v = make_label(parent, "--", COL_TEXT);
     lv_obj_align(v, LV_ALIGN_TOP_LEFT, x, 30);
+    lv_obj_set_width(v, 108);
+    lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
     return v;
 }
 
@@ -184,17 +206,19 @@ static void status_timer_cb(lv_timer_t *t)
         print_data_line(s);
 
     // Header status.
-    set_chip(chip_pm, "Druck ADC", s->pm_found ? COL_OK : COL_FAULT);
+    set_chip(chip_pm, s->pm_found ? "ADC OK" : "ADC OFF", s->pm_found ? COL_OK : COL_FAULT);
     if (s->boost_tripped)
         set_chip(chip_boost, "10 V TRIP", COL_FAULT);
     else
-        set_chip(chip_boost, "10 V supply", s->boost_pg ? COL_OK : COL_FAULT);
+        set_chip(chip_boost, s->boost_pg ? "10 V OK" : "10 V OFF", s->boost_pg ? COL_OK : COL_FAULT);
     set_chip(chip_usb, link_chip_text(), link_chip_ok() ? COL_OK : COL_IDLE);
     lv_label_set_text(clock_label, rtclock_screen_text());
     lv_obj_set_style_text_color(clock_label, rtclock_valid() ? lv_color_white() : COL_IDLE, 0);
 
     // Pressure.
-    lv_label_set_text(pressure_label, clicks_druck_value());
+    lv_label_set_text(pressure_label, s->reading_ok && !s->boost_tripped ? clicks_druck_value() : "----");
+    lv_obj_set_style_border_color(pressure_card,
+        !s->reading_ok || s->boost_tripped ? COL_FAULT : s->cal_nominal ? COL_WARN : COL_OK, 0);
     if (!s->pm_found)
         lv_label_set_text(pressure_sub, "Druck ADC (Power Monitor) not responding");
     else if (s->boost_tripped)
@@ -282,6 +306,9 @@ void init_main_screen()
     init_main_screen_ui(&lvgl_main_screen_ui);
     lv_obj_t *scr = lvgl_main_screen_ui.main_screen;
 
+    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(scr, lv_color_make(232, 238, 244), 0);
+
     // The designer's test switch is no longer used.
     lv_obj_add_flag(lvgl_main_screen_ui.switch_0, LV_OBJ_FLAG_HIDDEN);
 
@@ -298,7 +325,10 @@ void init_main_screen()
 
     lv_obj_t *title = make_label(hdr, "PMC", lv_color_white());
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
-    clock_label = make_label(hdr, "", COL_IDLE);
+    clock_label = make_label(hdr, "time not set", COL_IDLE);
+    lv_obj_set_style_text_font(clock_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_width(clock_label, 120);
+    lv_label_set_long_mode(clock_label, LV_LABEL_LONG_CLIP);
     lv_obj_align(clock_label, LV_ALIGN_LEFT_MID, 46, 0);
     // Status words, right-aligned row; green = ok, red = fault, grey = idle.
     lv_obj_t *chips = lv_obj_create(hdr);
@@ -308,18 +338,30 @@ void init_main_screen()
     lv_obj_set_style_border_width(chips, 0, 0);
     lv_obj_set_style_pad_all(chips, 0, 0);
     lv_obj_set_flex_flow(chips, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(chips, 14, 0);
+    lv_obj_set_style_pad_column(chips, 8, 0);
+    lv_obj_set_style_text_font(chips, &lv_font_montserrat_12, 0);
     lv_obj_align(chips, LV_ALIGN_RIGHT_MID, 0, 0);
     chip_pm = make_label(chips, "PM", COL_IDLE);
     chip_boost = make_label(chips, "BOOST", COL_IDLE);
-    chip_usb = make_label(chips, "USB", COL_IDLE);
+    chip_usb = make_label(chips, link_chip_text(), COL_IDLE);
+    lv_obj_set_width(chip_pm, 60);
+    lv_obj_set_width(chip_boost, 78);
+    lv_obj_set_width(chip_usb, 122);
+    lv_label_set_long_mode(chip_usb, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(chip_usb, LV_TEXT_ALIGN_RIGHT, 0);
 
     // Pressure card.
     lv_obj_t *pc = make_card(scr, 10, 38, 460, 92);
+    pressure_card = pc;
+    lv_obj_set_style_border_width(pc, 2, 0);
+    lv_obj_set_style_border_side(pc, LV_BORDER_SIDE_LEFT, 0);
+    pressure_font = lv_font_montserrat_48;
+    pressure_font.get_glyph_dsc = pressure_glyph_dsc;
+    pressure_font.kerning = LV_FONT_KERNING_NONE;
     pressure_label = make_label(pc, "----", COL_TEXT);
-    lv_obj_set_style_text_font(pressure_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_font(pressure_label, &pressure_font, 0);
     lv_obj_set_style_text_align(pressure_label, LV_TEXT_ALIGN_RIGHT, 0);
-    // Fixed-width right-aligned value so the digits stay put; value, unit
+    // Tabular digits and right alignment fix the decimal position; value, unit
     // and ratio sit roughly centred in the card.
     lv_obj_set_width(pressure_label, 250);
     lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 40, -4);
@@ -328,16 +370,23 @@ void init_main_screen()
     val_ratio = make_label(pc, "-- mV/V", COL_MUTED);
     lv_obj_align_to(val_ratio, unit, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
     pressure_sub = make_label(pc, "", COL_MUTED);
+    lv_obj_set_width(pressure_sub, 436);
+    lv_label_set_long_mode(pressure_sub, LV_LABEL_LONG_DOT);
     lv_obj_align(pressure_sub, LV_ALIGN_BOTTOM_LEFT, 4, 0);
 
-    // Firmware version; after a watchdog or brown-out reset, also the cause
-    // in red. Normal reset causes are only on the link (VER?).
-    lv_obj_t *ver = make_label(pc, "", sysinfo_reset_abnormal() ? COL_FAULT : COL_MUTED);
-    if (sysinfo_reset_abnormal())
-        lv_label_set_text_fmt(ver, "v%s, reset: %s", PMC_FW_VERSION, sysinfo_reset_reason());
-    else
-        lv_label_set_text_fmt(ver, "v%s", PMC_FW_VERSION);
-    lv_obj_align(ver, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
+    // Dedicated footer: firmware/reset information cannot obscure a fault.
+    lv_obj_t *ver = make_label(scr, "v" PMC_FW_VERSION, COL_MUTED);
+    lv_obj_set_style_text_font(ver, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(ver, 12, 256);
+    if (sysinfo_reset_abnormal()) {
+        lv_obj_t *reset = make_label(scr, "", COL_FAULT);
+        lv_obj_set_style_text_font(reset, &lv_font_montserrat_12, 0);
+        lv_label_set_text_fmt(reset, "Last reset: %s", sysinfo_reset_reason());
+        lv_obj_set_width(reset, 330);
+        lv_label_set_long_mode(reset, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(reset, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_pos(reset, 138, 256);
+    }
 
     // Calibration.
     lv_obj_t *cc = make_section(scr, 138, "Calibration");
@@ -349,7 +398,7 @@ void init_main_screen()
     cal_atm = make_field(cc, COLUMN(3), "ATM correction");
 
     // Raw chip readings. Excitation is fixed at 10 V; bus is what it measures.
-    lv_obj_t *rc = make_section(scr, 204, "Raw chip readings");
+    lv_obj_t *rc = make_section(scr, 198, "Raw chip readings");
     val_signal = make_field(rc, COLUMN(0), "INA228 shunt");
     val_exc = make_field(rc, COLUMN(1), "INA228 bus");
     val_die = make_field(rc, COLUMN(2), "INA228 die temp");
