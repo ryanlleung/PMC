@@ -99,7 +99,7 @@ void usb_serial_printf(const char *fmt, ...)
     if (len >= (int)sizeof(buf))
         len = sizeof(buf) - 1;
 
-    // The SDK's TinyUSB is built with a 32-byte CDC TX FIFO, so a longer
+    // The CDC TX FIFO (tinyusb_cdc_device.c, 256 bytes) can be full, so a longer
     // line has to be fed in pieces while the stack sends. Give up after
     // ~5 ms if the PC is not reading (port closed), dropping the rest.
     uint32_t sent = 0;

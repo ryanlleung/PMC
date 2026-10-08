@@ -23,6 +23,7 @@ add_executable(InitialTesting
     main_screen.h
     usb_serial.h
     usb_serial.c
+    tinyusb_cdc_device.c
     clicks.h
     clicks.c
     stepper3.h
