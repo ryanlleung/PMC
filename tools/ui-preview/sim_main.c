@@ -64,10 +64,43 @@ static void check_pressure_spacing(lv_obj_t *obj, int *found)
         check_pressure_spacing(lv_obj_get_child(obj, i), found);
 }
 
+static lv_obj_t *find_label(lv_obj_t *obj, const char *text)
+{
+    if (lv_obj_check_type(obj, &lv_label_class) && !strcmp(lv_label_get_text(obj), text))
+        return obj;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(obj); i++) {
+        lv_obj_t *found = find_label(lv_obj_get_child(obj, i), text);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static void check_detail_tabs(bool show_raw)
+{
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_t *raw_tab = find_label(scr, "Chip readings");
+    lv_obj_t *cal_tab = find_label(scr, "Calibration");
+    lv_obj_t *raw_field = find_label(scr, "INA228 signal");
+    lv_obj_t *cal_field = find_label(scr, "Druck serial number");
+    assert(raw_tab && cal_tab && raw_field && cal_field);
+    lv_obj_t *raw_panel = lv_obj_get_parent(raw_field);
+    lv_obj_t *cal_panel = lv_obj_get_parent(cal_field);
+    assert(lv_obj_has_flag(raw_panel, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_send_event(lv_obj_get_parent(raw_tab), LV_EVENT_CLICKED, NULL);
+    assert(!lv_obj_has_flag(raw_panel, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_state(lv_obj_get_parent(raw_tab), LV_STATE_CHECKED));
+    lv_obj_send_event(lv_obj_get_parent(cal_tab), LV_EVENT_CLICKED, NULL);
+    assert(!lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
+    assert(lv_obj_has_flag(raw_panel, LV_OBJ_FLAG_HIDDEN));
+    assert(!lv_obj_has_state(lv_obj_get_parent(raw_tab), LV_STATE_CHECKED));
+    if (show_raw) lv_obj_send_event(lv_obj_get_parent(raw_tab), LV_EVENT_CLICKED, NULL);
+}
+
 int main(int argc, char **argv)
 {
-    if (argc != 3) {
-        fprintf(stderr, "usage: %s ok|nopm|lowexc|trip|cal out.raw\n", argv[0]);
+    if (argc != 3 && argc != 4) {
+        fprintf(stderr, "usage: %s ok|nopm|lowexc|trip|cal out.raw [raw]\n", argv[0]);
         return 2;
     }
     fake_hw_set_scenario(argv[1]);
@@ -87,6 +120,7 @@ int main(int argc, char **argv)
         lv_tick_inc(1100);
         lv_timer_handler();
     }
+    check_detail_tabs(argc == 4 && !strcmp(argv[3], "raw"));
     lv_obj_update_layout(lv_screen_active());
     int pressure_labels = 0;
     check_pressure_spacing(lv_screen_active(), &pressure_labels);

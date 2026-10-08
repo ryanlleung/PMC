@@ -15,11 +15,9 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
  * Screen layout, 480 x 272:
  *   y   0-30   header: PMC, clock (RTC), Druck ADC (Power Monitor) / excitation (Boost 10) / link
  *   y  38-130  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
- *   y 138-192  calibration (12 px): Druck s/n, cert zero and span, ATM correction; stored
- *   y 198-252  raw chip readings (12 px): INA228 shunt, bus, die temperature; Boost 10 PG
- * y 256-270  firmware and reset cause, separate from fault messages
- * Cards are 6-8 px apart; both small cards use the same four columns.
- * The top two are the useful values; the bottom card is what the chips report.
+ *   y 138-252  Calibration / Chip readings tabs, each with a 2 x 2 field grid
+ *   y 256-270  firmware and reset cause, separate from fault messages
+ * Pressure and faults remain visible while switching between detail tabs.
  * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
  * Full per-board status lines go to COM3 only, when they change.
  */
@@ -38,6 +36,7 @@ static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
 static lv_obj_t *pressure_card;
 static lv_font_t pressure_font;
+static lv_obj_t *detail_cal, *detail_raw, *tab_cal, *tab_raw;
 static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die, *val_pg;
 static lv_obj_t *cal_table, *cal_zero, *cal_span, *cal_atm, *cal_store;
 
@@ -82,27 +81,55 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t col)
     return l;
 }
 
-// Section card, 12 px text, with a title line; fields go below the title.
-static lv_obj_t *make_section(lv_obj_t *parent, int32_t y, const char *title)
+static void detail_tab_event(lv_event_t *e)
 {
-    lv_obj_t *c = make_card(parent, 10, y, 460, 54);
-    lv_obj_set_style_text_font(c, &lv_font_montserrat_12, 0);
-    lv_obj_t *t = make_label(c, title, COL_HEADER);
-    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, -2);
-    return c;
+    bool calibration = lv_event_get_target_obj(e) == tab_cal;
+    lv_obj_t *shown = calibration ? detail_cal : detail_raw;
+    lv_obj_t *hidden = calibration ? detail_raw : detail_cal;
+    lv_obj_remove_flag(shown, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(hidden, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_state(calibration ? tab_cal : tab_raw, LV_STATE_CHECKED);
+    lv_obj_remove_state(calibration ? tab_raw : tab_cal, LV_STATE_CHECKED);
+    if (calibration) lv_obj_remove_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
 }
 
-// Column i (0-3) of a section card, 112 px each.
-#define COLUMN(i) ((i) * 112)
+static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char *text)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    lv_obj_set_pos(button, x, 0);
+    lv_obj_set_size(button, width, 28);
+    lv_obj_set_style_shadow_width(button, 0, 0);
+    lv_obj_set_style_radius(button, 4, 0);
+    lv_obj_set_style_bg_color(button, lv_color_make(235, 240, 245), 0);
+    lv_obj_set_style_text_color(button, COL_MUTED, 0);
+    lv_obj_set_style_bg_color(button, COL_HEADER, LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(button, lv_color_white(), LV_STATE_CHECKED);
+    lv_obj_t *label = lv_label_create(button);
+    lv_label_set_text(label, text);
+    lv_obj_center(label);
+    lv_obj_add_event_cb(button, detail_tab_event, LV_EVENT_CLICKED, NULL);
+    return button;
+}
 
-// Caption above, value below, in a section card.
-static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, const char *caption)
+static lv_obj_t *make_detail_panel(lv_obj_t *parent)
+{
+    lv_obj_t *panel = make_card(parent, 0, 34, 448, 68);
+    lv_obj_set_style_pad_all(panel, 0, 0);
+    return panel;
+}
+
+// Two columns, with a generous gutter and separate caption/value lines.
+static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, int32_t y, const char *caption)
 {
     lv_obj_t *cap = make_label(parent, caption, COL_MUTED);
-    lv_obj_align(cap, LV_ALIGN_TOP_LEFT, x, 14);
+    lv_obj_set_style_text_font(cap, &lv_font_montserrat_12, 0);
+    lv_obj_set_pos(cap, x, y);
     lv_obj_t *v = make_label(parent, "--", COL_TEXT);
-    lv_obj_align(v, LV_ALIGN_TOP_LEFT, x, 30);
-    lv_obj_set_width(v, 108);
+    lv_obj_set_pos(v, x, y + 14);
+    lv_obj_set_width(v, 204);
     lv_label_set_long_mode(v, LV_LABEL_LONG_DOT);
     return v;
 }
@@ -296,7 +323,7 @@ static void status_timer_cb(lv_timer_t *t)
         lv_label_set_text(cal_store, "saved in flash");
         lv_obj_set_style_text_color(cal_store, COL_OK, 0);
     } else {
-        lv_label_set_text(cal_store, "not saved, send CAL SAVE");
+        lv_label_set_text(cal_store, "Unsaved (CAL SAVE)");
         lv_obj_set_style_text_color(cal_store, COL_WARN, 0);
     }
 }
@@ -388,21 +415,30 @@ void init_main_screen()
         lv_obj_set_pos(reset, 138, 256);
     }
 
-    // Calibration.
-    lv_obj_t *cc = make_section(scr, 138, "Calibration");
-    cal_store = make_label(cc, "", COL_MUTED);
-    lv_obj_align(cal_store, LV_ALIGN_TOP_RIGHT, 0, -2);
-    cal_table = make_field(cc, COLUMN(0), "Druck s/n");
-    cal_zero = make_field(cc, COLUMN(1), "Zero at 10 V");
-    cal_span = make_field(cc, COLUMN(2), "Span at 10 V");
-    cal_atm = make_field(cc, COLUMN(3), "ATM correction");
+    // One spacious detail area; both sets of values still update every second.
+    lv_obj_t *details = make_card(scr, 10, 138, 460, 114);
+    tab_cal = make_tab(details, 0, 108, "Calibration");
+    tab_raw = make_tab(details, 116, 118, "Chip readings");
+    lv_obj_add_state(tab_cal, LV_STATE_CHECKED);
+    cal_store = make_label(details, "", COL_MUTED);
+    lv_obj_set_style_text_font(cal_store, &lv_font_montserrat_12, 0);
+    lv_obj_set_width(cal_store, 204);
+    lv_obj_set_style_text_align(cal_store, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(cal_store, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(cal_store, 244, 8);
 
-    // Raw chip readings. Excitation is fixed at 10 V; bus is what it measures.
-    lv_obj_t *rc = make_section(scr, 198, "Raw chip readings");
-    val_signal = make_field(rc, COLUMN(0), "INA228 shunt");
-    val_exc = make_field(rc, COLUMN(1), "INA228 bus");
-    val_die = make_field(rc, COLUMN(2), "INA228 die temp");
-    val_pg = make_field(rc, COLUMN(3), "Boost 10 PG");
+    detail_cal = make_detail_panel(details);
+    cal_table = make_field(detail_cal, 6, 0, "Druck serial number");
+    cal_atm = make_field(detail_cal, 236, 0, "Atmospheric correction");
+    cal_zero = make_field(detail_cal, 6, 36, "Certificate zero at 10 V");
+    cal_span = make_field(detail_cal, 236, 36, "Certificate span at 10 V");
+
+    detail_raw = make_detail_panel(details);
+    lv_obj_add_flag(detail_raw, LV_OBJ_FLAG_HIDDEN);
+    val_signal = make_field(detail_raw, 6, 0, "INA228 signal");
+    val_exc = make_field(detail_raw, 236, 0, "INA228 excitation");
+    val_die = make_field(detail_raw, 6, 36, "INA228 temperature");
+    val_pg = make_field(detail_raw, 236, 36, "Boost 10 supply");
 
     lv_timer_create(status_timer_cb, 1000, NULL);
 }
