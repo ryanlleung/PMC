@@ -324,12 +324,109 @@ void stepper3_zero(void)
         position = 0;
 }
 
-static const char *mode_name(stepper3_mode_t m)
+const char *stepper3_status(void)
+{
+    const char *st = run_state == ST_MOVING ? (dir > 0 ? "opening" : "closing")
+                   : energised ? "idle, coils on" : "idle, coils off";
+    lv_snprintf(status_text, sizeof status_text,
+                "S%d Stepper 3: %s, pos %ld, %s %lu sps, limit %s", PMC_STEPPER3_SOCKET,
+                st, (long)position, stepper3_mode_name(mode), (unsigned long)rate_run,
+                !LIMIT_FITTED ? "not fitted" : stepper3_limit_open() ? "OPEN" : "ok");
+    return status_text;
+}
+
+/* --------------------------------------------------------------------------
+ * Settings, shared by the MOT commands and the motor screen. Each setter
+ * refuses (returns false) while a move is running or for a value out of
+ * range, so the step timing and sequence never change mid-move.
+ * ------------------------------------------------------------------------ */
+bool stepper3_set_rate(uint32_t sps)
+{
+    if (run_state != ST_IDLE || sps < RATE_MIN || sps > RATE_MAX)
+        return false;
+    rate_run = sps;
+    return true;
+}
+
+bool stepper3_set_start(uint32_t sps)
+{
+    if (run_state != ST_IDLE || sps < RATE_MIN || sps > RATE_MAX)
+        return false;
+    rate_start = sps;
+    return true;
+}
+
+bool stepper3_set_accel(uint32_t sps2)
+{
+    if (run_state != ST_IDLE || sps2 < ACCEL_MIN || sps2 > ACCEL_MAX)
+        return false;
+    accel = sps2;
+    return true;
+}
+
+bool stepper3_set_mode(stepper3_mode_t nm)
+{
+    if (run_state != ST_IDLE || nm > STEPPER3_HALF)
+        return false;
+    // Keep the position in the new step size.
+    if (mode == STEPPER3_HALF && nm != STEPPER3_HALF)
+        position /= 2;
+    else if (mode != STEPPER3_HALF && nm == STEPPER3_HALF)
+        position *= 2;
+    mode = nm;
+    if (energised)
+        coils_off();     // re-energised on the right entry at the next move
+    return true;
+}
+
+bool stepper3_set_hold(bool on)
+{
+    if (run_state != ST_IDLE)
+        return false;
+    hold = on;
+    if (!hold)
+        coils_off();
+    return true;
+}
+
+bool stepper3_set_reverse(bool on)
+{
+    if (run_state != ST_IDLE)
+        return false;
+    reverse = on;
+    return true;
+}
+
+bool stepper3_set_order(const uint8_t o[4])
+{
+    uint8_t seen = 0;
+    if (run_state != ST_IDLE)
+        return false;
+    for (int i = 0; i < 4; i++) {
+        if (o[i] > 3 || (seen & (1u << o[i])))
+            return false;
+        seen |= 1u << o[i];
+    }
+    memcpy(order, o, sizeof order);
+    if (energised)
+        coils_off();
+    return true;
+}
+
+uint32_t stepper3_rate(void)            { return rate_run; }
+uint32_t stepper3_start_rate(void)      { return rate_start; }
+uint32_t stepper3_accel(void)           { return accel; }
+stepper3_mode_t stepper3_mode(void)     { return mode; }
+bool stepper3_hold(void)                { return hold; }
+bool stepper3_reverse(void)             { return reverse; }
+bool stepper3_energised(void)           { return energised; }
+int8_t stepper3_direction(void)         { return run_state == ST_MOVING ? dir : 0; }
+void stepper3_order(uint8_t o[4])       { memcpy(o, order, sizeof order); }
+const char *stepper3_mode_name(stepper3_mode_t m)
 {
     return m == STEPPER3_WAVE ? "WAVE" : m == STEPPER3_FULL ? "FULL" : "HALF";
 }
-
-static const char *stop_name(stepper3_stop_t s)
+const char *stepper3_stop_name(stepper3_stop_t s)
 {
     switch (s) {
     case STEPPER3_STOP_DONE:  return "done";
@@ -337,17 +434,6 @@ static const char *stop_name(stepper3_stop_t s)
     case STEPPER3_STOP_LIMIT: return "LIMIT";
     default:                  return "none";
     }
-}
-
-const char *stepper3_status(void)
-{
-    const char *st = run_state == ST_MOVING ? (dir > 0 ? "opening" : "closing")
-                   : energised ? "idle, coils on" : "idle, coils off";
-    lv_snprintf(status_text, sizeof status_text,
-                "S%d Stepper 3: %s, pos %ld, %s %lu sps, limit %s", PMC_STEPPER3_SOCKET,
-                st, (long)position, mode_name(mode), (unsigned long)rate_run,
-                !LIMIT_FITTED ? "not fitted" : stepper3_limit_open() ? "OPEN" : "ok");
-    return status_text;
 }
 
 /* --------------------------------------------------------------------------
@@ -373,9 +459,9 @@ static void show(void)
 {
     link_printf("MOT state %s, pos %ld, remaining %lu, last stop %s\r\n",
                 run_state == ST_MOVING ? "moving" : run_state == ST_SETTLE ? "settling" : "idle",
-                (long)position, (unsigned long)remaining, stop_name(last_stop));
+                (long)position, (unsigned long)remaining, stepper3_stop_name(last_stop));
     link_printf("MOT mode %s, rate %lu sps, start %lu sps, accel %lu sps/s\r\n",
-                mode_name(mode), (unsigned long)rate_run, (unsigned long)rate_start,
+                stepper3_mode_name(mode), (unsigned long)rate_run, (unsigned long)rate_start,
                 (unsigned long)accel);
     link_printf("MOT hold %d, dir %d, order %d%d%d%d, coils %s, limit %s\r\n",
                 hold, reverse, order[0], order[1], order[2], order[3],
@@ -418,21 +504,21 @@ bool stepper3_command(const char *line)
         if (!parse_int(a + 5, RATE_MIN, RATE_MAX, &v)) {
             link_printf("ERR expected: MOT RATE <%d-%d>\r\n", RATE_MIN, RATE_MAX);
         } else {
-            rate_run = (uint32_t)v;
+            stepper3_set_rate((uint32_t)v);
             link_printf("OK\r\n");
         }
     } else if (strncmp(a, " START", 6) == 0) {
         if (!parse_int(a + 6, RATE_MIN, RATE_MAX, &v)) {
             link_printf("ERR expected: MOT START <%d-%d>\r\n", RATE_MIN, RATE_MAX);
         } else {
-            rate_start = (uint32_t)v;
+            stepper3_set_start((uint32_t)v);
             link_printf("OK\r\n");
         }
     } else if (strncmp(a, " ACCEL", 6) == 0) {
         if (!parse_int(a + 6, ACCEL_MIN, ACCEL_MAX, &v)) {
             link_printf("ERR expected: MOT ACCEL <%d-%d>\r\n", ACCEL_MIN, ACCEL_MAX);
         } else {
-            accel = (uint32_t)v;
+            stepper3_set_accel((uint32_t)v);
             link_printf("OK\r\n");
         }
     } else if (strncmp(a, " MODE ", 6) == 0) {
@@ -442,29 +528,20 @@ bool stepper3_command(const char *line)
         else if (strcmp(m, "FULL") == 0) nm = STEPPER3_FULL;
         else if (strcmp(m, "HALF") == 0) nm = STEPPER3_HALF;
         else { link_printf("ERR expected: MOT MODE WAVE|FULL|HALF\r\n"); return true; }
-        // Keep the position in the new step size.
-        if (mode == STEPPER3_HALF && nm != STEPPER3_HALF)
-            position /= 2;
-        else if (mode != STEPPER3_HALF && nm == STEPPER3_HALF)
-            position *= 2;
-        mode = nm;
-        if (energised)
-            coils_off();     // re-energised on the right entry at the next move
+        stepper3_set_mode(nm);
         link_printf("OK pos %ld\r\n", (long)position);
     } else if (strncmp(a, " HOLD", 5) == 0) {
         if (!parse_int(a + 5, 0, 1, &v)) {
             link_printf("ERR expected: MOT HOLD 0|1\r\n");
         } else {
-            hold = v;
-            if (!hold)
-                coils_off();
+            stepper3_set_hold(v);
             link_printf("OK\r\n");
         }
     } else if (strncmp(a, " DIR", 4) == 0) {
         if (!parse_int(a + 4, 0, 1, &v)) {
             link_printf("ERR expected: MOT DIR 0|1\r\n");
         } else {
-            reverse = v;
+            stepper3_set_reverse(v);
             link_printf("OK\r\n");
         }
     } else if (strncmp(a, " ORDER ", 7) == 0) {
@@ -481,9 +558,7 @@ bool stepper3_command(const char *line)
         if (!ok) {
             link_printf("ERR expected: MOT ORDER <abcd>, digits 0-3 once each\r\n");
         } else {
-            memcpy(order, n, sizeof order);
-            if (energised)
-                coils_off();
+            stepper3_set_order(n);
             link_printf("OK\r\n");
         }
     } else {

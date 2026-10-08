@@ -110,3 +110,40 @@ const char *uncert_screen_text(bool *warn)
     if (!st.reading_ok) return "";
     return st.cal_nominal ? "+/- ? (not calibrated)" : "+/- 1.08 mbar";
 }
+
+/* Stepper 3: settings only, a move completes at once. */
+#include "stepper3.h"
+static int32_t m_pos;
+static uint32_t m_rate = 200, m_start = 25, m_accel = 400;
+static stepper3_mode_t m_mode = STEPPER3_FULL;
+static bool m_hold, m_rev;
+static uint8_t m_order[4] = { 0, 1, 2, 3 };
+static stepper3_stop_t m_stop = STEPPER3_STOP_NONE;
+
+bool stepper3_move(int32_t steps) { m_pos += steps; m_stop = STEPPER3_STOP_DONE; return steps != 0; }
+void stepper3_stop(void) {}
+void stepper3_off(void) {}
+bool stepper3_busy(void) { return false; }
+int32_t stepper3_position(void) { return m_pos; }
+void stepper3_zero(void) { m_pos = 0; }
+stepper3_stop_t stepper3_last_stop(void) { return m_stop; }
+bool stepper3_limit_open(void) { return false; }
+bool stepper3_limit_fitted(void) { return false; }
+bool stepper3_set_rate(uint32_t v) { m_rate = v; return true; }
+bool stepper3_set_start(uint32_t v) { m_start = v; return true; }
+bool stepper3_set_accel(uint32_t v) { m_accel = v; return true; }
+bool stepper3_set_mode(stepper3_mode_t m) { m_mode = m; return true; }
+bool stepper3_set_hold(bool on) { m_hold = on; return true; }
+bool stepper3_set_reverse(bool on) { m_rev = on; return true; }
+bool stepper3_set_order(const uint8_t o[4]) { memcpy(m_order, o, 4); return true; }
+uint32_t stepper3_rate(void) { return m_rate; }
+uint32_t stepper3_start_rate(void) { return m_start; }
+uint32_t stepper3_accel(void) { return m_accel; }
+stepper3_mode_t stepper3_mode(void) { return m_mode; }
+bool stepper3_hold(void) { return m_hold; }
+bool stepper3_reverse(void) { return m_rev; }
+bool stepper3_energised(void) { return m_hold; }
+int8_t stepper3_direction(void) { return 0; }
+void stepper3_order(uint8_t o[4]) { memcpy(o, m_order, 4); }
+const char *stepper3_mode_name(stepper3_mode_t m) { return m == STEPPER3_WAVE ? "WAVE" : m == STEPPER3_FULL ? "FULL" : "HALF"; }
+const char *stepper3_stop_name(stepper3_stop_t s) { return s == STEPPER3_STOP_DONE ? "done" : s == STEPPER3_STOP_CMD ? "stopped" : s == STEPPER3_STOP_LIMIT ? "LIMIT" : "none"; }

@@ -71,6 +71,28 @@ stepper3_stop_t stepper3_last_stop(void);
 bool stepper3_limit_open(void);
 bool stepper3_limit_fitted(void);
 
+// Settings (RAM only). Setters return false while a move is running or for
+// a value out of range (rates 16-1000 steps/s, accel 10-20000 steps/s^2).
+bool stepper3_set_rate(uint32_t sps);
+bool stepper3_set_start(uint32_t sps);
+bool stepper3_set_accel(uint32_t sps2);
+bool stepper3_set_mode(stepper3_mode_t mode);   // converts the position count
+bool stepper3_set_hold(bool on);
+bool stepper3_set_reverse(bool on);
+bool stepper3_set_order(const uint8_t order[4]); // each of 0-3 once
+
+uint32_t stepper3_rate(void);
+uint32_t stepper3_start_rate(void);
+uint32_t stepper3_accel(void);
+stepper3_mode_t stepper3_mode(void);
+bool stepper3_hold(void);
+bool stepper3_reverse(void);
+bool stepper3_energised(void);
+int8_t stepper3_direction(void);      // +1 opening, -1 closing, 0 idle
+void stepper3_order(uint8_t order[4]);
+const char *stepper3_mode_name(stepper3_mode_t mode);
+const char *stepper3_stop_name(stepper3_stop_t stop);
+
 // Short status line for the screen and the link.
 const char *stepper3_status(void);
 

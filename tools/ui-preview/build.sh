@@ -21,7 +21,7 @@ fi
 
 gcc $CFLAGS -o "$OUT/ui_preview" \
   "$HERE/sim_main.c" "$HERE/fake_hw.c" \
-  "$PROJ/main_screen.c" \
+  "$PROJ/main_screen.c" "$PROJ/motor_screen.c" \
   "$PROJ/build-MM4/generated/scr_main_screen.c" \
   "$PROJ/build-MM4/generated/screens.c" \
   "$OUT/liblvgl.a" -lm
@@ -34,4 +34,7 @@ for s in ok nopm lowexc trip cal unsaved nodruck; do
   python3 "$HERE/render.py" "$OUT/$s-chip.raw" "$OUT/$s-chip.png"
   rm "$OUT/$s-chip.raw"
 done
+"$OUT/ui_preview" ok "$OUT/motor.raw" motor
+python3 "$HERE/render.py" "$OUT/motor.raw" "$OUT/motor.png"
+rm "$OUT/motor.raw"
 echo "Wrote calibration and chip-reading previews for all six scenarios to $OUT"
