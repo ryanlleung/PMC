@@ -39,8 +39,15 @@ const char *cal_id(void);
 // True once the active table has been written to flash (or was loaded from
 // it), false after APPLY or ATM until CAL SAVE.
 bool cal_saved(void);
-// True if CAL ATM has scaled the active table (its id ends in "+atm").
+// True if CAL ATM has scaled the active table.
 bool cal_atm_applied(void);
+// Product of the CAL ATM factors in ppm: 1000000 = none, 0 = unknown (table
+// saved by firmware before 0.3.5).
+int32_t cal_atm_ppm(void);
+// First point's ratio and last minus first, ppb (1 mV/V = 1000000), with
+// the ATM factor taken back out: the cert zero and span over the excitation.
+int32_t cal_zero_ppb(void);
+int32_t cal_span_ppb(void);
 
 // Handles one command line from COM3. Returns false if it is not a CAL command.
 bool cal_command(const char *line);

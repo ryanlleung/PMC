@@ -34,13 +34,7 @@ void link_init(void)                         { usb_serial_init(); }
 void link_task(void)                         { usb_serial_task(); }
 bool link_getline(char *buf, size_t n)       { return usb_serial_getline(buf, n); }
 const char *link_status(void)                { return usb_serial_status(); }
-// "USB rx <bytes received>": shows on the screen whether commands arrive.
-const char *link_chip_text(void)
-{
-    static char t[24];
-    lv_snprintf(t, sizeof t, "USB rx %lu", (unsigned long)usb_serial_rx_bytes());
-    return t;
-}
+const char *link_chip_text(void)              { return "USB"; }
 
 bool link_take_new_client(void)
 {

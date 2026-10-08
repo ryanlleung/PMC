@@ -12,10 +12,10 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
 /*
  * Screen layout, 480 x 272:
- *   y   0-30   header: title, Power Monitor / Boost 10 / USB status
+ *   y   0-30   header: title, Druck ADC (Power Monitor) / excitation (Boost 10) / link
  *   y  38-150  pressure card: calibrated value (48 px), unit, sensor / fault line
  *   y 158-208  four readouts: signal, ratio, excitation, INA228 die temperature
- *   y 216-262  calibration: table id, ATM correction, stored or not
+ *   y 216-262  calibration (12 px): Druck s/n, cert zero and span, ATM correction, stored
  * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
  * Full per-board status lines go to COM3 only, when they change.
  */
@@ -32,7 +32,7 @@ static lv_obj_t *chip_pm, *chip_boost, *chip_usb;
 static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
 static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die;
-static lv_obj_t *cal_table, *cal_atm, *cal_store;
+static lv_obj_t *cal_table, *cal_zero, *cal_span, *cal_atm, *cal_store;
 
 static const char *last_line[6];
 static char line_copy[6][192];
@@ -66,6 +66,17 @@ static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, const char *caption)
     lv_obj_t *v = make_label(parent, "--", COL_TEXT);
     lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, x, 2);
     return v;
+}
+
+// Fixed point with 2 decimals, rounded: v in units of 10^-dec.
+static void set_fixed2(lv_obj_t *l, int64_t v, int dec, const char *unit)
+{
+    int64_t scale = 1;
+    for (int k = 2; k < dec; k++) scale *= 10;
+    int64_t a = v < 0 ? -v : v;
+    a = (a + scale / 2) / scale;                   // now hundredths
+    lv_label_set_text_fmt(l, "%s%ld.%02ld %s", (v < 0 && a) ? "-" : "",
+                          (long)(a / 100), (long)(a % 100), unit);
 }
 
 // One small readout card in the row at y 158.
@@ -162,19 +173,19 @@ static void status_timer_cb(lv_timer_t *t)
         print_data_line(s);
 
     // Header status.
-    set_chip(chip_pm, "PM", s->pm_found ? COL_OK : COL_FAULT);
+    set_chip(chip_pm, "Druck ADC", s->pm_found ? COL_OK : COL_FAULT);
     if (s->boost_tripped)
-        set_chip(chip_boost, "BOOST TRIP", COL_FAULT);
+        set_chip(chip_boost, "10 V TRIP", COL_FAULT);
     else
-        set_chip(chip_boost, "BOOST", s->boost_pg ? COL_OK : COL_FAULT);
+        set_chip(chip_boost, "10 V supply", s->boost_pg ? COL_OK : COL_FAULT);
     set_chip(chip_usb, link_chip_text(), link_chip_ok() ? COL_OK : COL_IDLE);
 
     // Pressure.
     lv_label_set_text(pressure_label, clicks_druck_value());
     if (!s->pm_found)
-        lv_label_set_text(pressure_sub, "Power Monitor not responding");
+        lv_label_set_text(pressure_sub, "Druck ADC (Power Monitor) not responding");
     else if (s->boost_tripped)
-        lv_label_set_text_fmt(pressure_sub, "Boost tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
+        lv_label_set_text_fmt(pressure_sub, "10 V supply tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
     else if (!s->reading_ok)
         lv_label_set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
     else if (s->cal_nominal)
@@ -185,56 +196,60 @@ static void status_timer_cb(lv_timer_t *t)
                                 (!s->pm_found || s->boost_tripped || !s->reading_ok) ? COL_FAULT :
                                 s->cal_nominal ? COL_WARN : COL_MUTED, 0);
 
-    // Readouts.
+    // Readouts, 2 decimals (the DATA lines keep full resolution).
     if (s->pm_found) {
-        int32_t sig_uv = s->shunt_nv / 1000;          // whole uV
-        int32_t sig_mv = sig_uv / 1000;
-        int32_t sig_frac = LV_ABS(sig_uv % 1000);
-        lv_label_set_text_fmt(val_signal, "%s%ld.%03ld mV", sig_uv < 0 ? "-" : "",
-                              (long)LV_ABS(sig_mv), (long)sig_frac);
-        lv_label_set_text_fmt(val_exc, "%ld.%03ld V", (long)(s->bus_mv / 1000), (long)(s->bus_mv % 1000));
-        int32_t d10 = s->die_mc / 100;                // 0.1 C
-        lv_label_set_text_fmt(val_die, "%s%ld.%ld C", d10 < 0 ? "-" : "",
-                              (long)(LV_ABS(d10) / 10), (long)(LV_ABS(d10) % 10));
+        set_fixed2(val_signal, s->shunt_nv, 6, "mV");
+        set_fixed2(val_exc, s->bus_mv, 3, "V");
+        set_fixed2(val_die, s->die_mc, 3, "C");
     } else {
         lv_label_set_text(val_signal, "--");
         lv_label_set_text(val_exc, "--");
         lv_label_set_text(val_die, "--");
     }
-    if (s->reading_ok) {
-        int32_t r10 = s->r_ppb / 10;   // mV/V to 5 decimals
-        lv_label_set_text_fmt(val_ratio, "%s%ld.%05ld mV/V", r10 < 0 ? "-" : "",
-                              (long)(LV_ABS(r10) / 100000), (long)(LV_ABS(r10) % 100000));
-    } else {
+    if (s->reading_ok)
+        set_fixed2(val_ratio, s->r_ppb, 6, "mV/V");
+    else
         lv_label_set_text(val_ratio, "--");
-    }
 
-    // Calibration.
-    if (cal_is_default()) {
-        lv_label_set_text(cal_table, "nominal 0-100 mV");
+    // Calibration. Zero and span are shown as the cert gives them, mV at
+    // 10 V excitation, with any ATM correction taken back out.
+    bool nominal = cal_is_default();
+    if (nominal) {
+        lv_label_set_text(cal_table, "none (nominal)");
         lv_obj_set_style_text_color(cal_table, COL_WARN, 0);
     } else {
         // The "+atm" suffix is shown in the ATM column instead.
         char id[CAL_ID_LEN];
         lv_strlcpy(id, cal_id(), sizeof id);
         size_t n = strlen(id);
-        if (cal_atm_applied())
+        if (n >= 4 && strcmp(id + n - 4, "+atm") == 0)
             id[n - 4] = '\0';
         lv_label_set_text(cal_table, id);
         lv_obj_set_style_text_color(cal_table, COL_TEXT, 0);
     }
-    if (cal_atm_applied()) {
+    set_fixed2(cal_zero, (int64_t)cal_zero_ppb() * 10, 6, "mV");
+    set_fixed2(cal_span, (int64_t)cal_span_ppb() * 10, 6, "mV");
+
+    int32_t k = cal_atm_ppm();
+    if (!cal_atm_applied()) {
+        lv_label_set_text(cal_atm, nominal ? "--" : "not applied");
+        lv_obj_set_style_text_color(cal_atm, nominal ? COL_MUTED : COL_WARN, 0);
+    } else if (k <= 0) {
         lv_label_set_text(cal_atm, "applied");
         lv_obj_set_style_text_color(cal_atm, COL_OK, 0);
     } else {
-        lv_label_set_text(cal_atm, cal_is_default() ? "--" : "not applied");
-        lv_obj_set_style_text_color(cal_atm, cal_is_default() ? COL_MUTED : COL_WARN, 0);
+        // Gain as a percentage change: 0.957300 shows -4.27 %.
+        int32_t c = (LV_ABS(k - 1000000) + 50) / 100;   // 0.01 %
+        lv_label_set_text_fmt(cal_atm, "%s%ld.%02ld %%", k < 1000000 ? "-" : "+",
+                              (long)(c / 100), (long)(c % 100));
+        lv_obj_set_style_text_color(cal_atm, COL_OK, 0);
     }
-    if (cal_is_default()) {
-        lv_label_set_text(cal_store, "nothing stored");
+
+    if (nominal) {
+        lv_label_set_text(cal_store, "--");
         lv_obj_set_style_text_color(cal_store, COL_MUTED, 0);
     } else if (cal_saved()) {
-        lv_label_set_text(cal_store, "saved in flash");
+        lv_label_set_text(cal_store, "in flash");
         lv_obj_set_style_text_color(cal_store, COL_OK, 0);
     } else {
         lv_label_set_text(cal_store, "not saved");
@@ -302,13 +317,17 @@ void init_main_screen()
     val_signal = make_readout(scr, 10, "Signal");
     val_ratio = make_readout(scr, 127, "Ratio");
     val_exc = make_readout(scr, 244, "Exc. (10 V set)");
-    val_die = make_readout(scr, 361, "INA228 die");
+    val_die = make_readout(scr, 361, "ADC temp");
 
-    // Calibration status.
+    // Calibration, small text.
     lv_obj_t *cc = make_card(scr, 10, 216, 460, 46);
-    cal_table = make_field(cc, 0, "Cal table");
-    cal_atm = make_field(cc, 190, "ATM correction");
-    cal_store = make_field(cc, 310, "Stored");
+    lv_obj_set_style_text_font(cc, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_pad_ver(cc, 8, 0);
+    cal_table = make_field(cc, 0, "Druck s/n");
+    cal_zero = make_field(cc, 110, "Zero (10 V)");
+    cal_span = make_field(cc, 195, "Span (10 V)");
+    cal_atm = make_field(cc, 280, "ATM correction");
+    cal_store = make_field(cc, 380, "Stored");
 
     lv_timer_create(status_timer_cb, 1000, NULL);
 }

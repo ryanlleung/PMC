@@ -2,7 +2,7 @@
 """Show, load or erase the Druck calibration stored on the board.
 
     python druck_cal.py 192.168.1.23 show
-    python druck_cal.py 192.168.1.23 zs --id "cert 1234567" --exc 10 --zero 0.12 --span 99.85
+    python druck_cal.py 192.168.1.23 zs --exc 10 --zero 1.337 --span 100.996
     python druck_cal.py 192.168.1.23 load table.txt --id "OI table" --xunits V --exc 10
     python druck_cal.py 192.168.1.23 erase
 
@@ -36,6 +36,7 @@ TCP_PORT = 5000
 FS_MBAR = 1034.214           # 15 psia
 MAX_POINTS = 32
 ID_LEN = 23
+DRUCK_SN = "5880156"         # serial of the Druck in use (bench, Oct 2026)
 
 P_TO_MBAR = {"mbar": 1.0, "bar": 1000.0, "Pa": 0.01, "kPa": 10.0,
              "psi": 68.947573, "torr": 1.3332237}
@@ -169,7 +170,7 @@ def main():
     sub.add_parser("erase")
 
     zs = sub.add_parser("zs", help="two-point zero/span")
-    zs.add_argument("--id", required=True)
+    zs.add_argument("--id", default=DRUCK_SN, help=f"default {DRUCK_SN}, the bench Druck's serial")
     zs.add_argument("--exc", type=float, required=True, help="cert supply, V")
     zs.add_argument("--zero", type=float, required=True, help="output at 0 psia, mV")
     zs.add_argument("--span", type=float, required=True, help="output at 15 psia minus zero, mV")

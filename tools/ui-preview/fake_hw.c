@@ -67,7 +67,10 @@ const char *clicks_druck_value(void) { return value; }
 bool clicks_druck_cal_nominal(void) { return st.cal_nominal; }
 const clicks_state_t *clicks_state(void) { return &st; }
 bool cal_is_default(void) { return st.cal_nominal; }
-const char *cal_id(void) { return fake_atm ? "Druck 3842117+atm" : "Druck 3842117"; }
+const char *cal_id(void) { return fake_atm ? "5880156+atm" : "5880156"; }
+int32_t cal_atm_ppm(void) { return fake_atm ? 957300 : 1000000; }
+int32_t cal_zero_ppb(void) { return st.cal_nominal ? 0 : 133700; }
+int32_t cal_span_ppb(void) { return st.cal_nominal ? 10000000 : 10099600; }
 bool cal_saved(void) { return fake_saved; }
 bool cal_atm_applied(void) { return fake_atm; }
 int32_t clicks_boost10_set_mv(int32_t mv) { return st.boost_tripped ? -1 : mv; }
