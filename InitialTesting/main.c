@@ -154,6 +154,7 @@ int main(void)
     while (1)
     {
         link_task();
+        touch_poll();
         rtclock_poll();
         if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) && !rtclock_command(line) && !i2c_sdk_test_command(line) && !touch_command(line) && !perf_command(line) && !uncert_command(line) &&
             !stepper3_command(line) && !clicks_command(line) &&
@@ -163,7 +164,7 @@ int main(void)
         lv_timer_handler();
         perf_note(t0);
         watchdog_kick();
-        Delay_ms(5);
+        Delay_ms(1);
     }
     ////////////////////////////////////////////////////////////////////////////////////////
 
