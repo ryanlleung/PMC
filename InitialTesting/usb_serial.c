@@ -116,6 +116,13 @@ void usb_serial_printf(const char *fmt, ...)
     }
 }
 
+static uint32_t rx_bytes;
+
+uint32_t usb_serial_rx_bytes(void)
+{
+    return rx_bytes;
+}
+
 bool usb_serial_getline(char *buf, size_t n)
 {
     static char line[96];
@@ -125,6 +132,7 @@ bool usb_serial_getline(char *buf, size_t n)
         int32_t c = tud_cdc_read_char();
         if (c < 0)
             break;
+        rx_bytes++;
         // CR, LF or CRLF all end a line (terminals differ); empty lines ignored.
         if (c == '\r' || c == '\n') {
             if (len == 0)

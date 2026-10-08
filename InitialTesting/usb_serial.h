@@ -2,6 +2,7 @@
 #define _USB_SERIAL_H_
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stddef.h>
 
 /**
@@ -25,5 +26,8 @@ void usb_serial_printf(const char *fmt, ...);
 // Non-blocking line input. Returns true with a complete line in buf (no CR/LF,
 // NUL-terminated) once one has arrived; longer lines are cut to n - 1 chars.
 bool usb_serial_getline(char *buf, size_t n);
+
+// Bytes received from the PC since start-up (shown in the USB header chip).
+uint32_t usb_serial_rx_bytes(void);
 
 #endif // _USB_SERIAL_H_
