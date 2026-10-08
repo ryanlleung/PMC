@@ -80,7 +80,7 @@ static void set_chip(lv_obj_t *chip, const char *text, lv_color_t col)
  * p_mbar and ratio are empty when there is no valid reading (ok = 0).
  * Lines not starting with DATA are status text.
  */
-// DATA lines once a second; DATA OFF pauses them (status lines still go out).
+// DATA lines once a second; DATA OFF pauses them and the live status lines.
 static bool data_on = true;
 
 bool main_screen_data_command(const char *line)
@@ -126,8 +126,12 @@ static void print_changed_lines(void)
     // A PC that connects later still gets every line once.
     bool resend = link_take_new_client();
 
+    // The Power Monitor and Druck lines carry live readings and change every
+    // second, so DATA OFF holds them back too.
+    const bool live[6] = { false, false, false, true, true, false };
+
     for (int i = 0; i < 6; i++) {
-        if (!line[i][0])
+        if (!line[i][0] || (live[i] && !data_on))
             continue;
         if (resend || last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
             lv_strlcpy(line_copy[i], line[i], sizeof line_copy[i]);
