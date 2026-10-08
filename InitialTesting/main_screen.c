@@ -14,9 +14,10 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 /*
  * Screen layout, 480 x 272:
  *   y   0-30   header: PMC, clock (RTC), Druck ADC (Power Monitor) / excitation (Boost 10) / link
- *   y  38-134  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
- *   y 140-198  calibration (12 px): Druck s/n, cert zero and span, ATM correction, stored
+ *   y  38-130  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
+ *   y 138-196  calibration (12 px): Druck s/n, cert zero and span, ATM correction; stored
  *   y 204-262  raw chip readings (12 px): INA228 shunt, bus, die temperature; Boost 10 PG
+ * Cards are 8 px apart; both small cards use the same four columns.
  * The top two are the useful values; the bottom card is what the chips report.
  * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
  * Full per-board status lines go to COM3 only, when they change.
@@ -70,6 +71,9 @@ static lv_obj_t *make_section(lv_obj_t *parent, int32_t y, const char *title)
     lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, -2);
     return c;
 }
+
+// Column i (0-3) of a section card, 112 px each.
+#define COLUMN(i) ((i) * 112)
 
 // Caption above, value below, in a section card.
 static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, const char *caption)
@@ -263,13 +267,12 @@ static void status_timer_cb(lv_timer_t *t)
     }
 
     if (nominal) {
-        lv_label_set_text(cal_store, "--");
-        lv_obj_set_style_text_color(cal_store, COL_MUTED, 0);
+        lv_label_set_text(cal_store, "");
     } else if (cal_saved()) {
-        lv_label_set_text(cal_store, "in flash");
+        lv_label_set_text(cal_store, "saved in flash");
         lv_obj_set_style_text_color(cal_store, COL_OK, 0);
     } else {
-        lv_label_set_text(cal_store, "not saved");
+        lv_label_set_text(cal_store, "not saved, send CAL SAVE");
         lv_obj_set_style_text_color(cal_store, COL_WARN, 0);
     }
 }
@@ -312,12 +315,14 @@ void init_main_screen()
     chip_usb = make_label(chips, "USB", COL_IDLE);
 
     // Pressure card.
-    lv_obj_t *pc = make_card(scr, 10, 38, 460, 96);
+    lv_obj_t *pc = make_card(scr, 10, 38, 460, 92);
     pressure_label = make_label(pc, "----", COL_TEXT);
     lv_obj_set_style_text_font(pressure_label, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_align(pressure_label, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_width(pressure_label, 300);
-    lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 0, -2);
+    // Fixed-width right-aligned value so the digits stay put; value, unit
+    // and ratio sit roughly centred in the card.
+    lv_obj_set_width(pressure_label, 250);
+    lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 40, -4);
     lv_obj_t *unit = make_label(pc, "mbar abs", COL_MUTED);
     lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_TOP, 12, 10);
     val_ratio = make_label(pc, "-- mV/V", COL_MUTED);
@@ -335,19 +340,20 @@ void init_main_screen()
     lv_obj_align(ver, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
 
     // Calibration.
-    lv_obj_t *cc = make_section(scr, 140, "Calibration");
-    cal_table = make_field(cc, 0, "Druck s/n");
-    cal_zero = make_field(cc, 110, "Zero (10 V)");
-    cal_span = make_field(cc, 195, "Span (10 V)");
-    cal_atm = make_field(cc, 280, "ATM correction");
-    cal_store = make_field(cc, 380, "Stored");
+    lv_obj_t *cc = make_section(scr, 138, "Calibration");
+    cal_store = make_label(cc, "", COL_MUTED);
+    lv_obj_align(cal_store, LV_ALIGN_TOP_RIGHT, 0, -2);
+    cal_table = make_field(cc, COLUMN(0), "Druck s/n");
+    cal_zero = make_field(cc, COLUMN(1), "Zero at 10 V");
+    cal_span = make_field(cc, COLUMN(2), "Span at 10 V");
+    cal_atm = make_field(cc, COLUMN(3), "ATM correction");
 
     // Raw chip readings. Excitation is fixed at 10 V; bus is what it measures.
-    lv_obj_t *rc = make_section(scr, 204, "Raw chip readings: INA228 (Power Monitor), Boost 10");
-    val_signal = make_field(rc, 0, "Shunt (Druck out)");
-    val_exc = make_field(rc, 125, "Bus (excitation)");
-    val_die = make_field(rc, 250, "Die temp");
-    val_pg = make_field(rc, 350, "Boost PG");
+    lv_obj_t *rc = make_section(scr, 204, "Raw chip readings");
+    val_signal = make_field(rc, COLUMN(0), "INA228 shunt");
+    val_exc = make_field(rc, COLUMN(1), "INA228 bus");
+    val_die = make_field(rc, COLUMN(2), "INA228 die temp");
+    val_pg = make_field(rc, COLUMN(3), "Boost 10 PG");
 
     lv_timer_create(status_timer_cb, 1000, NULL);
 }
