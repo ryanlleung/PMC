@@ -13,9 +13,10 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 /*
  * Screen layout, 480 x 272:
  *   y   0-30   header: title, Druck ADC (Power Monitor) / excitation (Boost 10) / link
- *   y  38-150  pressure card: calibrated value (48 px), unit, sensor / fault line
- *   y 158-208  four readouts: signal, ratio, excitation, INA228 die temperature
- *   y 216-262  calibration (12 px): Druck s/n, cert zero and span, ATM correction, stored
+ *   y  38-134  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
+ *   y 140-198  calibration (12 px): Druck s/n, cert zero and span, ATM correction, stored
+ *   y 204-262  raw chip readings (12 px): INA228 shunt, bus, die temperature; Boost 10 PG
+ * The top two are the useful values; the bottom card is what the chips report.
  * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
  * Full per-board status lines go to COM3 only, when they change.
  */
@@ -31,7 +32,7 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 static lv_obj_t *chip_pm, *chip_boost, *chip_usb;
 static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
-static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die;
+static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die, *val_pg;
 static lv_obj_t *cal_table, *cal_zero, *cal_span, *cal_atm, *cal_store;
 
 static const char *last_line[6];
@@ -58,13 +59,23 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t col)
     return l;
 }
 
-// Caption above, value below, inside an existing card.
+// Section card, 12 px text, with a title line; fields go below the title.
+static lv_obj_t *make_section(lv_obj_t *parent, int32_t y, const char *title)
+{
+    lv_obj_t *c = make_card(parent, 10, y, 460, 58);
+    lv_obj_set_style_text_font(c, &lv_font_montserrat_12, 0);
+    lv_obj_t *t = make_label(c, title, COL_HEADER);
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 0, -2);
+    return c;
+}
+
+// Caption above, value below, in a section card.
 static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, const char *caption)
 {
     lv_obj_t *cap = make_label(parent, caption, COL_MUTED);
-    lv_obj_align(cap, LV_ALIGN_TOP_LEFT, x, -2);
+    lv_obj_align(cap, LV_ALIGN_TOP_LEFT, x, 14);
     lv_obj_t *v = make_label(parent, "--", COL_TEXT);
-    lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, x, 2);
+    lv_obj_align(v, LV_ALIGN_TOP_LEFT, x, 30);
     return v;
 }
 
@@ -77,12 +88,6 @@ static void set_fixed2(lv_obj_t *l, int64_t v, int dec, const char *unit)
     a = (a + scale / 2) / scale;                   // now hundredths
     lv_label_set_text_fmt(l, "%s%ld.%02ld %s", (v < 0 && a) ? "-" : "",
                           (long)(a / 100), (long)(a % 100), unit);
-}
-
-// One small readout card in the row at y 158.
-static lv_obj_t *make_readout(lv_obj_t *parent, int32_t x, const char *caption)
-{
-    return make_field(make_card(parent, x, 158, 109, 50), 0, caption);
 }
 
 static void set_chip(lv_obj_t *chip, const char *text, lv_color_t col)
@@ -209,7 +214,15 @@ static void status_timer_cb(lv_timer_t *t)
     if (s->reading_ok)
         set_fixed2(val_ratio, s->r_ppb, 6, "mV/V");
     else
-        lv_label_set_text(val_ratio, "--");
+        lv_label_set_text(val_ratio, "-- mV/V");
+
+    if (s->boost_tripped) {
+        lv_label_set_text(val_pg, "tripped");
+        lv_obj_set_style_text_color(val_pg, COL_FAULT, 0);
+    } else {
+        lv_label_set_text(val_pg, s->boost_pg ? "regulating" : "not regulating");
+        lv_obj_set_style_text_color(val_pg, s->boost_pg ? COL_OK : COL_FAULT, 0);
+    }
 
     // Calibration. Zero and span are shown as the cert gives them, mV at
     // 10 V excitation, with any ATM correction taken back out.
@@ -293,14 +306,16 @@ void init_main_screen()
     chip_usb = make_label(chips, "USB", COL_IDLE);
 
     // Pressure card.
-    lv_obj_t *pc = make_card(scr, 10, 38, 460, 112);
+    lv_obj_t *pc = make_card(scr, 10, 38, 460, 96);
     pressure_label = make_label(pc, "----", COL_TEXT);
     lv_obj_set_style_text_font(pressure_label, &lv_font_montserrat_48, 0);
     lv_obj_set_style_text_align(pressure_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_width(pressure_label, 300);
-    lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 0, 4);
+    lv_obj_align(pressure_label, LV_ALIGN_TOP_LEFT, 0, -2);
     lv_obj_t *unit = make_label(pc, "mbar abs", COL_MUTED);
-    lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_BOTTOM, 12, -10);
+    lv_obj_align_to(unit, pressure_label, LV_ALIGN_OUT_RIGHT_TOP, 12, 10);
+    val_ratio = make_label(pc, "-- mV/V", COL_MUTED);
+    lv_obj_align_to(val_ratio, unit, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
     pressure_sub = make_label(pc, "", COL_MUTED);
     lv_obj_align(pressure_sub, LV_ALIGN_BOTTOM_LEFT, 4, 0);
 
@@ -313,21 +328,20 @@ void init_main_screen()
         lv_label_set_text_fmt(ver, "v%s", PMC_FW_VERSION);
     lv_obj_align(ver, LV_ALIGN_BOTTOM_RIGHT, -4, 0);
 
-    // Readouts. Excitation is the measured VBUS; the setpoint is fixed.
-    val_signal = make_readout(scr, 10, "Signal");
-    val_ratio = make_readout(scr, 127, "Ratio");
-    val_exc = make_readout(scr, 244, "Exc. (10 V set)");
-    val_die = make_readout(scr, 361, "ADC temp");
-
-    // Calibration, small text.
-    lv_obj_t *cc = make_card(scr, 10, 216, 460, 46);
-    lv_obj_set_style_text_font(cc, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_pad_ver(cc, 8, 0);
+    // Calibration.
+    lv_obj_t *cc = make_section(scr, 140, "Calibration");
     cal_table = make_field(cc, 0, "Druck s/n");
     cal_zero = make_field(cc, 110, "Zero (10 V)");
     cal_span = make_field(cc, 195, "Span (10 V)");
     cal_atm = make_field(cc, 280, "ATM correction");
     cal_store = make_field(cc, 380, "Stored");
+
+    // Raw chip readings. Excitation is fixed at 10 V; bus is what it measures.
+    lv_obj_t *rc = make_section(scr, 204, "Raw chip readings: INA228 (Power Monitor), Boost 10");
+    val_signal = make_field(rc, 0, "Shunt (Druck out)");
+    val_exc = make_field(rc, 125, "Bus (excitation)");
+    val_die = make_field(rc, 250, "Die temp");
+    val_pg = make_field(rc, 350, "Boost PG");
 
     lv_timer_create(status_timer_cb, 1000, NULL);
 }
