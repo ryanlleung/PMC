@@ -74,7 +74,7 @@ static uint32_t accel      = 400;    // steps/s^2
 static stepper3_mode_t mode = STEPPER3_FULL;
 static bool hold;                    // coils on when idle
 static bool reverse;                 // flips the sequence direction
-static uint8_t order[4] = { 0, 1, 2, 3 };   // coil n -> output order[n]
+static uint8_t order[4] = { 0, 2, 1, 3 };   // coil n -> output order[n]; 0213 found on the bench (8 Oct, 26M motor)
 
 /* --------------------------------------------------------------------------
  * Motion state (written by the ISR while moving)

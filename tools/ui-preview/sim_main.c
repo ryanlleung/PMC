@@ -165,11 +165,11 @@ static void check_motor_screen(void)
     tap_label(LV_SYMBOL_LEFT " Close");
     tap_label(LV_SYMBOL_LEFT " Close");
     assert(stepper3_position() == -10);
-    tap_label("Order 0123");
     tap_label("Order 0213");
+    tap_label("Order 0132");
     uint8_t o[4];
     stepper3_order(o);
-    assert(o[1] == 1 && o[2] == 3);
+    assert(o[1] == 1 && o[2] == 2);
     flushed_px = 0;
     for (int i = 0; i < 20; i++) { lv_tick_inc(110); lv_timer_handler(); }
     if (flushed_px != 0) {

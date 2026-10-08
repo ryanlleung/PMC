@@ -117,7 +117,7 @@ static int32_t m_pos;
 static uint32_t m_rate = 200, m_start = 25, m_accel = 400;
 static stepper3_mode_t m_mode = STEPPER3_FULL;
 static bool m_hold, m_rev;
-static uint8_t m_order[4] = { 0, 1, 2, 3 };
+static uint8_t m_order[4] = { 0, 2, 1, 3 };
 static stepper3_stop_t m_stop = STEPPER3_STOP_NONE;
 
 bool stepper3_move(int32_t steps) { m_pos += steps; m_stop = STEPPER3_STOP_DONE; return steps != 0; }
