@@ -410,12 +410,12 @@ void init_main_screen()
     lv_obj_set_style_pad_ver(hdr, 0, 0);
 
     lv_obj_t *title = make_label(hdr, "PMC", lv_color_white());
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, 96, 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
     clock_label = make_label(hdr, "time not set", COL_IDLE);
     lv_obj_set_style_text_font(clock_label, &lv_font_montserrat_12, 0);
     lv_obj_set_width(clock_label, 90);
     lv_label_set_long_mode(clock_label, LV_LABEL_LONG_CLIP);
-    lv_obj_align(clock_label, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(clock_label, LV_ALIGN_LEFT_MID, 46, 0);
     // Status words, right-aligned row; green = ok, red = fault, grey = idle.
     lv_obj_t *chips = lv_obj_create(hdr);
     lv_obj_remove_flag(chips, LV_OBJ_FLAG_SCROLLABLE);
@@ -456,6 +456,9 @@ void init_main_screen()
     // Uncertainty of the reading (uncert.c), under the unit.
     pressure_unc = make_label(pc, "", COL_MUTED);
     lv_obj_align_to(pressure_unc, unit, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
+#if !PMC_SHOW_UNCERTAINTY
+    lv_obj_add_flag(pressure_unc, LV_OBJ_FLAG_HIDDEN);   // UNC? still works
+#endif
     pressure_sub = make_label(pc, "", COL_MUTED);
     lv_obj_set_width(pressure_sub, 436);
     lv_label_set_long_mode(pressure_sub, LV_LABEL_LONG_DOT);
