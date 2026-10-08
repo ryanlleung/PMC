@@ -493,7 +493,7 @@ void init_main_screen()
 
     detail_raw = make_detail_panel(details);
     val_signal = make_field(detail_raw, 6, 0, "INA228 signal (ratio)");
-    val_exc = make_field(detail_raw, 236, 0, "INA228 excitation");
+    val_exc = make_field(detail_raw, 236, 0, "INA228 excitation (measured)");
     val_die = make_field(detail_raw, 6, 36, "INA228 temperature");
     val_pg = make_field(detail_raw, 236, 36, "Boost 10 supply");
 
