@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /**
- * @brief Needle-valve stepper on the Stepper 3 Click (S2, ULN2003, unipolar).
+ * @brief Needle-valve stepper on the Stepper 3 Click (S1, ULN2003, unipolar).
  *
  * The ULN2003 only switches the four coil ends to ground; the step sequence
  * comes from here. Steps are timed by TIM7 (interrupt per step), so the
