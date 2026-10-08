@@ -34,7 +34,7 @@ void link_init(void)                         { usb_serial_init(); }
 void link_task(void)                         { usb_serial_task(); }
 bool link_getline(char *buf, size_t n)       { return usb_serial_getline(buf, n); }
 const char *link_status(void)                { return usb_serial_status(); }
-const char *link_chip_text(void)             { return "USB"; }
+const char *link_chip_text(void)              { return "USB"; }
 
 bool link_take_new_client(void)
 {

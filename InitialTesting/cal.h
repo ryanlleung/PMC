@@ -18,6 +18,9 @@
  *   CAL NEW <id text>          start a new table (id up to 23 chars)
  *   CAL PT <mV/V> <mbar>       add a point, ratio ascending
  *   CAL APPLY                  check the new table and use it (RAM only)
+ *   CAL ATM <mbar> [unc]       scale the active table's ratios so the
+ *                              live reading equals <mbar> (corrects the
+ *                              INA228 input loading; RAM only, then SAVE)
  *   CAL SAVE                   write the active table to flash
  *   CAL ERASE                  erase flash and go back to the default
  * Replies start with OK or ERR.
@@ -33,6 +36,24 @@ int64_t cal_pressure_mmbar(int64_t r_ppb);
 
 bool cal_is_default(void);
 const char *cal_id(void);
+// True once the active table has been written to flash (or was loaded from
+// it), false after APPLY or ATM until CAL SAVE.
+bool cal_saved(void);
+// True if CAL ATM has scaled the active table.
+bool cal_atm_applied(void);
+// Product of the CAL ATM factors in ppm: 1000000 = none, 0 = unknown (table
+// saved by firmware before 0.3.5).
+int32_t cal_atm_ppm(void);
+// First point's ratio and last minus first, ppb (1 mV/V = 1000000), with
+// the ATM factor taken back out: the cert zero and span over the excitation.
+int32_t cal_zero_ppb(void);
+// Pressure and uncertainty given to the last CAL ATM, 0.001 mbar; 0 if
+// unknown (no ATM, or a table saved before 0.3.14). The uncertainty
+// defaults to CAL_ATM_UNC_DEFAULT when CAL ATM is given none.
+#define CAL_ATM_UNC_DEFAULT 1000   // 1.0 mbar
+int32_t cal_atm_ref_mmbar(void);
+int32_t cal_atm_unc_mmbar(void);
+int32_t cal_span_ppb(void);
 
 // Handles one command line from COM3. Returns false if it is not a CAL command.
 bool cal_command(const char *line);

@@ -8,15 +8,19 @@
 #include "link.h"
 #include "sysinfo.h"
 #include "cal.h"
+#include "rtclock.h"
+#include "uncert.h"
 
 static clicks_state_t st;
 static bool fake_wdt;
 static char value[24];
+static bool fake_saved, fake_atm;
 
 void fake_hw_set_scenario(const char *name)
 {
     memset(&st, 0, sizeof st);
     fake_wdt = false;
+    fake_saved = fake_atm = false;
     st.cal_nominal = true;
     st.boost_set_mv = 9999;
     st.pm_found = true;
@@ -39,6 +43,16 @@ void fake_hw_set_scenario(const char *name)
         strcpy(value, "----");
     } else if (!strcmp(name, "cal")) {
         st.cal_nominal = false;
+        fake_saved = fake_atm = true;
+        st.p_mmbar = 1013200;
+        strcpy(value, "1013.20");
+    } else if (!strcmp(name, "nodruck")) {
+        st.reading_ok = false;
+        st.druck_absent = true;
+        st.shunt_nv = 3100;
+        strcpy(value, "----");
+    } else if (!strcmp(name, "unsaved")) {
+        st.cal_nominal = false;
         fake_wdt = true;
     } else if (!strcmp(name, "trip")) {
         st.boost_tripped = true;
@@ -60,7 +74,12 @@ const char *clicks_druck_value(void) { return value; }
 bool clicks_druck_cal_nominal(void) { return st.cal_nominal; }
 const clicks_state_t *clicks_state(void) { return &st; }
 bool cal_is_default(void) { return st.cal_nominal; }
-const char *cal_id(void) { return "cert 1234567"; }
+const char *cal_id(void) { return fake_atm ? "5880156+atm" : "5880156"; }
+int32_t cal_atm_ppm(void) { return fake_atm ? 957300 : 1000000; }
+int32_t cal_zero_ppb(void) { return st.cal_nominal ? 0 : 133700; }
+int32_t cal_span_ppb(void) { return st.cal_nominal ? 10000000 : 10099600; }
+bool cal_saved(void) { return fake_saved; }
+bool cal_atm_applied(void) { return fake_atm; }
 int32_t clicks_boost10_set_mv(int32_t mv) { return st.boost_tripped ? -1 : mv; }
 
 void link_init(void) {}
@@ -72,6 +91,7 @@ bool link_chip_ok(void) { return true; }
 bool link_take_new_client(void) { return false; }
 const char *sysinfo_reset_reason(void) { return fake_wdt ? "watchdog" : "power-on"; }
 bool sysinfo_reset_abnormal(void) { return fake_wdt; }
+const char *i2c_sdk_test_result(void) { return ""; }
 const char *sysinfo_line(void) { return "PMC firmware 0.3.0 (preview), last reset: power-on"; }
 // Link output goes to stderr so the DATA line format can be checked.
 void link_printf(const char *fmt, ...)
@@ -80,4 +100,13 @@ void link_printf(const char *fmt, ...)
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
+}
+bool rtclock_valid(void) { return !st.cal_nominal; }
+const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "08 Oct  12:34"; }
+void uncert_update(const clicks_state_t *s) { (void)s; }
+const char *uncert_screen_text(bool *warn)
+{
+    *warn = st.cal_nominal;
+    if (!st.reading_ok) return "";
+    return st.cal_nominal ? "+/- ? (not calibrated)" : "+/- 1.08 mbar";
 }

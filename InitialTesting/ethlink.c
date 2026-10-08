@@ -221,9 +221,7 @@ bool ethlink_getline(char *buf, size_t n)
         // Bytes after a newline stay in rx for the next call.
         while (rx_pos < rx_len) {
             char c = rx[rx_pos++];
-            if (c == '\r')
-                continue;
-            if (c == '\n') {
+            if (c == '\r' || c == '\n') {
                 if (line_len == 0)
                     continue;
                 line[line_len] = '\0';

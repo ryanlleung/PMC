@@ -23,14 +23,21 @@ add_executable(InitialTesting
     main_screen.h
     usb_serial.h
     usb_serial.c
+    tinyusb_cdc_device.c
     clicks.h
     clicks.c
+    stepper3.h
+    stepper3.c
     extflash.h
     extflash.c
     cal.h
     cal.c
     sysinfo.h
     sysinfo.c
+    rtclock.c
+    uncert.c
+    i2c_sdk_test.h
+    i2c_sdk_test.c
     pmc_config.h
     link.h
     link.c

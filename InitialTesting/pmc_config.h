@@ -11,10 +11,26 @@
  *   0: USB COM port (COM3) as before, Ethernet off.
  * Flashing over USB-C with mikroBootloader works the same either way.
  */
-#define PMC_LINK_ETHERNET 1
+#define PMC_LINK_ETHERNET 0
+
+// 1: at boot, read the INA228 ID through the mikroSDK I2C2 driver (old
+// timeout 100, then default 10000) and send the result with the status
+// lines, before the bit-banged driver takes over. Bench diagnostic only.
+#define PMC_I2C_SDK_TEST  1
+
+// 1: "PM DIAG" command on the link: INA228 register readback and a sweep of
+// conversion times, modes and excitation, one line a second. Harmless when
+// not asked for; it moves the excitation 9-11 V and puts it back.
+#define PMC_PM_DIAG       1
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.3.0"
+#define PMC_FW_VERSION    "0.3.21"
+
+// 1 shows the +/- mbar uncertainty under the unit; UNC? works either way.
+#define PMC_SHOW_UNCERTAINTY 0
+
+// Serial number of the Druck in use, shown on the Calibration tab.
+#define PMC_DRUCK_SERIAL  "5880156"
 
 #define PMC_TCP_PORT      5000
 #define PMC_HOSTNAME      "pmc"

@@ -12,14 +12,15 @@
  *   S3 Boost 10      (LT8337 + TPL0501)  SPI1 PA5/PA6/PB5, CS PF8, PG PG2
  *   S4 Power Monitor (INA228)   SCL PF1 / SDA PF0 (bit-banged I2C)
  *
- * Nothing here drives the motor. The Boost 10 is set to ~10 V at start-up
+ * The stepper itself is in stepper3.c (coils off at start-up). The Boost 10 is set to ~10 V at start-up
  * for the Druck excitation, and drops to ~5 V if VBUS reads over 11.5 V.
  */
 
 // Latest readings for the UI, valid after clicks_init(), updated by clicks_poll().
 typedef struct {
     bool pm_found;        // INA228 answering
-    bool reading_ok;      // pm_found and excitation >= 7 V
+    bool reading_ok;      // pm_found, excitation >= 7 V and a plausible Druck signal
+    bool druck_absent;    // excitation fine but the signal is outside what a Druck gives
     int32_t shunt_nv;     // Druck signal (Vshunt), nV
     int32_t bus_mv;       // excitation (Vbus), mV
     int32_t r_ppb;        // signal / excitation, ppb (1 mV/V = 1 000 000)
@@ -30,12 +31,15 @@ typedef struct {
     bool boost_tripped;   // 11.5 V trip latched
     int32_t boost_trip_mv;
     int32_t boost_set_mv; // nominal setpoint for the wiper written
+    bool pm_diag;         // PM DIAG running (readings frozen)
 } clicks_state_t;
 
 void clicks_init(void);
 
 // Re-reads every board. Call about once a second.
 void clicks_poll(void);
+// Sets up the Power Monitor again (pins and INA228), e.g. after I2C TEST.
+void clicks_powermonitor_reinit(void);
 
 // One status line per board, valid after clicks_init().
 const char *clicks_stepper3_status(void);
@@ -54,5 +58,9 @@ const char *clicks_druck_value(void);
 bool clicks_druck_cal_nominal(void);
 
 const clicks_state_t *clicks_state(void);
+
+// "PM DIAG": Power Monitor input diagnostic, one result line per second on
+// the link (PMC_PM_DIAG). Returns false if the line is not a PM command.
+bool clicks_command(const char *line);
 
 #endif // _CLICKS_H_

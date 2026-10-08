@@ -1,3 +1,4 @@
+#include <string.h>
 /**
  * @file main.c
  * @brief Main source file for the InitialTesting LVGL Designer application.
@@ -22,8 +23,46 @@
 #include "pmc_config.h"
 #include "link.h"
 #include "sysinfo.h"
+#include "rtclock.h"
+#include "uncert.h"
+#include "i2c_sdk_test.h"
 #include "clicks.h"
 #include "cal.h"
+#include "stepper3.h"
+#include "main_screen.h"
+
+/*
+ * PERF?: how responsive the main loop is, since the last PERF?. Touch is
+ * read inside lv_timer_handler, so a long handler or loop pass is input lag.
+ */
+extern uint32_t disp_flush_ms, disp_flush_px;
+static uint32_t perf_since, perf_loops, perf_gap_max, perf_handler_max, perf_last_end;
+
+static void perf_note(uint32_t t0)
+{
+    uint32_t now = lv_tick_get();
+    uint32_t handler = now - t0;
+    if (handler > perf_handler_max) perf_handler_max = handler;
+    if (perf_last_end && now - perf_last_end > perf_gap_max) perf_gap_max = now - perf_last_end;
+    perf_last_end = now;
+    perf_loops++;
+}
+
+static bool perf_command(const char *line)
+{
+    if (strcmp(line, "PERF?") != 0)
+        return false;
+    uint32_t span = lv_tick_elaps(perf_since);
+    link_printf("PERF over %lu ms: loops=%lu longest_loop_ms=%lu longest_lvgl_ms=%lu "
+                "flush_ms=%lu flush_px=%lu\r\nOK\r\n",
+                (unsigned long)span, (unsigned long)perf_loops, (unsigned long)perf_gap_max,
+                (unsigned long)perf_handler_max, (unsigned long)disp_flush_ms,
+                (unsigned long)disp_flush_px);
+    perf_since = lv_tick_get();
+    perf_loops = perf_gap_max = perf_handler_max = 0;
+    disp_flush_ms = disp_flush_px = 0;
+    return true;
+}
 
 /**
  * @brief Initializes board peripherals for display, touch, and LVGL timing.
@@ -45,6 +84,7 @@ void application_init()
 {
     // Why the last reset happened (before anything else touches RCC).
     sysinfo_init();
+    rtclock_init();
 
     // Initialize board peripherals and LVGL drivers.
     board_init();
@@ -52,7 +92,8 @@ void application_init()
     // Druck calibration from the on-board serial flash (nominal if none stored).
     cal_init();
 
-    // Click boards on the shield (no motor drive, no Boost 10 writes).
+    // Click boards on the shield. Stepper coils off; the motor only moves
+    // on a MOT MOVE command.
     clicks_init();
 
     // Initialize all available screens.
@@ -113,11 +154,17 @@ int main(void)
     while (1)
     {
         link_task();
-        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line))
+        touch_poll();
+        rtclock_poll();
+        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) && !rtclock_command(line) && !i2c_sdk_test_command(line) && !touch_command(line) && !perf_command(line) && !uncert_command(line) &&
+            !stepper3_command(line) && !clicks_command(line) &&
+            !main_screen_data_command(line))
             link_printf("ERR unknown command\r\n");
+        uint32_t t0 = lv_tick_get();
         lv_timer_handler();
+        perf_note(t0);
         watchdog_kick();
-        Delay_ms(5);
+        Delay_ms(1);
     }
     ////////////////////////////////////////////////////////////////////////////////////////
 

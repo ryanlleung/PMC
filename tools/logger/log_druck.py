@@ -66,6 +66,10 @@ class Link:
             self.sock = socket.create_connection((host, int(port or TCP_PORT)), timeout=5)
             self.sock.settimeout(timeout)
             self.port = LineSock(self.sock)
+        # In case DATA OFF was left set from a terminal session.
+        self.write("DATA ON\n")
+        # Board clock from the PC's local time.
+        self.write(time.strftime("TIME SET %Y-%m-%d %H:%M:%S\n"))
 
     def readline(self):
         try:

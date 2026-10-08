@@ -8,37 +8,17 @@
 #include "lvgl.h"  // lv_snprintf
 #include "clicks.h"
 #include "cal.h"
+#include "i2c_sdk_test.h"
+#include "stepper3.h"
+#include "link.h"
+#include "pmc_config.h"
 
 #define STATUS_LEN 192
 
-static char stepper3_status[STATUS_LEN];
 static char boost10_status[STATUS_LEN];
 static char powermonitor_status[STATUS_LEN];
 static char druck_status[STATUS_LEN];
 static clicks_state_t state;
-
-/* --------------------------------------------------------------------------
- * Stepper 3 (S2)
- *
- * ULN2003 Darlington array: four inputs, no outputs back to the MCU, so the
- * board cannot be detected. All four inputs are driven low, which leaves
- * every coil off.
- * ------------------------------------------------------------------------ */
-static digital_out_t stepper3_in[4];
-
-static void stepper3_init(void)
-{
-    const pin_name_t pins[4] = { MIKROBUS_2_AN, MIKROBUS_2_RST,
-                                 MIKROBUS_2_CS, MIKROBUS_2_PWM };
-
-    for (int i = 0; i < 4; i++) {
-        digital_out_init(&stepper3_in[i], pins[i]);
-        digital_out_low(&stepper3_in[i]);
-    }
-
-    lv_snprintf(stepper3_status, STATUS_LEN,
-                "S2 Stepper 3: pins set, coils off (no readback)");
-}
 
 /* --------------------------------------------------------------------------
  * Boost 10 (S3)
@@ -51,9 +31,9 @@ static void stepper3_init(void)
  *
  * At start-up the wiper is written to BOOST10_WIPER_SET (~10.0 V nominal,
  * ~9.7-10.4 V with the digipot's +/-20% tolerance), the Druck excitation.
- * clicks_boost10_set_mv() then lets the screen slider move it between
- * 9.0 and 11.0 V nominal; the wiper is clamped to BOOST10_WIPER_11V..
- * BOOST10_WIPER_9V whatever is asked. If the Power Monitor reads VBUS above BOOST10_TRIP_MV
+ * It stays there: the screen has no setpoint control. Only PM DIAG moves it
+ * (clicks_boost10_set_mv(), 9.0-11.0 V nominal, wiper clamped to
+ * BOOST10_WIPER_11V..BOOST10_WIPER_9V) and puts it back afterwards. If the Power Monitor reads VBUS above BOOST10_TRIP_MV
  * the wiper goes to 0xFF (~5 V) and stays there until reset. That check
  * only works with VBUS wired to the Boost 10 output.
  *
@@ -152,23 +132,25 @@ static void boost10_check(int32_t vbus_mv)
 
 static void boost10_poll(void)
 {
-    state.boost_pg = digital_in_read(&boost10_pg) == 0;
+    // LT8337 PG is open drain, pulled low when the output is out of
+    // regulation (100k pull-up on the Click, schematic v101). PM DIAG saw PG
+    // high with VBUS on the setpoint, so high = regulating.
+    state.boost_pg = digital_in_read(&boost10_pg) != 0;
     state.boost_tripped = boost10_tripped;
     state.boost_trip_mv = boost10_trip_mv;
     state.boost_set_mv = boost10_wiper_to_mv(boost10_wiper);
 
-    const char *pg = digital_in_read(&boost10_pg) == 0 ? "PG low = regulating"
-                                                        : "PG high = NOT regulating";
+    const char *pg = state.boost_pg ? "PG high = regulating" : "PG low = NOT regulating";
     if (boost10_tripped)
         lv_snprintf(boost10_status, STATUS_LEN,
                     "S3 Boost 10: TRIPPED at %ld mV, now ~5 V, %s",
                     (long)boost10_trip_mv, pg);
     else
     {
-        int32_t mv = boost10_wiper_to_mv(boost10_wiper);
+        int32_t cv = (boost10_wiper_to_mv(boost10_wiper) + 5) / 10;  // 10 mV
         lv_snprintf(boost10_status, STATUS_LEN,
                     "S3 Boost 10: wiper %u (%ld.%02ld V nom), %s", boost10_wiper,
-                    (long)(mv / 1000), (long)((mv % 1000 + 5) / 10), pg);
+                    (long)(cv / 100), (long)(cv % 100), pg);
     }
 }
 
@@ -348,6 +330,15 @@ static void powermonitor_init(void)
  * ------------------------------------------------------------------------ */
 #define DRUCK_VEXC_MIN_MV    7000      // datasheet supply range 7-12 V
 
+/* A connected Druck gives about 0.13 mV/V at vacuum (cert zero 1.337 mV at
+ * 10 V, less the ~4 % input loading) up to about 10.2 mV/V at 15 psia. Well
+ * outside that, the sensor is unplugged or faulty. The limits leave room
+ * for other sensors' zero spread and some overrange. Not tested with the
+ * Druck unplugged yet: if the open inputs happen to float inside this
+ * window, the check will not catch it. */
+#define DRUCK_R_MIN_PPB      50000     // 0.05 mV/V
+#define DRUCK_R_MAX_PPB      11000000  // 11 mV/V
+
 // The ratio-to-pressure table lives in cal.c (stored in serial flash).
 static char druck_value[24];
 
@@ -361,6 +352,7 @@ static int64_t druck_pressure_mmbar(int32_t raw_shunt, int32_t raw_bus, int64_t 
 static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 {
     state.reading_ok = false;
+    state.druck_absent = false;
     if (bus_mv < DRUCK_VEXC_MIN_MV) {
         lv_snprintf(druck_value, sizeof druck_value, "----");
         lv_snprintf(druck_status, STATUS_LEN,
@@ -370,8 +362,17 @@ static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 
     int64_t r_ppb;
     int64_t p = druck_pressure_mmbar(raw_shunt, raw_bus, &r_ppb);
-    state.reading_ok = true;
     state.r_ppb = (int32_t)r_ppb;
+    if (r_ppb < DRUCK_R_MIN_PPB || r_ppb > DRUCK_R_MAX_PPB) {
+        int64_t ra = r_ppb < 0 ? -r_ppb : r_ppb;
+        state.druck_absent = true;
+        lv_snprintf(druck_value, sizeof druck_value, "----");
+        lv_snprintf(druck_status, STATUS_LEN,
+                    "Druck: signal %s%ld.%03ld mV/V, outside 0.05-11 mV/V (not connected?)",
+                    r_ppb < 0 ? "-" : "", (long)(ra / 1000000), (long)(ra % 1000000 / 1000));
+        return;
+    }
+    state.reading_ok = true;
     state.p_mmbar = (int32_t)p;
 
     // Round to 0.01 mbar.
@@ -388,6 +389,11 @@ static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
                 druck_value, r10 < 0 ? "-" : "", (long)(ra / 100000), (long)(ra % 100000),
                 (long)bus_mv, cal_is_default() ? "nominal cal" : cal_id());
 }
+
+#if PMC_PM_DIAG
+static int pmdiag_step = -1;  // -1 = not running
+static void pmdiag_run_step(void);
+#endif
 
 static void powermonitor_poll(void)
 {
@@ -433,6 +439,14 @@ static void powermonitor_poll(void)
         }
     }
 
+#if PMC_PM_DIAG
+    // The diagnostic owns the INA228 while it runs; readings hold their last value.
+    if (pmdiag_step >= 0) {
+        pmdiag_run_step();
+        return;
+    }
+#endif
+
     // VSHUNT: 20-bit signed in bits 23..4, 312.5 nV/LSB (ADCRANGE 0).
     // VBUS: 20-bit in bits 23..4, 195.3125 uV/LSB.
     // DIETEMP: 16-bit signed, 7.8125 m degC/LSB.
@@ -477,6 +491,242 @@ lost:
     state.reading_ok = false;
 }
 
+#if PMC_PM_DIAG
+/* --------------------------------------------------------------------------
+ * PM DIAG: Power Monitor input diagnostic (COM3 / TCP command)
+ *
+ * The board reads the Druck ~4.4 % below a DMM at the Click IN terminals.
+ * The Click has nothing between IN1 and the INA228 pins (schematic v100),
+ * so this checks the INA228 itself and how it samples the Druck output:
+ *   step 0      register readback (ADCRANGE, MEMSTAT trim checksum, ...)
+ *   steps 1-8   single-shot shunt conversions at each conversion time,
+ *               32 each: mean, min, max, sd. A mean that moves with the
+ *               conversion time, or a large sd, means interference is
+ *               being aliased; a mean that stays put means it is not.
+ *   steps 9-11  on-chip averaged readings: shunt only, and the normal
+ *               bus+shunt+temp sequence (does the bus conversion upset
+ *               the shunt one).
+ *   steps 12-14 excitation 9, 10, 11 V: the ratio should not move.
+ * One step per second from clicks_poll(), one line per step; then the
+ * excitation and the normal continuous setting are put back.
+ * ------------------------------------------------------------------------ */
+#define INA228_REG_CONFIG       0x00
+#define INA228_REG_SHUNT_CAL    0x02
+#define INA228_REG_SHUNT_TEMPCO 0x03
+#define INA228_REG_DIAG_ALRT    0x0B
+#define INA228_ADC_CONFIG_RUN   0xFB6C
+
+#define PM_CFG(mode, vbusct, vshct, vtct, avg) \
+    (uint16_t)(((mode) << 12) | ((vbusct) << 9) | ((vshct) << 6) | ((vtct) << 3) | (avg))
+
+typedef struct {
+    const char *what;
+    uint16_t cfg;      // ADC_CONFIG for one triggered conversion
+    uint8_t n;         // conversions taken
+    int16_t exc_mv;    // excitation to set first, 0 = leave
+} pmdiag_step_t;
+
+static const pmdiag_step_t pmdiag_steps[] = {
+    { "registers", 0, 0, 0 },
+    { "shunt 50us x1",     PM_CFG(2, 5, 0, 5, 0), 32, 0 },
+    { "shunt 84us x1",     PM_CFG(2, 5, 1, 5, 0), 32, 0 },
+    { "shunt 150us x1",    PM_CFG(2, 5, 2, 5, 0), 32, 0 },
+    { "shunt 280us x1",    PM_CFG(2, 5, 3, 5, 0), 32, 0 },
+    { "shunt 540us x1",    PM_CFG(2, 5, 4, 5, 0), 32, 0 },
+    { "shunt 1052us x1",   PM_CFG(2, 5, 5, 5, 0), 32, 0 },
+    { "shunt 2074us x1",   PM_CFG(2, 5, 6, 5, 0), 32, 0 },
+    { "shunt 4120us x1",   PM_CFG(2, 5, 7, 5, 0), 32, 0 },
+    { "shunt only 1052us x128",      PM_CFG(2, 5, 5, 5, 4), 2, 0 },
+    { "shunt only 4120us x64",       PM_CFG(2, 5, 7, 5, 3), 1, 0 },
+    { "bus+shunt+temp 1052us x128",  PM_CFG(7, 5, 5, 5, 4), 1, 0 },
+    { "exc 9V shunt+bus 1052us x128",  PM_CFG(3, 5, 5, 5, 4), 1, 9000 },
+    { "exc 10V shunt+bus 1052us x128", PM_CFG(3, 5, 5, 5, 4), 1, 10000 },
+    { "exc 11V shunt+bus 1052us x128", PM_CFG(3, 5, 5, 5, 4), 1, 11000 },
+};
+#define PMDIAG_STEPS ((int)(sizeof pmdiag_steps / sizeof pmdiag_steps[0]))
+
+static uint8_t pmdiag_saved_wiper;
+
+static void pmdiag_kick(void)
+{
+    IWDG->KR = 0xAAAA;  // a step can block for up to ~1 s
+}
+
+static bool pm_read16(uint8_t reg, uint16_t *v)
+{
+    uint8_t b[2];
+    if (!pm_read(reg, b, 2))
+        return false;
+    *v = (uint16_t)((b[0] << 8) | b[1]);
+    return true;
+}
+
+// One triggered conversion set (cfg), then VSHUNT and, if the mode has the
+// bus in it, VBUS. Raw 20-bit values.
+static bool pm_triggered(uint16_t cfg, int32_t *shunt, int32_t *bus)
+{
+    uint8_t b[3];
+    uint16_t d;
+
+    if (!pm_write16(INA228_REG_ADC_CONFIG, cfg))  // starts it, clears CNVRF
+        return false;
+    uint32_t t0 = lv_tick_get();
+    for (;;) {
+        if (!pm_read16(INA228_REG_DIAG_ALRT, &d))
+            return false;
+        if (d & 0x0002)  // CNVRF
+            break;
+        if (lv_tick_elaps(t0) > 1000)
+            return false;
+        pmdiag_kick();
+    }
+    if (!pm_read(INA228_REG_VSHUNT, b, 3))
+        return false;
+    *shunt = (int32_t)(((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) | ((uint32_t)b[2] << 8)) >> 12;
+    *bus = 0;
+    if ((cfg >> 12) & 1) {
+        if (!pm_read(INA228_REG_VBUS, b, 3))
+            return false;
+        *bus = (int32_t)((((uint32_t)b[0] << 16) | ((uint32_t)b[1] << 8) | b[2]) >> 4);
+    }
+    return true;
+}
+
+static uint32_t isqrt64(uint64_t v)
+{
+    uint64_t r = 0, bit = 1ULL << 62;
+    while (bit > v) bit >>= 2;
+    while (bit) {
+        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
+        else r >>= 1;
+        bit >>= 2;
+    }
+    return (uint32_t)r;
+}
+
+// 0.1 uV units as "-12345.6".
+static const char *fmt_0u1(char *buf, size_t n, int32_t v)
+{
+    lv_snprintf(buf, n, "%s%ld.%ld", v < 0 ? "-" : "", (long)(LV_ABS(v) / 10), (long)(LV_ABS(v) % 10));
+    return buf;
+}
+
+static void pmdiag_registers(void)
+{
+    uint16_t cfg = 0, adc = 0, cal = 0, tc = 0, dg = 0, id = 0;
+    bool ok = pm_read16(INA228_REG_CONFIG, &cfg) && pm_read16(INA228_REG_ADC_CONFIG, &adc) &&
+              pm_read16(INA228_REG_SHUNT_CAL, &cal) && pm_read16(INA228_REG_SHUNT_TEMPCO, &tc) &&
+              pm_read16(INA228_REG_DIAG_ALRT, &dg) && pm_read16(INA228_REG_DEV_ID, &id);
+    if (!ok) {
+        link_printf("PMDIAG 0 registers: I2C read failed\r\n");
+        return;
+    }
+    link_printf("PMDIAG 0 registers: CONFIG 0x%04X (ADCRANGE %d TEMPCOMP %d) ADC_CONFIG 0x%04X "
+                "SHUNT_CAL 0x%04X TEMPCO 0x%04X DIAG_ALRT 0x%04X (MEMSTAT %d, 1 = trim OK) DEV_ID 0x%04X\r\n",
+                cfg, (cfg >> 4) & 1, (cfg >> 5) & 1, adc, cal, tc, dg, dg & 1, id);
+}
+
+static void pmdiag_measure(int k)
+{
+    const pmdiag_step_t *st = &pmdiag_steps[k];
+    char a[16], b[16], c[16], d[16];
+    int32_t sh, bus = 0, first = 0, mn = 0, mx = 0;
+    int64_t sum = 0, sumsq = 0, sumbus = 0;
+
+    if (st->exc_mv) {
+        if (clicks_boost10_set_mv(st->exc_mv) < 0) {
+            link_printf("PMDIAG %d %s: skipped, Boost 10 tripped\r\n", k, st->what);
+            return;
+        }
+        uint32_t t0 = lv_tick_get();   // let the Boost and the Druck settle
+        while (lv_tick_elaps(t0) < 300)
+            pmdiag_kick();
+    }
+
+    for (int i = 0; i < st->n; i++) {
+        if (!pm_triggered(st->cfg, &sh, &bus)) {
+            link_printf("PMDIAG %d %s: conversion %d failed (I2C or no CNVRF)\r\n", k, st->what, i);
+            return;
+        }
+        if (i == 0) { first = sh; mn = sh; mx = sh; }
+        if (sh < mn) mn = sh;
+        if (sh > mx) mx = sh;
+        sum += sh;
+        sumsq += (int64_t)(sh - first) * (sh - first);
+        sumbus += bus;
+    }
+
+    int n = st->n;
+    int64_t dsum = sum - (int64_t)first * n;
+    int64_t var_raw_n2 = sumsq * n - dsum * dsum;           // n^2 x variance, raw^2
+    if (var_raw_n2 < 0) var_raw_n2 = 0;
+    // sd in 0.1 uV: sqrt(var) x 3.125
+    int32_t sd = (int32_t)(isqrt64((uint64_t)var_raw_n2 * 625 / 64) / (uint32_t)n);  // x 9.765625
+    int32_t mean = (int32_t)(sum * 3125 / (1000LL * n));    // 0.1 uV
+
+    if ((st->cfg >> 12) & 1) {  // mode includes the bus
+        int32_t raw_bus = (int32_t)(sumbus / n);
+        int32_t bus_mv = (int32_t)(((int64_t)raw_bus * 1953125) / 10000000);
+        int64_t r_ppb = raw_bus ? sum * 1600000 / ((int64_t)raw_bus * n) : 0;
+        boost10_check(bus_mv);
+        link_printf("PMDIAG %d %s: signal %s uV  exc %ld mV  ratio %ld.%06ld mV/V\r\n",
+                    k, st->what, fmt_0u1(a, sizeof a, mean), (long)bus_mv,
+                    (long)(r_ppb / 1000000), (long)LV_ABS(r_ppb % 1000000));
+    } else if (n < 4) {  // on-chip averaged: the mean is the result
+        link_printf("PMDIAG %d %s: signal %s uV (n=%d)\r\n", k, st->what, fmt_0u1(a, sizeof a, mean), n);
+    } else {
+        link_printf("PMDIAG %d %s: n=%d mean %s min %s max %s sd %s uV\r\n", k, st->what, n,
+                    fmt_0u1(a, sizeof a, mean),
+                    fmt_0u1(b, sizeof b, (int32_t)(mn * 3125 / 1000)),
+                    fmt_0u1(c, sizeof c, (int32_t)(mx * 3125 / 1000)),
+                    fmt_0u1(d, sizeof d, sd));
+    }
+}
+
+static void pmdiag_run_step(void)
+{
+    int k = pmdiag_step;
+
+    lv_snprintf(powermonitor_status, STATUS_LEN,
+                "S4 Power Monitor: PM DIAG step %d of %d (see COM3)", k, PMDIAG_STEPS - 1);
+    if (k == 0)
+        pmdiag_registers();
+    else
+        pmdiag_measure(k);
+
+    if (++pmdiag_step < PMDIAG_STEPS)
+        return;
+
+    // Put things back.
+    pmdiag_step = -1;
+    if (!boost10_tripped)
+        boost10_write_wiper(pmdiag_saved_wiper);
+    if (!pm_write16(INA228_REG_ADC_CONFIG, INA228_ADC_CONFIG_RUN))
+        pm_addr = 0;  // rescan next second
+    link_printf("PMDIAG done, excitation back to %ld mV nominal, normal readings resume\r\n",
+                (long)boost10_wiper_to_mv(boost10_wiper));
+}
+
+bool clicks_command(const char *line)
+{
+    if (strcmp(line, "PM DIAG") != 0)
+        return false;
+    if (pmdiag_step >= 0) {
+        link_printf("ERR PM DIAG already running\r\n");
+    } else if (pm_addr == 0) {
+        link_printf("ERR Power Monitor not found\r\n");
+    } else {
+        pmdiag_saved_wiper = boost10_wiper;
+        pmdiag_step = 0;
+        link_printf("OK PM DIAG: %d steps, one a second, excitation moves 9-11 V and is put back\r\n",
+                    PMDIAG_STEPS);
+    }
+    return true;
+}
+#else
+bool clicks_command(const char *line) { (void)line; return false; }
+#endif
+
 /* --------------------------------------------------------------------------
  * Public API
  * ------------------------------------------------------------------------ */
@@ -488,16 +738,29 @@ void clicks_init(void)
     clicks_poll();
 }
 
+// After the I2C2 SDK test has had PF0/PF1: bit-banged pins and INA228 again.
+void clicks_powermonitor_reinit(void)
+{
+    powermonitor_init();
+}
+
 void clicks_poll(void)
 {
     powermonitor_poll();  // may trip the Boost 10, so first
     boost10_poll();
 }
 
-const char *clicks_stepper3_status(void)     { return stepper3_status; }
+const char *clicks_stepper3_status(void)     { return stepper3_status(); }
 const char *clicks_boost10_status(void)      { return boost10_status; }
 const char *clicks_powermonitor_status(void) { return powermonitor_status; }
 const char *clicks_druck_status(void)        { return druck_status; }
 const char *clicks_druck_value(void)         { return druck_value; }
 bool clicks_druck_cal_nominal(void)          { return cal_is_default(); }
-const clicks_state_t *clicks_state(void)     { state.cal_nominal = cal_is_default(); return &state; }
+const clicks_state_t *clicks_state(void)
+{
+    state.cal_nominal = cal_is_default();
+#if PMC_PM_DIAG
+    state.pm_diag = pmdiag_step >= 0;
+#endif
+    return &state;
+}

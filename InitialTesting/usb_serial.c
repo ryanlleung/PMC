@@ -99,7 +99,7 @@ void usb_serial_printf(const char *fmt, ...)
     if (len >= (int)sizeof(buf))
         len = sizeof(buf) - 1;
 
-    // The SDK's TinyUSB is built with a 32-byte CDC TX FIFO, so a longer
+    // The CDC TX FIFO (tinyusb_cdc_device.c, 256 bytes) can be full, so a longer
     // line has to be fed in pieces while the stack sends. Give up after
     // ~5 ms if the PC is not reading (port closed), dropping the rest.
     uint32_t sent = 0;
@@ -116,18 +116,28 @@ void usb_serial_printf(const char *fmt, ...)
     }
 }
 
+#define LINE_IDLE_MS 200
+
+static uint32_t rx_bytes;
+
+uint32_t usb_serial_rx_bytes(void)
+{
+    return rx_bytes;
+}
+
 bool usb_serial_getline(char *buf, size_t n)
 {
     static char line[96];
     static size_t len;
+    static uint32_t last_rx;
 
     while (tud_cdc_available()) {
         int32_t c = tud_cdc_read_char();
         if (c < 0)
             break;
-        if (c == '\r')
-            continue;
-        if (c == '\n') {
+        rx_bytes++;
+        // CR, LF or CRLF all end a line (terminals differ); empty lines ignored.
+        if (c == '\r' || c == '\n') {
             if (len == 0)
                 continue;
             line[len] = '\0';
@@ -137,6 +147,17 @@ bool usb_serial_getline(char *buf, size_t n)
         }
         if (len < sizeof line - 1)
             line[len++] = (char)c;
+        last_rx = lv_tick_get();
+    }
+
+    // The NECTO UART Terminal sends the text with no line ending, so a line
+    // also ends after LINE_IDLE_MS with nothing more received. A terminal
+    // that sends each key as it is typed needs CR or LF instead.
+    if (len > 0 && lv_tick_elaps(last_rx) >= LINE_IDLE_MS) {
+        line[len] = '\0';
+        lv_strlcpy(buf, line, n);
+        len = 0;
+        return true;
     }
     return false;
 }
