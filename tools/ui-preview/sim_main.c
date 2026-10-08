@@ -85,8 +85,7 @@ static void check_detail_tabs(bool show_raw)
     assert(raw_tab && cal_tab && raw_field && cal_field);
     lv_obj_t *raw_panel = lv_obj_get_parent(raw_field);
     lv_obj_t *cal_panel = lv_obj_get_parent(cal_field);
-    assert(lv_obj_has_flag(raw_panel, LV_OBJ_FLAG_HIDDEN));
-    lv_obj_send_event(lv_obj_get_parent(raw_tab), LV_EVENT_CLICKED, NULL);
+    // Chip readings is the start-up tab.
     assert(!lv_obj_has_flag(raw_panel, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_state(lv_obj_get_parent(raw_tab), LV_STATE_CHECKED));

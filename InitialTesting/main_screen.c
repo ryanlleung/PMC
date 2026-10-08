@@ -15,7 +15,8 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
  * Screen layout, 480 x 272:
  *   y   0-30   header: PMC, clock (RTC), Druck ADC (Power Monitor) / excitation (Boost 10) / link
  *   y  38-130  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
- *   y 138-252  Calibration / Chip readings tabs, each with a 2 x 2 field grid
+ *   y 138-252  Chip readings / Calibration panels (2 x 2 fields), two half-width
+ *              tab buttons along the bottom; Chip readings shown at start-up
  *   y 256-270  firmware and reset cause, separate from fault messages
  * Pressure and faults remain visible while switching between detail tabs.
  * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
@@ -90,8 +91,6 @@ static void detail_tab_event(lv_event_t *e)
     lv_obj_add_flag(hidden, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_state(calibration ? tab_cal : tab_raw, LV_STATE_CHECKED);
     lv_obj_remove_state(calibration ? tab_raw : tab_cal, LV_STATE_CHECKED);
-    if (calibration) lv_obj_remove_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_add_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
 }
 
 static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char *text)
@@ -99,7 +98,7 @@ static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_remove_style_all(button);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
-    lv_obj_set_pos(button, x, 0);
+    lv_obj_set_pos(button, x, 74);
     lv_obj_set_size(button, width, 28);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_set_style_radius(button, 4, 0);
@@ -116,7 +115,7 @@ static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char
 
 static lv_obj_t *make_detail_panel(lv_obj_t *parent)
 {
-    lv_obj_t *panel = make_card(parent, 0, 34, 448, 68);
+    lv_obj_t *panel = make_card(parent, 0, 0, 448, 68);
     lv_obj_set_style_pad_all(panel, 0, 0);
     return panel;
 }
@@ -284,48 +283,51 @@ static void status_timer_cb(lv_timer_t *t)
     }
 
     // Calibration. Zero and span are shown as the cert gives them, mV at
-    // 10 V excitation, with any ATM correction taken back out.
+    // 10 V excitation, with the ATM correction taken back out. A table saved
+    // by firmware before 0.3.5 has no record of its ATM factor, so its zero
+    // and span still include it and are flagged.
     bool nominal = cal_is_default();
-    if (nominal) {
-        lv_label_set_text(cal_table, "none (nominal)");
-        lv_obj_set_style_text_color(cal_table, COL_WARN, 0);
-    } else {
-        // The "+atm" suffix is shown in the ATM column instead.
-        char id[CAL_ID_LEN];
-        lv_strlcpy(id, cal_id(), sizeof id);
-        size_t n = strlen(id);
-        if (n >= 4 && strcmp(id + n - 4, "+atm") == 0)
-            id[n - 4] = '\0';
-        lv_label_set_text(cal_table, id);
-        lv_obj_set_style_text_color(cal_table, COL_TEXT, 0);
-    }
+    int32_t k = cal_atm_ppm();
+    bool k_unknown = cal_atm_applied() && k <= 0;
+    lv_label_set_text(cal_table, PMC_DRUCK_SERIAL);
+
+    lv_color_t zs_col = nominal || k_unknown ? COL_WARN : COL_TEXT;
     set_fixed2(cal_zero, (int64_t)cal_zero_ppb() * 10, 6, "mV");
     set_fixed2(cal_span, (int64_t)cal_span_ppb() * 10, 6, "mV");
-
-    int32_t k = cal_atm_ppm();
-    if (!cal_atm_applied()) {
-        lv_label_set_text(cal_atm, nominal ? "--" : "not applied");
-        lv_obj_set_style_text_color(cal_atm, nominal ? COL_MUTED : COL_WARN, 0);
-    } else if (k <= 0) {
-        lv_label_set_text(cal_atm, "applied");
-        lv_obj_set_style_text_color(cal_atm, COL_OK, 0);
-    } else {
-        // Gain as a percentage change: 0.957300 shows -4.27 %.
-        int32_t c = (LV_ABS(k - 1000000) + 50) / 100;   // 0.01 %
-        lv_label_set_text_fmt(cal_atm, "%s%ld.%02ld %%", k < 1000000 ? "-" : "+",
-                              (long)(c / 100), (long)(c % 100));
-        lv_obj_set_style_text_color(cal_atm, COL_OK, 0);
-    }
-
     if (nominal) {
-        lv_label_set_text(cal_store, "");
-    } else if (cal_saved()) {
-        lv_label_set_text(cal_store, "saved in flash");
-        lv_obj_set_style_text_color(cal_store, COL_OK, 0);
-    } else {
-        lv_label_set_text(cal_store, "Unsaved (CAL SAVE)");
-        lv_obj_set_style_text_color(cal_store, COL_WARN, 0);
+        lv_label_set_text(cal_zero, "0.00 mV (nominal)");
+        lv_label_set_text(cal_span, "100.00 mV (nominal)");
+    } else if (k_unknown) {
+        char t[32];
+        lv_snprintf(t, sizeof t, "%s incl. ATM", lv_label_get_text(cal_zero));
+        lv_label_set_text(cal_zero, t);
+        lv_snprintf(t, sizeof t, "%s incl. ATM", lv_label_get_text(cal_span));
+        lv_label_set_text(cal_span, t);
     }
+    lv_obj_set_style_text_color(cal_zero, zs_col, 0);
+    lv_obj_set_style_text_color(cal_span, zs_col, 0);
+
+    if (!cal_atm_applied()) {
+        lv_label_set_text(cal_atm, nominal ? "--" : "not applied (CAL ATM)");
+        lv_obj_set_style_text_color(cal_atm, nominal ? COL_MUTED : COL_WARN, 0);
+    } else if (k_unknown) {
+        lv_label_set_text(cal_atm, "unknown, redo cal");
+        lv_obj_set_style_text_color(cal_atm, COL_WARN, 0);
+    } else {
+        // Gain as a factor and a percentage: 0.957300 shows x0.9573 (-4.27 %).
+        int32_t c = (LV_ABS(k - 1000000) + 50) / 100;   // 0.01 %
+        int32_t f = (k + 50) / 100;                     // 0.0001
+        lv_label_set_text_fmt(cal_atm, "x%ld.%04ld (%s%ld.%02ld %%)",
+                              (long)(f / 10000), (long)(f % 10000),
+                              k < 1000000 ? "-" : "+", (long)(c / 100), (long)(c % 100));
+        lv_obj_set_style_text_color(cal_atm, COL_TEXT, 0);
+    }
+
+    // Only a warning: nothing is shown once the table is saved.
+    if (!nominal && !cal_saved())
+        lv_obj_remove_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
+    else
+        lv_obj_add_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
 }
 
 void init_main_screen()
@@ -417,24 +419,23 @@ void init_main_screen()
 
     // One spacious detail area; both sets of values still update every second.
     lv_obj_t *details = make_card(scr, 10, 138, 460, 114);
-    tab_cal = make_tab(details, 0, 108, "Calibration");
-    tab_raw = make_tab(details, 116, 118, "Chip readings");
-    lv_obj_add_state(tab_cal, LV_STATE_CHECKED);
-    cal_store = make_label(details, "", COL_MUTED);
+    tab_raw = make_tab(details, 0, 220, "Chip readings");
+    tab_cal = make_tab(details, 228, 220, "Calibration");
+    lv_obj_add_state(tab_raw, LV_STATE_CHECKED);
+    // Unsaved warning on the Calibration button, so it shows on either tab.
+    cal_store = make_label(tab_cal, "not saved", COL_WARN);
     lv_obj_set_style_text_font(cal_store, &lv_font_montserrat_12, 0);
-    lv_obj_set_width(cal_store, 204);
-    lv_obj_set_style_text_align(cal_store, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_label_set_long_mode(cal_store, LV_LABEL_LONG_DOT);
-    lv_obj_set_pos(cal_store, 244, 8);
+    lv_obj_align(cal_store, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_add_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
 
     detail_cal = make_detail_panel(details);
+    lv_obj_add_flag(detail_cal, LV_OBJ_FLAG_HIDDEN);
     cal_table = make_field(detail_cal, 6, 0, "Druck serial number");
     cal_atm = make_field(detail_cal, 236, 0, "Atmospheric correction");
     cal_zero = make_field(detail_cal, 6, 36, "Certificate zero at 10 V");
     cal_span = make_field(detail_cal, 236, 36, "Certificate span at 10 V");
 
     detail_raw = make_detail_panel(details);
-    lv_obj_add_flag(detail_raw, LV_OBJ_FLAG_HIDDEN);
     val_signal = make_field(detail_raw, 6, 0, "INA228 signal");
     val_exc = make_field(detail_raw, 236, 0, "INA228 excitation");
     val_die = make_field(detail_raw, 6, 36, "INA228 temperature");
