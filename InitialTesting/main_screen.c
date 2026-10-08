@@ -110,8 +110,12 @@ static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char
     lv_obj_set_style_radius(button, 4, 0);
     lv_obj_set_style_bg_color(button, lv_color_make(235, 240, 245), 0);
     lv_obj_set_style_text_color(button, COL_MUTED, 0);
-    lv_obj_set_style_bg_color(button, COL_HEADER, LV_STATE_CHECKED);
-    lv_obj_set_style_text_color(button, lv_color_white(), LV_STATE_CHECKED);
+    // Selected: white with a dark outline (same size, so the label stays put).
+    lv_obj_set_style_border_width(button, 2, 0);
+    lv_obj_set_style_border_color(button, lv_color_make(235, 240, 245), 0);
+    lv_obj_set_style_bg_color(button, COL_CARD, LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(button, COL_HEADER, LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(button, COL_TEXT, LV_STATE_CHECKED);
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, text);
     lv_obj_center(label);
@@ -339,7 +343,7 @@ static void status_timer_cb(lv_timer_t *t)
         set_color(val_pg, COL_FAULT);
     } else {
         set_text(val_pg, s->boost_pg ? "regulating" : "not regulating");
-        set_color(val_pg, s->boost_pg ? COL_OK : COL_FAULT);
+        set_color(val_pg, s->boost_pg ? COL_TEXT : COL_FAULT);
     }
 
     // Calibration. Zero and span are shown as the cert gives them, mV at
