@@ -22,8 +22,11 @@ static uint8_t draw_buf[W * H * 2] __attribute__((aligned(4)));
 
 void fake_hw_set_scenario(const char *name);
 
+static long flushed_px;   // pixels sent to the display, for the redraw check
+
 static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px)
 {
+    flushed_px += (long)(a->x2 - a->x1 + 1) * (a->y2 - a->y1 + 1);
     const uint16_t *src = (const uint16_t *)px;
     for (int32_t y = a->y1; y <= a->y2; y++)
         for (int32_t x = a->x1; x <= a->x2; x++)
@@ -89,11 +92,11 @@ static void check_detail_tabs(bool show_raw)
     assert(!lv_obj_has_flag(raw_panel, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_state(lv_obj_get_parent(raw_tab), LV_STATE_CHECKED));
-    lv_obj_send_event(lv_obj_get_parent(cal_tab), LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(lv_obj_get_parent(cal_tab), LV_EVENT_PRESSED, NULL);
     assert(!lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
     assert(lv_obj_has_flag(raw_panel, LV_OBJ_FLAG_HIDDEN));
     assert(!lv_obj_has_state(lv_obj_get_parent(raw_tab), LV_STATE_CHECKED));
-    if (show_raw) lv_obj_send_event(lv_obj_get_parent(raw_tab), LV_EVENT_CLICKED, NULL);
+    if (show_raw) lv_obj_send_event(lv_obj_get_parent(raw_tab), LV_EVENT_PRESSED, NULL);
 }
 
 /* A tap through a real pointer input device, so hit-testing is checked too
@@ -159,6 +162,18 @@ int main(int argc, char **argv)
         lv_tick_inc(1100);
         lv_timer_handler();
     }
+    // Readings that do not change must not redraw anything: on the board
+    // every redrawn pixel is written to the SSD1963 one at a time.
+    flushed_px = 0;
+    for (int i = 0; i < 3; i++) {
+        lv_tick_inc(1100);
+        lv_timer_handler();
+    }
+    if (flushed_px != 0) {
+        fprintf(stderr, "steady-state redraw: %ld px\n", flushed_px);
+        return 1;
+    }
+
     lv_indev_t *touch = lv_indev_create();
     lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch, touch_read);

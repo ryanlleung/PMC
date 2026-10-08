@@ -1,3 +1,4 @@
+#include <stdarg.h>
 #include <string.h>
 
 #include "main_screen.h"
@@ -84,7 +85,10 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t col)
 
 static void detail_tab_event(lv_event_t *e)
 {
-    bool calibration = lv_event_get_target_obj(e) == tab_cal;
+    lv_obj_t *target = lv_event_get_target_obj(e);
+    if (lv_obj_has_state(target, LV_STATE_CHECKED))
+        return;                                     // already showing
+    bool calibration = target == tab_cal;
     lv_obj_t *shown = calibration ? detail_cal : detail_raw;
     lv_obj_t *hidden = calibration ? detail_raw : detail_cal;
     lv_obj_remove_flag(shown, LV_OBJ_FLAG_HIDDEN);
@@ -109,7 +113,8 @@ static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, text);
     lv_obj_center(label);
-    lv_obj_add_event_cb(button, detail_tab_event, LV_EVENT_CLICKED, NULL);
+    // On press, not release, so the tab changes as soon as it is touched.
+    lv_obj_add_event_cb(button, detail_tab_event, LV_EVENT_PRESSED, NULL);
     return button;
 }
 
@@ -133,21 +138,64 @@ static lv_obj_t *make_field(lv_obj_t *parent, int32_t x, int32_t y, const char *
     return v;
 }
 
+/*
+ * Updates that change nothing must not redraw: setting a label's text or a
+ * style, even to the same value, invalidates the object, and the SSD1963 is
+ * written pixel by pixel. The status timer refreshes every field each
+ * second, so these only touch the object when the value differs.
+ */
+static void set_text(lv_obj_t *l, const char *text)
+{
+    if (strcmp(lv_label_get_text(l), text) != 0)
+        lv_label_set_text(l, text);
+}
+
+static void set_text_fmt(lv_obj_t *l, const char *fmt, ...)
+{
+    char t[96];
+    va_list ap;
+    va_start(ap, fmt);
+    lv_vsnprintf(t, sizeof t, fmt, ap);
+    va_end(ap);
+    set_text(l, t);
+}
+
+static void set_color(lv_obj_t *o, lv_color_t c)
+{
+    if (!lv_color_eq(lv_obj_get_style_text_color(o, LV_PART_MAIN), c))
+        lv_obj_set_style_text_color(o, c, 0);
+}
+
+static void set_hidden(lv_obj_t *o, bool hidden)
+{
+    if (hidden != lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+        if (hidden) lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 // Fixed point with 2 decimals, rounded: v in units of 10^-dec.
-static void set_fixed2(lv_obj_t *l, int64_t v, int dec, const char *unit)
+static void fmt_fixed2(char *buf, size_t n, int64_t v, int dec, const char *unit)
 {
     int64_t scale = 1;
     for (int k = 2; k < dec; k++) scale *= 10;
     int64_t a = v < 0 ? -v : v;
     a = (a + scale / 2) / scale;                   // now hundredths
-    lv_label_set_text_fmt(l, "%s%ld.%02ld %s", (v < 0 && a) ? "-" : "",
-                          (long)(a / 100), (long)(a % 100), unit);
+    lv_snprintf(buf, n, "%s%ld.%02ld %s", (v < 0 && a) ? "-" : "",
+                (long)(a / 100), (long)(a % 100), unit);
+}
+
+static void set_fixed2(lv_obj_t *l, int64_t v, int dec, const char *unit)
+{
+    char t[32];
+    fmt_fixed2(t, sizeof t, v, dec, unit);
+    set_text(l, t);
 }
 
 static void set_chip(lv_obj_t *chip, const char *text, lv_color_t col)
 {
-    lv_label_set_text(chip, text);
-    lv_obj_set_style_text_color(chip, col, 0);
+    set_text(chip, text);
+    set_color(chip, col);
 }
 
 /*
@@ -238,26 +286,27 @@ static void status_timer_cb(lv_timer_t *t)
     else
         set_chip(chip_boost, s->boost_pg ? "10 V OK" : "10 V OFF", s->boost_pg ? COL_OK : COL_FAULT);
     set_chip(chip_usb, link_chip_text(), link_chip_ok() ? COL_OK : COL_IDLE);
-    lv_label_set_text(clock_label, rtclock_screen_text());
-    lv_obj_set_style_text_color(clock_label, rtclock_valid() ? lv_color_white() : COL_IDLE, 0);
+    set_text(clock_label, rtclock_screen_text());
+    set_color(clock_label, rtclock_valid() ? lv_color_white() : COL_IDLE);
 
     // Pressure.
-    lv_label_set_text(pressure_label, s->reading_ok && !s->boost_tripped ? clicks_druck_value() : "----");
-    lv_obj_set_style_border_color(pressure_card,
-        !s->reading_ok || s->boost_tripped ? COL_FAULT : s->cal_nominal ? COL_WARN : COL_OK, 0);
+    set_text(pressure_label, s->reading_ok && !s->boost_tripped ? clicks_druck_value() : "----");
+    lv_color_t edge = !s->reading_ok || s->boost_tripped ? COL_FAULT : s->cal_nominal ? COL_WARN : COL_OK;
+    if (!lv_color_eq(lv_obj_get_style_border_color(pressure_card, LV_PART_MAIN), edge))
+        lv_obj_set_style_border_color(pressure_card, edge, 0);
     if (!s->pm_found)
-        lv_label_set_text(pressure_sub, "Druck ADC (Power Monitor) not responding");
+        set_text(pressure_sub, "Druck ADC (Power Monitor) not responding");
     else if (s->boost_tripped)
-        lv_label_set_text_fmt(pressure_sub, "10 V supply tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
+        set_text_fmt(pressure_sub, "10 V supply tripped at %ld mV, reset to clear", (long)s->boost_trip_mv);
     else if (!s->reading_ok)
-        lv_label_set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
+        set_text(pressure_sub, "Excitation below 7 V, check VBUS wiring");
     else if (s->cal_nominal)
-        lv_label_set_text(pressure_sub, "Druck 15 psia, NOT calibrated (nominal)");
+        set_text(pressure_sub, "Druck 15 psia, NOT calibrated (nominal)");
     else
-        lv_label_set_text(pressure_sub, "Druck 15 psia, calibrated");
-    lv_obj_set_style_text_color(pressure_sub,
+        set_text(pressure_sub, "Druck 15 psia, calibrated");
+    set_color(pressure_sub,
                                 (!s->pm_found || s->boost_tripped || !s->reading_ok) ? COL_FAULT :
-                                s->cal_nominal ? COL_WARN : COL_MUTED, 0);
+                                s->cal_nominal ? COL_WARN : COL_MUTED);
 
     // Readouts, 2 decimals (the DATA lines keep full resolution).
     if (s->pm_found) {
@@ -265,21 +314,21 @@ static void status_timer_cb(lv_timer_t *t)
         set_fixed2(val_exc, s->bus_mv, 3, "V");
         set_fixed2(val_die, s->die_mc, 3, "C");
     } else {
-        lv_label_set_text(val_signal, "--");
-        lv_label_set_text(val_exc, "--");
-        lv_label_set_text(val_die, "--");
+        set_text(val_signal, "--");
+        set_text(val_exc, "--");
+        set_text(val_die, "--");
     }
     if (s->reading_ok)
         set_fixed2(val_ratio, s->r_ppb, 6, "mV/V");
     else
-        lv_label_set_text(val_ratio, "-- mV/V");
+        set_text(val_ratio, "-- mV/V");
 
     if (s->boost_tripped) {
-        lv_label_set_text(val_pg, "tripped");
-        lv_obj_set_style_text_color(val_pg, COL_FAULT, 0);
+        set_text(val_pg, "tripped");
+        set_color(val_pg, COL_FAULT);
     } else {
-        lv_label_set_text(val_pg, s->boost_pg ? "regulating" : "not regulating");
-        lv_obj_set_style_text_color(val_pg, s->boost_pg ? COL_OK : COL_FAULT, 0);
+        set_text(val_pg, s->boost_pg ? "regulating" : "not regulating");
+        set_color(val_pg, s->boost_pg ? COL_OK : COL_FAULT);
     }
 
     // Calibration. Zero and span are shown as the cert gives them, mV at
@@ -289,45 +338,36 @@ static void status_timer_cb(lv_timer_t *t)
     bool nominal = cal_is_default();
     int32_t k = cal_atm_ppm();
     bool k_unknown = cal_atm_applied() && k <= 0;
-    lv_label_set_text(cal_table, PMC_DRUCK_SERIAL);
+    set_text(cal_table, PMC_DRUCK_SERIAL);
 
     lv_color_t zs_col = nominal || k_unknown ? COL_WARN : COL_TEXT;
-    set_fixed2(cal_zero, (int64_t)cal_zero_ppb() * 10, 6, "mV");
-    set_fixed2(cal_span, (int64_t)cal_span_ppb() * 10, 6, "mV");
-    if (nominal) {
-        lv_label_set_text(cal_zero, "0.00 mV (nominal)");
-        lv_label_set_text(cal_span, "100.00 mV (nominal)");
-    } else if (k_unknown) {
-        char t[32];
-        lv_snprintf(t, sizeof t, "%s incl. ATM", lv_label_get_text(cal_zero));
-        lv_label_set_text(cal_zero, t);
-        lv_snprintf(t, sizeof t, "%s incl. ATM", lv_label_get_text(cal_span));
-        lv_label_set_text(cal_span, t);
-    }
-    lv_obj_set_style_text_color(cal_zero, zs_col, 0);
-    lv_obj_set_style_text_color(cal_span, zs_col, 0);
+    char z[32], sp[32];
+    fmt_fixed2(z, sizeof z, (int64_t)cal_zero_ppb() * 10, 6, "mV");
+    fmt_fixed2(sp, sizeof sp, (int64_t)cal_span_ppb() * 10, 6, "mV");
+    const char *suffix = nominal ? " (nominal)" : k_unknown ? " incl. ATM" : "";
+    set_text_fmt(cal_zero, "%s%s", z, suffix);
+    set_text_fmt(cal_span, "%s%s", sp, suffix);
+    set_color(cal_zero, zs_col);
+    set_color(cal_span, zs_col);
 
     if (!cal_atm_applied()) {
-        lv_label_set_text(cal_atm, nominal ? "--" : "not applied (CAL ATM)");
-        lv_obj_set_style_text_color(cal_atm, nominal ? COL_MUTED : COL_WARN, 0);
+        set_text(cal_atm, nominal ? "--" : "not applied (CAL ATM)");
+        set_color(cal_atm, nominal ? COL_MUTED : COL_WARN);
     } else if (k_unknown) {
-        lv_label_set_text(cal_atm, "unknown, redo cal");
-        lv_obj_set_style_text_color(cal_atm, COL_WARN, 0);
+        set_text(cal_atm, "unknown, redo cal");
+        set_color(cal_atm, COL_WARN);
     } else {
         // Gain as a factor and a percentage: 0.957300 shows x0.9573 (-4.27 %).
         int32_t c = (LV_ABS(k - 1000000) + 50) / 100;   // 0.01 %
         int32_t f = (k + 50) / 100;                     // 0.0001
-        lv_label_set_text_fmt(cal_atm, "x%ld.%04ld (%s%ld.%02ld %%)",
+        set_text_fmt(cal_atm, "x%ld.%04ld (%s%ld.%02ld %%)",
                               (long)(f / 10000), (long)(f % 10000),
                               k < 1000000 ? "-" : "+", (long)(c / 100), (long)(c % 100));
-        lv_obj_set_style_text_color(cal_atm, COL_TEXT, 0);
+        set_color(cal_atm, COL_TEXT);
     }
 
     // Only a warning: nothing is shown once the table is saved.
-    if (!nominal && !cal_saved())
-        lv_obj_remove_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
-    else
-        lv_obj_add_flag(cal_store, LV_OBJ_FLAG_HIDDEN);
+    set_hidden(cal_store, nominal || cal_saved());
 }
 
 void init_main_screen()
