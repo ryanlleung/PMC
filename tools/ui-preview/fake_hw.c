@@ -8,6 +8,7 @@
 #include "link.h"
 #include "sysinfo.h"
 #include "cal.h"
+#include "rtclock.h"
 
 static clicks_state_t st;
 static bool fake_wdt;
@@ -94,3 +95,5 @@ void link_printf(const char *fmt, ...)
     vfprintf(stderr, fmt, ap);
     va_end(ap);
 }
+bool rtclock_valid(void) { return !st.cal_nominal; }
+const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "12:34:56  08 Oct"; }

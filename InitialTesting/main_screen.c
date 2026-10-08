@@ -5,6 +5,7 @@
 #include "clicks.h"
 #include "cal.h"
 #include "sysinfo.h"
+#include "rtclock.h"
 #include "i2c_sdk_test.h"
 #include "pmc_config.h"
 
@@ -12,7 +13,7 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
 /*
  * Screen layout, 480 x 272:
- *   y   0-30   header: title, Druck ADC (Power Monitor) / excitation (Boost 10) / link
+ *   y   0-30   header: PMC, clock (RTC), Druck ADC (Power Monitor) / excitation (Boost 10) / link
  *   y  38-134  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
  *   y 140-198  calibration (12 px): Druck s/n, cert zero and span, ATM correction, stored
  *   y 204-262  raw chip readings (12 px): INA228 shunt, bus, die temperature; Boost 10 PG
@@ -30,6 +31,7 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
 #define COL_WARN     lv_color_make(214, 130, 0)
 
 static lv_obj_t *chip_pm, *chip_boost, *chip_usb;
+static lv_obj_t *clock_label;
 static lv_obj_t *pressure_label;
 static lv_obj_t *pressure_sub;
 static lv_obj_t *val_signal, *val_ratio, *val_exc, *val_die, *val_pg;
@@ -184,6 +186,8 @@ static void status_timer_cb(lv_timer_t *t)
     else
         set_chip(chip_boost, "10 V supply", s->boost_pg ? COL_OK : COL_FAULT);
     set_chip(chip_usb, link_chip_text(), link_chip_ok() ? COL_OK : COL_IDLE);
+    lv_label_set_text(clock_label, rtclock_screen_text());
+    lv_obj_set_style_text_color(clock_label, rtclock_valid() ? lv_color_white() : COL_IDLE, 0);
 
     // Pressure.
     lv_label_set_text(pressure_label, clicks_druck_value());
@@ -289,8 +293,10 @@ void init_main_screen()
     lv_obj_set_style_pad_hor(hdr, 10, 0);
     lv_obj_set_style_pad_ver(hdr, 0, 0);
 
-    lv_obj_t *title = make_label(hdr, "PMC  Druck pressure", lv_color_white());
+    lv_obj_t *title = make_label(hdr, "PMC", lv_color_white());
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    clock_label = make_label(hdr, "", COL_IDLE);
+    lv_obj_align(clock_label, LV_ALIGN_LEFT_MID, 46, 0);
     // Status words, right-aligned row; green = ok, red = fault, grey = idle.
     lv_obj_t *chips = lv_obj_create(hdr);
     lv_obj_remove_flag(chips, LV_OBJ_FLAG_SCROLLABLE);

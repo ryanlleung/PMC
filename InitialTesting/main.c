@@ -22,6 +22,7 @@
 #include "pmc_config.h"
 #include "link.h"
 #include "sysinfo.h"
+#include "rtclock.h"
 #include "clicks.h"
 #include "cal.h"
 #include "stepper3.h"
@@ -47,6 +48,7 @@ void application_init()
 {
     // Why the last reset happened (before anything else touches RCC).
     sysinfo_init();
+    rtclock_init();
 
     // Initialize board peripherals and LVGL drivers.
     board_init();
@@ -116,7 +118,8 @@ int main(void)
     while (1)
     {
         link_task();
-        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) &&
+        rtclock_poll();
+        if (link_getline(line, sizeof line) && !cal_command(line) && !sysinfo_command(line) && !rtclock_command(line) &&
             !stepper3_command(line) && !clicks_command(line) &&
             !main_screen_data_command(line))
             link_printf("ERR unknown command\r\n");

@@ -34,6 +34,7 @@ add_executable(InitialTesting
     cal.c
     sysinfo.h
     sysinfo.c
+    rtclock.c
     i2c_sdk_test.h
     i2c_sdk_test.c
     pmc_config.h
