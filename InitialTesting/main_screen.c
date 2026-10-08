@@ -110,12 +110,14 @@ static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char
     lv_obj_set_style_radius(button, 4, 0);
     lv_obj_set_style_bg_color(button, lv_color_make(235, 240, 245), 0);
     lv_obj_set_style_text_color(button, COL_MUTED, 0);
-    // Selected: white with a dark outline (same size, so the label stays put).
+    // Selected: same grey with a dark outline and dark text. The unselected
+    // border matches the fill so the label does not shift. Slightly darker
+    // while pressed, for feedback.
     lv_obj_set_style_border_width(button, 2, 0);
     lv_obj_set_style_border_color(button, lv_color_make(235, 240, 245), 0);
-    lv_obj_set_style_bg_color(button, COL_CARD, LV_STATE_CHECKED);
     lv_obj_set_style_border_color(button, COL_HEADER, LV_STATE_CHECKED);
     lv_obj_set_style_text_color(button, COL_TEXT, LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(button, lv_color_make(218, 225, 232), LV_STATE_PRESSED);
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, text);
     lv_obj_center(label);

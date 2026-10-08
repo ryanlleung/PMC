@@ -24,7 +24,7 @@
 #define PMC_PM_DIAG       1
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.3.17"
+#define PMC_FW_VERSION    "0.3.18"
 
 // Serial number of the Druck in use, shown on the Calibration tab.
 #define PMC_DRUCK_SERIAL  "5880156"
