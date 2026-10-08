@@ -344,7 +344,7 @@ const char *stepper3_status(void)
     const char *st = run_state == ST_MOVING ? (dir > 0 ? "opening" : "closing")
                    : energised ? "idle, coils on" : "idle, coils off";
     lv_snprintf(status_text, sizeof status_text,
-                "S2 Stepper 3: %s, pos %ld, %s %lu sps, limit %s",
+                "S%d Stepper 3: %s, pos %ld, %s %lu sps, limit %s", PMC_STEPPER3_SOCKET,
                 st, (long)position, mode_name(mode), (unsigned long)rate_run,
                 !LIMIT_FITTED ? "not fitted" : stepper3_limit_open() ? "OPEN" : "ok");
     return status_text;
