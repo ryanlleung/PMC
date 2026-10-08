@@ -114,7 +114,7 @@ const char *uncert_screen_text(bool *warn)
 /* Stepper 3: settings only, a move completes at once. */
 #include "stepper3.h"
 static int32_t m_pos;
-static uint32_t m_rate = 200, m_start = 25, m_accel = 400;
+static uint32_t m_rate = 400, m_start = 200, m_accel = 3200;
 static stepper3_mode_t m_mode = STEPPER3_FULL;
 static bool m_hold, m_rev;
 static uint8_t m_order[4] = { 0, 2, 1, 3 };

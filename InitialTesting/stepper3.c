@@ -66,11 +66,14 @@ static const uint8_t seq[8] = { 0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9 };
 #define ACCEL_MAX      20000
 
 /* --------------------------------------------------------------------------
- * Settings (RAM only; defaults from the control logic: run 200, creep 25)
+ * Settings (RAM only). Defaults from the 26M048B2U bench test, 8 Oct 2026
+ * (thread "26M motor torque-speed settings", /mnt/project-files/motor/):
+ * clean at RUN 400 and START 400 with no ramp, steps missed at RUN 600,
+ * so RUN 400 is about 2/3 of the measured limit.
  * ------------------------------------------------------------------------ */
-static uint32_t rate_run   = 200;    // steps/s
-static uint32_t rate_start = 25;     // steps/s, ramp starts and ends here
-static uint32_t accel      = 400;    // steps/s^2
+static uint32_t rate_run   = 400;    // steps/s
+static uint32_t rate_start = 200;    // steps/s, ramp starts and ends here
+static uint32_t accel      = 3200;   // steps/s^2
 static stepper3_mode_t mode = STEPPER3_FULL;
 static bool hold;                    // coils on when idle
 static bool reverse;                 // flips the sequence direction
