@@ -408,12 +408,12 @@ void init_main_screen()
     lv_obj_set_style_pad_ver(hdr, 0, 0);
 
     lv_obj_t *title = make_label(hdr, "PMC", lv_color_white());
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 96, 0);
     clock_label = make_label(hdr, "time not set", COL_IDLE);
     lv_obj_set_style_text_font(clock_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_width(clock_label, 120);
+    lv_obj_set_width(clock_label, 90);
     lv_label_set_long_mode(clock_label, LV_LABEL_LONG_CLIP);
-    lv_obj_align(clock_label, LV_ALIGN_LEFT_MID, 46, 0);
+    lv_obj_align(clock_label, LV_ALIGN_LEFT_MID, 0, 0);
     // Status words, right-aligned row; green = ok, red = fault, grey = idle.
     lv_obj_t *chips = lv_obj_create(hdr);
     lv_obj_remove_flag(chips, LV_OBJ_FLAG_SCROLLABLE);
