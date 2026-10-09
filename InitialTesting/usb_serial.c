@@ -6,6 +6,7 @@
 #include "usb_hw.h"
 #include "tusb.h"
 #include "usb_serial.h"
+#include "link.h"
 
 /* --------------------------------------------------------------------------
  * Clock
@@ -127,39 +128,21 @@ uint32_t usb_serial_rx_bytes(void)
 
 bool usb_serial_getline(char *buf, size_t n)
 {
-    static char line[96];
-    static size_t len;
-    static uint32_t last_rx;
+    static link_line_t line;
 
     while (tud_cdc_available()) {
         int32_t c = tud_cdc_read_char();
         if (c < 0)
             break;
         rx_bytes++;
-        // CR, LF or CRLF all end a line (terminals differ); empty lines ignored.
-        if (c == '\r' || c == '\n') {
-            if (len == 0)
-                continue;
-            line[len] = '\0';
-            lv_strlcpy(buf, line, n);
-            len = 0;
+        if (link_line_feed(&line, (char)c, buf, n))
             return true;
-        }
-        if (len < sizeof line - 1)
-            line[len++] = (char)c;
-        last_rx = lv_tick_get();
     }
 
     // The NECTO UART Terminal sends the text with no line ending, so a line
     // also ends after LINE_IDLE_MS with nothing more received. A terminal
     // that sends each key as it is typed needs CR or LF instead.
-    if (len > 0 && lv_tick_elaps(last_rx) >= LINE_IDLE_MS) {
-        line[len] = '\0';
-        lv_strlcpy(buf, line, n);
-        len = 0;
-        return true;
-    }
-    return false;
+    return link_line_idle(&line, LINE_IDLE_MS, buf, n);
 }
 
 /* --------------------------------------------------------------------------

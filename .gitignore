@@ -6,3 +6,6 @@ InitialTesting/build-MM4/*
 # the build rules, which the cloud cross-build and tools/ui-preview read.
 !InitialTesting/build-MM4/generated/
 !InitialTesting/build-MM4/build.ninja
+
+# Python bytecode.
+__pycache__/

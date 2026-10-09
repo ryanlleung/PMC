@@ -7,6 +7,29 @@
 #include "ethlink.h"
 #include "link.h"
 
+static bool line_take(link_line_t *l, char *out, size_t n)
+{
+    l->text[l->len] = '\0';
+    lv_strlcpy(out, l->text, n);
+    l->len = 0;
+    return true;
+}
+
+bool link_line_feed(link_line_t *l, char c, char *out, size_t n)
+{
+    if (c == '\r' || c == '\n')
+        return l->len > 0 && line_take(l, out, n);
+    if (l->len < sizeof l->text - 1)
+        l->text[l->len++] = c;
+    l->last_ms = lv_tick_get();
+    return false;
+}
+
+bool link_line_idle(link_line_t *l, uint32_t idle_ms, char *out, size_t n)
+{
+    return l->len > 0 && lv_tick_elaps(l->last_ms) >= idle_ms && line_take(l, out, n);
+}
+
 #if PMC_LINK_ETHERNET
 
 void link_init(void)                         { ethlink_init(); }

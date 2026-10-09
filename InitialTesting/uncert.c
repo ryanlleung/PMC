@@ -3,6 +3,7 @@
 #include "lvgl.h"   // lv_snprintf
 #include "link.h"
 #include "cal.h"
+#include "fixed.h"
 #include "uncert.h"
 
 #define DRUCK_ACC_MMBAR   414      // 0.04 % of 1034.214 mbar (15 psia FS)
@@ -23,18 +24,6 @@ typedef struct {
 
 static terms_t last;
 static const clicks_state_t *last_s;
-
-static uint32_t isqrt64(uint64_t v)
-{
-    uint64_t r = 0, bit = 1ULL << 62;
-    while (bit > v) bit >>= 2;
-    while (bit) {
-        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
-        else r >>= 1;
-        bit >>= 2;
-    }
-    return (uint32_t)r;
-}
 
 static int32_t abs32(int64_t v) { return (int32_t)(v < 0 ? -v : v); }
 
@@ -90,13 +79,6 @@ void uncert_update(const clicks_state_t *s)
     compute(s, &last);
 }
 
-// 0.001 mbar to "0.45" (2 decimals, rounded).
-static void mbar2(char *b, size_t n, int32_t v)
-{
-    int32_t c = (v + 5) / 10;
-    lv_snprintf(b, n, "%ld.%02ld", (long)(c / 100), (long)(c % 100));
-}
-
 const char *uncert_screen_text(bool *warn)
 {
     static char t[32];
@@ -108,7 +90,7 @@ const char *uncert_screen_text(bool *warn)
         return t;
     }
     *warn = last.assumed;
-    mbar2(v, sizeof v, last.total);
+    fixed_fmt(v, sizeof v, fixed_round(last.total, 1), 2);
     lv_snprintf(t, sizeof t, "+/- %s mbar", v);
     return t;
 }
@@ -116,8 +98,7 @@ const char *uncert_screen_text(bool *warn)
 static void term(const char *name, int32_t v, const char *note)
 {
     char b[16];
-    lv_snprintf(b, sizeof b, "%ld.%03ld", (long)(v / 1000), (long)(v % 1000));
-    link_printf("UNC %-14s %s mbar  %s\r\n", name, b, note);
+    link_printf("UNC %-14s %s mbar  %s\r\n", name, fixed_fmt(b, sizeof b, v, 3), note);
 }
 
 bool uncert_command(const char *line)
@@ -129,8 +110,8 @@ bool uncert_command(const char *line)
         return true;
     }
     char b[96], p[16], u[16];
-    lv_snprintf(p, sizeof p, "%ld.%03ld", (long)(last.ref_p / 1000), (long)(last.ref_p % 1000));
-    lv_snprintf(u, sizeof u, "%ld.%03ld", (long)(last.ref_unc / 1000), (long)(last.ref_unc % 1000));
+    fixed_fmt(p, sizeof p, last.ref_p, 3);
+    fixed_fmt(u, sizeof u, last.ref_unc, 3);
     term("total (RSS)", last.total, "about 95 %");
     term("druck", last.druck, "datasheet, 0.04 % FS");
     lv_snprintf(b, sizeof b, "CAL ATM reference +/-%s at %s mbar%s, scaled to this pressure",
