@@ -9,7 +9,7 @@
 #include "clicks.h"
 #include "cal.h"
 #include "fixed.h"
-#include "i2c_sdk_test.h"
+#include "drv_i2c_master.h"
 #include "stepper3.h"
 #include "link.h"
 #include "pmc_config.h"
@@ -158,18 +158,25 @@ static void boost10_poll(void)
 /* --------------------------------------------------------------------------
  * Power Monitor (S4)
  *
- * INA228 on the shield I2C lines (PF1 SCL, PF0 SDA). Driven by a bit-banged
- * I2C master: on the bench the mikroSDK I2C2 driver never got a reply, while
- * a bit-banged scan on the same pins found the INA228 at 0x4A, so the wiring
- * is good and the fault is in the driver path (cause not found).
+ * INA228 on the shield I2C lines (PF1 SCL, PF0 SDA), I2C2 through the
+ * mikroSDK I2C master driver at 100 kHz.
+ *
+ * The driver (mikroSDK 2.19.3, STM32F4 hal_ll) returns from any failed
+ * transfer without sending STOP or clearing the NACK flag, so I2C2 stays
+ * BUSY and every later transfer fails too. After a failure pm_recover()
+ * sends STOP, closes the driver, resets I2C2 and opens it again. This is
+ * what made it look dead before: a scan from 0x40 left I2C2 stuck at the
+ * first empty address, so the INA228 at 0x4A was never reached.
+ * The timeout is the driver default, 10000 status reads (a few ms); a short
+ * one (100) times out before the 90 us address byte is even sent.
  *
  * Real detection: manufacturer ID 0x5449 ("TI") and device ID 0x228x. The
- * address depends on the A0/A1 jumpers (0x40-0x4F), so all 16 are tried.
- * The INA228 powers up converting shunt, bus and temperature continuously,
- * so the readings are live without writing any register.
+ * address depends on the A0/A1 jumpers (0x40-0x4F): 0x4A, the one fitted,
+ * is tried first, then the rest.
  * ------------------------------------------------------------------------ */
-#define BB_SCL 1  // PF1
-#define BB_SDA 0  // PF0
+#define PM_SCL_PIN 1  // PF1, read directly to spot a bus held low
+#define PM_SDA_PIN 0  // PF0
+#define PM_ADDR_FITTED 0x4A
 
 #define INA228_REG_ADC_CONFIG 0x01
 #define INA228_REG_VSHUNT   0x04
@@ -179,96 +186,69 @@ static void boost10_poll(void)
 #define INA228_REG_DEV_ID   0x3F
 #define INA228_MFR_TI       0x5449
 
-static int bb_scl_idle, bb_sda_idle;
+static i2c_master_t pm_i2c;
+static bool pm_open;
 static uint8_t pm_addr;  // 0 = not found
 
 // Scan diagnostics: first address that answered and the ID it returned.
 static uint8_t pm_ack_addr;
 static uint16_t pm_ack_mfr;
 
-static void bb_delay(void)
+static void pm_spin(uint32_t n)
 {
-    for (volatile int i = 0; i < 200; i++);  // ~5 us half period at 168 MHz
+    for (volatile uint32_t i = 0; i < n; i++);
 }
 
-static int bb_read(int pin)
+static void pm_i2c_open(void)
 {
-    return (GPIOF->IDR >> pin) & 1;
+    i2c_master_config_t cfg;
+
+    i2c_master_configure_default(&cfg);   // timeout 10000
+    cfg.scl = MIKROBUS_4_SCL;
+    cfg.sda = MIKROBUS_4_SDA;
+    cfg.speed = I2C_MASTER_SPEED_STANDARD;
+    // Returns the acquire code: 1 on the first open, -1 on failure.
+    pm_open = i2c_master_open(&pm_i2c, &cfg) != I2C_MASTER_ERROR;
 }
 
-// Open drain: 1 = release (pulled up by the Click), 0 = drive low.
-static void bb_pin(int pin, int level)
+// After a failed transfer: let a byte in flight finish (90 us at 100 kHz),
+// STOP, then a fresh I2C2 so the next transfer does not find it BUSY.
+static void pm_recover(void)
 {
-    GPIOF->BSRR = level ? (1UL << pin) : (1UL << (pin + 16));
-    bb_delay();
-    if (level && pin == BB_SCL) {
-        // Allow clock stretching, with a limit.
-        for (int t = 0; t < 1000 && !bb_read(BB_SCL); t++)
-            bb_delay();
-    }
-}
-
-static void bb_start(void) { bb_pin(BB_SDA, 1); bb_pin(BB_SCL, 1); bb_pin(BB_SDA, 0); bb_pin(BB_SCL, 0); }
-static void bb_stop(void)  { bb_pin(BB_SDA, 0); bb_pin(BB_SCL, 1); bb_pin(BB_SDA, 1); }
-
-static bool bb_write_byte(uint8_t v)  // true on ACK
-{
-    for (int i = 7; i >= 0; i--) {
-        bb_pin(BB_SDA, (v >> i) & 1);
-        bb_pin(BB_SCL, 1);
-        bb_pin(BB_SCL, 0);
-    }
-    bb_pin(BB_SDA, 1);
-    bb_pin(BB_SCL, 1);
-    bool ack = !bb_read(BB_SDA);
-    bb_pin(BB_SCL, 0);
-    return ack;
-}
-
-static uint8_t bb_read_byte(bool ack)
-{
-    uint8_t v = 0;
-
-    bb_pin(BB_SDA, 1);
-    for (int i = 0; i < 8; i++) {
-        bb_pin(BB_SCL, 1);
-        v = (uint8_t)((v << 1) | bb_read(BB_SDA));
-        bb_pin(BB_SCL, 0);
-    }
-    bb_pin(BB_SDA, ack ? 0 : 1);
-    bb_pin(BB_SCL, 1);
-    bb_pin(BB_SCL, 0);
-    bb_pin(BB_SDA, 1);
-    return v;
+    pm_spin(20000);
+    I2C2->CR1 |= I2C_CR1_STOP;
+    pm_spin(20000);
+    if (pm_open)
+        i2c_master_close(&pm_i2c);
+    RCC->APB1RSTR |= RCC_APB1RSTR_I2C2RST;
+    RCC->APB1RSTR &= ~RCC_APB1RSTR_I2C2RST;
+    pm_i2c_open();
 }
 
 static bool pm_read_at(uint8_t addr, uint8_t reg, uint8_t *buf, size_t len)
 {
-    bb_start();
-    if (!bb_write_byte((uint8_t)(addr << 1)) || !bb_write_byte(reg)) {
-        bb_stop();
+    if (!pm_open)
+        pm_i2c_open();   // retried at each scan if it failed before
+    if (!pm_open)
         return false;
-    }
-    bb_start();  // repeated start
-    if (!bb_write_byte((uint8_t)((addr << 1) | 1))) {
-        bb_stop();
-        return false;
-    }
-    for (size_t i = 0; i < len; i++)
-        buf[i] = bb_read_byte(i + 1 < len);
-    bb_stop();
-    return true;
+    i2c_master_set_slave_address(&pm_i2c, addr);
+    if (i2c_master_write_then_read(&pm_i2c, &reg, 1, buf, len) == I2C_MASTER_SUCCESS)
+        return true;
+    pm_recover();
+    return false;
 }
 
 static bool pm_write16(uint8_t reg, uint16_t v)
 {
-    bool ok;
+    uint8_t b[3] = { reg, (uint8_t)(v >> 8), (uint8_t)v };
 
-    bb_start();
-    ok = bb_write_byte((uint8_t)(pm_addr << 1)) && bb_write_byte(reg) &&
-         bb_write_byte((uint8_t)(v >> 8)) && bb_write_byte((uint8_t)v);
-    bb_stop();
-    return ok;
+    if (!pm_open)
+        return false;
+    i2c_master_set_slave_address(&pm_i2c, pm_addr);
+    if (i2c_master_write(&pm_i2c, b, sizeof b) == I2C_MASTER_SUCCESS)
+        return true;
+    pm_recover();
+    return false;
 }
 
 static bool pm_read(uint8_t reg, uint8_t *buf, size_t len)
@@ -295,19 +275,10 @@ static bool pm_probe(uint8_t addr)
 
 static void powermonitor_init(void)
 {
+    // PF1/PF0 are read directly to spot a bus held low, so the port clock
+    // must be on even if the driver open fails.
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOFEN;
-
-    // Inputs, no pull: read the idle levels set by the Click's pull-ups.
-    GPIOF->MODER &= ~((3UL << (2 * BB_SCL)) | (3UL << (2 * BB_SDA)));
-    GPIOF->PUPDR &= ~((3UL << (2 * BB_SCL)) | (3UL << (2 * BB_SDA)));
-    bb_delay();
-    bb_scl_idle = bb_read(BB_SCL);
-    bb_sda_idle = bb_read(BB_SDA);
-
-    // Open-drain outputs, released high.
-    GPIOF->BSRR = (1UL << BB_SCL) | (1UL << BB_SDA);
-    GPIOF->OTYPER |= (1UL << BB_SCL) | (1UL << BB_SDA);
-    GPIOF->MODER |= (1UL << (2 * BB_SCL)) | (1UL << (2 * BB_SDA));
+    pm_i2c_open();
 }
 
 /* --------------------------------------------------------------------------
@@ -396,12 +367,9 @@ static void powermonitor_poll(void)
 
     if (pm_addr == 0) {
         pm_ack_addr = 0;
-        // With SCL held low (wiring fault) every clock edge would wait out
-        // the stretch limit, ~1 s per scan, starving the UI and network.
-        bb_pin(BB_SDA, 1);
-        GPIOF->BSRR = 1UL << BB_SCL;
-        bb_delay();
-        if (!bb_read(BB_SCL)) {
+        // With SCL held low (wiring fault) every probe would time out and
+        // recover, 16 times a second, starving the UI and network.
+        if (!((GPIOF->IDR >> PM_SCL_PIN) & 1)) {
             lv_snprintf(powermonitor_status, STATUS_LEN,
                         "S4 Power Monitor: SCL held low (I2C wiring fault?)");
             lv_snprintf(druck_value, sizeof druck_value, "----");
@@ -410,8 +378,10 @@ static void powermonitor_poll(void)
             state.reading_ok = false;
             return;
         }
+        if (pm_probe(PM_ADDR_FITTED))
+            pm_addr = PM_ADDR_FITTED;
         for (uint8_t a = 0x40; a <= 0x4F && pm_addr == 0; a++)
-            if (pm_probe(a))
+            if (a != PM_ADDR_FITTED && pm_probe(a))
                 pm_addr = a;
         // Continuous shunt, bus and temperature, 1052 us each, 128 averages
         // (~0.4 s per result). Default is 0xFB68, no averaging.
@@ -422,10 +392,14 @@ static void powermonitor_poll(void)
                 lv_snprintf(powermonitor_status, STATUS_LEN,
                             "S4 Power Monitor: 0x%02X answered but ID 0x%04X is not an INA228",
                             pm_ack_addr, pm_ack_mfr);
+            else if (!pm_open)
+                lv_snprintf(powermonitor_status, STATUS_LEN,
+                            "S4 Power Monitor: I2C2 open failed");
             else
                 lv_snprintf(powermonitor_status, STATUS_LEN,
                             "S4 Power Monitor: NOT FOUND (no reply at 0x40-0x4F,\n"
-                            "   idle SCL %d SDA %d)", bb_scl_idle, bb_sda_idle);
+                            "   SCL %d SDA %d)", (int)((GPIOF->IDR >> PM_SCL_PIN) & 1),
+                            (int)((GPIOF->IDR >> PM_SDA_PIN) & 1));
             lv_snprintf(druck_value, sizeof druck_value, "----");
             lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor not found)");
             state.pm_found = false;
@@ -711,12 +685,6 @@ void clicks_init(void)
     powermonitor_init();
     boost10_init();
     clicks_poll();
-}
-
-// After the I2C2 SDK test has had PF0/PF1: bit-banged pins and INA228 again.
-void clicks_powermonitor_reinit(void)
-{
-    powermonitor_init();
 }
 
 void clicks_poll(void)

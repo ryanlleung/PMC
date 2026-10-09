@@ -40,8 +40,6 @@ add_executable(InitialTesting
     uncert.c
     fixed.h
     fixed.c
-    i2c_sdk_test.h
-    i2c_sdk_test.c
     pmc_config.h
     link.h
     link.c

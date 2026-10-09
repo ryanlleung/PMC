@@ -8,7 +8,6 @@
 #include "sysinfo.h"
 #include "rtclock.h"
 #include "uncert.h"
-#include "i2c_sdk_test.h"
 #include "pmc_config.h"
 #include "motor_screen.h"
 #include "fixed.h"
@@ -47,8 +46,9 @@ static lv_obj_t *val_signal, *val_exc, *val_die, *val_pg;
 static lv_obj_t *pressure_unc;
 static lv_obj_t *cal_table, *cal_zero, *cal_span, *cal_atm, *cal_store;
 
-static const char *last_line[6];
-static char line_copy[6][192];
+#define STATUS_LINES 5
+static const char *last_line[STATUS_LINES];
+static char line_copy[STATUS_LINES][192];
 
 /* Reuse the existing glyph bitmaps, with tabular advances for the readout.
  * Right alignment alone cannot stop proportional digits moving the decimal.
@@ -249,18 +249,17 @@ static void print_data_line(const clicks_state_t *s)
 
 static void print_changed_lines(void)
 {
-    const char *line[6] = { sysinfo_line(), clicks_stepper3_status(), clicks_boost10_status(),
-                            clicks_powermonitor_status(), clicks_druck_status(),
-                            i2c_sdk_test_result() };
+    const char *line[STATUS_LINES] = { sysinfo_line(), clicks_stepper3_status(), clicks_boost10_status(),
+                                       clicks_powermonitor_status(), clicks_druck_status() };
 
     // A PC that connects later still gets every line once.
     bool resend = link_take_new_client();
 
     // The Power Monitor and Druck lines carry live readings and change every
     // second, so DATA OFF holds them back too.
-    const bool live[6] = { false, false, false, true, true, false };
+    const bool live[STATUS_LINES] = { false, false, false, true, true };
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < STATUS_LINES; i++) {
         if (!line[i][0] || (live[i] && !data_on))
             continue;
         if (resend || last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
