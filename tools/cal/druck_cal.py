@@ -7,7 +7,7 @@
     python druck_cal.py 192.168.1.23 erase
 
 The first argument is the board's IP (Ethernet build, TCP port 5000, or
-host:port) or its COM port (USB build). Needs pip install pyserial.
+host:port) or its COM port (USB build, needs pip install pyserial).
 Stop log_druck.py first: the board takes one connection at a time (a new
 one replaces the old), and only one program can hold a COM port.
 
@@ -27,10 +27,9 @@ what is in flash. Use --dry to print the commands without a port.
 """
 import argparse
 import re
+import socket
 import sys
 import time
-
-import serial   # pip install pyserial
 
 TCP_PORT = 5000
 
@@ -74,42 +73,63 @@ def check(pts):
             sys.exit(f"ratios not strictly ascending at {a[0]:.6f} / {b[0]:.6f} mV/V")
 
 
-class Board:
-    """A COM port, or TCP to host[:port] through pyserial's socket:// URL."""
+class LineSock:
+    """Minimal line reader over TCP that survives read timeouts."""
 
+    def __init__(self, sock):
+        self.sock, self.buf = sock, b""
+
+    def readline(self):
+        while b"\n" not in self.buf:
+            chunk = self.sock.recv(1024)     # socket.timeout if nothing arrives
+            if not chunk:
+                line, self.buf = self.buf, b""
+                return line                  # b"" = closed
+            self.buf += chunk
+        line, _, self.buf = self.buf.partition(b"\n")
+        return line + b"\n"
+
+    def write(self, data):
+        self.sock.sendall(data)
+
+    def close(self):
+        self.sock.close()
+
+
+class Board:
     def __init__(self, target):
-        if not re.match(r"^(COM\d+|/dev/)", target, re.I):
+        self.sock = None
+        if re.match(r"^(COM\d+|/dev/)", target, re.I):
+            import serial
+            self.s = serial.Serial(target, 115200, timeout=0.2)
+            self.s.dtr = True
+            time.sleep(0.2)
+            self.s.reset_input_buffer()
+        else:
             host, _, port = target.partition(":")
-            target = f"socket://{host}:{port or TCP_PORT}"
-        self.s = serial.serial_for_url(target, baudrate=115200, timeout=0.2)
-        self.s.dtr = True    # ignored over TCP
-        self.buf = b""
-        time.sleep(0.2)
-        self.s.reset_input_buffer()
+            self.sock = socket.create_connection((host, int(port or TCP_PORT)), timeout=5)
+            self.sock.settimeout(0.2)
+            self.s = LineSock(self.sock)
+            time.sleep(0.2)
 
     def _readline(self):
-        # A read that times out mid-line keeps the part it has for next time.
-        self.buf += self.s.readline()
-        if not self.buf.endswith(b"\n"):
+        try:
+            return self.s.readline().decode("ascii", errors="replace").strip()
+        except (socket.timeout, TimeoutError):
             return ""
-        line, self.buf = self.buf, b""
-        return line.decode("ascii", errors="replace").strip()
 
     def cmd(self, text, timeout=3.0):
         """Sends one line, returns the reply lines up to and including OK/ERR."""
+        self.s.write((text + "\n").encode("ascii"))
         got, end = [], time.time() + timeout
-        try:
-            self.s.write((text + "\n").encode("ascii"))
-            while time.time() < end:
-                line = self._readline()
-                if not line or line.startswith("DATA,"):
-                    continue
-                if line.startswith(("CAL ", "PMC firmware", "OK", "ERR")):
-                    got.append(line)
-                if line.startswith("OK") or line.startswith("ERR"):
-                    return got
-        except serial.SerialException as e:
-            sys.exit(f"link lost during '{text}': {e}")
+        while time.time() < end:
+            line = self._readline()
+            if not line or line.startswith("DATA,"):
+                continue
+            if line.startswith(("CAL ", "PMC firmware", "OK", "ERR")):
+                got.append(line)
+            if line.startswith("OK") or line.startswith("ERR"):
+                return got
         sys.exit(f"no reply to '{text}' (old firmware, or wrong address/port?)")
 
 
@@ -166,10 +186,7 @@ def main():
     ld.add_argument("--no-save", action="store_true")
 
     a = ap.parse_args()
-    try:
-        board = Dry() if a.dry else Board(a.target)
-    except serial.SerialException as e:
-        sys.exit(e)
+    board = Dry() if a.dry else Board(a.target)
 
     if a.what == "ver":
         send(board, "VER?")
