@@ -247,6 +247,16 @@ dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
 </div>
 
 <div class="panel">
+<h2>Laptop configuration tool</h2>
+<p class="muted" style="margin:0 0 8px">Stands in for the PC tool on USB or TCP 5000. Detailed configuration and calibration tables are prepared here and sent to the controller; they arrive as a draft and need the commissioning session (open it on the screen, or type <code>ACCESS 2468</code> in the console).</p>
+<div class="row"><button class="pbtn" id="cfg-export">Export saved configuration</button><button class="pbtn" id="cfg-send">Send configuration file</button><input type="file" id="cfg-file" accept=".json,application/json" hidden></div>
+<div class="row" style="margin-top:8px"><button class="pbtn" id="cfg-prof">Send sensor profile s/n 5880211 (0 to 2000 mbar, 12-point table)</button></div>
+<div class="row" style="margin-top:8px"><button class="pbtn" id="cfg-wipe">Erase simulated flash</button><span class="muted">Clears the saved configuration in this browser.</span></div>
+</div>
+</div>
+
+<div class="grid">
+<div class="panel">
 <h2>Try this</h2>
 <ol class="try">
 <li>The board starts homed at 0 % in manual. Quick setup turns the helium flow and pump on, homes if needed, sets SP 5 and manual 34 %. K_DIR +1, Kp 4 %/mbar, Ti 0.25 min and T_check 30 s are now the defaults.</li>
@@ -299,6 +309,7 @@ dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
 <li>v25 (Ryan, 9 Oct): header Back closes a keypad or dialog; homing asks first, names its three steps and can be stopped from the Mode button; the cards drop Error, Target and Steps for one line each (Setpoint / Set by or Moving to); Valve screen captions say Pressure now and Valve now, and Change fully open is a button; Menu System row reads Tuning, Faults and events; every label checked to fit its box.</li>
 <li>v26 (Ryan, 9 Oct): valve card line reads Set to N % (was Set by hand / auto); Valve screen top row three equal cards (Valve now with its set-to position, Pressure now, Fully open with Change); Motor and switch shows Valve now and Steps now, Home a double-height button in the side column.</li>
 <li>v27 (review round 3, Ryan: fix all): not-homed valve card one string; Faults list over two rows with paged events; Mode button shows the homing step, disabled (red STOP is the only stop); editable cards carry a › at the right edge; Valve screen back on the column grid; Fully open as a setting card; keypad without Cancel (header Back cancels), Set two rows tall; Valve now caption carries the set position; trend axis from 0 with a coloured legend above the plot; Sensor reading shows the serial in full.</li>
+<li>v47, UI/UX review update 2 (commissioning access and configuration): one commissioning session (Menu &gt; Commissioning, PIN 2468 in the simulator) replaces the Motor, Homing and Tuning locks; brown header with COMMISSIONING and the idle time left; closes on Exit or after 10 min without a touch, without changing mode or valve; serial settings commands need the same session (ACCESS pin). Commissioning pages: Sensor, Valve setup (100 % travel, reference offset, back-off, reference and creep speeds, motor direction; drive speeds), Control tuning (gain, integral, direction, auto min, deadband, target band; target min, target max, low alarm), Diagnostics, Configuration. Every setting is edit, Apply, Save for restart: amber edge draft, blue edge applied but not saved; leaving a page with a draft asks Apply or Discard; Configuration has the name and revision, Restore saved, Load defaults, Apply all. Target max and the low alarm (F-02) are separate from the sensor range and Target min. Sensor profiles and 32-point tables come from the laptop (bench panel) and are not made the sensor in use until applied. The reading goes through zero, span and the cal factor. Keypad has +/- for negative values.</li>
 <li>v46, UI/UX review update 1 (operator screens and navigation): home Target line says inactive or paused outside AUTO; valve card "Valve position, %" with Opening / Closing / Stationary / Closed limit and Requested; AUTO status line separates Approaching target, Within target band and Stable (in band for 60 s); mode button Start AUTO / Switch to MANUAL / Resume AUTO / Reference Valve; Home renamed Reference valve (header NOT REFERENCED, REFERENCING); home Set Target and Move Valve; Valve page has Pressure, Position, Requested, Enter %, hold Close, -1 %, +1 %, hold Open and a line saying what the valve is doing or why it cannot move (presets row and 100 % travel removed); Menu is Trend, Alarms and events, Reference valve, System information, Commissioning; Back returns one level.</li>
 <li>v41 (Ryan, 9 Oct): Menu has no Valve tile (home Set Valve is the way in); Motor and switch split into Motor (speeds and drive settings, last move, Save) and Homing (limit switch, last homing, offset, overtravel, progress, Home), no page switch.</li>
 <li>v42 (Ryan, 9 Oct): date and clock removed from the header; mode word and dot move to the right edge. Motor last-move card reads Moving / To N %, N steps while the valve moves; Valve calc. shows ---- when not homed.</li>
@@ -333,23 +344,51 @@ const BOOT_CLOCK = 14 * 3600 + 30 * 60;
 const FW = 'v0.6.0';
 let t = 0;                             // simulated seconds since page load
 
+// v47 (UI/UX review items 4 and 7): Target max and the low-pressure alarm are their own settings. Before v47 the
+// sensor full scale was the setpoint ceiling and P_MIN was both the lowest setpoint and the F-02 threshold.
 const DEF_P = { Kp: 4, Ti: 0.25, Kd: 0, DB: 8, Ts: 1, Pmin: 0.2, POSMAX: 99072, KDIR: 1,
   fhome: 400, fcreep: 25, Nbackoff: 400, Nclear: 800, Noffset: 0, Tcheck: 30, Nresp: 5, dPmin: 0.05,
-  checkMin: 1000, Tconv: 1800, band: 0.1, leadMax: 3000, Tlag: 40, outMin: 14, stableT: 60 };
+  checkMin: 1000, Tconv: 1800, band: 0.1, leadMax: 3000, Tlag: 40, outMin: 14, stableT: 60, spMax: 1034, alarmLo: 0.2 };
 const RANGE = { Kp: [0.01, 100], Ti: [0, 100], Kd: [0, 100], DB: [0, 2000], Ts: [0.5, 10], Pmin: [0, 1034],
   POSMAX: [1000, 300000], fhome: [16, 1000], fcreep: [16, 1000], Nbackoff: [10, 5000],
   Nclear: [10, 10000], Noffset: [0, 5000], Tcheck: [1, 120], Nresp: [1, 50], dPmin: [0.001, 10],
-  checkMin: [0, 200000], Tconv: [10, 36000], band: [0.001, 10], leadMax: [0, 100000], Tlag: [0, 600], outMin: [0, 50], stableT: [5, 3600] };
-const FLASH_KEY = 'pmc-sim-flash-v4';
-let flash = null;
-try { const s = localStorage.getItem(FLASH_KEY); if (s) flash = JSON.parse(s); } catch (e) { flash = null; }
-let P = Object.assign({}, DEF_P, flash || {});
-
-const MOT = { run: 400, start: 200, accel: 3200 };
+  checkMin: [0, 200000], Tconv: [10, 36000], band: [0.001, 10], leadMax: [0, 100000], Tlag: [0, 600], outMin: [0, 50], stableT: [5, 3600],
+  spMax: [0.1, 35000], alarmLo: [0, 1034] };
+const DEF_MOT = { run: 400, start: 200, accel: 3200, rev: 0 };
+const BENCH_PROF = { model: 'UNIK 5000 PDCR50G1', fs: 1034, type: 'abs', serial: 5880156, exc: 10.0, zero: 0.05, span: 100.02, atm: 1.0512, atmDate: '08 Oct 2026', table: null };
+// Configuration model (review item 7): Edit -> Apply -> Save for restart.
+//   active (P, MOT, SENS) is what the controller uses now; SAVED is what serial flash holds and what a restart loads;
+//   DRAFT holds edits on the commissioning pages that are not applied yet.
+// One configuration has a name and a revision; each Save bumps the revision.
+const CFG_KEY = 'pmc-sim-config-v5';
+function cfgCore() { return { P: Object.assign({}, P), MOT: Object.assign({}, MOT), sens: { active: SENS.active, prof: JSON.parse(JSON.stringify(SENS.prof)) } }; }
+function defaultCfg() { return { name: 'Bench CF-11', rev: 1, savedAt: 0, P: Object.assign({}, DEF_P), MOT: Object.assign({}, DEF_MOT), sens: { active: 0, prof: [Object.assign({}, BENCH_PROF)] } }; }
+let SAVED = defaultCfg();
+try { const s = localStorage.getItem(CFG_KEY); if (s) { const o = JSON.parse(s); if (o && o.P && o.MOT && o.sens) SAVED = o; } } catch (e) { }
+let P = Object.assign({}, DEF_P, SAVED.P);
+const MOT = Object.assign({}, DEF_MOT, SAVED.MOT);
+const SENS = { active: SAVED.sens.active, prof: JSON.parse(JSON.stringify(SAVED.sens.prof)) };
+function loadActive(cfg) {
+  P = Object.assign({}, DEF_P, cfg.P); Object.assign(MOT, DEF_MOT, cfg.MOT);
+  SENS.prof = JSON.parse(JSON.stringify(cfg.sens.prof)); SENS.active = clamp(cfg.sens.active, 0, SENS.prof.length - 1);
+}
+function cfgDirty() { const a = cfgCore(), b = SAVED; return JSON.stringify(a.P) !== JSON.stringify(Object.assign({}, DEF_P, b.P)) || JSON.stringify(a.MOT) !== JSON.stringify(Object.assign({}, DEF_MOT, b.MOT)) || JSON.stringify(a.sens) !== JSON.stringify(b.sens); }
+function saveCfg() {
+  if (DRAFT.size) return refuse('Apply or discard the draft first (' + DRAFT.size + ' not applied)');
+  const c = cfgCore(); SAVED = Object.assign({ name: SAVED.name, rev: SAVED.rev + 1, savedAt: t }, c);
+  try { localStorage.setItem(CFG_KEY, JSON.stringify(SAVED)); } catch (e) { }
+  ev('CFG', 'Configuration ' + SAVED.name + ' rev ' + SAVED.rev + ' saved to serial flash (simulated)');
+  msg('Saved as rev ' + SAVED.rev + '. Used after restart.', 'info');
+  return true;
+}
+function cfgLabel() { return SAVED.name + ' rev ' + SAVED.rev; }
+function cfgState() { return DRAFT.size ? 'draft' : cfgDirty() ? 'applied' : 'saved'; }
+const CFG_STATE_WORDS = { saved: 'Saved', applied: 'Applied, not saved', draft: 'Draft, not applied' };
+const DRAFT = new Map();
 const BENCH = { druck: true, exc: true, coupled: true, air: 1013.4, plumb: 'line', link: 'usb' };
 const LIM = { force: 'NORMAL', hyst: 20, simPos: 3000, raw: false, active: false, clearSince: null, over: 0, deepest: 0 };
 const M = { pos: 0, moving: false, dir: 0, v: 0, acc: 0, target: 0, vrun: 400, vstart: 200, lastStop: 'none', onDone: null };
-const C = { mode: 'NOT HOMED', ref: false, SP: 5.0, manPos: 0, posCmd: 0, lastSent: 0, lastCorr: 0, I: 0, prevPV: null,
+const C = { mv: 0, lastImport: null, mode: 'NOT HOMED', ref: false, SP: 5.0, manPos: 0, posCmd: 0, lastSent: 0, lastCorr: 0, I: 0, prevPV: null,
   homeStage: '', homeT0: 0, lastHome: null, faults: new Map(), events: [], msg: null,
   winT: 0, winPos: 0, winPV: null, posF: 0, noresp: 0, wrong: 0, convStart: 0, f02Since: null, refusal: '', inBandSince: null };
 let PV = null, PVreal = BENCH.air, pvValid = true;
@@ -518,9 +557,10 @@ function doStep() {
   if (M.dir < 0 && LIM.active) { finish('LIMIT'); return false; }   // read before every closing step
   M.pos += M.dir;
   if (BENCH.coupled) {
+    const ph = MOT.rev ? -M.dir : M.dir;   // v47: Motor direction setting; Normal is right for the bench wiring
     // The seat is a hard stop 30 steps past the switch point: further closing steps are driven against it and lost.
-    if (M.dir > 0 || LIM.simPos > -30) LIM.simPos += M.dir;
-    if (M.dir < 0 && LIM.simPos < 0) { LIM.over++; LIM.deepest = Math.min(LIM.deepest, LIM.simPos); }
+    if (ph > 0 || LIM.simPos > -30) LIM.simPos += ph;
+    if (ph < 0 && LIM.simPos < 0) { LIM.over++; LIM.deepest = Math.min(LIM.deepest, LIM.simPos); }
   }
   updateRaw();
   return true;
@@ -675,8 +715,8 @@ function toAuto() {
   if (C.mode === 'HOMING') return refuse('Auto refused: referencing (IL-8)');
   if (C.faults.size) return refuse('Auto refused: latched fault, ACK first (IL-9)');
   if (!pvValid || PV == null) return refuse('Auto refused: pressure invalid (IL-3)');
-  if (C.SP < P.Pmin || C.SP > pMax()) return refuse('Auto refused: setpoint outside P_MIN to P_MAX (IL-4)');
-  if (PV < P.Pmin || PV > pMax()) return refuse('Auto refused: pressure ' + PV.toFixed(2) + ' outside P_MIN to the sensor range. Helium flow on? Open in manual first');
+  if (C.SP < P.Pmin || C.SP > pMax()) return refuse('Auto refused: target outside Target min to Target max (IL-4)');
+  if (PV < P.alarmLo || PV > sensFs()) return refuse('Auto refused: pressure ' + PV.toFixed(2) + ' below the low alarm or above the sensor range. Helium flow on? Open in manual first');
   if (!P.KDIR) return refuse('Auto refused: K_DIR not set (IL-6)');
   if (P.Kp == null || P.Ti == null) return refuse('Auto refused: Kp and Ti not set (Tuning)');
   const e = P.KDIR * (C.SP - PV);
@@ -729,8 +769,17 @@ function jog(n) {
 /* ======================================================================
  * Measurement, process, control step
  * ==================================================================== */
+// v47 (UI/UX review item 8): the reading goes through the calibration in use, so zero, span, factor and tables
+// change the pressure the controller uses. The bench Druck s/n 5880156 has certificate zero 0.05 mV and span
+// 100.02 mV at 10 V; the INA228 input loads its output by 1/1.0512 (8 Oct finding), which the cal factor undoes.
+const TRUE_DRUCK = { zero: 0.05, span: 100.02, fs: 1034, load: 1 / 1.0512 };
+function druckMv(p) { return (TRUE_DRUCK.zero + p / TRUE_DRUCK.fs * (TRUE_DRUCK.span - TRUE_DRUCK.zero)) * TRUE_DRUCK.load; }   // mV at 10 V
+function calP(mv, q) { const m = mv * q.atm; return q.table ? interpX(q.table, m / 10) : q.fs * (m - q.zero) / (q.span - q.zero); }
+function interpX(tab, x) { if (x <= tab[0][0]) return tab[0][1] + (x - tab[0][0]) * (tab[1][1] - tab[0][1]) / (tab[1][0] - tab[0][0]); for (let i = 1; i < tab.length; i++) if (x <= tab[i][0] || i === tab.length - 1) { const [a, ya] = tab[i - 1], [b, yb] = tab[i]; return ya + (yb - ya) * (x - a) / (b - a); } }
 function measure() {
-  PVreal = BENCH.plumb === 'line' ? FL.P + noise(0.01) : BENCH.air + noise(0.02);
+  const pTrue = BENCH.plumb === 'line' ? FL.P + noise(0.01) : BENCH.air + noise(0.02);
+  C.mv = druckMv(pTrue);
+  PVreal = calP(C.mv, SENS.prof[SENS.active]);
   if (!BENCH.druck) { pvValid = false; raise('F-01', 'No Druck signal'); }
   else if (!BENCH.exc) { pvValid = false; raise('F-03', 'Excitation outside 9.5 to 10.5 V'); }
   else pvValid = true;
@@ -742,7 +791,7 @@ function ctrlTick() {
   if (C.mode !== 'AUTO' || PV == null) { C.inBandSince = null; return; }
   if (Math.abs(C.SP - PV) > P.band) C.inBandSince = null; else if (C.inBandSince == null) C.inBandSince = t;
   // F-02, armed in auto only (G7)
-  if (PV < P.Pmin || PV > pMax()) { if (C.f02Since === null) C.f02Since = t; if (t - C.f02Since >= 5) { raise('F-02', PV < P.Pmin ? 'Pressure ' + PV.toFixed(2) + ' below P_MIN ' + P.Pmin + ' mbar, check helium flow and pump' : 'Pressure ' + PV.toFixed(2) + ' above the sensor range ' + pMax() + ' mbar'); return; } }
+  if (PV < P.alarmLo || PV > sensFs()) { if (C.f02Since === null) C.f02Since = t; if (t - C.f02Since >= 5) { raise('F-02', PV < P.alarmLo ? 'Pressure ' + PV.toFixed(2) + ' below the low alarm ' + P.alarmLo + ' mbar, check helium flow and pump' : 'Pressure ' + PV.toFixed(2) + ' above the sensor range ' + sensFs() + ' mbar'); return; } }
   else C.f02Since = null;
 
   const e = P.KDIR * (C.SP - PV);
@@ -816,7 +865,7 @@ function simTick() {
 function reboot() {
   timers = []; M.moving = false; M.onDone = null; M.v = 0; M.pos = 0; M.target = 0; M.lastStop = 'none';
   C.mode = 'NOT HOMED'; C.ref = false; C.faults.clear(); C.homeStage = ''; C.manPos = C.posCmd = C.lastSent = 0; C.I = 0; C.msg = null;
-  P = Object.assign({}, DEF_P, flash || {});
+  loadActive(SAVED); DRAFT.clear(); ACC.on = false;   // a restart loads the saved configuration; drafts and applied changes are lost
   ev('F-14', 'Power-up (event only)');
   bootHomed();
 }
@@ -895,7 +944,7 @@ function holdBtn(par, x, y, w, h, label, ms, fn, cls) {   // acts only after a p
 const COL = { hdr: '#1F2933', text: '#1F2933', muted: '#546374', ok: '#2EA043', fault: '#D63031', warn: '#D68200', idle: '#969EA6', blue: '#2D5877', bg: '#E8EEF4' };
 const MODE_COL = { AUTO: '#2EA043', MANUAL: '#5B6B7B', 'NOT HOMED': '#D68200', HOMING: '#2D5877', PAUSED: '#D68200' };
 
-const TITLES = { menu: 'Menu', sensor: 'Sensor', motor: 'Valve setup', homing: 'Homing settings', tune: 'Control tuning', faults: 'Alarms and events', trend: 'Trend', valve: 'Valve',
+const TITLES = { menu: 'Menu', sensor: 'Sensor', motor: 'Valve setup', tune: 'Control tuning', diag: 'Diagnostics', cfg: 'Configuration', faults: 'Alarms and events', trend: 'Trend', valve: 'Valve',
   ref: 'Reference valve', info: 'System information', comm: 'Commissioning' };
 // Review item 1: "Home" meant both the main page and a physical move. The move is now "Reference valve".
 const MODE_WORD = { 'NOT HOMED': 'NOT REFERENCED', HOMING: 'REFERENCING', PAUSED: 'AUTO PAUSED', MANUAL: 'MANUAL', AUTO: 'AUTO' };
@@ -908,15 +957,24 @@ function newScreen(name) {
 }
 // Review item 5: Back returns one level (it used to go straight home from every page). Home clears the stack.
 let navStack = [];
-function show(name, back) {
+function show(name, back, force) {
   closeOverlay();
+  // v47 (review item 7): leaving a settings page never drops its draft silently.
+  const pd = current && current !== name && FIELDS[current] ? pageDraft(current) : [];
+  if (pd.length && !force) {
+    confirmBox('Leave ' + TITLES[current] + '? ' + pd.length + ' change' + (pd.length > 1 ? 's are' : ' is') + ' not applied.', 'Apply', 'act',
+      () => { if (applyFields(pd)) show(name, back, true); }, ['Discard', () => { pd.forEach(f => DRAFT.delete(f.id)); show(name, back, true); }]);
+    return;
+  }
+  if (COMM_PAGES.includes(name) && !ACC.on) { refuse('Commissioning access needed'); name = 'menu'; }
   if (current && current !== name && screens[current] && screens[current].leave) screens[current].leave();
   if (name === 'ctrl') navStack = [];
-  else if (!back && current && current !== name) navStack.push(current);
+  else if (back) { if (navStack[navStack.length - 1] === name) navStack.pop(); }
+  else if (current && current !== name) navStack.push(current);
   for (const k in screens) vis(screens[k].el, k === name);
   current = name; updateUI();
 }
-function goBack() { if (overlay) { closeOverlay(); return; } show(navStack.pop() || 'ctrl', true); }
+function goBack() { if (overlay) { closeOverlay(); return; } show(navStack[navStack.length - 1] || 'ctrl', true); }
 // One grid on every screen (v22): 8 px gaps, four equal 109 px columns 10-119 | 127-236 | 244-353 | 361-470,
 // four 48 px rows 48-96 | 104-152 | 160-208 | 216-264. Content 10-353 x 48-208, side column 361-470 with
 // three slots, bottom row = status line (10-353) beside STOP (361-470) on every screen.
@@ -946,13 +1004,21 @@ function buildGlobal() {
   const fdot = st(mk(foot, 12, 20, 8, 8, ''), { borderRadius: '4px' });
   const ftxt = st(mk(foot, 28, 0, 303, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center', overflow: 'hidden' });
   foot.addEventListener('pointerdown', e => { e.preventDefault(); if (foot.dataset.go) show(foot.dataset.go); });
-  G = { h, back, pmc, title, badge, mdot, stop, foot, fdot, ftxt };
+  // v47 (review item 2): persistent commissioning indication. Header turns brown, a 12 px line names the access level
+  // and the idle time left; the title drops below it.
+  const acc = st(mk(h, 127, 3, 170, 14, '', ''), { fontSize: '12px', lineHeight: '14px', color: '#FFD58A' });
+  G = { h, back, pmc, title, badge, mdot, stop, foot, fdot, ftxt, acc };
+  dev.addEventListener('pointerdown', accTouch, true);   // any touch restarts the commissioning idle timer
 }
 const DAYS = 'Sun Mon Tue Wed Thu Fri Sat'.split(' ');
 function updateGlobal() {
   const home = current === 'ctrl';
   vis(G.back, !home || !!overlay); vis(G.title, !home); vis(G.pmc, home && !overlay);
   set(G.title, TITLES[current] || '');
+  const hb = ACC.on ? '#5C4310' : COL.hdr;
+  setbg(G.h, hb); setbg(G.back, hb); vis(G.acc, ACC.on);
+  if (ACC.on) { const l = accLeft(); set(G.acc, 'COMMISSIONING ' + Math.floor(l / 60000) + ':' + pad2(Math.floor(l / 1000) % 60)); }
+  st(G.title, ACC.on ? { top: '15px', lineHeight: '24px' } : { top: '0px', lineHeight: HDR + 'px' });
   set(G.badge, MODE_WORD[C.mode] || C.mode);
   setbg(G.mdot, MODE_COL[C.mode]);
   // footer: toast, else latched-fault bar, else the screen's own note
@@ -1122,16 +1188,18 @@ function keypad(o) {
   const info = st(mk(field, 10, 24, 200, 16, '', o.info), { fontSize: '12px', color: COL.muted, lineHeight: '16px', overflow: 'hidden', textOverflow: 'ellipsis' });
   const val = st(mk(field, 190, 0, 143, 48, '', ''), { fontSize: '26px', textAlign: 'right', lineHeight: '48px' });
   let entry = '';
-  const show1 = () => set(val, entry === '' ? ' ' : entry);
+  const show1 = () => set(val, entry === '' ? ' ' : o.mask ? '*'.repeat(entry.length) : entry);
   show1();
   const kc = cols(5), ky = [RY[1] - HDR, RY[2] - HDR, RY[3] - HDR];
   // v27 (review 3, findings 6 and 10): no Cancel key, the header Back cancels; delete two cells wide, Set two rows tall.
-  const keys = [['7', '8', '9', 'del', null], ['4', '5', '6', '0', 'set'], ['1', '2', '3', '.', null]];
+  // v47 (review item 8): a +/- key when negative values are allowed (certificate zero can be negative).
+  const keys = [['7', '8', '9', o.min < 0 ? 'neg' : 'del', o.min < 0 ? 'del' : null], ['4', '5', '6', '0', 'set'], ['1', '2', '3', '.', null]];
   keys.forEach((r, ri) => r.forEach((k, ci) => {
     if (k == null) return;
     const [x, w] = kc[ci], y = ky[ri];
     if (k === 'set') { btn(m, x, y, w, 104, '<b>Set</b>', commit, 'act'); return; }
     if (k === 'del') { btn(m, x, y, kc[4][0] + kc[4][1] - x, 48, '&#9003;', () => { entry = entry.slice(0, -1); show1(); }); return; }
+    if (k === 'neg') { btn(m, x, y, w, 48, '+/-', () => { entry = entry.startsWith('-') ? entry.slice(1) : '-' + entry; show1(); }); return; }
     btn(m, x, y, w, 48, k, () => key(k), k === '.' && o.dec === 0 ? 'dis' : '');
   }));
   // Side column (Ryan, 9 Oct): no nudges; one card fills 361-470 x 48-208 above STOP with PV and SP
@@ -1154,21 +1222,21 @@ function keypad(o) {
     entry += k; show1();
   }
   function commit() {
-    if (entry === '' || entry === '.') { closeOverlay(); return; }
+    if (entry === '' || entry === '.' || entry === '-') { closeOverlay(); return; }
     const v = parseFloat(entry);
-    if (!(v >= o.min && v <= o.max)) { set(info, 'Outside ' + o.min + ' to ' + o.max + (o.w03 ? ' (W-03)' : '')); setc(info, COL.fault); if (o.w03) ev('W-03', 'Setpoint ' + v + ' rejected'); return; }
-    const r = o.onSet(v);
+    if (!(v >= o.min && v <= o.max) && !o.mask) { set(info, 'Outside ' + o.min + ' to ' + o.max + (o.w03 ? ' (W-03)' : '')); setc(info, COL.fault); if (o.w03) ev('W-03', 'Setpoint ' + v + ' rejected'); return; }
+    const r = o.onSet(v, entry);
     if (r === false) { set(info, C.refusal); setc(info, COL.fault); return; }
     closeOverlay();
     if (r && r.then) r.then();
   }
 }
-function spPanel() { const on = C.mode === 'AUTO' || C.mode === 'PAUSED'; return [['PV, mbar', fmtP(PV)], ['SP, mbar', C.SP.toFixed(2), on ? null : COL.idle]]; }   // v28: same rule as the home card
+function spPanel() { const on = C.mode === 'AUTO' || C.mode === 'PAUSED'; return [['Now, mbar', fmtP(PV)], ['Target', C.SP.toFixed(2), on ? null : COL.idle]]; }   // v28: same rule as the home card
 function keypadSP() {
-  keypad({ title: 'Setpoint, mbar abs', panel: spPanel, min: P.Pmin, max: pMax(), w03: true,
-    info: 'Range ' + P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(2),
+  keypad({ title: 'Target, mbar abs', panel: spPanel, min: P.Pmin, max: pMax(), w03: true,
+    info: 'Allowed ' + P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(2),
     onSet: v => {
-      if (Math.abs(v - C.SP) > SP_CONFIRM) return { then: () => confirmBox('Change the setpoint from ' + C.SP.toFixed(2) + ' to ' + v.toFixed(2) + ' mbar? That is ' + (v >= C.SP ? '+' : '-') + Math.abs(v - C.SP).toFixed(2) + ' mbar.', 'Change', 'act', () => setSP(v)) };
+      if (Math.abs(v - C.SP) > SP_CONFIRM) return { then: () => confirmBox('Change the target from ' + C.SP.toFixed(2) + ' to ' + v.toFixed(2) + ' mbar? That is ' + (v >= C.SP ? '+' : '-') + Math.abs(v - C.SP).toFixed(2) + ' mbar.', 'Change', 'act', () => setSP(v)) };
       return setSP(v);
     } });
 }
@@ -1206,44 +1274,6 @@ function keypadPct() {
   if (!canManual()) return notManual();
   keypad({ title: 'Go to % open', panel: () => [['Open now, %', C.ref ? pctOf(M.pos).toFixed(1) : '--']], min: 0, max: 100,
     info: '0 closed, 100 = ' + fint(P.POSMAX) + ' steps', onSet: v => manPct(v) });
-}
-function setFullOpen(steps, how) {
-  steps = Math.round(steps);
-  if (!setParam('POSMAX', steps)) return false;
-  ev('VALVE', 'Fully open set to ' + fint(steps) + ' steps (' + (steps / FLP.spt).toFixed(2) + ' turns), ' + how);
-  return true;
-}
-function confirmFullOpen(steps, how) {
-  return { then: () => confirmBox('Make fully open ' + fint(Math.round(steps)) + ' steps (' + (steps / FLP.spt).toFixed(2) + ' turns)? Every % on the screen rescales.', 'Set', 'act', () => setFullOpen(steps, how)) };
-}
-function keypadTurns() {
-  keypad({ title: 'Fully open, output turns', now: (P.POSMAX / FLP.spt).toFixed(2), min: RANGE.POSMAX[0] / FLP.spt, max: RANGE.POSMAX[1] / FLP.spt,
-    info: fint(FLP.spt) + ' steps per turn', onSet: v => (C.mode === 'AUTO' || C.mode === 'PAUSED') ? refuse('Set POS_MAX in manual') : confirmFullOpen(v * FLP.spt, 'typed in turns') });
-}
-function keypadFullSteps() {
-  keypad({ title: 'Fully open, steps', now: fint(P.POSMAX), min: RANGE.POSMAX[0], max: RANGE.POSMAX[1], dec: 0,
-    info: 'From the closed limit', onSet: v => (C.mode === 'AUTO' || C.mode === 'PAUSED') ? refuse('Set POS_MAX in manual') : confirmFullOpen(v, 'typed in steps') });
-}
-function fullOpenHere() {
-  if (!C.ref) return refuse('Valve not referenced: reference it first (IL-2)');
-  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to manual first');
-  if (M.moving) return refuse('Wait for the valve to stop');
-  if (M.pos < RANGE.POSMAX[0]) return refuse('Too close to closed to be fully open');
-  confirmFullOpen(M.pos, 'set at the present position').then();
-}
-function fullOpenMenu() {
-  closeOverlay();
-  overlay = st(mk(dev, 0, HDR, 480, 272 - HDR, 'ov'), { zIndex: '10' });
-  const m = mk(overlay, 70, 4, 340, 164, 'modal');   // centred like the confirm dialog
-  st(mk(m, 16, 8, 308, 22, '', 'Change the fully open setting'), { fontSize: '16px', lineHeight: '22px' });
-  st(mk(m, 16, 30, 308, 18, '', fint(P.POSMAX) + ' steps, ' + (P.POSMAX / FLP.spt).toFixed(2) + ' turns, ' + (P.POSMAX / FLP.spt * FLP.pitch).toFixed(2) + ' mm lift'), { fontSize: '12px' });
-  const lock = C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING';
-  const b1 = btn(m, 16, 52, 150, 48, 'Type turns', keypadTurns);
-  const b2 = btn(m, 174, 52, 150, 48, 'Type steps', keypadFullSteps);
-  const b3 = btn(m, 16, 108, 150, 48, '<small>Use present position</small><b>' + fint(M.pos) + ' steps</b>', fullOpenHere);
-  [b1, b2, b3].forEach(b => tog(b, 'dis', lock)); if (!canManual()) tog(b3, 'dis', true);
-  btn(m, 174, 108, 150, 48, 'Close', closeOverlay);
-  if (lock) st(mk(m, 180, 12, 144, 16, '', 'Locked in auto'), { fontSize: '12px', color: COL.warn, textAlign: 'right' });
 }
 // Hold-to-jog (Ryan, 9 Oct): moves toward closed or fully open while pressed, stops on release.
 // In LVGL: LV_EVENT_PRESSED starts, RELEASED or PRESS_LOST stops; the touch is polled every 5 ms.
@@ -1328,7 +1358,8 @@ function buildMenu() {
   tile(c2[1][0], RY[0], c2[1][1], 'Alarms and events', 'faults');
   tile(c2[0][0], RY[1], c2[0][1], 'Reference valve', 'ref');
   tile(c2[1][0], RY[1], c2[1][1], 'System information', 'info');
-  tile(10, RY[2], 460, 'Commissioning', 'comm');
+  const bc = btn(s, 10, RY[2], 460, RH, '', commTile);
+  screens.menu.update = () => seth(bc, ACC.on ? '<b style="font-size:16px">Commissioning</b><small>open, protected setup pages</small>' : '<b style="font-size:16px">Commissioning</b><small>PIN required, setup and diagnostics</small>');
   screens.menu.foot = () => 'Link ' + (BENCH.link === 'eth' ? 'Ethernet 192.168.1.50' : 'USB') + '. Firmware ' + FW + ', last reset power-on.';
 }
 // Read-only value card; long values drop from 16 px to 12 px so they fit (LVGL: two label styles).
@@ -1384,18 +1415,171 @@ function buildInfo() {
     sen.set('Druck ' + q.model.split(' ')[0] + ' ' + q.model.split(' ')[1] + ', s/n ' + q.serial);
     rng.set('0 to ' + q.fs);
     cal.set(q.atm.toFixed(4));
-    calD.set('Cert. zero ' + q.zero.toFixed(3) + ', span ' + q.span.toFixed(2) + ' mV');
+    calD.set(q.table ? 'Table, ' + q.table.length + ' points' : 'Cert. zero ' + q.zero.toFixed(3) + ', span ' + q.span.toFixed(2) + ' mV');
     lim.set(P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(0));
-    cfg.set(cfgLabel(), cfgDirty() ? COL.warn : COL.text);
+    cfg.set(cfgLabel() + (cfgDirty() ? ', not saved' : ''), cfgDirty() ? COL.blue : COL.text);
     lnk.set(BENCH.link === 'eth' ? 'Ethernet' : 'USB');
     fw.set(FW);
   };
   screens.info.foot = () => 'Read only. Settings are changed in Commissioning.';
 }
-function cfgDirty() { return pJSON() !== savedJSON() || JSON.stringify(MOT) !== MOT_SAVED || JSON.stringify(SENS.prof) !== SENS.saved; }
-function cfgLabel() { return 'Bench CF-11' + (cfgDirty() ? ', changed, not saved' : ', saved'); }
 
-/* ---- Commissioning hub ------------------------------------------------- */
+/* ---- Commissioning access (UI/UX review item 2) ------------------------ */
+// v47: one commissioning session replaces the separate Motor, Homing and Tuning locks. Access level is separate from
+// AUTO/MANUAL: entering or leaving it never changes the control mode or moves the valve. Entry by PIN (simulator
+// PIN 2468; a long press is the alternative if the workplace does not need a PIN). Closes on Exit or after 10 min
+// without a touch. The serial port shares the same session (ACCESS pin / ACCESS EXIT).
+const ACC = { on: false, last: 0, pin: '2468', idleMs: 10 * 60 * 1000 };
+const COMM_PAGES = ['comm', 'sensor', 'motor', 'tune', 'diag', 'cfg'];
+function accTouch() { if (ACC.on) ACC.last = performance.now(); }
+function accLeft() { return Math.max(0, ACC.idleMs - (performance.now() - ACC.last)); }
+function accEnter(via) { ACC.on = true; ACC.last = performance.now(); ev('ACCESS', 'Commissioning opened (' + via + ')'); return true; }
+function accExit(why) {
+  if (!ACC.on) return false;
+  const n = DRAFT.size; DRAFT.clear(); ACC.on = false;
+  ev('ACCESS', 'Commissioning closed (' + why + ')' + (n ? ', ' + n + ' draft change' + (n > 1 ? 's' : '') + ' discarded' : '') + (cfgDirty() ? '; applied changes stay in force until restart' : ''));
+  if (COMM_PAGES.includes(current)) { navStack = []; show('menu', true, true); }
+  return true;
+}
+function needAcc() { return ACC.on ? true : refuse('Commissioning access needed (Menu > Commissioning)'); }
+function commTile() {
+  if (ACC.on) return show('comm');
+  keypad({ title: 'Commissioning PIN', mask: true, dec: 0, min: 0, max: 99999999, info: 'Simulator PIN ' + ACC.pin,
+    onSet: (v, entry) => entry === ACC.pin ? (accEnter('PIN on screen'), { then: () => show('comm') }) : refuse('Wrong PIN') });
+}
+function commExit() {
+  const n = DRAFT.size, dirty = cfgDirty();
+  if (!n && !dirty) return accExit('Exit pressed');
+  confirmBox('Exit commissioning?' + (n ? ' ' + n + ' draft change' + (n > 1 ? 's are' : ' is') + ' not applied and will be discarded.' : '') + (dirty ? ' Applied changes are not saved: they stay in force until restart.' : ''), 'Exit', 'act', () => accExit('Exit pressed'));
+}
+
+/* ---- Settings fields: edit -> apply -> save (UI/UX review item 7) ------- */
+// Every commissioning setting is a field: tap to edit (draft, amber edge), Apply puts the page's draft in force
+// (blue edge while it differs from the saved configuration), Save for restart writes the whole configuration.
+const isAuto = () => C.mode === 'AUTO' || C.mode === 'PAUSED';
+const FIELDS = {};
+function fld(page, o) { o.page = page; (FIELDS[page] = FIELDS[page] || []).push(o); return o; }
+function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+function fv(f) { return DRAFT.has(f.id) ? DRAFT.get(f.id) : f.get(); }
+function allFields() { return Object.values(FIELDS).flat(); }
+function pageDraft(page) { return (FIELDS[page] || []).filter(f => DRAFT.has(f.id)); }
+function setDraft(f, v) { if (same(v, f.get())) DRAFT.delete(f.id); else DRAFT.set(f.id, v); }
+function fmtF(f, v) { return f.fmt ? f.fmt(v) : v == null ? 'not set' : (f.dec === 0 ? fint(v) : (+v).toFixed(f.dec)); }
+function applyFields(fs) {
+  if (!fs.length) return refuse('Nothing to apply');
+  for (const f of fs) { const e = f.check && f.check(DRAFT.get(f.id)); if (e) return refuse(f.cap + ': ' + e); }
+  const words = [];
+  fs.forEach(f => { const was = f.get(), v = DRAFT.get(f.id); if (f.apply(v) !== false) words.push(f.cap.split(',')[0] + ' ' + fmtF(f, was) + ' to ' + fmtF(f, v)); });
+  fs.forEach(f => DRAFT.delete(f.id));
+  ev('CFG', 'Applied, not saved: ' + words.join('; '));
+  msg('Applied. In use now; lost at restart unless saved.', 'info');
+  return true;
+}
+// Sensor fields act on the profile that will be in use after Apply.
+function sIdx() { return DRAFT.has('S.active') ? DRAFT.get('S.active') : SENS.active; }
+function savedProf(q) { return SAVED.sens.prof.find(x => x.serial === q.serial) || {}; }
+const manualOnly = () => isAuto() ? 'switch to MANUAL first' : C.mode === 'HOMING' ? 'wait for referencing to finish' : null;
+const stillOnly = () => M.moving || C.mode === 'HOMING' ? 'wait for the valve to stop' : null;
+const P_FIELD = (page, key, cap, unit, dec, info, extra) => fld(page, Object.assign({ id: 'P.' + key, cap, unit, dec, min: RANGE[key][0], max: RANGE[key][1], info,
+  get: () => P[key], saved: () => Object.assign({}, DEF_P, SAVED.P)[key], def: () => DEF_P[key], fromCfg: o => o.P && o.P[key],
+  apply: v => setParam(key, v) }, extra || {}));
+const M_FIELD = (key, cap, unit, dec, min, max, info) => fld('motor', { id: 'MOT.' + key, cap, unit, dec, min, max, info,
+  get: () => MOT[key], saved: () => Object.assign({}, DEF_MOT, SAVED.MOT)[key], def: () => DEF_MOT[key], fromCfg: o => o.MOT && o.MOT[key],
+  check: () => stillOnly(), apply: v => { MOT[key] = v; return true; } });
+// Sensor
+fld('sensor', { id: 'S.active', cap: 'Sensor in use', kind: 'choice', get: () => SENS.active, saved: () => SAVED.sens.active, fmt: v => SENS.prof[v] ? 's/n ' + SENS.prof[v].serial + ', 0 to ' + SENS.prof[v].fs : '?',
+  fromCfg: o => { const q = o.sens && o.sens.prof && o.sens.prof[o.sens.active]; const i = q ? SENS.prof.findIndex(x => x.serial === q.serial) : -1; return i < 0 ? undefined : i; },
+  check: () => manualOnly(), apply: v => { SENS.active = v; return true; } });
+const S_FIELD = (key, cap, unit, dec, min, max, info) => fld('sensor', { id: 'S.' + key, cap, unit, dec, min, max, info, cal: true,
+  get: () => SENS.prof[sIdx()][key], saved: () => savedProf(SENS.prof[sIdx()])[key],
+  check: () => isAuto() ? 'switch to MANUAL first (the pressure reading changes)' : null, apply: v => { SENS.prof[sIdx()][key] = v; return true; } });
+S_FIELD('zero', 'Zero', 'mV', 3, -5, 5, 'Certificate zero at 10 V');
+S_FIELD('span', 'Span', 'mV', 3, 50, 150, 'Certificate span at 10 V (full scale)');
+S_FIELD('atm', 'Cal factor', '', 4, 0.5, 2, 'Multiplies the Druck signal');
+// The profile list itself (no card): lets Restore saved remove profiles added since the last save.
+fld('sensor', { id: 'S.prof', cap: 'Sensor profiles', hidden: true, get: () => SENS.prof, saved: () => SAVED.sens.prof, fmt: v => v.length + ' profile' + (v.length > 1 ? 's' : ''),
+  check: () => manualOnly(), apply: v => { const keep = SENS.prof[SENS.active].serial; SENS.prof = JSON.parse(JSON.stringify(v)); SENS.active = Math.max(0, SENS.prof.findIndex(q => q.serial === keep)); return true; } });
+// Valve setup
+fld('motor', { id: 'P.POSMAX', cap: '100 % travel', unit: 'turns', dec: 2, get: () => P.POSMAX, saved: () => Object.assign({}, DEF_P, SAVED.P).POSMAX, def: () => DEF_P.POSMAX, fromCfg: o => o.P && o.P.POSMAX,
+  fmt: v => (v / FLP.spt).toFixed(2), edit: f => fullTravelEdit(f), check: () => manualOnly(), apply: v => setParam('POSMAX', v) });
+P_FIELD('motor', 'Noffset', 'Reference offset', 'steps', 0, 'Count set at the closed limit', { check: () => manualOnly() });
+P_FIELD('motor', 'Nbackoff', 'Back-off', 'steps', 0, 'Off the switch before the slow approach', { check: () => manualOnly() });
+P_FIELD('motor', 'fhome', 'Ref. speed', 'steps/s', 0, 'Speed closing to the switch', { check: () => manualOnly() });
+P_FIELD('motor', 'fcreep', 'Creep speed', 'steps/s', 0, 'Slow final approach to the switch', { check: () => manualOnly() });
+fld('motor', { id: 'MOT.rev', cap: 'Motor direction', kind: 'toggle', get: () => MOT.rev, saved: () => Object.assign({}, DEF_MOT, SAVED.MOT).rev, def: () => 0, fromCfg: o => o.MOT && o.MOT.rev,
+  fmt: v => v ? 'Reversed' : 'Normal', check: () => manualOnly() || stillOnly(), apply: v => { MOT.rev = v; if (v !== 0 || C.ref) { C.ref = false; if (C.mode === 'MANUAL') C.mode = 'NOT HOMED'; } return true; } });
+M_FIELD('run', 'Run speed', 'steps/s', 0, 16, 1000, 'Normal move speed');
+M_FIELD('start', 'Start speed', 'steps/s', 0, 16, 1000, 'Speed at the start and end of a move');
+M_FIELD('accel', 'Acceleration', 'steps/s/s', 0, 25, 20000, 'Ramp between start and run');
+// Control tuning and limits
+P_FIELD('tune', 'Kp', 'Gain', '%/mbar', 2, '% open per mbar of error');
+P_FIELD('tune', 'Ti', 'Integral time', 'min', 2, 'Integral time, 0 is off');
+fld('tune', { id: 'P.KDIR', cap: 'Valve direction', kind: 'toggle', get: () => P.KDIR, saved: () => Object.assign({}, DEF_P, SAVED.P).KDIR, def: () => DEF_P.KDIR, fromCfg: o => o.P && o.P.KDIR,
+  fmt: v => v === 1 ? '+1' : v === -1 ? '-1' : 'not set', check: () => isAuto() ? 'switch to MANUAL first' : null, apply: v => setParam('KDIR', v) });
+P_FIELD('tune', 'outMin', 'Auto min', '% open', 1, 'AUTO never closes the valve below this');
+P_FIELD('tune', 'DB', 'Deadband', 'steps', 0, 'AUTO skips moves smaller than this');
+P_FIELD('tune', 'band', 'Target band', 'mbar', 2, 'Within this of the target reads Within target band');
+P_FIELD('tune', 'Pmin', 'Target min', 'mbar', 2, 'Lowest target an operator can set', { check: v => v >= fv(FIELDS.tune.find(f => f.id === 'P.spMax')) ? 'must be below Target max' : C.SP < v ? 'the present target ' + C.SP.toFixed(2) + ' is below it; change the target first' : null });
+P_FIELD('tune', 'spMax', 'Target max', 'mbar', 1, 'Highest target; at most the sensor range', { check: v => v > SENS.prof[sIdx()].fs ? 'above the sensor range ' + SENS.prof[sIdx()].fs + ' mbar' : C.SP > v ? 'the present target ' + C.SP.toFixed(2) + ' is above it; change the target first' : null });
+P_FIELD('tune', 'alarmLo', 'Low alarm', 'mbar', 2, 'F-02 in AUTO below this for 5 s', { check: v => v > fv(FIELDS.tune.find(f => f.id === 'P.Pmin')) ? 'must be at or below Target min' : null });
+
+function fullTravelEdit(f) {
+  const steps = fv(f), here = M.pos;
+  const typeIt = () => keypad({ title: '100 % travel, output turns', now: (steps / FLP.spt).toFixed(2), min: RANGE.POSMAX[0] / FLP.spt, max: RANGE.POSMAX[1] / FLP.spt,
+    info: fint(FLP.spt) + ' steps per output turn', onSet: v => { setDraft(f, Math.round(v * FLP.spt)); return true; } });
+  if (!C.ref || isAuto() || M.moving || here < RANGE.POSMAX[0]) return typeIt();
+  confirmBox('100 % travel is ' + (steps / FLP.spt).toFixed(2) + ' turns (' + fint(steps) + ' steps). Type a value, or use the present position (' + (here / FLP.spt).toFixed(2) + ' turns)?', 'Type turns', 'act', typeIt,
+    ['Present', () => setDraft(f, here)]);
+}
+function editField(f) {
+  if (!needAcc()) return;
+  if (f.cal && SENS.prof[sIdx()].table && f.id !== 'S.atm') return refuse('This sensor uses an imported table: zero and span are not used');
+  if (f.edit) return f.edit(f);
+  if (f.kind === 'choice') return profileList(f);
+  if (f.kind === 'toggle') { const cur = fv(f), nv = f.id === 'P.KDIR' ? (cur === 1 ? -1 : 1) : (cur ? 0 : 1); return confirmBox('Change ' + f.cap.toLowerCase() + ' from ' + fmtF(f, cur) + ' to ' + fmtF(f, nv) + '? Draft until applied.' + (f.id === 'MOT.rev' ? ' Applying it clears the valve reference.' : ''), 'Change', 'act', () => setDraft(f, nv)); }
+  keypad({ title: f.cap + (f.unit ? ', ' + f.unit : '') + ', ' + f.min + ' to ' + f.max, now: fmtF(f, fv(f)), min: f.min, max: f.max, dec: f.dec === 0 ? 0 : undefined,
+    info: f.info + '. Saved ' + fmtF(f, f.saved()), onSet: v => { const e = f.check && f.check(v); if (e && !/MANUAL|stop|finish/.test(e)) return refuse(e); setDraft(f, f.dec === 0 ? Math.round(v) : v); return true; } });
+}
+// Field card: amber edge = draft (not applied), blue edge = applied but differs from the saved configuration.
+function fieldCard(par, f, x, y, w) {
+  const e = editCard(par, x, y, w, RH, f.cap + (f.unit ? ', ' + f.unit : ''), () => editField(f));
+  const edge = mk(e.c, 0, 6, 3, 36, '');
+  return () => {
+    const d = DRAFT.has(f.id), v = fv(f), applied = f.saved() !== undefined && !same(f.get(), f.saved());
+    const off = f.cal && SENS.prof[sIdx()].table && f.id !== 'S.atm';
+    set(e.v, off ? 'table' : fmtF(f, v)); setc(e.v, !ACC.on || off ? COL.muted : d ? '#9A5D00' : COL.text);
+    setbg(edge, d ? COL.warn : applied ? COL.blue : 'transparent');
+  };
+}
+// Side column on every settings page: Restore saved, Discard, Apply (or Save for restart).
+function cfgSide(s, page, pager) {
+  const bR = pager ? pager.btn : side(s, 0, '<small>Restore</small><b style="font-size:16px;margin-top:2px">Saved</b>', () => {
+    if (!needAcc()) return;
+    const fs = FIELDS[page].filter(f => !same(fv(f), f.saved()) && f.saved() !== undefined);
+    if (!fs.length) return refuse('Already the saved values');
+    fs.forEach(f => setDraft(f, f.saved())); msg('Saved values loaded as a draft. Apply to use them.', 'info'); return true;
+  });
+  const bD = side(s, 1, '<small>Discard</small><b style="font-size:16px;margin-top:2px">Draft</b>', () => { pageDraft(page).forEach(f => DRAFT.delete(f.id)); msg('Draft discarded.', 'info'); return true; });
+  const bA = side(s, 2, '', () => pageDraft(page).length ? applyFields(pageDraft(page)) : saveCfg(), 'act');
+  screens[page].foot = () => cfgFoot(page);
+  return () => {
+    const pd = pageDraft(page).length;
+    if (!pager) tog(bR, 'dis', !ACC.on || !FIELDS[page].some(f => f.saved() !== undefined && !same(fv(f), f.saved())));
+    tog(bD, 'dis', !pd);
+    seth(bA, pd ? '<b style="font-size:16px">Apply</b><small>' + pd + ' change' + (pd > 1 ? 's' : '') + '</small>' : cfgDirty() ? '<small>Save for</small><b style="font-size:16px;margin-top:2px">restart</b>' : '<b style="font-size:16px">Saved</b>');
+    tog(bA, 'dis', !ACC.on || (!pd && !cfgDirty()));
+    screens[page].footCol = pd || DRAFT.size ? '#9A5D00' : cfgDirty() ? COL.blue : null;
+  };
+}
+function cfgFoot(page) {
+  const pd = page ? pageDraft(page).length : DRAFT.size, other = DRAFT.size - (page ? pd : 0);
+  if (pd) return 'Draft: ' + pd + ' not applied (amber edge). Apply puts it in use.' + (other ? ' ' + other + ' more on other pages.' : '');
+  if (other) return other + ' draft change' + (other > 1 ? 's' : '') + ' on other pages, not applied.';
+  if (cfgDirty()) return 'Applied, not saved (blue edge): in use now, lost at restart. Save for restart keeps it.';
+  return 'Saved: ' + cfgLabel() + '.' + (page ? ' Tap a value to change it.' : '');
+}
+
+/* ---- Commissioning pages ----------------------------------------------- */
 function buildComm() {
   const s = newScreen('comm');
   const c2 = cols(2, 10, 470);
@@ -1403,220 +1587,150 @@ function buildComm() {
   tile(c2[0][0], RY[0], c2[0][1], 'Sensor', 'sensor');
   tile(c2[1][0], RY[0], c2[1][1], 'Valve setup', 'motor');
   tile(c2[0][0], RY[1], c2[0][1], 'Control tuning', 'tune');
-  tile(c2[1][0], RY[1], c2[1][1], 'Homing settings', 'homing');
-  st(mk(s, 10, RY[2], 460, RH, 'card'), { display: 'flex', alignItems: 'center', paddingLeft: '12px', fontSize: '12px', whiteSpace: 'normal' }).textContent = 'Interim (update 1): pages keep their own locks. Update 2 replaces them with one commissioning session.';
-  screens.comm.foot = () => 'Setup pages. Not needed for normal operation.';
+  tile(c2[1][0], RY[1], c2[1][1], 'Diagnostics', 'diag');
+  tile(c2[0][0], RY[2], c2[0][1], 'Configuration', 'cfg');
+  const bx = btn(s, c2[1][0], RY[2], c2[1][1], RH, '', commExit);
+  screens.comm.foot = () => cfgFoot(null);
+  screens.comm.update = () => {
+    const l = accLeft();
+    seth(bx, '<b style="font-size:16px">Exit commissioning</b><small>closes after ' + Math.floor(l / 60000) + ':' + pad2(Math.floor(l / 1000) % 60) + ' idle</small>');
+    screens.comm.footCol = DRAFT.size ? '#9A5D00' : cfgDirty() ? COL.blue : null;
+  };
 }
-
-/* ---- Sensor (today's main screen, moved) ----------------------------- */
-// Sensor profiles and calibration (Ryan, 9 Oct). One profile per transducer; the active one sets range and
-// excitation, and carries its calibration (cert zero and span at 10 V, room-air factor). Saved to serial flash.
-// No text keyboard: a profile is named by model, range and serial (digits from the keypad).
-const SENS = { active: 0, page: 0, saved: null, draft: null,
-  prof: [{ model: 'UNIK 5000 PDCR50G1', fs: 1034, type: 'abs', serial: 5880156, exc: 10.0, zero: 0.05, span: 100.02, atm: 1.0512, atmDate: '08 Oct' }] };   // the bench Druck only
-SENS.saved = JSON.stringify(SENS.prof);
-// Drop-down list of profiles by serial number, over rows 1-3 (never over STOP); last item adds a profile.
-function profileList() {
+function profileList(f) {
   closeOverlay();
   overlay = st(mk(dev, 0, HDR, 480, 272 - HDR, 'ov'), { zIndex: '10' });
   overlay.addEventListener('pointerdown', e => { if (e.target === overlay) closeOverlay(); updateUI(); });
-  const items = SENS.prof.map((q, i) => ['s/n ' + q.serial + ', 0 to ' + q.fs + ' mbar abs', i]);
-  if (SENS.prof.length < 3) items.push(['+ New profile', 'new']);
-  // v29: opens under the full-width box in row 2; three rows reach row 4, so it stays left of STOP then.
-  const ih = 40, lw = items.length > 2 ? 343 : 460, box = st(mk(overlay, 10, RY[1] - HDR, lw, ih * items.length, 'card'), { overflow: 'hidden' });
+  const items = SENS.prof.map((q, i) => ['s/n ' + q.serial + ', 0 to ' + q.fs + ' mbar' + (q.table ? ', table' : ''), i]);
+  const ih = 40, box = st(mk(overlay, 10, RY[1] - HDR, 343, ih * items.length, 'card'), { overflow: 'hidden' });
   items.forEach(([label, k], i) => {
-    const it = st(mk(box, 0, i * ih, lw, ih, '', label), { fontSize: '16px', lineHeight: ih + 'px', paddingLeft: '12px', cursor: 'pointer', borderTop: i ? '1px solid ' + COL.bg : 'none',
-      background: k === SENS.active ? '#3E4C59' : '#FFFFFF', color: k === SENS.active ? '#FFFFFF' : k === 'new' ? COL.blue : COL.text });
-    it.addEventListener('pointerdown', e => {
-      e.preventDefault(); e.stopPropagation(); closeOverlay();
-      if (C.mode === 'AUTO' || C.mode === 'PAUSED') { sensLocked(); updateUI(); return; }
-      if (k === 'new') { SENS.draft = Object.assign({}, SENS.prof[SENS.active], { serial: 0, zero: 0, span: 100, atm: 1, atmDate: '' }); }
-      else if (k !== SENS.active) confirmBox('Use the sensor s/n ' + SENS.prof[k].serial + '? Range and calibration change now.', 'Use', 'act', () => { SENS.active = k; ev('SENS', 'Sensor in use ' + profName(SENS.prof[k])); });
-      updateUI();
-    });
+    const sel = k === fv(f);
+    const it = st(mk(box, 0, i * ih, 343, ih, '', label), { fontSize: '16px', lineHeight: ih + 'px', paddingLeft: '12px', cursor: 'pointer', borderTop: i ? '1px solid ' + COL.bg : 'none',
+      background: sel ? '#3E4C59' : '#FFFFFF', color: sel ? '#FFFFFF' : COL.text });
+    it.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); closeOverlay(); setDraft(f, k); ['S.zero', 'S.span', 'S.atm'].forEach(x => DRAFT.delete(x)); updateUI(); });
   });
 }
-// v39 (review, Ryan: all): the setpoint ceiling is the range of the sensor in use; P_MAX left Tuning.
-function pMax() { return SENS.prof[SENS.active].fs; }
-function sensLocked() { return C.mode === 'AUTO' || C.mode === 'PAUSED' ? refuse('Switch to manual to change the sensor') : false; }
+function pMax() { return Math.min(P.spMax, SENS.prof[SENS.active].fs); }
+function sensFs() { return SENS.prof[SENS.active].fs; }
 function profName(q) { return 'Druck ' + q.fs + ' mbar ' + q.type + (q.serial ? ', s/n ' + q.serial : ''); }
 function buildSensor() {
   const s = newScreen('sensor');
-  // v45 (Ryan): two pages. Reading, and Sensor and calibration (profiles and calibration combined, nothing shown twice).
-  const segUpd = segmented(s, 10, RY[0], 460, ['Reading', 'Sensor and calibration'], () => SENS.page, i => { SENS.page = i; });
-  const pg = [0, 1].map(() => st(mk(s, 0, 0, 480, 272, ''), { pointerEvents: 'none' }));
-  const auto = el => st(el, { pointerEvents: 'auto' });
-  // Page 0, reading
-  const pc = mk(pg[0], 10, RY[1], 460, RH, 'card');   // v29: Sensor cards across the full width
-  const edge = mk(pc, 0, 6, 3, 36, '');
-  mk(pc, 12, 5, null, null, 'cap', 'Druck, mbar abs');
-  const sub = st(mk(pc, 12, 23, 220, 18, '', ''), { fontSize: '12px', color: COL.muted, overflow: 'hidden', textOverflow: 'ellipsis' });
-  const pv = st(mk(pc, 300, 4, 150, 40, '', ''), { fontSize: '26px', textAlign: 'right', lineHeight: '40px' });
-  const d = mk(pg[0], 10, RY[2], 343, RH, 'card');   // v39: Save in the side cell
-  const fld = (x, c) => { mk(d, x, 5, null, null, 'cap', c); return st(mk(d, x, 20, 100, null, '', '--'), { fontSize: '16px', overflow: 'hidden', textOverflow: 'ellipsis' }); };
-  // Plain words for the operator (v22): no chip names. v45 (Ryan): no calibration factor here, it is on the other page.
-  const f1 = fld(12, 'Signal, mV/V'), f2 = fld(128, 'Supply, V'), f3 = fld(240, 'Board, C');
-  // Page 1, sensor and calibration. Row 2: sensor in use (drop-down by serial number; in a draft, tap to enter the
-  // serial) and its range; Calibrate to a known pressure beside them. Row 3: certificate zero and span, the factor.
-  const cur = () => SENS.draft || SENS.prof[SENS.active];
-  const dd = st(mk(pg[1], 10, RY[1], 226, RH, 'card'), { cursor: 'pointer', pointerEvents: 'auto' });
-  const ddCap = mk(dd, 12, 5, null, null, 'cap', 'Sensor in use');
-  const ddVal = st(mk(dd, 12, 22, 180, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden', whiteSpace: 'nowrap' });
-  const ddArrow = st(mk(dd, 192, 0, 28, 48, '', '▾'), { fontSize: '16px', lineHeight: '48px', textAlign: 'center', color: COL.muted });
-  dd.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation();
-    if (SENS.draft) { if (sensLocked()) return updateUI(); keypad({ title: 'Serial number', now: String(SENS.draft.serial || ''), min: 1, max: 99999999, dec: 0, info: 'From the Druck label', onSet: v => { SENS.draft.serial = Math.round(v); return true; } }); updateUI(); return; }
-    profileList(); });
-  const edit = (x, y, cap, key, dec, min, max, info) => { const e = editCard(pg[1], x, y, 109, RH, cap, () => {
-    if (C.mode === 'AUTO' || C.mode === 'PAUSED') return sensLocked();
-    const q = cur();
-    keypad({ title: cap, now: dec ? q[key].toFixed(dec) : String(q[key]), min, max, dec: dec === 0 ? 0 : undefined, info, onSet: v => { q[key] = dec === 0 ? Math.round(v) : v; return true; } });
-  }); auto(e.c); return [e, key, dec]; };
-  const ed = [edit(244, RY[1], 'Range, mbar', 'fs', 0, 100, 35000, 'Full scale, mbar abs'),
-              edit(10, RY[2], 'Zero, mV', 'zero', 3, -5, 5, 'Certificate zero at 10 V'),
-              edit(127, RY[2], 'Span, mV', 'span', 3, 50, 150, 'Certificate span at 10 V')];
-  const fc = mk(pg[1], 244, RY[2], 109, RH, 'card');
-  mk(fc, 10, 5, null, null, 'cap', 'Cal factor');
-  const fv = st(mk(fc, 10, 23, 89, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden' });
-  // v45 (Ryan: room-air check becomes enter a known pressure): any reference, not only room air.
-  const bKnown = side(s, 1, '<small>Enter known</small><b style="font-size:16px">Pressure</b>', () => {
-    if (C.mode === 'AUTO' || C.mode === 'PAUSED') return sensLocked();
+  // v47: sensor in use (drop-down, draft until applied), certificate zero and span, cal factor, Enter known pressure.
+  // Profiles and calibration tables are prepared on the laptop and sent over serial (bench panel); creating one does
+  // not make it the sensor in use.
+  const F = id => FIELDS.sensor.find(f => f.id === id);
+  const u = [fieldCard(s, F('S.active'), 10, RY[0], 226), fieldCard(s, F('S.zero'), 10, RY[1], 109), fieldCard(s, F('S.span'), 127, RY[1], 109), fieldCard(s, F('S.atm'), 244, RY[1], 109)];
+  const rng = infoCard(s, 244, RY[0], 109, 'Range, mbar');
+  const src = infoCard(s, 10, RY[2], 226, 'Calibration');
+  btn(s, 244, RY[2], 109, RH, '<small>Enter known</small><b style="font-size:16px;margin-top:2px">Pressure</b>', () => {
+    if (!needAcc()) return;
     if (!(BENCH.druck && BENCH.exc)) return refuse('No Druck signal');
-    const q = SENS.prof[SENS.active], raw = PVreal / q.atm;
-    keypad({ title: 'Known pressure now, mbar abs', now: PVreal.toFixed(1), min: 1, max: q.fs, info: 'From a reference gauge or barometer',
-      onSet: v => ({ then: () => confirmBox('Set the cal factor to ' + (v / raw).toFixed(4) + ' (was ' + q.atm.toFixed(4) + ')? Readings scale by ' + ((v / raw / q.atm - 1) * 100).toFixed(2) + ' %.', 'Set', 'act', () => { q.atm = v / raw; q.atmDate = '09 Oct 2026'; ev('CAL', 'Cal factor ' + q.atm.toFixed(4) + ' from known pressure ' + v.toFixed(1) + ' mbar'); }) }) });
+    const q = SENS.prof[sIdx()], raw = calP(C.mv, Object.assign({}, q, { atm: 1 }));
+    keypad({ title: 'Known pressure now, mbar abs', now: calP(C.mv, Object.assign({}, q, { atm: fv(F('S.atm')) })).toFixed(1), min: 1, max: q.fs, info: 'From a reference gauge or barometer',
+      onSet: v => { setDraft(F('S.atm'), +(v / raw).toFixed(5)); msg('Cal factor ' + (v / raw).toFixed(4) + ' as a draft. Apply to use it.', 'info'); return true; } });
   });
-  const bCreate = side(s, 2, '<b>Create</b>', () => {
-    const q = SENS.draft;
-    if (!q.serial) return refuse('Enter the serial number first');
-    if (SENS.prof.some(x => x.serial === q.serial)) return refuse('A profile for s/n ' + q.serial + ' exists');
-    SENS.prof.push(q); SENS.draft = null; SENS.active = SENS.prof.length - 1; ev('SENS', 'New profile ' + profName(q) + ', now in use'); return true;
-  }, 'act');
-  const bCancel = side(s, 1, 'Cancel', () => { SENS.draft = null; return true; });
-  const bSave = side(s, 2, '<b>Save</b>', () => { SENS.saved = JSON.stringify(SENS.prof); ev('SENS', 'Sensor profiles and calibration saved to serial flash (simulated)'); return true; }, 'act');
-  screens.sensor.foot = () => (SENS.page === 0 ? 'The Druck reading and its supply.' : SENS.draft ? 'New sensor: tap to enter the serial number, set range, zero and span, then Create.' : 'Tap the sensor to change it or add one. Enter known pressure sets the cal factor.') + (JSON.stringify(SENS.prof) !== SENS.saved ? ' Changed, not saved.' : '');
+  const sideU = cfgSide(s, 'sensor');
   screens.sensor.update = () => {
-    if (SENS.page > 1) SENS.page = 1;
-    segUpd(); pg.forEach((e, i) => vis(e, i === SENS.page));
-    if (SENS.page !== 1 && SENS.draft) SENS.draft = null;   // leaving the page cancels a draft
-    const nd = !!SENS.draft;
-    vis(bCreate, nd); vis(bCancel, nd); vis(bSave, !nd); vis(bKnown, SENS.page === 1 && !nd);
-    const dirty = JSON.stringify(SENS.prof) !== SENS.saved;
-    tog(bSave, 'dis', !dirty);
-    set(ddCap, nd ? 'New sensor, serial' : 'Sensor in use'); set(ddArrow, nd ? '›' : '▾'); setc(ddArrow, nd ? COL.blue : COL.muted);
-    set(ddVal, nd ? (SENS.draft.serial ? 's/n ' + SENS.draft.serial : 'enter') : 's/n ' + SENS.prof[SENS.active].serial); setc(ddVal, nd && !SENS.draft.serial ? COL.warn : COL.text);
-    st(dd, { boxShadow: nd ? 'none' : 'inset 0 0 0 2px #AEB9C4' });
-    screens.sensor.footCol = dirty ? '#9A5D00' : null;
-    const A = SENS.prof[SENS.active], ok = BENCH.druck && BENCH.exc, q = cur();
-    set(pv, ok ? PVreal.toFixed(2) : '----'); setbg(edge, !ok ? COL.fault : COL.ok);
-    set(sub, !BENCH.druck ? 'No signal, check the sensor is connected' : !BENCH.exc ? 'Supply to the Druck out of range' : 's/n ' + A.serial + ', 0 to ' + A.fs + ' mbar');
-    setc(sub, ok ? COL.muted : COL.fault);
-    set(f1, BENCH.druck ? (PVreal / A.fs * 10).toFixed(3) : '0.000');
-    set(f2, BENCH.exc ? A.exc.toFixed(2) : '8.71'); setc(f2, BENCH.exc ? COL.text : COL.fault);
-    set(f3, '23.5');
-    ed.forEach(([e, k, dc]) => set(e.v, dc ? q[k].toFixed(dc) : String(q[k])));
-    set(fv, q.atm.toFixed(4));
+    u.forEach(f => f()); sideU();
+    const q = SENS.prof[sIdx()];
+    rng.set('0 to ' + q.fs);
+    src.set(q.table ? 'Table, ' + q.table.length + ' points (laptop)' : 'Certificate' + (q.atmDate ? ', factor ' + q.atmDate.slice(0, 6) : ''));
   };
 }
-
-/* ---- Motor service --------------------------------------------------- */
-const RATES = [16, 25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 600, 800, 1000];
-const ACCELS = [25, 50, 100, 200, 400, 800, 1600, 3200, 6400];
-const SIZES = [1, 10, 100, 1000, 10000];
-function stepList(list, v, dir) {
-  let i = list.reduce((b, x, k) => Math.abs(x - v) < Math.abs(list[b] - v) ? k : b, 0);
-  if (dir > 0 && list[i] <= v && i + 1 < list.length) i++; else if (dir < 0 && list[i] >= v && i > 0) i--;
-  return list[i];
+// Settings page of plain fields: two columns of 167 px (room for full names with units), six fields a page,
+// side column Page / Discard / Apply. Restore saved is on the Configuration page.
+function buildFieldPage(name, pageNames, notes) {
+  const s = newScreen(name), c2 = cols(2), fs = FIELDS[name], np = Math.ceil(fs.length / 6);
+  let pg = 0;
+  const cards = fs.map((f, i) => { const k = i % 6; return [fieldCard(s, f, c2[Math.floor(k / 3)][0], RY[k % 3], c2[Math.floor(k / 3)][1]), Math.floor(i / 6), i]; });
+  const pager = { btn: side(s, 0, '', () => { pg = (pg + 1) % np; return true; }) };
+  // A page with three fields gets a note in the right column, so no cell is left empty.
+  const note = st(mk(s, c2[1][0], RY[0], c2[1][1], 152, 'card'), {}), ntxt = st(mk(note, 12, 8, c2[1][1] - 24, 136, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal' });
+  const sideU = cfgSide(s, name, pager);
+  screens[name].leave = () => { pg = 0; };
+  screens[name].update = () => {
+    cards.forEach(([u, p, i]) => { vis(s.querySelectorAll(':scope > .card')[i], p === pg); u(); });
+    const nt = notes && notes[pg] ? notes[pg]() : ''; vis(note, !!nt); set(ntxt, nt);
+    seth(pager.btn, '<small>' + pageNames[pg] + ', ' + (pg + 1) + ' of ' + np + '</small><b style="font-size:16px;margin-top:2px">' + pageNames[(pg + 1) % np] + ' &#8250;</b>');
+    sideU();
+  };
 }
-// v41 (Ryan: Set Valve and Menu > Valve did the same; split motor parameters and homing): two Menu screens,
-// Motor (drive settings) and Homing (limit switch and Home), no page switch on either.
-let MOT_SAVED = JSON.stringify(MOT);
-const DRV_LOCK = () => C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING';
-function rdCard(par, x, y, w, cap, muted) { const c = mk(par, x, y, w, RH, 'card'); mk(c, 10, 5, w - 20, null, 'cap', cap); return st(mk(c, 10, 22, w - 20, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden', whiteSpace: 'nowrap', color: muted ? COL.muted : COL.text }); }
+function buildMotor() { buildFieldPage('motor', ['Valve', 'Drive'], [null, () => 'Drive speeds for manual and AUTO moves. Referencing uses Reference speed and Creep speed on the Valve page. Changes apply when the valve is stopped.']); }
+function buildTune() { buildFieldPage('tune', ['Control', 'Limits'], [null, () => 'Target min and max bound what an operator can set. They are separate from the sensor range (0 to ' + sensFs() + ' mbar). Low alarm: F-02 if the pressure stays below it for 5 s in AUTO.']); }
 const STOP_WORDS = { DONE: 'Reached target', LIMIT: 'Limit switch', STOP: 'Stopped', none: 'None yet' };
-let motUnlocked = false, homUnlocked = false;
-function buildMotor() {
-  const s = newScreen('motor');
-  // v44 (review, Ryan: correct all): service screen, locked like Tuning. Row 1 Run, Start, Accel, Steps now;
-  // rows 2-3 the last move (what stopped it, where, target); side Lock above Save. Step mode, coil order and hold
-  // are wiring settings read over serial (VER?); Valve calc. duplicated the Valve screen.
-  const c3 = cols(3);
-  const spd = [['Run, steps/s', 'run', RATES], ['Start, steps/s', 'start', RATES], ['Accel, step/s/s', 'accel', ACCELS]].map((r, i) => {
-    const e = editCard(s, c3[i][0], RY[0], c3[i][1], RH, r[0], () => {
-      if (!motUnlocked) return msg('Hold Unlock to change the motor speeds.', 'info');
-      if (M.moving) return refuse('Busy: stop first');
-      keypad({ title: r[0], now: String(MOT[r[1]]), min: r[2][0], max: r[2][r[2].length - 1], dec: 0, info: 'Range ' + r[2][0] + ' to ' + r[2][r[2].length - 1], onSet: v => { MOT[r[1]] = Math.round(v); return true; } });
-    });
-    return [e, r];
-  });
-  const fo = editCard(s, 361, RY[0], 109, RH, '100 %, turns', fullOpenMenu);   // v46: moved here from the operator Valve page
-  // v45 (Ryan: too many words in the middle box): short value cards. Row 2 the last move and its target;
-  // row 3 distance, time and mean speed, which is what a speed change shows.
-  const vLast = rdCard(s, 10, RY[1], 226, 'Last move'), vLastCap = vLast.parentNode.firstChild, vTgt = rdCard(s, 244, RY[1], 109, 'Target, steps');
-  const vDist = rdCard(s, 10, RY[2], 109, 'Moved, steps'), vTook = rdCard(s, 127, RY[2], 109, 'Took, s'), vMean = rdCard(s, 244, RY[2], 109, 'Mean, steps/s');
-  const bLock = holdBtn(s, 361, RY[1], 109, RH, '', () => motUnlocked ? 0 : 1000, () => { motUnlocked = !motUnlocked; ev('MOT', motUnlocked ? 'Motor unlocked' : 'Motor locked'); });
-  const bSave = side(s, 2, '<b>Save</b>', () => { MOT_SAVED = JSON.stringify(MOT); ev('MOT', 'Motor settings saved to serial flash (proposed)'); return true; }, 'act');
-  screens.motor.leave = () => { motUnlocked = false; };
-  screens.motor.foot = () => JSON.stringify(MOT) !== MOT_SAVED ? 'Changed, not saved.' : motUnlocked ? 'Unlocked: tap a speed to change it.' : 'Locked. Hold Unlock to change the speeds.';
-  screens.motor.update = () => {
-    spd.forEach(([e, r]) => { set(e.v, String(MOT[r[1]])); setc(e.v, motUnlocked ? COL.text : COL.muted); });
-    set(fo.v, (P.POSMAX / FLP.spt).toFixed(2)); tog(fo.c, 'dis', C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING');
-    const has = M.t0 != null, dur = has ? (M.moving ? t : M.tEnd) - M.t0 : 0, dist = has ? Math.abs(M.pos - M.from) : 0;
-    set(vLast, M.moving ? 'Moving' : STOP_WORDS[M.lastStop] || M.lastStop); setc(vLast, M.moving ? COL.blue : M.lastStop === 'LIMIT' ? COL.warn : COL.text);
-    set(vTgt, has ? fint(M.target) : '--'); set(vDist, has ? fint(dist) : '--'); set(vTook, has ? dur.toFixed(1) : '--'); set(vMean, has && dur > 0 ? fint(dist / dur) : '--');
-    tog(bSave, 'dis', JSON.stringify(MOT) === MOT_SAVED);
-    screens.motor.footCol = JSON.stringify(MOT) !== MOT_SAVED ? '#9A5D00' : COL.muted;
-    lockLabel(bLock, motUnlocked);
+function buildDiag() {
+  const s = newScreen('diag');
+  // v47: raw readings and drive diagnostics, read only (were the Sensor Reading page and the Motor last-move cards).
+  const c4 = cols(4, 10, 470);
+  const g = (r, c, cap) => infoCard(s, c4[c][0], RY[r], c4[c][1], cap);
+  const sig = g(0, 0, 'Signal, mV/V'), raw = g(0, 1, 'Uncal., mbar'), sup = g(0, 2, 'Supply, V'), brd = g(0, 3, 'Board, C');
+  const pos = g(1, 0, 'Steps now'), sw = g(1, 1, 'Switch, NC'), over = g(1, 2, 'Past switch'), lnk = g(1, 3, 'Link');
+  const last = g(2, 0, 'Last move'), tgt = g(2, 1, 'Target, steps'), dist = g(2, 2, 'Moved, steps'), took = g(2, 3, 'Took, s');
+  screens.diag.foot = () => 'Read only. Raw values for commissioning and fault finding.';
+  screens.diag.update = () => {
+    const ok = BENCH.druck && BENCH.exc;
+    sig.set(BENCH.druck ? (C.mv / 10).toFixed(4) : '0.0000', ok ? COL.text : COL.fault);
+    raw.set(ok ? calP(C.mv, { fs: 1034, zero: 0, span: 100, atm: 1 }).toFixed(1) : '----');
+    sup.set(BENCH.exc ? '10.00' : '8.71', BENCH.exc ? COL.text : COL.fault); brd.set('23.5');
+    pos.set(fint(M.pos)); sw.set(LIM.active ? 'Open' : 'Closed', LIM.active ? COL.warn : COL.text); over.set(fint(LIM.over), LIM.over ? COL.fault : COL.text);
+    lnk.set(BENCH.link === 'eth' ? 'Ethernet' : 'USB');
+    const has = M.t0 != null, dur = has ? (M.moving ? t : M.tEnd) - M.t0 : 0;
+    last.set(M.moving ? 'Moving' : STOP_WORDS[M.lastStop] || M.lastStop, M.moving ? COL.blue : M.lastStop === 'LIMIT' ? COL.warn : COL.text);
+    tgt.set(has ? fint(M.target) : '--'); dist.set(has ? fint(Math.abs(M.pos - M.from)) : '--'); took.set(has ? dur.toFixed(1) : '--');
   };
 }
-function buildHoming() {
-  const s = newScreen('homing');
-  // v44 (review, Ryan: correct all): operator screen, stays usable. Row 1 switch, last homing, past switch;
-  // row 2 progress, Home over rows 2-3; row 3 Offset and Creep (service, editable only when unlocked) and Lock.
-  // v45 (Ryan): last homing with date and year (226 wide to fit), steps visible while homing (above Lock), Home only.
-  const vHome = rdCard(s, 10, RY[0], 226, 'Last homing');
-  const vState = rdCard(s, 244, RY[0], 109, 'Switch, NC'), vOver = rdCard(s, 361, RY[0], 109, 'Past switch');
-  const vStep = rdCard(s, 10, RY[1], 226, 'Homing'), vStepCap = vStep.parentNode.firstChild, pos = rdCard(s, 244, RY[1], 109, 'Steps now');
-  const bh = btn(s, 361, RY[1], 109, 104, '<b style="font-size:16px">Home</b>', homeAsk, 'act');
-  const svc = (x, cap, key, unit) => editCard(s, x, RY[2], 109, RH, cap, () => {
-    if (!homUnlocked) return msg('Hold Unlock to change ' + cap.split(',')[0] + '.', 'info');
-    if (C.mode === 'HOMING') return refuse('Busy: homing');
-    const rg = RANGE[key];
-    keypad({ title: cap + ', ' + rg[0] + ' to ' + rg[1], now: String(P[key]), min: rg[0], max: rg[1], dec: 0, info: unit,
-      onSet: v => { if (!setParam(key, v)) return false; flash = Object.assign({}, flash || DEF_P, { [key]: P[key] }); try { localStorage.setItem(FLASH_KEY, JSON.stringify(flash)); } catch (e) { } ev('HOME', cap + ' set to ' + P[key] + ' and saved'); return true; } });
+function buildCfg() {
+  const s = newScreen('cfg');
+  // v47: the configuration as one thing, with a name and revision. Restore saved and defaults go through a draft.
+  const name = infoCard(s, 10, RY[0], 226, 'Configuration in use');
+  const state = infoCard(s, 244, RY[0], 109, 'State');
+  const saved = infoCard(s, 10, RY[1], 226, 'Last saved');
+  const imp = infoCard(s, 244, RY[1], 109, 'Last import');
+  const bDis = side(s, 1, '<small>Discard</small><b style="font-size:16px;margin-top:2px">All drafts</b>', () => { DRAFT.clear(); msg('All drafts discarded.', 'info'); return true; });
+  const bRes = btn(s, 10, RY[2], 109, RH, '<small>Restore</small><b style="font-size:16px;margin-top:2px">Saved</b>', () => {
+    if (!needAcc()) return;
+    let n = 0; allFields().forEach(f => { if (f.saved() !== undefined && !same(fv(f), f.saved())) { setDraft(f, f.saved()); n++; } });
+    return n ? (msg('Saved configuration loaded as a draft (' + n + '). Apply all to use it.', 'info'), true) : refuse('Already the saved configuration');
   });
-  const eOff = svc(10, 'Offset, steps', 'Noffset', 'Count set at the closed limit');
-  const eCreep = svc(127, 'Creep, steps/s', 'fcreep', 'Slow final approach speed');
-  const bLock = holdBtn(s, 244, RY[2], 109, RH, '', () => homUnlocked ? 0 : 1000, () => { homUnlocked = !homUnlocked; ev('HOME', homUnlocked ? 'Homing settings unlocked' : 'Homing settings locked'); });
-  screens.homing.leave = () => { homUnlocked = false; };
-  screens.homing.foot = () => C.mode === 'HOMING' ? 'STOP to cancel.' : homUnlocked ? 'Unlocked: Offset and Creep save when set.' : 'Home closes to the switch, then sets 0 %.';
-  screens.homing.update = () => {
-    set(vState, LIM.active ? 'Open' : 'Closed'); setc(vState, LIM.active ? COL.warn : COL.text);
-    set(vHome, C.lastHome ? stamp(C.lastHome.t) : 'Not since power-on'); set(pos, fint(M.pos));
-    set(vOver, fint(LIM.over)); setc(vOver, LIM.over ? COL.fault : COL.text);
-    const hm = C.mode === 'HOMING' ? (homeStep().match(/(\d of 3): (.*)/) || []) : [];
-    set(vStepCap, hm[1] ? 'Homing, step ' + hm[1] : 'Homing');
-    set(vStep, C.mode === 'HOMING' ? (hm[2] ? hm[2][0].toUpperCase() + hm[2].slice(1) : 'Starting') : C.ref ? 'Homed' : 'Not homed'); setc(vStep, C.mode === 'HOMING' ? COL.blue : C.ref ? COL.text : COL.warn);
-    set(eOff.v, fint(P.Noffset)); set(eCreep.v, fint(P.fcreep));
-    [eOff, eCreep].forEach(e => setc(e.v, homUnlocked ? COL.text : COL.muted));
-    tog(bh, 'dis', DRV_LOCK());
-    lockLabel(bLock, homUnlocked);
+  const bDef = btn(s, 127, RY[2], 109, RH, '<small>Load</small><b style="font-size:16px;margin-top:2px">Defaults</b>', () => {
+    if (!needAcc()) return;
+    let n = 0; allFields().forEach(f => { if (f.def && !same(fv(f), f.def())) { setDraft(f, f.def()); n++; } });
+    return n ? (msg('Defaults loaded as a draft (' + n + '). Apply all to use them.', 'info'), true) : refuse('Already the defaults');
+  });
+  const note = st(mk(s, 244, RY[2], 109, RH, 'card'), {});
+  st(mk(note, 8, 0, 95, 48, '', 'Laptop: CFG import / export'), { fontSize: '12px', lineHeight: '15px', whiteSpace: 'normal', display: 'flex', alignItems: 'center' });
+  const bAll = side(s, 2, '', () => DRAFT.size ? applyFields(allFields().filter(f => DRAFT.has(f.id))) : saveCfg(), 'act');
+  const bName = side(s, 0, '<small>Drafts</small><b style="font-size:16px;margin-top:2px">0</b>', () => { const pg = [...new Set(allFields().filter(f => DRAFT.has(f.id)).map(f => f.page))]; if (pg.length) show(pg[0]); });
+  screens.cfg.foot = () => cfgFoot(null);
+  screens.cfg.update = () => {
+    name.set(cfgLabel());
+    const stt = cfgState();
+    state.set(stt === 'draft' ? 'Draft' : stt === 'applied' ? 'Not saved' : 'Saved', stt === 'draft' ? '#9A5D00' : stt === 'applied' ? COL.blue : COL.text);
+    saved.set(SAVED.savedAt ? stamp(SAVED.savedAt) : 'Before this power-on');
+    imp.set(C.lastImport ? clock(C.lastImport.t).slice(0, 5) : 'None');
+    seth(bName, '<small>Drafts, go to</small><b style="font-size:16px;margin-top:2px">' + DRAFT.size + '</b>'); tog(bName, 'dis', !DRAFT.size);
+    tog(bDis, 'dis', !DRAFT.size);
+    seth(bAll, DRAFT.size ? '<b style="font-size:16px">Apply all</b><small>' + DRAFT.size + ' change' + (DRAFT.size > 1 ? 's' : '') + '</small>' : cfgDirty() ? '<small>Save for</small><b style="font-size:16px;margin-top:2px">restart</b>' : '<b style="font-size:16px">Saved</b>');
+    tog(bAll, 'dis', !DRAFT.size && !cfgDirty());
+    [bRes, bDef].forEach(b => tog(b, 'dis', !ACC.on));
+    screens.cfg.footCol = DRAFT.size ? '#9A5D00' : cfgDirty() ? COL.blue : null;
   };
 }
+// Laptop configuration tool (bench side): import goes in as a draft; it needs the commissioning session.
+function importCfg(o, how) {
+  if (!ACC.on) { conLog('ERR commissioning access needed: ACCESS pin, or open Commissioning on the screen', 'err'); return false; }
+  let added = 0;
+  ((o.sens && o.sens.prof) || []).forEach(q => { if (!SENS.prof.some(x => x.serial === q.serial)) { SENS.prof.push(JSON.parse(JSON.stringify(q))); added++; } });
+  let n = 0; allFields().forEach(f => { const v = f.fromCfg && f.fromCfg(o); if (v !== undefined && v !== null && !same(v, fv(f))) { setDraft(f, v); n++; } });
+  C.lastImport = { t, name: o.name || how };
+  ev('CFG', 'Imported ' + (o.name ? o.name + (o.rev ? ' rev ' + o.rev : '') : how) + ' from the laptop: ' + n + ' setting' + (n === 1 ? '' : 's') + ' as a draft' + (added ? ', ' + added + ' sensor profile' + (added > 1 ? 's' : '') + ' added (not in use)' : ''));
+  conLog('OK imported, ' + n + ' as draft, ' + added + ' profile(s) added');
+  return true;
+}
+// Example of a profile prepared on the laptop: a second Druck with a 12-point calibration table (mV/V -> mbar).
+const EXAMPLE_PROF = { model: 'UNIK 5000 PDCR50G1', fs: 2000, type: 'abs', serial: 5880211, exc: 10.0, zero: 0, span: 100, atm: 1.0, atmDate: '',
+  table: [[0.004, 0], [0.5, 100.4], [1, 200.6], [1.5, 300.7], [2.5, 500.9], [3.5, 701.0], [4.5, 900.8], [5.5, 1100.5], [6.5, 1300.2], [7.5, 1499.9], [8.5, 1699.8], [10.0, 2000]] };
 
-/* ---- Limit and simulation -------------------------------------------- */
-
-/* ---- Tuning ---------------------------------------------------------- */
-// v32 (Ryan: say what each one is): [name, key, unit, decimals, short (keypad, about 30 chars), long (status line)].
-// v44 (review, Ryan: correct all): six rows on the screen. Kd, T_s, T_check, N_resp, dP_min, F-10 min move,
-// I hold lead and F-10 lag are set over serial only (CTRL commands); f_creep moved to Homing as Creep.
-// v45 (Ryan): full names, not variable names; left column Kp, Ti, valve direction (bottom), right P_MIN, Auto min, DB.
-const TUNE = [
-  ['Proportional gain', 'Kp', '%/mbar', 2, 'Gain, % open per mbar error', 'Proportional gain (Kp): % open per mbar of pressure error.'],
-  ['Integral time', 'Ti', 'min', 2, 'Integral time, 0 is off', 'Integral time (Ti): how fast auto removes a steady error. 0 turns it off.'],
-  ['Valve direction', 'KDIR', '', 0, '+1: opening raises pressure', 'Valve direction (K_DIR): +1 if opening the valve raises the pressure.'],
-  ['Lowest setpoint', 'Pmin', 'mbar', 2, 'Lowest setpoint allowed', 'Lowest setpoint (P_MIN). Auto faults (F-02) below it.'],
-  ['Lowest auto opening', 'outMin', '% open', 1, 'Auto never closes below this', 'Lowest auto opening (Auto min): auto never closes the valve below this.'],
-  ['Deadband', 'DB', 'steps', 0, 'Smaller moves are skipped', 'Deadband (DB): auto skips moves smaller than this.']];
 function setParam(key, v) {
   if (key === 'KDIR') { if (v !== 1 && v !== -1) return refuse('K_DIR is +1 or -1'); if (C.mode === 'AUTO') return refuse('Set K_DIR in manual'); P.KDIR = v; return true; }
   const r = RANGE[key];
@@ -1627,61 +1741,6 @@ function setParam(key, v) {
   P[key] = v;
   if (key === 'POSMAX' && C.ref) { C.manPos = Math.min(C.manPos, v); }
   return true;
-}
-function savedJSON() { return JSON.stringify(flash || DEF_P); }
-function pJSON() { const o = {}; for (const k in DEF_P) o[k] = P[k]; return JSON.stringify(o); }
-function saveP() {
-  const o = {}; for (const k in DEF_P) o[k] = P[k];
-  flash = o;
-  try { localStorage.setItem(FLASH_KEY, JSON.stringify(o)); } catch (e) { }
-  ev('CTRL', 'Settings saved to serial flash (simulated)');
-  return true;
-}
-let tunePage = 0, tuneUnlocked = false;
-function buildTune() {
-  const s = newScreen('tune');
-  const rows = TUNE.map((r, i) => {
-    const pg = Math.floor(i / 6), k = i % 6;
-    const row = st(mk(s, cols(2)[Math.floor(k / 3)][0], RY[k % 3], cols(2)[Math.floor(k / 3)][1], RH, 'card'), { cursor: 'pointer' });
-    st(mk(row, 8, 4, 152, 16, '', r[0]), { fontSize: '12px', color: COL.muted, lineHeight: '16px' });
-    const v = st(mk(row, 8, 22, 134, 20, '', ''), { fontSize: '16px', textAlign: 'right', lineHeight: '20px' });
-    st(mk(row, 148, 0, 14, RH, '', '\u203A'), { fontSize: '16px', color: COL.blue, lineHeight: RH + 'px', textAlign: 'center' });   // editable (review 3)
-    row.addEventListener('pointerdown', () => {
-      if (!tuneUnlocked) { msg(r[5] + ' Hold Unlock to change.', 'info'); return; }
-      if (r[1] === 'KDIR') {
-        const nv = P.KDIR === 1 ? -1 : 1;
-        if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Set K_DIR in manual');
-        return confirmBox('Change the valve direction from ' + (P.KDIR === 1 ? '+1' : '-1') + ' to ' + (nv === 1 ? '+1' : '-1') + '? Auto will drive the valve the other way.', 'Change', 'act', () => setParam('KDIR', nv));
-      }
-      const rg = RANGE[r[1]];
-      keypad({ title: r[0] + (r[2] ? ', ' + r[2] : '') + ', ' + rg[0] + ' to ' + rg[1], now: P[r[1]] == null ? 'not set' : (+P[r[1]]).toFixed(r[3]), min: rg[0], max: rg[1], dec: r[3] === 0 ? 0 : undefined,
-        info: r[4], onSet: x => r[1] === 'POSMAX' ? ((C.mode === 'AUTO' || C.mode === 'PAUSED') ? refuse('Set POS_MAX in manual') : confirmFullOpen(x, 'set on Tuning')) : setParam(r[1], x) });
-    });
-    return [row, v, r, pg];
-  });
-  const bLock = holdBtn(s, 361, RY[0], 109, 104, '', () => tuneUnlocked ? 0 : 1000, () => { tuneUnlocked = !tuneUnlocked; ev('TUNE', tuneUnlocked ? 'Tuning unlocked' : 'Tuning locked'); });
-  const bSave = side(s, 2, '<b>Save</b>', saveP, 'act');
-  screens.tune.leave = () => { tuneUnlocked = false; };
-  screens.tune.foot = () => pJSON() !== savedJSON() ? 'Changed, not saved to flash.' : tuneUnlocked ? 'Unlocked: tap a row to change it.' : 'Locked. Tap a row to see what it does; hold Unlock to edit.';
-  screens.tune.footCol = null;
-  screens.tune.update = () => {
-    rows.forEach(([row, v, r, pg]) => {
-      vis(row, pg === tunePage);
-      const x = P[r[1]];
-      if (r[1] === 'KDIR') { set(v, x === 1 ? '+1' : x === -1 ? '-1' : 'not set'); setc(v, x ? COL.text : COL.warn); }
-      else { set(v, x == null ? 'not set' : (r[3] === 0 ? fint(x) : (+x).toFixed(r[3])) + (r[2] ? ' ' + r[2] : '')); setc(v, x == null ? COL.warn : COL.text); }
-      // Locked rows: muted value colour, not opacity (opacity in LVGL renders the row into a 24 KB layer).
-      if (!tuneUnlocked && x != null) setc(v, COL.muted);
-    });
-    tog(bSave, 'dis', pJSON() === savedJSON());
-    screens.tune.footCol = pJSON() !== savedJSON() ? '#9A5D00' : COL.muted;
-    lockLabel(bLock, tuneUnlocked);
-  };
-}
-function lockLabel(b, on) {
-  let l = b.querySelector('.lbl'); if (!l) { l = document.createElement('span'); l.className = 'lbl'; b.insertBefore(l, b.firstChild); }
-  seth(l, on ? '<b>Lock</b>' : '<small>Hold to</small><b>Unlock</b>');
-  st(l, { display: 'flex', flexDirection: 'column', alignItems: 'center' });
 }
 
 /* ---- Faults and events ------------------------------------------------ */
@@ -1823,8 +1882,10 @@ function conLog(text, cls) {
   con.scrollTop = con.scrollHeight;
 }
 const HELP = [
-  'CTRL? | CTRL HOME | CTRL STOP | CTRL AUTO | CTRL MAN [%] | CTRL STEPS n | CTRL SP mbar | CTRL ACK | CTRL LOG? | CTRL SAVE | CTRL LOAD | CTRL DEFAULTS',
-  'PID? | PID KP|TI|KD|DB|TS|PMIN|TCHECK|NRESP|DPMIN|TCONV|CHECKMIN|LEAD|TLAG|OUTMIN v | PID KDIR +1|-1',
+  'CTRL? | CTRL HOME | CTRL STOP | CTRL AUTO | CTRL MAN [%] | CTRL STEPS n | CTRL SP mbar | CTRL ACK | CTRL LOG?',
+  'ACCESS? | ACCESS pin | ACCESS EXIT   (settings commands below need the commissioning session; the screen shares it)',
+  'CFG? | CFG SAVE | CFG RESTORE | CFG DEFAULTS   (serial changes apply at once, not saved until CFG SAVE)',
+  'PID? | PID KP|TI|KD|DB|TS|PMIN|SPMAX|ALARMLO|BAND|STABLE|TCHECK|NRESP|DPMIN|TCONV|CHECKMIN|LEAD|TLAG|OUTMIN v | PID KDIR +1|-1',
   'VALVE? | VALVE POSMAX|FHOME|FCREEP|BACKOFF|CLEAR|OFFSET v',
   'LIM? | LIM SIM AT n | LIM SIM HYST n | LIM SIM NORMAL|OPEN|CLOSED | LIM SIM LOSE n',
   'MOT? | MOT MOVE n | MOT STOP | MOT RATE|START|ACCEL v'];
@@ -1835,7 +1896,7 @@ function command(line) {
   conLog('> ' + line.trim(), 'in');
   const w = u.split(' '), num = parseFloat(w[w.length - 1]);
   C.refusal = 'bad value';
-  const pmap = { KP: 'Kp', TI: 'Ti', KD: 'Kd', DB: 'DB', TS: 'Ts', PMIN: 'Pmin', TCHECK: 'Tcheck', NRESP: 'Nresp', DPMIN: 'dPmin', TCONV: 'Tconv', CHECKMIN: 'checkMin', LEAD: 'leadMax', TLAG: 'Tlag', OUTMIN: 'outMin' };
+  const pmap = { SPMAX: 'spMax', ALARMLO: 'alarmLo', BAND: 'band', STABLE: 'stableT', KP: 'Kp', TI: 'Ti', KD: 'Kd', DB: 'DB', TS: 'Ts', PMIN: 'Pmin', TCHECK: 'Tcheck', NRESP: 'Nresp', DPMIN: 'dPmin', TCONV: 'Tconv', CHECKMIN: 'checkMin', LEAD: 'leadMax', TLAG: 'Tlag', OUTMIN: 'outMin' };
   const vmap = { POSMAX: 'POSMAX', FHOME: 'fhome', FCREEP: 'fcreep', BACKOFF: 'Nbackoff', CLEAR: 'Nclear', OFFSET: 'Noffset' };
   if (u === 'HELP') { HELP.forEach(l => conLog(l)); return; }
   if (u === 'CTRL?') { conLog('mode=' + C.mode + ' homed=' + (C.ref ? 1 : 0) + ' pv=' + fmtP(PV) + ' sp=' + C.SP.toFixed(2) + ' pos=' + M.pos + ' target=' + (C.mode === 'AUTO' ? C.posCmd : C.manPos) + ' open=' + pctOf(M.pos).toFixed(1) + '% I=' + Math.round(C.I) + ' faults=' + ([...C.faults.keys()].join(',') || 'none')); conLog('OK'); return; }
@@ -1851,9 +1912,16 @@ function command(line) {
   if (w[0] === 'CTRL' && w[1] === 'SP') return okErr(isNaN(num) ? false : setSP(num));
   if (u === 'CTRL ACK') return okErr(ack());
   if (u === 'CTRL LOG?') { C.events.slice(-20).forEach(e => conLog('EVT,' + clock(e.t) + ',' + e.tag + ',' + e.text)); conLog('OK'); return; }
-  if (u === 'CTRL SAVE') return okErr(saveP());
-  if (u === 'CTRL LOAD') { P = Object.assign({}, DEF_P, flash || {}); return okErr(true, 'loaded'); }
-  if (u === 'CTRL DEFAULTS') { if (C.mode === 'AUTO') return okErr(refuse('Switch to manual first')); P = Object.assign({}, DEF_P); return okErr(true, 'defaults, not saved'); }
+  // v47 (review item 2): one access check for every settings command, shared with the screen session.
+  if (u === 'ACCESS?') { conLog('access=' + (ACC.on ? 'commissioning, ' + Math.ceil(accLeft() / 1000) + ' s idle left' : 'operator')); conLog('OK'); return; }
+  if (u === 'ACCESS EXIT') return okErr(ACC.on ? accExit('ACCESS EXIT over serial') : refuse('not open'));
+  if (w[0] === 'ACCESS' && w.length === 2) return okErr(w[1] === ACC.pin ? (ACC.on ? true : accEnter('serial')) : refuse('wrong PIN'));
+  if (u === 'CFG?') { conLog('config=' + cfgLabel() + ' state=' + cfgState() + ' drafts=' + DRAFT.size + ' saved=' + (SAVED.savedAt ? stamp(SAVED.savedAt, true) : 'before power-on')); conLog('OK'); return; }
+  const setting = /^(CTRL SAVE|CTRL LOAD|CTRL DEFAULTS|CFG SAVE|CFG RESTORE|CFG DEFAULTS|PID [A-Z]+ |VALVE [A-Z]+ |MOT (RATE|START|ACCEL) )/.test(u + ' ');
+  if (setting && !ACC.on) return okErr(refuse('commissioning access needed (ACCESS pin)'));
+  if (u === 'CTRL SAVE' || u === 'CFG SAVE') return okErr(saveCfg());
+  if (u === 'CTRL LOAD' || u === 'CFG RESTORE') { if (isAuto()) return okErr(refuse('switch to MANUAL first')); loadActive(SAVED); DRAFT.clear(); ev('CFG', 'Saved configuration restored over serial'); return okErr(true, 'restored ' + cfgLabel()); }
+  if (u === 'CTRL DEFAULTS' || u === 'CFG DEFAULTS') { if (isAuto()) return okErr(refuse('switch to MANUAL first')); P = Object.assign({}, DEF_P); Object.assign(MOT, DEF_MOT); ev('CFG', 'Defaults applied over serial, not saved'); return okErr(true, 'defaults, not saved'); }
   if (u === 'PID?') { conLog(Object.keys(pmap).map(k => k + '=' + P[pmap[k]]).join(' ') + ' KDIR=' + P.KDIR); conLog('OK'); return; }
   if (w[0] === 'PID' && w[1] === 'KDIR') return okErr(setParam('KDIR', num));
   if (w[0] === 'PID' && pmap[w[1]]) return okErr(isNaN(num) ? false : setParam(pmap[w[1]], num));
@@ -2021,6 +2089,14 @@ function setLink(v) { BENCH.link = v; document.querySelectorAll('[data-link]').f
 document.querySelectorAll('[data-link]').forEach(b => b.addEventListener('click', () => setLink(b.dataset.link)));
 function benchLimButtons() { document.querySelectorAll('[data-lim]').forEach(b => b.classList.toggle('on', b.dataset.lim === LIM.force)); }
 document.querySelectorAll('[data-lim]').forEach(b => b.addEventListener('click', () => { LIM.force = b.dataset.lim; ev('LIM', 'Bench test: switch ' + b.textContent.toLowerCase()); benchLimButtons(); }));
+document.getElementById('cfg-export').addEventListener('click', () => {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(SAVED, null, 2)], { type: 'application/json' }));
+  a.download = 'pmc-config-' + SAVED.name.replace(/\s+/g, '-') + '-rev' + SAVED.rev + '.json'; a.click(); conLog('> CFG EXPORT', 'in'); conLog('OK ' + cfgLabel() + ' exported');
+});
+document.getElementById('cfg-send').addEventListener('click', () => document.getElementById('cfg-file').click());
+document.getElementById('cfg-file').addEventListener('change', e => { const f = e.target.files[0]; if (!f) return; f.text().then(txt => { conLog('> CFG IMPORT ' + f.name, 'in'); try { importCfg(JSON.parse(txt), f.name); } catch (er) { conLog('ERR not a configuration file', 'err'); } updateUI(); }); e.target.value = ''; });
+document.getElementById('cfg-prof').addEventListener('click', () => { conLog('> CFG IMPORT profile s/n 5880211', 'in'); importCfg({ sens: { prof: [EXAMPLE_PROF] } }, 'sensor profile s/n 5880211'); updateUI(); });
+document.getElementById('cfg-wipe').addEventListener('click', () => { try { localStorage.removeItem(CFG_KEY); } catch (e) { } SAVED = defaultCfg(); ev('CFG', 'Simulated flash erased: defaults saved as rev 1'); updateUI(); });
 document.getElementById('b-lose').addEventListener('click', () => { LIM.simPos -= 300; ev('LIM', 'Bench test: 300 lost steps'); });
 setTimeout(benchLimButtons, 0);
 
@@ -2038,6 +2114,7 @@ window.addEventListener('resize', () => { fit(); drawBench(); flDraw(); });
 
 let lastUI = 0, lastBench = 0;
 function updateUI() {
+  if (ACC.on && accLeft() <= 0) accExit('no touch for 10 min');
   if (current && screens[current]) screens[current].update();
   updateGlobal();
   if (screensKeypadNow && overlay) screensKeypadNow();
@@ -2054,7 +2131,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-buildGlobal(); buildCtrl(); buildValve(); buildMenu(); buildRef(); buildInfo(); buildComm(); buildSensor(); buildMotor(); buildHoming(); buildTune(); buildFaults(); buildTrend();
+buildGlobal(); buildCtrl(); buildValve(); buildMenu(); buildRef(); buildInfo(); buildComm(); buildSensor(); buildMotor(); buildTune(); buildDiag(); buildCfg(); buildFaults(); buildTrend();
 setSpeed(1); setWin(600); fit();
 flBuildParams(); flBuildRead(); setPlumb('line'); setLink('usb'); flCurveCalc(); flDraw();
 conLog('PMC ' + FW + ' simulated. Boots homed at 0 % in manual (simulator default; the firmware plan G3 boots not homed). Type HELP for commands.');
