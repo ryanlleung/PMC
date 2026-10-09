@@ -259,18 +259,17 @@ dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
 <div class="panel">
 <h2>Try this</h2>
 <ol class="try">
-<li>The board starts homed at 0 % in manual. Quick setup turns the helium flow and pump on, homes if needed, sets SP 5 and manual 34 %. K_DIR +1, Kp 4 %/mbar, Ti 0.25 min and T_check 30 s are now the defaults.</li>
-<li>Move valve: enter a % open, use the presets, hold to jog, and change the fully open setting (turns, steps, or the present position).</li>
-<li>Go to AUTO. Change the setpoint to 6, then 20 (asks first, out of reach), then 5.</li>
-<li>STOP during a move, then ACK. STOP is in the same place on every screen and works over the keypad.</li>
-<li>Go to Trend in auto, then press STOP: the red bar at the bottom names the fault; tap it for Faults.</li>
-<li>Latch two faults (bench panel: Force open, then Home, then STOP): the home status line shows the higher priority one and a count.</li>
-<li>Tuning: tap a row (refused), hold Unlock for 1 s, then change K_DIR (asks first).</li>
-<li>Untick the drive in auto, then change the setpoint: F-10. Tick it again, ACK, go to manual 0 %: W-01 shows the steps that were lost.</li>
-<li>Bench panel: Lose 300 steps, then manual 0 %: W-01.</li>
-<li>Bench panel Force open, then Home: F-09. Force closed: F-07.</li>
-<li>In auto, turn the helium flow off. The pot boils dry and the valve winds open with nothing to show for it: F-16 after about 60 s. Turn the pump off instead: F-17.</li>
-<li>Stop the pump: the pressure climbs along the vapour pressure curve whatever the valve does.</li>
+<li>Page load starts referenced at 0 % in MANUAL (simulator convenience). Quick setup turns the helium flow and pump on, references if needed, sets the target to 5 and opens the valve to 34 %.</li>
+<li>Reboot board: the controller starts NOT REFERENCED with the saved configuration. Press Reference Valve (home) or Menu &gt; Reference valve.</li>
+<li>Set Target, then Start AUTO. The status line goes Approaching target, Within target band, then Stable after 60 s in the band.</li>
+<li>Switch to MANUAL, Move Valve: Enter %, -1 % / +1 %, hold Close or Open. Row 3 says what the valve is doing or why it cannot move.</li>
+<li>STOP in AUTO: header STOPPED, status line says the valve was not commanded closed. Tap the status line for the fault detail; Reset fault returns to MANUAL, not AUTO.</li>
+<li>Untick Druck connected: F-01. Reset fault is refused until the Druck is back.</li>
+<li>Menu &gt; Commissioning, PIN 2468. Change the gain: amber edge (draft). Apply: blue edge (in use, not saved). Back with a draft asks Apply or Discard. Reboot loses applied changes; Save for restart keeps them (revision goes up).</li>
+<li>Laptop panel: send the s/n 5880211 profile (table). Commissioning &gt; Sensor &gt; Sensor in use: pick it, Apply. The reading changes because the table is for a different sensor. Configuration &gt; Restore saved, Apply all puts it back.</li>
+<li>Commissioning &gt; Sensor &gt; Zero: +/- key for a negative zero; Apply shifts the reading.</li>
+<li>In AUTO, turn the helium flow off: F-16 after about 60 s. Turn the pump off instead: F-17. Untick the drive: F-10.</li>
+<li>Bench panel Force open, then reference: F-09. Force closed: F-07. Valve setup &gt; Motor direction Reversed, Apply, reference: F-07.</li>
 </ol>
 </div>
 
@@ -287,7 +286,7 @@ dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
 </div>
 
 <div class="panel">
-<h2>Changes since the plan (simulator versions 7 to 17)</h2>
+<h2>Changes since the plan (simulator versions 7 to 48)</h2>
 <ul class="try">
 <li>Every screen has the same 40 px header: PMC or Back, title, mode badge (colour is mode only), clock HH:MM at the right.</li>
 <li>One STOP, 96 &times; 58 at bottom right, on every screen and above every overlay.</li>
@@ -309,6 +308,7 @@ dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
 <li>v25 (Ryan, 9 Oct): header Back closes a keypad or dialog; homing asks first, names its three steps and can be stopped from the Mode button; the cards drop Error, Target and Steps for one line each (Setpoint / Set by or Moving to); Valve screen captions say Pressure now and Valve now, and Change fully open is a button; Menu System row reads Tuning, Faults and events; every label checked to fit its box.</li>
 <li>v26 (Ryan, 9 Oct): valve card line reads Set to N % (was Set by hand / auto); Valve screen top row three equal cards (Valve now with its set-to position, Pressure now, Fully open with Change); Motor and switch shows Valve now and Steps now, Home a double-height button in the side column.</li>
 <li>v27 (review round 3, Ryan: fix all): not-homed valve card one string; Faults list over two rows with paged events; Mode button shows the homing step, disabled (red STOP is the only stop); editable cards carry a › at the right edge; Valve screen back on the column grid; Fully open as a setting card; keypad without Cancel (header Back cancels), Set two rows tall; Valve now caption carries the set position; trend axis from 0 with a coloured legend above the plot; Sensor reading shows the serial in full.</li>
+<li>v48, UI/UX review update 3 (STOP, faults, simulator fixes): header STOPPED while the operator stop is latched and FAULT for any other latched fault, with a red rule under the header that stays visible over keypads and dialogs; STOP text says AUTO off, motion stopped, valve not commanded closed; ACK renamed Reset fault (clears latches whose cause has gone, never starts AUTO); tap a fault for what happened, what the controller did, what to check and when it can be reset; latched faults outrank messages in the footer. Simulator fixes: Reboot board loads the saved configuration and starts not referenced (no invented reference); device trend no longer draws the true mechanism position; the events list refreshes by sequence, so it keeps updating once 200 events are stored.</li>
 <li>v47, UI/UX review update 2 (commissioning access and configuration): one commissioning session (Menu &gt; Commissioning, PIN 2468 in the simulator) replaces the Motor, Homing and Tuning locks; brown header with COMMISSIONING and the idle time left; closes on Exit or after 10 min without a touch, without changing mode or valve; serial settings commands need the same session (ACCESS pin). Commissioning pages: Sensor, Valve setup (100 % travel, reference offset, back-off, reference and creep speeds, motor direction; drive speeds), Control tuning (gain, integral, direction, auto min, deadband, target band; target min, target max, low alarm), Diagnostics, Configuration. Every setting is edit, Apply, Save for restart: amber edge draft, blue edge applied but not saved; leaving a page with a draft asks Apply or Discard; Configuration has the name and revision, Restore saved, Load defaults, Apply all. Target max and the low alarm (F-02) are separate from the sensor range and Target min. Sensor profiles and 32-point tables come from the laptop (bench panel) and are not made the sensor in use until applied. The reading goes through zero, span and the cal factor. Keypad has +/- for negative values.</li>
 <li>v46, UI/UX review update 1 (operator screens and navigation): home Target line says inactive or paused outside AUTO; valve card "Valve position, %" with Opening / Closing / Stationary / Closed limit and Requested; AUTO status line separates Approaching target, Within target band and Stable (in band for 60 s); mode button Start AUTO / Switch to MANUAL / Resume AUTO / Reference Valve; Home renamed Reference valve (header NOT REFERENCED, REFERENCING); home Set Target and Move Valve; Valve page has Pressure, Position, Requested, Enter %, hold Close, -1 %, +1 %, hold Open and a line saying what the valve is doing or why it cannot move (presets row and 100 % travel removed); Menu is Trend, Alarms and events, Reference valve, System information, Commissioning; Back returns one level.</li>
 <li>v41 (Ryan, 9 Oct): Menu has no Valve tile (home Set Valve is the way in); Motor and switch split into Motor (speeds and drive settings, last move, Save) and Homing (limit switch, last homing, offset, overtravel, progress, Home), no page switch.</li>
@@ -524,7 +524,7 @@ function pctMech() { return 100 * clamp(LIM.simPos, 0, P.POSMAX) / P.POSMAX; }
 function noise(pp) { return (Math.random() - 0.5) * pp; }
 function later(dt, fn) { timers.push({ at: t + dt, fn }); }
 function ev(tag, text) {
-  C.events.push({ t, tag, text });
+  C.events.push({ t, tag, text }); C.evSeq = (C.evSeq || 0) + 1;
   if (C.events.length > 200) C.events.shift();
   conLog('EVT,' + clock(t) + ',' + tag + ',' + text, 'evt');
 }
@@ -614,7 +614,7 @@ function limitHit() {
 // Central permissive for manual, jog and auto moves.
 function requestMove(target, quiet) {
   if (C.mode === 'HOMING') return quiet ? false : refuse('Referencing in progress (IL-8)');
-  if (C.faults.size && !(LIM.active && target > M.pos)) return quiet ? false : refuse('Latched fault: ACK first (IL-9)');
+  if (C.faults.size && !(LIM.active && target > M.pos)) return quiet ? false : refuse('Fault latched: reset the fault first (IL-9)');
   if (C.ref) target = clamp(Math.round(target), 0, P.POSMAX);
   if (!M.moving && target < M.pos && LIM.active) return quiet ? false : refuse('Closed limit active: closing blocked (IL-1)');
   return startMove(target);
@@ -628,14 +628,14 @@ function requestMove(target, quiet) {
 function homeStep() { return { 'clearance move': 'Moving off the switch', 'fast approach': 'Referencing 1 of 3: closing to the switch', 'back-off': 'Referencing 2 of 3: backing off', 'creep approach': 'Referencing 3 of 3: slow approach' }[C.homeStage] || 'Referencing'; }
 function homeAsk() {
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to MANUAL before referencing');
-  if (C.faults.size) return refuse('Latched fault: ACK first (IL-9)');
+  if (C.faults.size) return refuse('Fault latched: reset the fault first (IL-9)');
   const mins = Math.ceil(1.1 * P.POSMAX / P.fhome / 60);
   confirmBox('Reference the valve? It closes until the limit switch opens, then sets 0 %. Up to ' + mins + ' min. The pressure will change.', 'Reference', 'act', home);
 }
 function home() {
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to MANUAL before referencing');
   if (C.mode === 'HOMING') return refuse('Already referencing');
-  if (C.faults.size) return refuse('Latched fault: ACK first (IL-9)');
+  if (C.faults.size) return refuse('Fault latched: reset the fault first (IL-9)');
   stopMotor();
   C.ref = false; C.mode = 'HOMING'; C.homeT0 = t;
   ev('HOME', 'Homing started at count ' + fint(M.pos));
@@ -693,15 +693,42 @@ function raise(tag, text, o) {
   if (C.mode === 'MANUAL') { C.manPos = C.posCmd = C.lastSent = M.pos; }
   if (o.ref) { C.ref = false; if (C.mode !== 'HOMING') C.mode = 'NOT HOMED'; }
 }
+// v48 (UI/UX review item 6): the action clears latches, so it is called Reset fault (was ACK). A latch clears only
+// when its reset condition holds. Reset never starts AUTO: the controller stays in MANUAL (or NOT REFERENCED).
+function faultCanReset(tag) { return !(tag === 'F-01' && !BENCH.druck) && !(tag === 'F-03' && !BENCH.exc); }
 function ack() {
-  if (!C.faults.size) return refuse('Nothing to acknowledge');
-  for (const tag of [...C.faults.keys()]) {
-    if (tag === 'F-01' && !BENCH.druck) continue;
-    if (tag === 'F-03' && !BENCH.exc) continue;
-    C.faults.delete(tag); ev(tag, 'acknowledged');
-  }
-  if (C.faults.size) return refuse('Cause still present: ' + [...C.faults.keys()].join(', '));
+  if (!C.faults.size) return refuse('No fault to reset');
+  for (const tag of [...C.faults.keys()]) { if (faultCanReset(tag)) { C.faults.delete(tag); ev(tag, 'reset by operator'); } }
+  if (C.faults.size) return refuse('Not reset, cause still present: ' + [...C.faults.keys()].join(', '));
+  msg('Fault reset. ' + (C.ref ? 'MANUAL, valve held. Start AUTO when ready.' : 'Valve not referenced.'), 'info');
   return true;
+}
+// What happened, what the controller did, what to check, what allows reset (review item 6).
+const HELD = 'AUTO off; valve motion stopped and held where it stopped (not commanded closed).';
+const FAULT_INFO = {
+  'F-01': ['No signal from the Druck (below 0.05 mV/V).', HELD, 'Druck cable and M12 connector; Druck supply.', 'Signal back in range.'],
+  'F-02': ['Pressure stayed below the low alarm, or above the sensor range, for 5 s in AUTO.', HELD, 'Helium supply, pump and pumping line; target and limits.', 'Any time; then start AUTO again.'],
+  'F-03': ['Druck excitation outside 9.5 to 10.5 V.', HELD, 'Boost supply and 10 V wiring.', 'Excitation back in the window.'],
+  'F-07': ['Referencing did not find the limit switch within the travel.', 'Referencing stopped; valve not referenced.', 'Switch wiring, motor direction, drive coupling.', 'Any time; then reference again.'],
+  'F-09': ['Limit switch still open after moving off it.', 'Referencing stopped; valve not referenced.', 'Switch stuck or wiring open.', 'Any time; then reference again.'],
+  'F-10': ['Valve moved in AUTO but the pressure did not respond.', HELD, 'Drive slipping, motor unplugged, needle seized.', 'Any time; check before starting AUTO.'],
+  'F-16': ['Valve opening while the pressure kept falling.', HELD, 'Helium supply (bath empty, capillary blocked); on first use, valve direction.', 'Any time; check before starting AUTO.'],
+  'F-17': ['Valve closing while the pressure kept rising.', HELD, 'Pump stopped, pumping valve shut, heat load; on first use, valve direction.', 'Any time; check before starting AUTO.'],
+  'F-12': ['STOP pressed.', HELD + ' Referencing, if running, is cancelled.', 'Why STOP was pressed.', 'Any time. AUTO does not restart by itself.'] };
+function faultDetail(tag) {
+  const f = C.faults.get(tag); if (!f) return;
+  closeOverlay();
+  overlay = st(mk(dev, 0, HDR, 480, 272 - HDR, 'ov'), { zIndex: '10', background: '#DCE3EA' });
+  const c = mk(overlay, 10, RY[0] - HDR, 343, 160, 'card');
+  const info = FAULT_INFO[tag] || [f.text, HELD, '-', 'Any time.'];
+  st(mk(c, 12, 6, 319, 20, '', tag + ' ' + faultShort(tag, f)), { fontSize: '16px', lineHeight: '20px', color: COL.fault, overflow: 'hidden', textOverflow: 'ellipsis' });
+  const body = st(mk(c, 12, 28, 319, 128, ''), { fontSize: '12px', lineHeight: '15px', whiteSpace: 'normal' });
+  body.innerHTML = [['Happened', info[0] + ' ' + stamp(f.t, true) + '.'], ['Controller', info[1]], ['Check', info[2]], ['Reset when', info[3] + (faultCanReset(tag) ? ' Can reset now.' : ' Cause still present.')]]
+    .map(([k, v]) => '<span style="color:' + COL.muted + '">' + k + ':</span> ' + v).join('<br>');
+  btn(overlay, 361, RY[1] - HDR, 109, RH, '<small>Reset</small><b style="font-size:16px;margin-top:2px">Fault</b>', () => { closeOverlay(); ack(); }, 'act');
+  btn(overlay, 361, RY[2] - HDR, 109, RH, '<b style="font-size:16px">Close</b>', closeOverlay);
+  const n = faultsByPriority(), i = n.findIndex(x => x[0] === tag);
+  btn(overlay, 361, RY[0] - HDR, 109, RH, n.length > 1 ? '<small>Fault ' + (i + 1) + ' of ' + n.length + '</small><b style="font-size:16px;margin-top:2px">Next &#8250;</b>' : '<small>Fault</small><b style="font-size:16px;margin-top:2px">1 of 1</b>', () => { if (n.length > 1) faultDetail(n[(i + 1) % n.length][0]); }, n.length > 1 ? '' : 'dis');
 }
 function operatorStop() {
   const wasHoming = C.mode === 'HOMING';
@@ -713,7 +740,7 @@ function toAuto() {
   if (C.mode === 'AUTO') return true;
   if (!C.ref) return refuse('Auto refused: valve not referenced (IL-2)');
   if (C.mode === 'HOMING') return refuse('Auto refused: referencing (IL-8)');
-  if (C.faults.size) return refuse('Auto refused: latched fault, ACK first (IL-9)');
+  if (C.faults.size) return refuse('Auto refused: fault latched, reset it first (IL-9)');
   if (!pvValid || PV == null) return refuse('Auto refused: pressure invalid (IL-3)');
   if (C.SP < P.Pmin || C.SP > pMax()) return refuse('Auto refused: target outside Target min to Target max (IL-4)');
   if (PV < P.alarmLo || PV > sensFs()) return refuse('Auto refused: pressure ' + PV.toFixed(2) + ' below the low alarm or above the sensor range. Helium flow on? Open in manual first');
@@ -866,8 +893,11 @@ function reboot() {
   timers = []; M.moving = false; M.onDone = null; M.v = 0; M.pos = 0; M.target = 0; M.lastStop = 'none';
   C.mode = 'NOT HOMED'; C.ref = false; C.faults.clear(); C.homeStage = ''; C.manPos = C.posCmd = C.lastSent = 0; C.I = 0; C.msg = null;
   loadActive(SAVED); DRAFT.clear(); ACC.on = false;   // a restart loads the saved configuration; drafts and applied changes are lost
+  C.lastHome = null; C.inBandSince = null; navStack = [];
   ev('F-14', 'Power-up (event only)');
-  bootHomed();
+  // v48 (review item 8): a restart no longer invents a reference or moves the mechanism. The step count restarts
+  // at 0 with the valve wherever it was, so the controller boots NOT REFERENCED (plan G3).
+  ev('HOME', 'Boot: valve not referenced');
 }
 function bootHomed() {                  // simulator convenience (Ryan, 8 Oct): start homed, valve closed on the switch
   LIM.simPos = 0; LIM.raw = true; LIM.active = true; LIM.clearSince = null;
@@ -1019,16 +1049,21 @@ function updateGlobal() {
   setbg(G.h, hb); setbg(G.back, hb); vis(G.acc, ACC.on);
   if (ACC.on) { const l = accLeft(); set(G.acc, 'COMMISSIONING ' + Math.floor(l / 60000) + ':' + pad2(Math.floor(l / 1000) % 60)); }
   st(G.title, ACC.on ? { top: '15px', lineHeight: '24px' } : { top: '0px', lineHeight: HDR + 'px' });
-  set(G.badge, MODE_WORD[C.mode] || C.mode);
-  setbg(G.mdot, MODE_COL[C.mode]);
+  // v48: STOPPED while the operator stop is latched, FAULT while any other fault is latched (both mean AUTO is off).
+  const fw = C.faults.has('F-12') ? 'STOPPED' : C.faults.size ? 'FAULT' : null;
+  set(G.badge, fw || MODE_WORD[C.mode] || C.mode);
+  setbg(G.mdot, fw ? COL.fault : MODE_COL[C.mode]);
+  // A latched fault stays visible over keypads and dialogs: red rule under the header.
+  [G.h, G.back].forEach(e => st(e, { boxShadow: C.faults.size ? 'inset 0 -4px 0 ' + COL.fault : 'none' }));
   // footer: toast, else latched-fault bar, else the screen's own note
   const f = G.foot;
   const toastOn = C.msg && performance.now() < C.msg.until;
   const fl = faultsByPriority();
   let mode = 'none', text = '', go = '';
   if (home) mode = 'none';
+  // v48 (review item 6): a latched fault outranks messages; a refusal still shows while it is fresh, then the fault returns.
+  else if (fl.length && current !== 'faults' && !(toastOn && C.msg.kind === 'warn' && !overlay)) { mode = 'fault'; text = (fl[0][0] === 'F-12' ? 'Stopped: valve not commanded closed.' : fl[0][0] + ' ' + faultShort(fl[0][0], fl[0][1]) + '.') + (fl.length > 1 ? ' ' + fl.length + ' faults.' : '') + ' Tap for Alarms  \u203A'; go = 'faults'; }
   else if (toastOn && !overlay) { mode = 'toast'; text = C.msg.text; }
-  else if (fl.length && current !== 'faults') { mode = 'fault'; text = fl.length > 1 ? fl[0][0] + ' latched, ' + fl.length + ' faults. Tap for Faults  ›' : fl[0][0] + ' ' + faultShort(fl[0][0], fl[0][1]) + '  ›'; go = 'faults'; }
   else if (screens[current] && screens[current].foot) { mode = 'note'; text = screens[current].foot(); }
   vis(f, mode !== 'none');
   set(G.ftxt, text); f.dataset.go = go;
@@ -1074,10 +1109,10 @@ function buildCtrl() {
   const bValve = btn(s, 244, RY[2], 109, RH, '', () => show('valve'));
 
   const sb = mk(s, 10, RY[3], 343, RH, 'card'); st(sb, { cursor: 'pointer' });
-  sb.addEventListener('pointerdown', ev0 => { if (ev0.target === sb || ev0.target.parentNode === sb) { if (C.faults.size) show('faults'); } });
+  sb.addEventListener('pointerdown', ev0 => { if (ev0.target === sb || ev0.target.parentNode === sb) { if (C.faults.size) { faultDetail(faultsByPriority()[0][0]); updateUI(); } } });
   const dot = st(mk(sb, 12, 20, 8, 8, ''), { borderRadius: '4px' });
   const stxt = st(mk(sb, 28, 0, 303, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center', overflow: 'hidden' });
-  const sbtn = btn(sb, 253, 4, 86, 40, '<b>ACK</b>', ack, 'act');
+  const sbtn = btn(sb, 253, 4, 86, 40, '', ack, 'act');
 
   screens.ctrl.update = () => {
     // Pressure card
@@ -1113,7 +1148,7 @@ function buildCtrl() {
     set(stxt, sl.text); setc(stxt, sl.kind === 'fault' ? '#B42324' : sl.kind === 'warn' ? '#9A5D00' : COL.text);
     setbg(sb, sl.kind === 'fault' ? '#FDE8E8' : sl.kind === 'warn' ? '#FFF3DD' : '#FFFFFF');
     setbg(dot, sl.kind === 'fault' ? COL.fault : sl.kind === 'warn' ? COL.warn : sl.dot || COL.idle);
-    vis(sbtn, !!sl.btn); seth(sbtn, sl.count ? '<b>ACK</b><small>' + sl.count + ' faults</small>' : '<b>ACK</b>');
+    vis(sbtn, !!sl.btn); seth(sbtn, '<small>Reset</small><b>' + (sl.count ? sl.count + ' faults' : 'fault') + '</b>');
     st(stxt, { width: (sl.btn ? 217 : 303) + 'px' });
     const ma = modeAction();
     seth(bMode, ma[0] ? '<small>' + ma[0] + '</small><b style="font-size:16px;margin-top:2px">' + ma[1] + '</b>' : '<b style="font-size:16px">' + ma[1] + '</b>');
@@ -1134,7 +1169,9 @@ function regulation() {
 function statusLine() {
   if (C.faults.size) {
     const fl = faultsByPriority(); const [tag, f] = fl[0];
-    return { kind: 'fault', text: tag + ' ' + faultShort(tag, f), btn: 'ACK', count: fl.length > 1 ? fl.length : 0 };
+    // v48: STOP says what it did and what it did not do.
+    if (tag === 'F-12') return { kind: 'fault', text: 'Stopped. AUTO off, valve motion stopped; valve not commanded closed.', btn: 1, count: fl.length > 1 ? fl.length : 0 };
+    return { kind: 'fault', text: tag + ' ' + faultShort(tag, f) + '. Tap for details.', btn: 1, count: fl.length > 1 ? fl.length : 0 };
   }
   if (C.msg && performance.now() < C.msg.until) return { kind: C.msg.kind, text: C.msg.text };
   switch (C.mode) {
@@ -1752,7 +1789,7 @@ function buildFaults() {
   const fc = mk(s, 10, RY[0], 343, RH, 'card');
   // Highest priority first, each a 16 px name over a 12 px date and time (v45, Ryan); scrolls past one; the count is on ACK.
   const fl = st(mk(fc, 10, 4, 327, 40, 'list'), { fontSize: '16px', lineHeight: '20px', overflowY: 'auto', scrollbarWidth: 'thin' });
-  const ba = side(s, 0, '<b>ACK</b>', ack, 'act');
+  const ba = side(s, 0, '', ack, 'act');
   const ec = mk(s, 10, RY[1], 460, 104, 'card');
   mk(ec, 10, 3, null, null, 'cap', 'Events, newest first');
   const el = st(mk(ec, 10, 19, 446, 83, ''), { fontSize: '12px', lineHeight: '16px', overflowY: 'auto', whiteSpace: 'normal', scrollbarWidth: 'thin' });
@@ -1763,15 +1800,15 @@ function buildFaults() {
     box.addEventListener('pointerup', () => { y0 = null; });
   });
   let lastN = -1, lastF = null;
-  screens.faults.foot = () => C.faults.size ? 'Fix the cause, then ACK. Drag a list to scroll it.' : 'No latched faults. Drag the events to scroll.';
+  screens.faults.foot = () => C.faults.size ? 'Tap a fault for what to check. Reset fault clears it once the cause is gone.' : 'No latched faults. Drag the events to scroll.';
   screens.faults.update = () => {
     const fk = faultsByPriority().map(([k, f]) => k + f.t).join('|');
-    if (fk !== lastF) { lastF = fk; fl.innerHTML = ''; fl.scrollTop = 0; if (!C.faults.size) { const p = document.createElement('p'); p.textContent = 'No latched faults'; p.style.color = COL.muted; p.style.margin = '0'; fl.appendChild(p); } faultsByPriority().forEach(([k, f]) => { const p = document.createElement('p'); p.textContent = k + '  ' + faultShort(k, f); p.style.color = COL.fault; p.style.margin = '0'; p.style.whiteSpace = 'nowrap'; p.style.overflow = 'hidden'; p.style.textOverflow = 'ellipsis'; fl.appendChild(p);
+    if (fk !== lastF) { lastF = fk; fl.innerHTML = ''; fl.scrollTop = 0; if (!C.faults.size) { const p = document.createElement('p'); p.textContent = 'No latched faults'; p.style.color = COL.muted; p.style.margin = '0'; fl.appendChild(p); } faultsByPriority().forEach(([k, f]) => { const p = document.createElement('p'); p.textContent = k + '  ' + faultShort(k, f) + '  \u203A'; p.style.color = COL.fault; p.style.margin = '0'; p.style.cursor = 'pointer'; p.addEventListener('pointerup', () => { faultDetail(k); updateUI(); }); p.style.whiteSpace = 'nowrap'; p.style.overflow = 'hidden'; p.style.textOverflow = 'ellipsis'; fl.appendChild(p);
       const q = document.createElement('p'); q.textContent = stamp(f.t, true); st(q, { color: COL.muted, margin: '0', fontSize: '12px', lineHeight: '16px', paddingBottom: '4px' }); fl.appendChild(q); }); }   // v45 (Ryan): date with year and seconds under each fault
-    seth(ba, C.faults.size > 1 ? '<small>ACK</small><b style="font-size:16px">' + C.faults.size + ' faults</b>' : '<b>ACK</b>');
+    seth(ba, '<small>Reset</small><b style="font-size:16px;margin-top:2px">' + (C.faults.size > 1 ? C.faults.size + ' faults' : 'Fault') + '</b>');
     tog(ba, 'dis', !C.faults.size);
-    if (C.events.length !== lastN) {
-      const keep = el.scrollTop; lastN = C.events.length; el.innerHTML = '';
+    if (C.evSeq !== lastN) {   // v48: by sequence number; the count stops changing once the 200-event history is full
+      const keep = el.scrollTop; lastN = C.evSeq; el.innerHTML = '';
       const evs = C.events.slice().reverse();
       if (!evs.length) { const p = document.createElement('p'); p.textContent = 'None'; p.style.color = COL.muted; el.appendChild(p); }
       evs.forEach(e => { const p = document.createElement('p'); p.textContent = stamp(e.t, true) + '  ' + e.tag + '  ' + e.text; p.style.padding = '2px 0'; p.style.margin = '0'; p.style.borderTop = '1px solid ' + COL.bg;
@@ -1847,7 +1884,7 @@ function drawChart(cv, win, col, scale, compact) {
     ctx.stroke(); ctx.setLineDash([]);
   };
   ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
-  line('mech', col.mech, yPct, [2, 3], 1.2);
+  if (!col.solid) line('mech', col.mech, yPct, [2, 3], 1.2);   // v48: the device does not measure the mechanism; bench chart only
   line('pos', col.pos, yPct, [], 1.4);
   line('sp', col.sp, yP, [6, 4], 1.4);
   line('pv', col.pv, yP, [], 1.8);
@@ -1882,7 +1919,7 @@ function conLog(text, cls) {
   con.scrollTop = con.scrollHeight;
 }
 const HELP = [
-  'CTRL? | CTRL HOME | CTRL STOP | CTRL AUTO | CTRL MAN [%] | CTRL STEPS n | CTRL SP mbar | CTRL ACK | CTRL LOG?',
+  'CTRL? | CTRL HOME | CTRL STOP | CTRL AUTO | CTRL MAN [%] | CTRL STEPS n | CTRL SP mbar | CTRL RESET (was ACK) | CTRL LOG?',
   'ACCESS? | ACCESS pin | ACCESS EXIT   (settings commands below need the commissioning session; the screen shares it)',
   'CFG? | CFG SAVE | CFG RESTORE | CFG DEFAULTS   (serial changes apply at once, not saved until CFG SAVE)',
   'PID? | PID KP|TI|KD|DB|TS|PMIN|SPMAX|ALARMLO|BAND|STABLE|TCHECK|NRESP|DPMIN|TCONV|CHECKMIN|LEAD|TLAG|OUTMIN v | PID KDIR +1|-1',
@@ -1910,7 +1947,7 @@ function command(line) {
   }
   if (w[0] === 'CTRL' && w[1] === 'STEPS') return okErr(isNaN(num) ? false : setManSteps(num));
   if (w[0] === 'CTRL' && w[1] === 'SP') return okErr(isNaN(num) ? false : setSP(num));
-  if (u === 'CTRL ACK') return okErr(ack());
+  if (u === 'CTRL ACK' || u === 'CTRL RESET') return okErr(ack());
   if (u === 'CTRL LOG?') { C.events.slice(-20).forEach(e => conLog('EVT,' + clock(e.t) + ',' + e.tag + ',' + e.text)); conLog('OK'); return; }
   // v47 (review item 2): one access check for every settings command, shared with the screen session.
   if (u === 'ACCESS?') { conLog('access=' + (ACC.on ? 'commissioning, ' + Math.ceil(accLeft() / 1000) + ' s idle left' : 'operator')); conLog('OK'); return; }
@@ -2134,7 +2171,7 @@ function frame(now) {
 buildGlobal(); buildCtrl(); buildValve(); buildMenu(); buildRef(); buildInfo(); buildComm(); buildSensor(); buildMotor(); buildTune(); buildDiag(); buildCfg(); buildFaults(); buildTrend();
 setSpeed(1); setWin(600); fit();
 flBuildParams(); flBuildRead(); setPlumb('line'); setLink('usb'); flCurveCalc(); flDraw();
-conLog('PMC ' + FW + ' simulated. Boots homed at 0 % in manual (simulator default; the firmware plan G3 boots not homed). Type HELP for commands.');
+conLog('PMC ' + FW + ' simulated. Page load starts referenced at 0 % in manual (simulator convenience); Reboot board starts not referenced, as the firmware will. Type HELP for commands.');
 ev('F-14', 'Power-up (event only)');
 bootHomed();
 show('ctrl');
