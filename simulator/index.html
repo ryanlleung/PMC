@@ -1096,13 +1096,16 @@ function updateGlobal() {
   else if (fl.length && current !== 'faults' && !(toastOn && C.msg.kind === 'warn' && !overlay)) { mode = 'fault'; text = (fl[0][0] === 'F-12' ? 'Stopped: valve not commanded closed.' : fl[0][0] + ' ' + faultShort(fl[0][0], fl[0][1]) + '.') + (fl.length > 1 ? ' ' + fl.length + ' faults.' : '') + ' Tap for Alarms.'; go = 'faults'; }
   else if (toastOn && !overlay) { mode = 'toast'; text = C.msg.text; }
   else if (screens[current] && screens[current].foot) { mode = 'note'; text = screens[current].foot(); go = screens[current].footGo ? screens[current].footGo() : ''; }
-  if (mode === 'note' && !text) mode = 'none';   // v52: the footer carries status and faults only; nothing to say, no strip
+  // Ryan (9 Oct): the status strip beside STOP stays on every screen. With nothing page-specific it shows the
+  // controller status line, as on home.
+  let sl = null;
+  if (!home && (mode === 'none' || (mode === 'note' && !text))) { sl = statusLine(); mode = 'note'; text = sl.text; go = ''; }
   vis(f, mode !== 'none');
   set(G.ftxt, text); f.dataset.go = go; vis(G.fgo, !!go);
-  const warnT = mode === 'toast' && C.msg.kind !== 'info';   // v32: 'info' notes (tuning descriptions) stay plain
+  const warnT = (mode === 'toast' && C.msg.kind !== 'info') || (sl && sl.kind === 'warn');   // v32: 'info' notes stay plain
   setbg(f, mode === 'fault' ? '#FDE8E8' : warnT ? '#FFF3DD' : '#FFFFFF');
   setc(G.ftxt, mode === 'fault' ? '#B42324' : warnT ? '#9A5D00' : COL.text);
-  setMark(G.fdot, mode === 'fault' ? 'fault' : warnT ? 'warn' : '', (mode === 'note' && screens[current].footCol) || COL.idle);
+  setMark(G.fdot, mode === 'fault' ? 'fault' : warnT ? 'warn' : '', (sl && (sl.dot || COL.idle)) || (mode === 'note' && screens[current].footCol) || COL.idle);
   st(f, { cursor: go ? 'pointer' : 'default' });
 }
 
@@ -1136,8 +1139,8 @@ function buildCtrl() {
   const BAR = 202;   // no target tick: it looked like a drag handle (Ryan, 9 Oct)
 
   // v52: two navigation buttons (Menu, Valve) and two actions (Set target, mode), each labelled with what it does.
-  navBtn(s, 10, RY[2], 109, RH, 'Menu', () => show('menu'));
-  const bMode = btn(s, 361, RY[2], 109, RH, '', modePress);   // v31 (Ryan): mode button far right, above STOP
+  navBtn(s, 361, RY[2], 109, RH, 'Menu', () => show('menu'));   // Ryan (9 Oct): Menu above STOP, mode button far left
+  const bMode = btn(s, 10, RY[2], 109, RH, '', modePress);
   btn(s, 127, RY[2], 109, RH, lab('Set target'), () => keypadSP());
   navBtn(s, 244, RY[2], 109, RH, 'Valve', () => show('valve'));
 
