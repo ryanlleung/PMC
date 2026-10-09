@@ -238,6 +238,7 @@ dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
 <label class="ck"><input type="checkbox" id="b-druck" checked=""> Druck connected</label>
 <label class="ck"><input type="checkbox" id="b-exc" checked=""> Excitation in window (10 V)</label>
 <label class="ck"><input type="checkbox" id="b-coupled" checked=""> Motor turning the mechanism (untick for a slipping or disconnected drive)</label>
+<label class="ck"><input type="checkbox" id="b-flash"> Flash write fails (Save for restart should report failure)</label>
 <div class="row" style="margin-top:8px"><span class="muted">Host link</span><button class="pbtn" data-link="usb">USB</button><button class="pbtn" data-link="eth">Ethernet 192.168.1.50</button></div>
 <div class="row" style="margin-top:8px"><span class="muted">Druck port</span><button class="pbtn" data-plumb="line">Cryostat line</button><button class="pbtn" data-plumb="air">Room air</button></div>
 <div class="kv" style="margin-top:8px"><span>Room air, mbar</span><input id="b-air" type="number" step="0.1" value="1013.4"></div>
@@ -329,12 +330,16 @@ function loadActive(cfg) {
 function cfgDirty() { const a = cfgCore(), b = SAVED; return JSON.stringify(a.P) !== JSON.stringify(Object.assign({}, DEF_P, b.P)) || JSON.stringify(a.MOT) !== JSON.stringify(Object.assign({}, DEF_MOT, b.MOT)) || JSON.stringify(a.sens) !== JSON.stringify(b.sens); }
 function saveCfg() {
   if (DRAFT.size) return refuse('Apply or discard the draft first (' + DRAFT.size + ' not applied)');
-  const c = cfgCore(); SAVED = Object.assign({ name: SAVED.name, rev: SAVED.rev + 1, savedAt: t }, c);
-  try { localStorage.setItem(CFG_KEY, JSON.stringify(SAVED)); } catch (e) { }
+  const c = cfgCore(), next = Object.assign({ name: SAVED.name, rev: SAVED.rev + 1, savedAt: t }, c);
+  // v50 (review 9 Oct): a failed write is a failed save; SAVED changes only once the write has succeeded.
+  try { if (SIM_FLASH_FAIL) throw new Error('simulated flash write failure'); localStorage.setItem(CFG_KEY, JSON.stringify(next)); }
+  catch (e) { ev('CFG', 'Save failed (' + (e && e.message || 'write error') + '); flash still holds ' + cfgLabel()); return refuse('Save failed: not saved. Flash still holds ' + cfgLabel() + '.'); }
+  SAVED = next;
   ev('CFG', 'Configuration ' + SAVED.name + ' rev ' + SAVED.rev + ' saved to serial flash (simulated)');
   msg('Saved as rev ' + SAVED.rev + '. Used after restart.', 'info');
   return true;
 }
+let SIM_FLASH_FAIL = false;   // bench test hook: make the next saves fail
 function cfgLabel() { return SAVED.name + ' rev ' + SAVED.rev; }
 // v49 (review 9 Oct): what is not applied (draft vs in use) and what is not saved (in use vs saved), listed separately
 // with the labels and units of the editing pages.
@@ -343,11 +348,29 @@ function cfgDiffs() {
   const nd = [], ns = [];
   allFields().forEach(f => {
     const key = f.diffKey || (v => v);
-    if (DRAFT.has(f.id)) nd.push(fLabel(f) + ': ' + fmtF(f, f.get()) + ' to ' + fmtF(f, DRAFT.get(f.id)) + ' (' + TITLES[f.page] + ')');
+    if (DRAFT.has(f.id)) nd.push(f.diffText ? f.diffText(f.get(), DRAFT.get(f.id)).map(x => x + ' (' + TITLES[f.page] + ')').join('\n') : fLabel(f) + ': ' + fmtF(f, f.get()) + ' to ' + fmtF(f, DRAFT.get(f.id)) + ' (' + TITLES[f.page] + ')');
     const sv = f.saved();
-    if (sv !== undefined && !same(key(f.get()), key(sv))) ns.push(fLabel(f) + ': saved ' + fmtF(f, sv) + ', in use ' + fmtF(f, f.get()) + ' (' + TITLES[f.page] + ')');
+    if (f.diffText && sv !== undefined) { if (!same(sv, f.get())) f.diffText(sv, f.get(), SENS.prof[SENS.active].serial).forEach(x => ns.push(x + ' (' + TITLES[f.page] + ')')); }
+    else if (sv !== undefined && !same(key(f.get()), key(sv))) ns.push(fLabel(f) + ': saved ' + fmtF(f, sv) + ', in use ' + fmtF(f, f.get()) + ' (' + TITLES[f.page] + ')');
   });
   return { nd, ns };
+}
+// Profile list differences, per sensor serial: added, removed, or which calibration values changed.
+// skip: serial whose zero, span and cal factor are listed by their own fields (the sensor in use, in Not saved).
+function profDiff(a, b, skip) {
+  const ft = (k, x, y) => skip === undefined ? k + ' ' + x + ' to ' + y : k + ': saved ' + x + ', in use ' + y;
+  const out = [], name = q => 'Sensor s/n ' + q.serial;
+  const cal = q => q.table ? 'table ' + q.table.length + ' points' : 'zero ' + (+q.zero).toFixed(3) + ' mV, span ' + (+q.span).toFixed(3) + ' mV';
+  b.forEach(q => { const p = a.find(x => x.serial === q.serial);
+    if (!p) { out.push(name(q) + ': added, ' + (q.calId || 'no calibration identity')); return; }
+    const ch = [];
+    if ((p.calId || '') + (p.calDate || '') !== (q.calId || '') + (q.calDate || '')) ch.push(ft('calibration', [p.calId, p.calDate].filter(Boolean).join(' '), [q.calId, q.calDate].filter(Boolean).join(' ')));
+    if (p.atm !== q.atm && q.serial !== skip) ch.push(ft('cal factor', (+p.atm).toFixed(4), (+q.atm).toFixed(4)));
+    if (q.serial !== skip && cal(p) !== cal(q) || JSON.stringify(p.table) !== JSON.stringify(q.table)) ch.push(ft('calibration values', cal(p), cal(q)));
+    if (ch.length) out.push(name(q) + ' ' + ch.join('; '));
+    else if (!same(p, q) && q.serial !== skip) out.push(name(q) + ': profile details changed'); });
+  a.forEach(p => { if (!b.some(x => x.serial === p.serial)) out.push(name(p) + ': removed'); });
+  return out;
 }
 function diffList(title, lines) {
   closeOverlay();
@@ -355,7 +378,7 @@ function diffList(title, lines) {
   const c = mk(overlay, 10, RY[0] - HDR, 343, 160, 'card');
   st(mk(c, 12, 6, 319, 18, '', title), { fontSize: '16px', lineHeight: '18px' });
   const l = st(mk(c, 12, 28, 319, 126, ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', overflowY: 'auto' });
-  l.innerHTML = lines.length ? lines.map(x => '<p style="margin:0 0 4px">' + x.replace(/</g, '&lt;') + '</p>').join('') : '<p style="margin:0;color:' + COL.muted + '">None</p>';
+  l.innerHTML = lines.length ? lines.flatMap(x => x.split('\n')).map(x => '<p style="margin:0 0 4px">' + x.replace(/</g, '&lt;') + '</p>').join('') : '<p style="margin:0;color:' + COL.muted + '">None</p>';
   btn(overlay, 361, RY[2] - HDR, 109, RH, '<b style="font-size:16px">Close</b>', closeOverlay);
 }
 function cfgState() { return DRAFT.size ? 'draft' : cfgDirty() ? 'applied' : 'saved'; }
@@ -564,6 +587,8 @@ function startMove(target, rate, onDone) {
   M.target = target;
   M.onDone = onDone || null;
   if (!M.moving) {
+    // v50 (review 9 Oct): no move starts while a fault is latched, whoever asks (homing stages included).
+    if (C.faults.size) { M.onDone = null; if (onDone) later(0, () => onDone('FAULT')); return false; }
     if (target === M.pos) { if (onDone) { M.onDone = null; later(0, () => onDone('DONE')); } return true; }
     if (target < M.pos && LIM.active) { M.onDone = null; M.lastStop = 'LIMIT'; if (onDone) later(0, () => onDone('LIMIT')); return false; }
     M.from = M.pos; M.t0 = t;   // v45: start of the move, for the Motor screen
@@ -590,7 +615,7 @@ function limitHit() {
 // Central permissive for manual, jog and auto moves.
 function requestMove(target, quiet) {
   if (C.mode === 'HOMING') return quiet ? false : refuse('Referencing in progress (IL-8)');
-  if (C.faults.size && !(LIM.active && target > M.pos)) return quiet ? false : refuse('Fault latched: reset the fault first (IL-9)');
+  if (C.faults.size) return quiet ? false : refuse('Fault latched: reset the fault first (IL-9)');
   if (C.ref) target = clamp(Math.round(target), 0, P.POSMAX);
   if (!M.moving && target < M.pos && LIM.active) return quiet ? false : refuse('Closed limit active: closing blocked (IL-1)');
   return startMove(target);
@@ -619,7 +644,7 @@ function home() {
     C.homeStage = 'clearance move';
     startMove(M.pos + P.Nclear, P.fhome, r => {
       if (r !== 'DONE') return homeAbort(r);
-      later(0.15, () => { if (LIM.active) homeFault('F-09', 'Switch still active after ' + P.Nclear + '-step clearance move'); else homeFast(); });
+      later(0.15, () => { if (C.mode !== 'HOMING') return; if (LIM.active) homeFault('F-09', 'Switch still active after ' + P.Nclear + '-step clearance move'); else homeFast(); });
     });
   } else homeFast();
   return true;
@@ -637,7 +662,7 @@ function homeBack() {
   C.homeStage = 'back-off';
   startMove(M.pos + P.Nbackoff, P.fhome, r => {
     if (r !== 'DONE') return homeAbort(r);
-    later(0.15, () => { if (LIM.active) homeFault('F-09', 'Switch still active after ' + P.Nbackoff + '-step back-off'); else homeCreep(); });
+    later(0.15, () => { if (C.mode !== 'HOMING') return; if (LIM.active) homeFault('F-09', 'Switch still active after ' + P.Nbackoff + '-step back-off'); else homeCreep(); });
   });
 }
 function homeCreep() {
@@ -665,6 +690,7 @@ function raise(tag, text, o) {
   C.faults.set(tag, { text, t });
   ev(tag, text);
   stopMotor();
+  homeAbort(tag);   // v50: also between referencing stages, when no move is running to carry the stop
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') { C.mode = 'MANUAL'; }
   if (C.mode === 'MANUAL') { C.manPos = C.posCmd = C.lastSent = M.pos; }
   if (o.ref) { C.ref = false; if (C.mode !== 'HOMING') C.mode = 'NOT HOMED'; }
@@ -708,6 +734,8 @@ function faultDetail(tag) {
 }
 function operatorStop() {
   const wasHoming = C.mode === 'HOMING';
+  // v50 (review 9 Oct): STOP always stops, even with F-12 already latched (raise() ignores a repeat).
+  if (C.faults.has('F-12')) { stopMotor(); homeAbort('STOP'); ev('F-12', 'STOP pressed again at count ' + fint(M.pos)); return true; }
   raise('F-12', 'Operator stop at count ' + fint(M.pos) + (wasHoming ? ', homing aborted' : ''));
   return true;
 }
@@ -1478,13 +1506,43 @@ function allFields() { return Object.values(FIELDS).flat(); }
 function pageDraft(page) { return (FIELDS[page] || []).filter(f => DRAFT.has(f.id)); }
 function setDraft(f, v) { if (same(v, f.get())) DRAFT.delete(f.id); else DRAFT.set(f.id, v); }
 function fmtF(f, v) { return f.fmt ? f.fmt(v) : v == null ? 'not set' : (f.dec === 0 ? fint(v) : (+v).toFixed(f.dec)); }
+// v50 (review 9 Oct): Apply checks the configuration that would result (every applied value in range, and the
+// limits, speeds and sensor profiles consistent with each other), not each field on its own. Nothing is applied
+// if any check fails.
+function fieldRange(f) { return f.id === 'P.POSMAX' ? RANGE.POSMAX : typeof f.min === 'number' ? [f.min, f.max] : null; }
+function profProblem(q) {
+  if (!q || !(q.fs > 0)) return 'no full scale';
+  if (!(q.atm >= 0.5 && q.atm <= 2)) return 'cal factor ' + q.atm + ' outside 0.5 to 2';
+  if (q.table) { if (q.table.length < 2 || q.table.length > 32) return 'table needs 2 to 32 points'; for (let i = 1; i < q.table.length; i++) if (!(q.table[i][0] > q.table[i - 1][0] && q.table[i][1] > q.table[i - 1][1])) return 'table not increasing at point ' + (i + 1); }
+  else if (!(q.zero >= -5 && q.zero <= 5 && q.span >= 50 && q.span <= 150)) return 'zero or span out of range';
+  return null;
+}
+function cfgProblem(fs) {
+  const byId = id => allFields().find(x => x.id === id);
+  const pv = id => { const f = byId(id); return fs.includes(f) ? DRAFT.get(id) : f.get(); };
+  for (const f of fs) {
+    const v = DRAFT.get(f.id), r = fieldRange(f);
+    if (r && !(typeof v === 'number' && v >= r[0] && v <= r[1])) return fLabel(f) + ' ' + v + ' is outside ' + fmtF(f, r[0]) + ' to ' + fmtF(f, r[1]);
+    if (f.id === 'P.KDIR' && v !== 1 && v !== -1) return 'Valve direction must be +1 or -1';
+    if (f.id === 'MOT.rev' && v !== 0 && v !== 1) return 'Motor direction must be Normal or Reversed';
+  }
+  const prof = pv('S.prof'), act = pv('S.active');
+  if (!prof[act]) return 'Sensor in use is not in the profile list';
+  for (const q of prof) { const e = profProblem(q); if (e) return 'Sensor s/n ' + q.serial + ': ' + e; }
+  if (!(pv('P.Pmin') < pv('P.spMax'))) return 'Target min ' + pv('P.Pmin') + ' must be below Target max ' + pv('P.spMax');
+  if (pv('P.spMax') > prof[act].fs) return 'Target max ' + pv('P.spMax') + ' is above the sensor range ' + prof[act].fs + ' mbar';
+  if (pv('P.alarmLo') > pv('P.Pmin')) return 'Low alarm ' + pv('P.alarmLo') + ' must be at or below Target min ' + pv('P.Pmin');
+  if (pv('MOT.start') > pv('MOT.run')) return 'Start speed must not exceed Run speed';
+  return null;
+}
 function applyFields(fs, moveTarget) {
   if (!fs.length) return refuse('Nothing to apply');
   for (const f of fs) { const e = f.check && f.check(DRAFT.get(f.id)); if (e) return refuse(f.cap + ': ' + e); }
+  const bad = cfgProblem(fs); if (bad) return refuse('Not applied: ' + bad);
   // v49 (review 9 Oct, limits dead end): new target limits that exclude the present target are applied together with
   // a target moved to the nearest allowed value, after one confirmation. Before v49 neither could be changed first.
   const lim = id => { const f = allFields().find(x => x.id === id); return fs.includes(f) ? DRAFT.get(id) : f.get(); };
-  const lo = lim('P.Pmin'), hi = Math.min(lim('P.spMax'), SENS.prof[fs.some(f => f.id === 'S.active') ? DRAFT.get('S.active') : SENS.active].fs);
+  const prof = lim('S.prof'), lo = lim('P.Pmin'), hi = Math.min(lim('P.spMax'), prof[lim('S.active')].fs);
   if ((C.SP < lo || C.SP > hi) && !moveTarget) {
     const to = clamp(C.SP, lo, hi);
     confirmBox('The target ' + C.SP.toFixed(2) + ' mbar is outside the new limits ' + lo.toFixed(2) + ' to ' + hi.toFixed(1) + '. Apply and move the target to ' + to.toFixed(2) + ' mbar?' + (C.mode === 'AUTO' ? ' AUTO will drive to it.' : ''), 'Apply', 'act', () => applyFields(fs, true));
@@ -1521,7 +1579,7 @@ S_FIELD('zero', 'Zero', 'mV', 3, -5, 5, 'Certificate zero at 10 V');
 S_FIELD('span', 'Span', 'mV', 3, 50, 150, 'Certificate span at 10 V (full scale)');
 S_FIELD('atm', 'Cal factor', '', 4, 0.5, 2, 'Multiplies the Druck signal');
 // The profile list itself (no card): lets Restore saved remove profiles added since the last save.
-fld('sensor', { id: 'S.prof', cap: 'Sensor profiles', hidden: true, get: () => SENS.prof, saved: () => SAVED.sens.prof, fmt: v => v.map(q => 's/n ' + q.serial).join(', '), diffKey: v => v.map(q => q.serial),
+const PROF_FIELD = fld('sensor', { id: 'S.prof', cap: 'Sensor profiles', hidden: true, diffText: (a, b, skip) => profDiff(a, b, skip), get: () => SENS.prof, saved: () => SAVED.sens.prof, fmt: v => v.map(q => 's/n ' + q.serial).join(', '), diffKey: v => v.map(q => q.serial),
   check: () => manualOnly(), apply: v => { const keep = SENS.prof[SENS.active].serial; SENS.prof = JSON.parse(JSON.stringify(v)); SENS.active = Math.max(0, SENS.prof.findIndex(q => q.serial === keep)); return true; } });
 // Valve setup
 fld('motor', { id: 'P.POSMAX', cap: '100 % travel', unit: 'turns', dec: 2, get: () => P.POSMAX, saved: () => Object.assign({}, DEF_P, SAVED.P).POSMAX, def: () => DEF_P.POSMAX, fromCfg: o => o.P && o.P.POSMAX,
@@ -1544,7 +1602,7 @@ P_FIELD('tune', 'outMin', 'Auto min', '% open', 1, 'AUTO never closes the valve 
 P_FIELD('tune', 'DB', 'Deadband', 'steps', 0, 'AUTO skips moves smaller than this');
 P_FIELD('tune', 'band', 'Target band', 'mbar', 2, 'Within this of the target reads Within target band');
 P_FIELD('tune', 'Pmin', 'Target min', 'mbar', 2, 'Lowest target an operator can set', { check: v => v >= fv(FIELDS.tune.find(f => f.id === 'P.spMax')) ? 'must be below Target max' : null });
-P_FIELD('tune', 'spMax', 'Target max', 'mbar', 1, 'Highest target; at most the sensor range', { check: v => v > SENS.prof[sIdx()].fs ? 'above the sensor range ' + SENS.prof[sIdx()].fs + ' mbar' : null });
+P_FIELD('tune', 'spMax', 'Target max', 'mbar', 1, 'Highest target; at most the sensor range', { check: v => v > SENS.prof[sIdx()].fs ? 'above the sensor range ' + SENS.prof[sIdx()].fs + ' mbar' : v <= fv(FIELDS.tune.find(f => f.id === 'P.Pmin')) ? 'must be above Target min' : null });
 P_FIELD('tune', 'alarmLo', 'Low alarm', 'mbar', 2, 'F-02 in AUTO below this for 5 s', { check: v => v > fv(FIELDS.tune.find(f => f.id === 'P.Pmin')) ? 'must be at or below Target min' : null });
 
 function fullTravelEdit(f) {
@@ -1746,11 +1804,21 @@ function buildCfg() {
 // Laptop configuration tool (bench side): import goes in as a draft; it needs the commissioning session.
 function importCfg(o, how) {
   if (!ACC.on) { conLog('ERR commissioning access needed: ACCESS pin, or open Commissioning on the screen', 'err'); return false; }
-  let added = 0;
-  ((o.sens && o.sens.prof) || []).forEach(q => { if (!SENS.prof.some(x => x.serial === q.serial)) { SENS.prof.push(JSON.parse(JSON.stringify(q))); added++; } });
-  let n = 0; allFields().forEach(f => { const v = f.fromCfg && f.fromCfg(o); if (v !== undefined && v !== null && !same(v, fv(f))) { setDraft(f, v); n++; } });
+  // v50 (review 9 Oct): reject the whole import if any value is out of range or a profile is bad, before drafting anything.
+  const badF = allFields().map(f => { const v = f.fromCfg && f.fromCfg(o), r = fieldRange(f); return v != null && r && !(typeof v === 'number' && v >= r[0] && v <= r[1]) ? fLabel(f) + ' ' + v + ' (allowed ' + r[0] + ' to ' + r[1] + ')' : null; }).filter(Boolean);
+  const badP = ((o.sens && o.sens.prof) || []).map(q => { const e = profProblem(q); return e ? 's/n ' + q.serial + ': ' + e : null; }).filter(Boolean);
+  if (badF.length || badP.length) { ev('CFG', 'Import refused: ' + badF.concat(badP).join('; ')); conLog('ERR import refused, nothing changed: ' + badF.concat(badP).join('; '), 'err'); return false; }
+  let added = 0, revised = 0;
+  const list = JSON.parse(JSON.stringify(fv(PROF_FIELD)));
+  ((o.sens && o.sens.prof) || []).forEach(q => {
+    const i = SENS.prof.findIndex(x => x.serial === q.serial);
+    if (i < 0) { SENS.prof.push(JSON.parse(JSON.stringify(q))); list.push(JSON.parse(JSON.stringify(q))); added++; }
+    else { const j = list.findIndex(x => x.serial === q.serial); if (!same(list[j], q)) { list[j] = JSON.parse(JSON.stringify(q)); revised++; } }
+  });
+  if (revised) { setDraft(PROF_FIELD, list); if (list.some(q => q.serial === SENS.prof[sIdx()].serial && !same(q, SENS.prof[sIdx()]))) ['S.zero', 'S.span', 'S.atm'].forEach(id => DRAFT.delete(id)); }   // a new calibration for a known sensor is a draft until applied
+  let n = revised; allFields().forEach(f => { if (f === PROF_FIELD) return; const v = f.fromCfg && f.fromCfg(o); if (v !== undefined && v !== null && !same(v, fv(f))) { setDraft(f, v); n++; } });
   C.lastImport = { t, name: o.name || how };
-  ev('CFG', 'Imported ' + (o.name ? o.name + (o.rev ? ' rev ' + o.rev : '') : how) + ' from the laptop: ' + n + ' setting' + (n === 1 ? '' : 's') + ' as a draft' + (added ? ', ' + added + ' sensor profile' + (added > 1 ? 's' : '') + ' added (not in use)' : ''));
+  ev('CFG', 'Imported ' + (o.name ? o.name + (o.rev ? ' rev ' + o.rev : '') : how) + ' from the laptop: ' + n + ' setting' + (n === 1 ? '' : 's') + ' as a draft' + (revised ? ' (' + revised + ' revised sensor calibration' + (revised > 1 ? 's' : '') + ')' : '') + (added ? ', ' + added + ' sensor profile' + (added > 1 ? 's' : '') + ' added (not in use)' : ''));
   conLog('OK imported, ' + n + ' as draft, ' + added + ' profile(s) added');
   return true;
 }
@@ -1916,6 +1984,18 @@ const HELP = [
   'VALVE? | VALVE POSMAX|FHOME|FCREEP|BACKOFF|CLEAR|OFFSET v',
   'LIM? | LIM SIM AT n | LIM SIM HYST n | LIM SIM NORMAL|OPEN|CLOSED | LIM SIM LOSE n',
   'MOT? | MOT MOVE n | MOT STOP | MOT RATE|START|ACCEL v'];
+// v50: serial settings get the same whole-configuration check as Apply on the screen.
+function serialSet(key, v) {
+  const f = allFields().find(x => x.id === 'P.' + key);
+  if (f) {
+    const had = DRAFT.has(f.id), old = DRAFT.get(f.id);
+    DRAFT.set(f.id, v); const bad = cfgProblem([f]); if (had) DRAFT.set(f.id, old); else DRAFT.delete(f.id);
+    if (bad) return refuse(bad);
+    const lo = key === 'Pmin' ? v : P.Pmin, hi = key === 'spMax' ? Math.min(v, SENS.prof[SENS.active].fs) : pMax();
+    if (C.SP < lo || C.SP > hi) return refuse('target ' + C.SP.toFixed(2) + ' mbar is outside ' + lo + ' to ' + hi + ': CTRL SP first');
+  }
+  return setParam(key, v);
+}
 function okErr(r, okText) { conLog(r === false ? 'ERR ' + C.refusal : 'OK' + (okText ? ' ' + okText : ''), r === false ? 'err' : ''); }
 function command(line) {
   const u = line.trim().toUpperCase().replace(/\s+/g, ' ');
@@ -1951,9 +2031,9 @@ function command(line) {
   if (u === 'CTRL DEFAULTS' || u === 'CFG DEFAULTS') { if (isAuto()) return okErr(refuse('switch to MANUAL first')); P = Object.assign({}, DEF_P); Object.assign(MOT, DEF_MOT); ev('CFG', 'Defaults applied over serial, not saved'); return okErr(true, 'defaults, not saved'); }
   if (u === 'PID?') { conLog(Object.keys(pmap).map(k => k + '=' + P[pmap[k]]).join(' ') + ' KDIR=' + P.KDIR); conLog('OK'); return; }
   if (w[0] === 'PID' && w[1] === 'KDIR') return okErr(setParam('KDIR', num));
-  if (w[0] === 'PID' && pmap[w[1]]) return okErr(isNaN(num) ? false : setParam(pmap[w[1]], num));
+  if (w[0] === 'PID' && pmap[w[1]]) return okErr(isNaN(num) ? false : serialSet(pmap[w[1]], num));
   if (u === 'VALVE?') { conLog('homed=' + (C.ref ? 1 : 0) + ' pos=' + M.pos + ' open=' + pctOf(M.pos).toFixed(1) + '% ' + Object.keys(vmap).map(k => k + '=' + P[vmap[k]]).join(' ')); conLog('OK'); return; }
-  if (w[0] === 'VALVE' && vmap[w[1]]) { if (C.mode === 'HOMING') return okErr(refuse('Homing in progress')); return okErr(isNaN(num) ? false : setParam(vmap[w[1]], num)); }
+  if (w[0] === 'VALVE' && vmap[w[1]]) { if (C.mode === 'HOMING') return okErr(refuse('Homing in progress')); return okErr(isNaN(num) ? false : serialSet(vmap[w[1]], num)); }
   if (u === 'LIM?') { conLog('source=simulated force=' + LIM.force + ' contact=' + (LIM.raw ? 'open' : 'closed') + ' active=' + (LIM.active ? 1 : 0) + ' seat=' + LIM.simPos + ' hyst=' + LIM.hyst + ' overtravel=' + LIM.over + ' last_home=' + (C.lastHome ? clock(C.lastHome.t) : 'none')); conLog('OK'); return; }
   if (w[0] === 'LIM' && w[1] === 'SIM') {
     if (w[2] === 'AT' && !isNaN(num)) { if (M.moving) return okErr(refuse('Busy')); LIM.simPos = Math.round(num); updateRaw(); return okErr(true); }
@@ -1984,6 +2064,7 @@ document.querySelectorAll('[data-speed]').forEach(b => b.addEventListener('click
 function setWin(v) { benchWin = v; document.querySelectorAll('[data-win]').forEach(b => b.classList.toggle('on', +b.dataset.win === v)); drawBench(); }
 document.querySelectorAll('[data-win]').forEach(b => b.addEventListener('click', () => setWin(+b.dataset.win)));
 document.getElementById('pause').addEventListener('click', e => { paused = !paused; e.target.textContent = paused ? 'Run' : 'Pause'; e.target.classList.toggle('on', paused); });
+document.getElementById('b-flash').addEventListener('change', e => { SIM_FLASH_FAIL = e.target.checked; });
 document.getElementById('reboot').addEventListener('click', () => { reboot(); show('ctrl'); });
 document.getElementById('quick').addEventListener('click', () => {
   setSpeed(20);
