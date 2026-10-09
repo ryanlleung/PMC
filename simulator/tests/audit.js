@@ -3,14 +3,14 @@ module.exports = async (p, h) => {
   let n = 0;
   const check = async (label, setup) => { await p.evaluate(setup); const r = await h.audit(label); if (r.length) n++; await h.shot('audit-' + label); };
   const go = name => `navStack = []; closeOverlay(); show('${name}', false, true);`;
-  const base = () => { localStorage.clear(); SAVED = defaultCfg(); loadActive(SAVED); DRAFT.clear(); C.faults.clear(); setHe(true); setPump(true); accEnter('audit'); };
+  const base = () => { localStorage.clear(); SAVED = defaultCfg(); loadActive(SAVED); DRAFT.clear(); C.faults.clear(); setHe(true); setPump(true); accEnter('audit'); C.msg = null; };
   await p.evaluate(base);
   for (const sc of ['ctrl', 'valve', 'menu', 'ref', 'info', 'comm', 'guide', 'sensor', 'motor', 'tune', 'limits', 'diag', 'cfg', 'faults', 'trend'])
     await check(sc, go(sc));
   // tabs on Valve setup
   for (const t of ['Reference', 'Drive']) { await p.evaluate(go('motor')); await h.tap(t); await check('motor-' + t.toLowerCase(), 'updateUI()'); }
   // modes on home and the valve page
-  await check('ctrl-notref', 'reboot(); accEnter("audit"); ' + go('ctrl'));
+  await check('ctrl-notref', 'reboot(); accEnter("audit"); C.msg = null; ' + go('ctrl'));
   await check('valve-notref', go('valve'));
   await check('ctrl-referencing', 'C.faults.clear(); home(); for (let i = 0; i < 200; i++) simTick(); ' + go('ctrl'));
   await check('ref-referencing', go('ref'));
@@ -40,7 +40,7 @@ module.exports = async (p, h) => {
   await check('kp-target', go('ctrl') + ' keypadSP()');
   await check('kp-position', go('valve') + ' keypadPct()');
   await check('kp-pin', 'accExit("audit"); ' + go('menu') + ' commTile()');
-  await p.evaluate(() => accEnter('audit'));
+  await p.evaluate(() => { accEnter('audit'); C.msg = null; });
   await check('kp-field', go('tune') + ' editField(FIELDS.tune[0])');
   await h.keys('9999'); await h.tap('Set'); await check('kp-field-error', 'updateUI()');
   await check('kp-travel', go('motor') + ' C.mode = "AUTO"; editField(FIELDS.motor[0]); C.mode = "MANUAL"');
@@ -52,6 +52,6 @@ module.exports = async (p, h) => {
   for (const [k, js] of Object.entries(dialogs)) { await check(k, js); if (k === 'dlg-target-big') { await h.keys('500'); await h.tap('Set'); await check('dlg-target-big2', 'updateUI()'); } }
   await check('difflist', 'closeOverlay(); for (const f of allFields().filter(f => f.min != null).slice(0, 12)) DRAFT.set(f.id, f.max); diffList("Unapplied changes", cfgDiffs().nd, "Apply changes puts them in use.")');
   await check('cfg-pending', 'closeOverlay(); P.Kp = 5; ' + go('cfg'));
-  await check('sensor-import', go('sensor') + ' DRAFT.clear();'); await h.tap('Import tablesfrom PC'); await check('import-info', 'updateUI()');
+  await check('sensor-import', go('sensor') + ' DRAFT.clear();'); await h.tap('Import from PC'); await check('import-info', 'updateUI()');
   console.log(n ? n + ' states with findings' : 'no findings');
 };

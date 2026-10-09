@@ -7,7 +7,10 @@ module.exports.audit = () => {
   const scrollable = e => { for (let x = e; x && x !== dev; x = x.parentElement) { const o = getComputedStyle(x).overflowY; if (o === 'auto' || o === 'scroll') return true; } return false; };
   const rel = r => ({ l: r.left - D.left, r: r.right - D.left, t: r.top - D.top, b: r.bottom - D.top });
   // text box of the glyphs: large digits leave empty ascender space above, which is not a visible overlap
-  const textRect = e => { const rg = document.createRange(); rg.selectNodeContents(e); const r = rel(rg.getBoundingClientRect()); const fs = parseFloat(getComputedStyle(e).fontSize); if (fs >= 26) { r.t += fs * 0.22; r.b -= fs * 0.12; } return r; };
+  const textRect = e => { const rg = document.createRange(); rg.selectNodeContents(e); const r = rel(rg.getBoundingClientRect()); const fs = parseFloat(getComputedStyle(e).fontSize); if (fs >= 26) { r.t += fs * 0.22; r.b -= fs * 0.12; }
+    // a label cut with "..." (data-trunc) is drawn only inside its own box
+    if (e.dataset.trunc) { const bx = rel(e.getBoundingClientRect()); r.l = Math.max(r.l, bx.l); r.r = Math.min(r.r, bx.r); r.t = Math.max(r.t, bx.t); r.b = Math.min(r.b, bx.b); }
+    return r; };
   const leaves = [...dev.querySelectorAll('div, b, small, span, p')].filter(e => visible(e) && [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()) && !e.closest('.sym'));
   const name = e => '"' + e.textContent.trim().slice(0, 40) + '"';
   // top-most layer only: elements under an open overlay are hidden from the user
@@ -23,7 +26,7 @@ module.exports.audit = () => {
       if ((e.scrollWidth > e.clientWidth + 1 || (cs.whiteSpace === 'nowrap' && e.style.width && cs.overflow !== 'visible' && tw > e.clientWidth + 0.05)) && e.clientWidth) out.push('CLIP-H ' + name(e) + ' ' + tw.toFixed(1) + '>' + e.clientWidth);
       if (e.scrollHeight > e.clientHeight + 1 && e.clientHeight && cs.overflow !== 'visible') out.push('CLIP-V ' + name(e) + ' ' + e.scrollHeight + '>' + e.clientHeight);
     }
-    const t = textRect(e), box = e.closest('.card, .b, .modal, .hdr');
+    const t = textRect(e), box = e.closest('.card, .fld, .ro, .b, .modal, .hdr');
     if (box && !scrollable(e) && !e.dataset.trunc) { const bx = rel(box.getBoundingClientRect()); if (t.l < bx.l - 1 || t.r > bx.r + 1 || t.t < bx.t - 1 || t.b > bx.b + 1) out.push('OUTSIDE ' + name(e)); }
     if (!scrollable(e) && (t.l < -1 || t.r > 481 || t.t < -1 || t.b > 273)) out.push('OFFSCREEN ' + name(e));
     for (const ch of e.textContent) { const c = ch.codePointAt(0); if (!((c >= 0x20 && c <= 0x7E) || c === 0xB0 || c === 0x2022)) out.push('GLYPH U+' + c.toString(16).toUpperCase() + ' ' + name(e)); }

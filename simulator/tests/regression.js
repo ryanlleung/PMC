@@ -1,4 +1,4 @@
-// Earlier review findings that must stay fixed (v49, v50) and the v51 all-or-nothing Apply.
+// Earlier review findings that must stay fixed (v49, v50), the v51 all-or-nothing Apply and the v52 fixed header.
 module.exports = async (p, h) => {
   const { ok } = h, ev = f => p.evaluate(f);
   await ev(() => { localStorage.clear(); SAVED = defaultCfg(); loadActive(SAVED); document.getElementById('reboot').click(); setHe(true); setPump(true); });
@@ -21,5 +21,9 @@ module.exports = async (p, h) => {
   r = await ev(() => { DRAFT.clear(); P.Kp = 5; SIM_FLASH_FAIL = true; const rev = SAVED.rev; const res = saveCfg(); SIM_FLASH_FAIL = false; return { res, same: rev === SAVED.rev, dirty: cfgDirty() }; });
   ok(r.res === false && r.same && r.dirty, 'failed flash write: not saved, reported');
   r = await ev(() => { DRAFT.set('P.Ti', 0.5); const was = [C.mode, M.pos]; commExit(); const t = overlay.textContent; closeOverlay(); return { t, was }; });
-  ok(/kept for review/.test(r.t) && /Discard drafts/.test(r.t), 'Exit warns: drafts kept, offers Discard drafts');
+  ok(/kept for review/.test(r.t) && /Discard changes/.test(r.t), 'Exit warns: drafts kept, offers Discard changes');
+  // v52: the header never changes with commissioning; the idle lock is announced, not counted down.
+  r = await ev(() => { accEnter('test'); show('sensor', false, true); updateUI(); const a = [G.title.style.top, getComputedStyle(G.h).backgroundColor, G.h.textContent];
+    ACC.last -= ACC.idleMs + 1; updateUI(); return { a, b: [G.title.style.top, getComputedStyle(G.h).backgroundColor], acc: ACC.on, cur: current, foot: G.ftxt.textContent }; });
+  ok(r.a[0] === r.b[0] && r.a[1] === r.b[1] && !/\d:\d\d/.test(r.a[2]) && !r.acc && r.cur === 'menu' && /^Commissioning locked/.test(r.foot), 'header fixed through commissioning; idle lock shows "Commissioning locked"');
 };

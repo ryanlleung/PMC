@@ -4,7 +4,7 @@ module.exports = (p, out) => {
   const shot = async n => { await p.evaluate(() => updateUI()); await p.waitForTimeout(60); await p.locator('#devclip').screenshot({ path: out + '/' + n + '.png' }); };
   const tap = async (txt, prefix) => { await p.evaluate(([t, pre]) => {
     const vis = e => { for (let x = e; x && x !== document.body; x = x.parentElement) if (getComputedStyle(x).display === 'none') return false; return true; };
-    const els = [...document.querySelectorAll('#dev .b, #dev .seg, #dev .card, #dev .ov div')].filter(e => { if (!vis(e)) return false; const s = e.textContent.replace(/\s+/g, ' ').trim(); return pre ? s.startsWith(t) : s === t; });
+    const els = [...document.querySelectorAll('#dev .b, #dev .seg, #dev .card, #dev .fld, #dev .ro, #dev .ov div')].filter(e => { if (!vis(e)) return false; const s = e.textContent.replace(/\s+/g, ' ').trim(); return pre ? s.startsWith(t) : s === t; });
     if (!els.length) throw new Error('no element ' + t);
     const el = els[els.length - 1];
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
