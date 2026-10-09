@@ -1,11 +1,14 @@
 # NECTO / CMake build outputs and the clangd index: regenerated on every build.
 InitialTesting/.cache/
 InitialTesting/compile_commands.json
+# Build folders, one per NECTO build configuration (build-MM4,
+# "build-Default Configuration", ...). Only build-MM4/generated is kept: the
+# LVGL Designer screen code (from main_screen.mscr), which tools/ui-preview
+# compiles.
+InitialTesting/build-*/
+!InitialTesting/build-MM4/
 InitialTesting/build-MM4/*
-# Kept: the LVGL Designer screen code (generated from main_screen.mscr) and
-# the build rules, which the cloud cross-build and tools/ui-preview read.
 !InitialTesting/build-MM4/generated/
-!InitialTesting/build-MM4/build.ninja
 
 # Python bytecode.
 __pycache__/
