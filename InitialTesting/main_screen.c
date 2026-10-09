@@ -10,6 +10,7 @@
 #include "uncert.h"
 #include "i2c_sdk_test.h"
 #include "pmc_config.h"
+#include "motor_screen.h"
 
 lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
@@ -17,8 +18,9 @@ lvgl_main_screen_ui_t lvgl_main_screen_ui;
  * Screen layout, 480 x 272:
  *   y   0-30   header: PMC, clock (RTC), Druck ADC (Power Monitor) / excitation (Boost 10) / link
  *   y  38-130  pressure card: calibrated value (48 px), unit, ratio, sensor / fault line
- *   y 138-252  Chip readings / Calibration panels (2 x 2 fields), two half-width
- *              tab buttons along the bottom; Chip readings shown at start-up
+ *   y 138-252  Chip readings / Calibration panels (2 x 2 fields), tab buttons
+ *              along the bottom; Chip readings shown at start-up. The third
+ *              button, Motor, opens the motor screen (motor_screen.c).
  *   y 256-270  firmware and reset cause, separate from fault messages
  * Pressure and faults remain visible while switching between detail tabs.
  * Excitation is fixed at 10.00 V nominal (clicks_init); the screen only reads it.
@@ -97,6 +99,12 @@ static void detail_tab_event(lv_event_t *e)
     lv_obj_add_flag(hidden, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_state(calibration ? tab_cal : tab_raw, LV_STATE_CHECKED);
     lv_obj_remove_state(calibration ? tab_raw : tab_cal, LV_STATE_CHECKED);
+}
+
+static void motor_button_event(lv_event_t *e)
+{
+    (void)e;
+    motor_screen_show();
 }
 
 static lv_obj_t *make_tab(lv_obj_t *parent, int32_t x, int32_t width, const char *text)
@@ -385,8 +393,13 @@ static void status_timer_cb(lv_timer_t *t)
         set_color(cal_atm, COL_TEXT);
     }
 
-    // Only a warning: nothing is shown once the table is saved.
-    set_hidden(cal_store, nominal || cal_saved());
+    // Only a warning: nothing is shown once the table is saved. The button
+    // text moves left to make room for it.
+    bool unsaved = !(nominal || cal_saved());
+    set_hidden(cal_store, !unsaved);
+    lv_obj_t *cal_text = lv_obj_get_child(tab_cal, 0);
+    if (lv_obj_get_style_translate_x(cal_text, LV_PART_MAIN) != (unsaved ? -34 : 0))
+        lv_obj_set_style_translate_x(cal_text, unsaved ? -34 : 0, 0);
 }
 
 void init_main_screen()
@@ -483,8 +496,12 @@ void init_main_screen()
 
     // One spacious detail area; both sets of values still update every second.
     lv_obj_t *details = make_card(scr, 10, 138, 460, 114);
-    tab_raw = make_tab(details, 0, 220, "Chip readings");
-    tab_cal = make_tab(details, 228, 220, "Calibration");
+    tab_raw = make_tab(details, 0, 140, "Chip readings");
+    tab_cal = make_tab(details, 146, 200, "Calibration");
+    // Same look as the tabs, but it opens the motor screen.
+    lv_obj_t *motor = make_tab(details, 352, 96, "Motor " LV_SYMBOL_RIGHT);
+    lv_obj_remove_event_cb(motor, detail_tab_event);
+    lv_obj_add_event_cb(motor, motor_button_event, LV_EVENT_PRESSED, NULL);
     lv_obj_add_state(tab_raw, LV_STATE_CHECKED);
     // Unsaved warning on the Calibration button, so it shows on either tab.
     cal_store = make_label(tab_cal, "not saved", COL_WARN);
@@ -506,6 +523,7 @@ void init_main_screen()
     val_pg = make_field(detail_raw, 236, 36, "Boost 10 supply");
 
     lv_timer_create(status_timer_cb, 1000, NULL);
+    motor_screen_init(scr);
 }
 
 void show_main_screen()

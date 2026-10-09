@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "stepper3.h"
 
 #include "lvgl.h"
 #include "screens.h"
@@ -139,6 +140,47 @@ static void check_touch_tabs(void)
     assert(lv_obj_has_flag(cal_panel, LV_OBJ_FLAG_HIDDEN));
 }
 
+static void tap_label(const char *text)
+{
+    lv_obj_t *l = find_label(lv_screen_active(), text);
+    assert(l);
+    lv_area_t a;
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_get_coords(lv_obj_get_parent(l), &a);
+    tap((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2);
+}
+
+/* Opens the motor screen with the Motor button, works a few controls by
+ * touch, checks a steady screen redraws nothing, then goes back and returns. */
+static void check_motor_screen(void)
+{
+    lv_obj_t *main_scr = lv_screen_active();
+    tap_label("Motor " LV_SYMBOL_RIGHT);
+    assert(lv_screen_active() != main_scr);
+    tap_label("HALF");
+    assert(stepper3_mode() == STEPPER3_HALF);
+    tap_label("10");
+    tap_label("Open " LV_SYMBOL_RIGHT);
+    assert(stepper3_position() == 10);
+    tap_label(LV_SYMBOL_LEFT " Close");
+    tap_label(LV_SYMBOL_LEFT " Close");
+    assert(stepper3_position() == -10);
+    tap_label("Order 0213");
+    tap_label("Order 0132");
+    uint8_t o[4];
+    stepper3_order(o);
+    assert(o[1] == 1 && o[2] == 2);
+    flushed_px = 0;
+    for (int i = 0; i < 20; i++) { lv_tick_inc(110); lv_timer_handler(); }
+    if (flushed_px != 0) {
+        fprintf(stderr, "motor screen steady redraw: %ld px\n", flushed_px);
+        exit(1);
+    }
+    tap_label(LV_SYMBOL_LEFT " Back");
+    assert(lv_screen_active() == main_scr);
+    tap_label("Motor " LV_SYMBOL_RIGHT);
+}
+
 int main(int argc, char **argv)
 {
     if (argc != 3 && argc != 4) {
@@ -178,11 +220,16 @@ int main(int argc, char **argv)
     lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(touch, touch_read);
     check_touch_tabs();
+    if (argc == 4 && !strcmp(argv[3], "motor")) {
+        check_motor_screen();
+        goto render;
+    }
     check_detail_tabs(argc == 4 && !strcmp(argv[3], "raw"));
     lv_obj_update_layout(lv_screen_active());
     int pressure_labels = 0;
     check_pressure_spacing(lv_screen_active(), &pressure_labels);
     assert(pressure_labels == 1);
+render:
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(d);
 
