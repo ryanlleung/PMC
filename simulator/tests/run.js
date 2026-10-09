@@ -13,6 +13,10 @@ const { chromium } = require('playwright');
   await p.addInitScript(() => { let a = 12345; Math.random = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; });
   await p.goto('file://' + path.join(__dirname, '..', 'index.html'));
   await p.waitForTimeout(400);
+  // measure with the real font: Montserrat Medium (the LVGL built-in font family), not a fallback
+  const font = await p.evaluate(async () => { await Promise.all([12, 16, 26, 40].map(z => document.fonts.load('500 ' + z + 'px Montserrat'))); await document.fonts.ready; return document.fonts.check('500 16px Montserrat'); });
+  if (!font) { console.log('FAIL Montserrat did not load: text measurements would use a fallback font'); process.exit(1); }
+  await p.evaluate(() => { for (const k in screens) { } updateUI(); });
   await p.evaluate(() => { nativeSize = true; fit(); paused = true; });
   const h = require('./helpers.js')(p, out);
   let fails = 0; h.ok = (c, m) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + m); };

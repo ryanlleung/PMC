@@ -1034,12 +1034,13 @@ function buildGlobal() {
   // link left the header (link and firmware on the Menu status line; Druck faults show on the pressure card and F-01).
   const back = st(btn(h, 0, 0, 119, HDR, '<span>' + sym('LEFT') + ' Back</span>', goBack, 'dark'), { alignItems: 'flex-start', paddingLeft: '10px' });   // v25: Back also closes a keypad or dialog
   const pmc = st(mk(h, 10, 0, 109, HDR, '', 'PMC'), { fontSize: '16px', lineHeight: HDR + 'px' });
-  const title = st(mk(h, 127, 0, 160, HDR, '', ''), { fontSize: '16px', lineHeight: HDR + 'px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+  const title = st(mk(h, 127, 0, 166, HDR, '', ''), { fontSize: '16px', lineHeight: HDR + 'px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
   // v40 (Ryan, header option B): mode as a 12 px white word with a 10 px dot in the mode colour to its right (6 px gap), no box.
   // v43 (Ryan, 9 Oct): mode word 16 px, the same size as the title and Back.
   // v42 (Ryan, 9 Oct): date and clock removed from the header, so the mode word and dot sit at the right edge, dot ending at x 470.
-  // v51 (review item 4): the title ends at 287, so NOT REFERENCED (about 150 px) keeps a margin.
-  const badge = st(mk(h, 290, 0, 164, HDR, '', ''), { color: '#fff', fontSize: '16px', lineHeight: HDR + 'px', textAlign: 'right', whiteSpace: 'nowrap' });
+  // v51 (review item 4): measured at 16 px: longest title "System information" 160 px (127-293), NOT REFERENCED 154 px
+  // (from 300 to 454), so the two keep at least 7 px apart.
+  const badge = st(mk(h, 296, 0, 158, HDR, '', ''), { color: '#fff', fontSize: '16px', lineHeight: HDR + 'px', textAlign: 'right', whiteSpace: 'nowrap' });
   const mdot = st(mk(h, 460, 15, 10, 10, ''), { borderRadius: '5px' });
   const stop = st(btn(dev, 361, 216, 109, 48, '<b style="font-size:26px">STOP</b>', () => { closeOverlay(); return operatorStop(); }, 'red'), { zIndex: '30' });
   // Footer: same box, dot and text position as the home status line (Ryan, 9 Oct: console consistent on every screen).

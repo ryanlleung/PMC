@@ -18,7 +18,9 @@ module.exports.audit = () => {
     const cs = getComputedStyle(e), fs = parseFloat(cs.fontSize);
     if (![12, 16, 26, 40].includes(Math.round(fs))) out.push('FONT ' + fs + 'px ' + name(e));
     if (!scrollable(e) && !e.dataset.trunc) {
-      if (e.scrollWidth > e.clientWidth + 1 && e.clientWidth) out.push('CLIP-H ' + name(e) + ' ' + e.scrollWidth + '>' + e.clientWidth);
+      // sub-pixel: scrollWidth rounds, so compare the text's own width (an ellipsis can hide 0.3 px of overflow)
+      const tw = (() => { const rg = document.createRange(); rg.selectNodeContents(e); return rg.getBoundingClientRect().width; })();
+      if ((e.scrollWidth > e.clientWidth + 1 || (cs.whiteSpace === 'nowrap' && e.style.width && cs.overflow !== 'visible' && tw > e.clientWidth + 0.05)) && e.clientWidth) out.push('CLIP-H ' + name(e) + ' ' + tw.toFixed(1) + '>' + e.clientWidth);
       if (e.scrollHeight > e.clientHeight + 1 && e.clientHeight && cs.overflow !== 'visible') out.push('CLIP-V ' + name(e) + ' ' + e.scrollHeight + '>' + e.clientHeight);
     }
     const t = textRect(e), box = e.closest('.card, .b, .modal, .hdr');
