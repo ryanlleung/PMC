@@ -10,7 +10,7 @@
  * Socket layout (Ryan, 7 Oct 2026):
  *   S1 Stepper 3     (ULN2003)  AN PA4, RST PC2, CS PB12, PWM PD12 (PMC_STEPPER3_SOCKET)
  *   S3 Boost 10      (LT8337 + TPL0501)  SPI1 PA5/PA6/PB5, CS PF8, PG PG2
- *   S4 Power Monitor (INA228)   SCL PF1 / SDA PF0 (bit-banged I2C)
+ *   S4 Power Monitor (INA228)   SCL PF1 / SDA PF0 (I2C2, mikroSDK driver)
  *
  * The stepper itself is in stepper3.c (coils off at start-up). The Boost 10 is set to ~10 V at start-up
  * for the Druck excitation, and drops to ~5 V if VBUS reads over 11.5 V.
@@ -38,8 +38,6 @@ void clicks_init(void);
 
 // Re-reads every board. Call about once a second.
 void clicks_poll(void);
-// Sets up the Power Monitor again (pins and INA228), e.g. after I2C TEST.
-void clicks_powermonitor_reinit(void);
 
 // One status line per board, valid after clicks_init().
 const char *clicks_stepper3_status(void);
