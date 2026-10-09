@@ -299,6 +299,7 @@ dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
 <li>v25 (Ryan, 9 Oct): header Back closes a keypad or dialog; homing asks first, names its three steps and can be stopped from the Mode button; the cards drop Error, Target and Steps for one line each (Setpoint / Set by or Moving to); Valve screen captions say Pressure now and Valve now, and Change fully open is a button; Menu System row reads Tuning, Faults and events; every label checked to fit its box.</li>
 <li>v26 (Ryan, 9 Oct): valve card line reads Set to N % (was Set by hand / auto); Valve screen top row three equal cards (Valve now with its set-to position, Pressure now, Fully open with Change); Motor and switch shows Valve now and Steps now, Home a double-height button in the side column.</li>
 <li>v27 (review round 3, Ryan: fix all): not-homed valve card one string; Faults list over two rows with paged events; Mode button shows the homing step, disabled (red STOP is the only stop); editable cards carry a › at the right edge; Valve screen back on the column grid; Fully open as a setting card; keypad without Cancel (header Back cancels), Set two rows tall; Valve now caption carries the set position; trend axis from 0 with a coloured legend above the plot; Sensor reading shows the serial in full.</li>
+<li>v46, UI/UX review update 1 (operator screens and navigation): home Target line says inactive or paused outside AUTO; valve card "Valve position, %" with Opening / Closing / Stationary / Closed limit and Requested; AUTO status line separates Approaching target, Within target band and Stable (in band for 60 s); mode button Start AUTO / Switch to MANUAL / Resume AUTO / Reference Valve; Home renamed Reference valve (header NOT REFERENCED, REFERENCING); home Set Target and Move Valve; Valve page has Pressure, Position, Requested, Enter %, hold Close, -1 %, +1 %, hold Open and a line saying what the valve is doing or why it cannot move (presets row and 100 % travel removed); Menu is Trend, Alarms and events, Reference valve, System information, Commissioning; Back returns one level.</li>
 <li>v41 (Ryan, 9 Oct): Menu has no Valve tile (home Set Valve is the way in); Motor and switch split into Motor (speeds and drive settings, last move, Save) and Homing (limit switch, last homing, offset, overtravel, progress, Home), no page switch.</li>
 <li>v42 (Ryan, 9 Oct): date and clock removed from the header; mode word and dot move to the right edge. Motor last-move card reads Moving / To N %, N steps while the valve moves; Valve calc. shows ---- when not homed.</li>
 <li>v43 (Ryan, 9 Oct): header mode word (MANUAL, AUTO, NOT HOMED) 16 px, the same as the title and Back.</li>
@@ -334,11 +335,11 @@ let t = 0;                             // simulated seconds since page load
 
 const DEF_P = { Kp: 4, Ti: 0.25, Kd: 0, DB: 8, Ts: 1, Pmin: 0.2, POSMAX: 99072, KDIR: 1,
   fhome: 400, fcreep: 25, Nbackoff: 400, Nclear: 800, Noffset: 0, Tcheck: 30, Nresp: 5, dPmin: 0.05,
-  checkMin: 1000, Tconv: 1800, band: 0.1, leadMax: 3000, Tlag: 40, outMin: 14 };
+  checkMin: 1000, Tconv: 1800, band: 0.1, leadMax: 3000, Tlag: 40, outMin: 14, stableT: 60 };
 const RANGE = { Kp: [0.01, 100], Ti: [0, 100], Kd: [0, 100], DB: [0, 2000], Ts: [0.5, 10], Pmin: [0, 1034],
   POSMAX: [1000, 300000], fhome: [16, 1000], fcreep: [16, 1000], Nbackoff: [10, 5000],
   Nclear: [10, 10000], Noffset: [0, 5000], Tcheck: [1, 120], Nresp: [1, 50], dPmin: [0.001, 10],
-  checkMin: [0, 200000], Tconv: [10, 36000], band: [0.001, 10], leadMax: [0, 100000], Tlag: [0, 600], outMin: [0, 50] };
+  checkMin: [0, 200000], Tconv: [10, 36000], band: [0.001, 10], leadMax: [0, 100000], Tlag: [0, 600], outMin: [0, 50], stableT: [5, 3600] };
 const FLASH_KEY = 'pmc-sim-flash-v4';
 let flash = null;
 try { const s = localStorage.getItem(FLASH_KEY); if (s) flash = JSON.parse(s); } catch (e) { flash = null; }
@@ -350,7 +351,7 @@ const LIM = { force: 'NORMAL', hyst: 20, simPos: 3000, raw: false, active: false
 const M = { pos: 0, moving: false, dir: 0, v: 0, acc: 0, target: 0, vrun: 400, vstart: 200, lastStop: 'none', onDone: null };
 const C = { mode: 'NOT HOMED', ref: false, SP: 5.0, manPos: 0, posCmd: 0, lastSent: 0, lastCorr: 0, I: 0, prevPV: null,
   homeStage: '', homeT0: 0, lastHome: null, faults: new Map(), events: [], msg: null,
-  winT: 0, winPos: 0, winPV: null, posF: 0, noresp: 0, wrong: 0, convStart: 0, f02Since: null, refusal: '' };
+  winT: 0, winPos: 0, winPV: null, posF: 0, noresp: 0, wrong: 0, convStart: 0, f02Since: null, refusal: '', inBandSince: null };
 let PV = null, PVreal = BENCH.air, pvValid = true;
 let timers = [], nextMeas = 1, nextCtrl = 1;
 const trend = [];
@@ -572,7 +573,7 @@ function limitHit() {
 
 // Central permissive for manual, jog and auto moves.
 function requestMove(target, quiet) {
-  if (C.mode === 'HOMING') return quiet ? false : refuse('Homing in progress (IL-8)');
+  if (C.mode === 'HOMING') return quiet ? false : refuse('Referencing in progress (IL-8)');
   if (C.faults.size && !(LIM.active && target > M.pos)) return quiet ? false : refuse('Latched fault: ACK first (IL-9)');
   if (C.ref) target = clamp(Math.round(target), 0, P.POSMAX);
   if (!M.moving && target < M.pos && LIM.active) return quiet ? false : refuse('Closed limit active: closing blocked (IL-1)');
@@ -584,16 +585,16 @@ function requestMove(target, quiet) {
  * ==================================================================== */
 // v25 (Ryan, 9 Oct: homing UX bad): ask first with what will happen, name the step while it runs,
 // Mode button becomes Stop, and say when it is done.
-function homeStep() { return { 'clearance move': 'Moving off the switch', 'fast approach': 'Homing 1 of 3: closing to the switch', 'back-off': 'Homing 2 of 3: backing off', 'creep approach': 'Homing 3 of 3: slow approach' }[C.homeStage] || 'Homing'; }
+function homeStep() { return { 'clearance move': 'Moving off the switch', 'fast approach': 'Referencing 1 of 3: closing to the switch', 'back-off': 'Referencing 2 of 3: backing off', 'creep approach': 'Referencing 3 of 3: slow approach' }[C.homeStage] || 'Referencing'; }
 function homeAsk() {
-  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to manual before homing');
+  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to MANUAL before referencing');
   if (C.faults.size) return refuse('Latched fault: ACK first (IL-9)');
   const mins = Math.ceil(1.1 * P.POSMAX / P.fhome / 60);
-  confirmBox('Home the valve? It closes until the limit switch opens, then sets 0 %. Up to ' + mins + ' min. The pressure will change.', 'Home', 'act', home);
+  confirmBox('Reference the valve? It closes until the limit switch opens, then sets 0 %. Up to ' + mins + ' min. The pressure will change.', 'Reference', 'act', home);
 }
 function home() {
-  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to manual before homing');
-  if (C.mode === 'HOMING') return refuse('Already homing');
+  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to MANUAL before referencing');
+  if (C.mode === 'HOMING') return refuse('Already referencing');
   if (C.faults.size) return refuse('Latched fault: ACK first (IL-9)');
   stopMotor();
   C.ref = false; C.mode = 'HOMING'; C.homeT0 = t;
@@ -631,7 +632,7 @@ function homeCreep() {
       C.manPos = C.posCmd = C.lastSent = M.pos;
       C.lastHome = { t, dur: t - C.homeT0 };
       ev('HOME', 'Homed in ' + (t - C.homeT0).toFixed(1) + ' s, position ' + P.Noffset);
-      msg('Homed. Valve closed at 0 %.', 'info');
+      msg('Valve referenced. Closed at 0 %.', 'info');
     } else if (r === 'DONE') homeFault('F-07', 'Homing: switch not found on creep approach');
     else homeAbort(r);
   });
@@ -670,8 +671,8 @@ function operatorStop() {
 function kpSteps() { return P.Kp / 100 * P.POSMAX; }
 function toAuto() {
   if (C.mode === 'AUTO') return true;
-  if (!C.ref) return refuse('Auto refused: not homed (IL-2)');
-  if (C.mode === 'HOMING') return refuse('Auto refused: homing (IL-8)');
+  if (!C.ref) return refuse('Auto refused: valve not referenced (IL-2)');
+  if (C.mode === 'HOMING') return refuse('Auto refused: referencing (IL-8)');
   if (C.faults.size) return refuse('Auto refused: latched fault, ACK first (IL-9)');
   if (!pvValid || PV == null) return refuse('Auto refused: pressure invalid (IL-3)');
   if (C.SP < P.Pmin || C.SP > pMax()) return refuse('Auto refused: setpoint outside P_MIN to P_MAX (IL-4)');
@@ -705,11 +706,11 @@ function toManual() {
 }
 function setSP(v) {
   if (!(v >= P.Pmin && v <= pMax())) { ev('W-03', 'Setpoint ' + v + ' rejected, allowed ' + P.Pmin + ' to ' + pMax()); return refuse('W-03 Setpoint outside ' + P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(2)); }
-  C.SP = v; C.convStart = t; ev('SP', 'Setpoint ' + v.toFixed(2) + ' mbar');
+  C.SP = v; C.convStart = t; C.inBandSince = null; ev('SP', 'Setpoint ' + v.toFixed(2) + ' mbar');
   return true;
 }
 function setManSteps(n) {
-  if (C.mode !== 'MANUAL') return refuse(C.mode === 'NOT HOMED' ? 'Not homed: press Home first (IL-2)' : 'Valve entry is for manual mode');
+  if (C.mode !== 'MANUAL') return refuse(C.mode === 'NOT HOMED' ? 'Valve not referenced: reference it first (IL-2)' : 'Valve entry is for manual mode');
   n = clamp(Math.round(n), 0, P.POSMAX);
   if (!requestMove(n)) return false;
   C.manPos = C.posCmd = C.lastSent = n;
@@ -717,7 +718,7 @@ function setManSteps(n) {
 }
 function jog(n) {
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Jog locked in auto');
-  if (C.mode === 'HOMING') return refuse('Jog locked while homing (IL-8)');
+  if (C.mode === 'HOMING') return refuse('Movement locked while referencing (IL-8)');
   let target = (M.moving ? M.target : M.pos) + n;
   if (C.ref) target = clamp(target, 0, P.POSMAX);
   if (!requestMove(target)) return false;
@@ -738,7 +739,8 @@ function measure() {
 function ctrlTick() {
   // valve position lagged by the process time constant: the pressure answers this, not the raw count
   C.posF = P.Tlag > 0 && C.ref && C.mode !== 'HOMING' ? C.posF + (M.pos - C.posF) * P.Ts / (P.Tlag + P.Ts) : M.pos;
-  if (C.mode !== 'AUTO' || PV == null) return;
+  if (C.mode !== 'AUTO' || PV == null) { C.inBandSince = null; return; }
+  if (Math.abs(C.SP - PV) > P.band) C.inBandSince = null; else if (C.inBandSince == null) C.inBandSince = t;
   // F-02, armed in auto only (G7)
   if (PV < P.Pmin || PV > pMax()) { if (C.f02Since === null) C.f02Since = t; if (t - C.f02Since >= 5) { raise('F-02', PV < P.Pmin ? 'Pressure ' + PV.toFixed(2) + ' below P_MIN ' + P.Pmin + ' mbar, check helium flow and pump' : 'Pressure ' + PV.toFixed(2) + ' above the sensor range ' + pMax() + ' mbar'); return; } }
   else C.f02Since = null;
@@ -893,7 +895,10 @@ function holdBtn(par, x, y, w, h, label, ms, fn, cls) {   // acts only after a p
 const COL = { hdr: '#1F2933', text: '#1F2933', muted: '#546374', ok: '#2EA043', fault: '#D63031', warn: '#D68200', idle: '#969EA6', blue: '#2D5877', bg: '#E8EEF4' };
 const MODE_COL = { AUTO: '#2EA043', MANUAL: '#5B6B7B', 'NOT HOMED': '#D68200', HOMING: '#2D5877', PAUSED: '#D68200' };
 
-const TITLES = { menu: 'Menu', sensor: 'Sensor', motor: 'Motor', homing: 'Homing', tune: 'Tuning', faults: 'Faults and events', trend: 'Trend', valve: 'Valve' };
+const TITLES = { menu: 'Menu', sensor: 'Sensor', motor: 'Valve setup', homing: 'Homing settings', tune: 'Control tuning', faults: 'Alarms and events', trend: 'Trend', valve: 'Valve',
+  ref: 'Reference valve', info: 'System information', comm: 'Commissioning' };
+// Review item 1: "Home" meant both the main page and a physical move. The move is now "Reference valve".
+const MODE_WORD = { 'NOT HOMED': 'NOT REFERENCED', HOMING: 'REFERENCING', PAUSED: 'AUTO PAUSED', MANUAL: 'MANUAL', AUTO: 'AUTO' };
 function newScreen(name) {
   const s = mk(dev, 0, HDR, 480, 272 - HDR, 'scr');
   st(s, { top: '0px', height: '272px' });
@@ -901,12 +906,17 @@ function newScreen(name) {
   screens[name] = { el: s, update: () => {}, foot: null, leave: null };
   return s;
 }
-function show(name) {
+// Review item 5: Back returns one level (it used to go straight home from every page). Home clears the stack.
+let navStack = [];
+function show(name, back) {
   closeOverlay();
   if (current && current !== name && screens[current] && screens[current].leave) screens[current].leave();
+  if (name === 'ctrl') navStack = [];
+  else if (!back && current && current !== name) navStack.push(current);
   for (const k in screens) vis(screens[k].el, k === name);
   current = name; updateUI();
 }
+function goBack() { if (overlay) { closeOverlay(); return; } show(navStack.pop() || 'ctrl', true); }
 // One grid on every screen (v22): 8 px gaps, four equal 109 px columns 10-119 | 127-236 | 244-353 | 361-470,
 // four 48 px rows 48-96 | 104-152 | 160-208 | 216-264. Content 10-353 x 48-208, side column 361-470 with
 // three slots, bottom row = status line (10-353) beside STOP (361-470) on every screen.
@@ -922,7 +932,7 @@ function buildGlobal() {
   // v37 (Ryan, review header proposal): the same header on every screen. PMC (home) or Back in 0-119, text from x 10;
   // title from x 127; mode badge 109 x 30 at 304-413; clock HH:MM 16 px right-aligned to 470. Date, Druck health and
   // link left the header (link and firmware on the Menu status line; Druck faults show on the pressure card and F-01).
-  const back = st(btn(h, 0, 0, 119, HDR, '&#8249; Back', () => { if (overlay) closeOverlay(); else show('ctrl'); }, 'dark'), { alignItems: 'flex-start', paddingLeft: '10px' });   // v25: Back also closes a keypad or dialog
+  const back = st(btn(h, 0, 0, 119, HDR, '&#8249; Back', goBack, 'dark'), { alignItems: 'flex-start', paddingLeft: '10px' });   // v25: Back also closes a keypad or dialog
   const pmc = st(mk(h, 10, 0, 109, HDR, '', 'PMC'), { fontSize: '16px', lineHeight: HDR + 'px' });
   const title = st(mk(h, 127, 0, 170, HDR, '', ''), { fontSize: '16px', lineHeight: HDR + 'px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
   // v40 (Ryan, header option B): mode as a 12 px white word with a 10 px dot in the mode colour to its right (6 px gap), no box.
@@ -943,7 +953,7 @@ function updateGlobal() {
   const home = current === 'ctrl';
   vis(G.back, !home || !!overlay); vis(G.title, !home); vis(G.pmc, home && !overlay);
   set(G.title, TITLES[current] || '');
-  set(G.badge, C.mode === 'PAUSED' ? 'AUTO PAUSED' : C.mode);
+  set(G.badge, MODE_WORD[C.mode] || C.mode);
   setbg(G.mdot, MODE_COL[C.mode]);
   // footer: toast, else latched-fault bar, else the screen's own note
   const f = G.foot;
@@ -983,23 +993,24 @@ function readCard(s, x, cap, go) {
 function buildCtrl() {
   const s = newScreen('ctrl');
   // Rows 2:1:1 (Ryan, 9 Oct): cards 48-152 (two grid rows), buttons 160-208, status line + STOP 216-264.
+  // v46 (UI/UX review item 1): the screen answers what is the pressure, what is asked for, what the controller is doing
+  // and whether anything needs attention. Target says when it is inactive; the valve card says it is a position and
+  // shows Opening / Closing / Stationary; the status line separates Approaching, Within target band and Stable.
   const pc = readCard(s, 10, 'Pressure, mbar abs', 'trend');
   st(pc.strip, { top: '66px', height: '1px' });
-  const vc = readCard(s, 244, 'Valve open, %', 'valve');
+  const vc = readCard(s, 244, 'Valve position, %', 'valve');
   const barFill = st(mk(vc.strip, 0, 0, 0, 6, ''), { background: COL.blue, borderRadius: '2px' });
   const BAR = 202;   // no target tick: it looked like a drag handle (Ryan, 9 Oct)
 
   btn(s, 10, RY[2], 109, RH, '<span style="font-size:16px">Menu</span>', () => show('menu'));
   const bMode = btn(s, 361, RY[2], 109, RH, '', modePress);   // v31 (Ryan): mode button far right, above STOP
-  // Actions, not values (Ryan, 9 Oct): the values are in the cards above; same verb-over-target form as the Mode button.
-  const bSp = btn(s, 127, RY[2], 109, RH, '<small>Set</small><b style="font-size:16px;margin-top:2px">Pressure</b>', () => keypadSP());   // v24: Set + the card it changes
+  const bSp = btn(s, 127, RY[2], 109, RH, '<small>Set</small><b style="font-size:16px;margin-top:2px">Target</b>', () => keypadSP());
   const bValve = btn(s, 244, RY[2], 109, RH, '', () => show('valve'));
 
   const sb = mk(s, 10, RY[3], 343, RH, 'card'); st(sb, { cursor: 'pointer' });
   sb.addEventListener('pointerdown', ev0 => { if (ev0.target === sb || ev0.target.parentNode === sb) { if (C.faults.size) show('faults'); } });
   const dot = st(mk(sb, 12, 20, 8, 8, ''), { borderRadius: '4px' });
   const stxt = st(mk(sb, 28, 0, 303, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center', overflow: 'hidden' });
-  const cnt = st(mk(sb, 186, 13, 72, 22, '', ''), { fontSize: '12px', lineHeight: '22px', textAlign: 'center', borderRadius: '11px', background: '#B42324', color: '#fff' });
   const sbtn = btn(sb, 253, 4, 86, 40, '<b>ACK</b>', ack, 'act');
 
   screens.ctrl.update = () => {
@@ -1008,21 +1019,15 @@ function buildCtrl() {
     set(pc.val, fmtP(PV));
     setc(pc.val, PV == null ? COL.fault : COL.text);
     setbg(pc.stripe, PV == null ? COL.fault : COL.ok);
-    // Trend word: 5 s mean now against the 5 s mean 30 s ago; moves under max(0.2 mbar, 3 % of PV) read steady (Ryan, 9 Oct: too sensitive at 10 s / 0.05 mbar).
-    const mean = (a, b) => { const q = trend.slice(Math.max(0, trend.length - b), trend.length - a).filter(x => x.pv != null); return q.length ? q.reduce((u, x) => u + x.pv, 0) / q.length : null; };
-    const m0 = trend.length > 35 ? mean(0, 5) : null, m1 = trend.length > 35 ? mean(30, 35) : null;
-    const dp = m0 != null && m1 != null ? m0 - m1 : 0, thr = Math.max(0.2, 0.03 * Math.abs(PV || 0));
-    // v33 (Ryan): no direction shown on home (words in v31, arrows in v32, both removed); states stay words.
     set(pc.state, PV == null ? 'no signal' : '');
     setc(pc.state, COL.fault);
-    // v31 (Ryan: too many words, no unit): "Setpoint" and the number only (the card title gives mbar abs);
-    // outside auto the number is light grey (COL.idle), as for other inactive values.
-    set(pc.l1, 'Setpoint'); setc(pc.l1, COL.muted);
-    set(pc.v1, C.SP.toFixed(2)); setc(pc.v1, auto ? COL.text : COL.idle);
-    // Valve card, same layout
+    // Target: grey alone did not say whether it was inactive or unavailable, so the label says it.
+    set(pc.l1, C.mode === 'AUTO' ? 'Target' : C.mode === 'PAUSED' ? 'Target, paused' : 'Target, inactive'); setc(pc.l1, COL.muted);
+    set(pc.v1, C.SP.toFixed(2)); setc(pc.v1, C.mode === 'AUTO' ? COL.text : COL.idle);
+    // Valve card: motion word top right (restored; review item 1)
     const d = M.moving ? M.dir : 0;
-    set(vc.state, LIM.active ? 'on limit' : '');
-    setc(vc.state, LIM.active ? COL.warn : d ? COL.blue : COL.idle);
+    set(vc.state, LIM.active && !d ? 'Closed limit' : d > 0 ? 'Opening' : d < 0 ? 'Closing' : C.ref ? 'Stationary' : '');
+    setc(vc.state, LIM.active && !d ? COL.warn : d ? COL.blue : COL.muted);
     setbg(vc.stripe, C.ref ? COL.ok : C.mode === 'HOMING' ? COL.blue : COL.warn);
     if (C.ref) {
       set(vc.val, pctOf(M.pos).toFixed(1)); setc(vc.val, COL.text); st(vc.val, { fontSize: '40px' });
@@ -1031,28 +1036,34 @@ function buildCtrl() {
       const tgt = auto ? C.posCmd : (M.moving ? M.target : C.manPos);
       vis(vc.strip, true);
       st(vc.l1, { width: '130px' });
-      set(vc.l1, 'Set to'); set(vc.v1, pctOf(tgt).toFixed(1) + ' %');   // v26: the commanded position, by hand or by auto
+      set(vc.l1, 'Requested'); set(vc.v1, pctOf(tgt).toFixed(1) + ' %');
     } else {
-      // v39 (review): not homed is said once each: badge NOT HOMED, card "----" / Position unknown, button Home.
-      set(vc.val, C.mode === 'HOMING' ? 'Homing' : '----'); setc(vc.val, C.mode === 'HOMING' ? COL.blue : COL.idle); st(vc.val, { fontSize: C.mode === 'HOMING' ? '26px' : '40px' });
+      set(vc.val, C.mode === 'HOMING' ? 'Referencing' : '----'); setc(vc.val, C.mode === 'HOMING' ? COL.blue : COL.idle); st(vc.val, { fontSize: C.mode === 'HOMING' ? '26px' : '40px' });
       vis(vc.strip, false);
-      set(vc.l1, C.mode === 'HOMING' ? homeStep().replace('Homing ', 'Step ') : 'Position unknown'); set(vc.v1, '');
+      set(vc.l1, C.mode === 'HOMING' ? homeStep().replace('Referencing ', 'Step ') : 'Not referenced'); set(vc.v1, '');
       st(vc.l1, { width: C.mode === 'HOMING' ? '202px' : '130px', whiteSpace: 'normal', overflow: 'hidden' });
     }
     const sl = statusLine();
     set(stxt, sl.text); setc(stxt, sl.kind === 'fault' ? '#B42324' : sl.kind === 'warn' ? '#9A5D00' : COL.text);
     setbg(sb, sl.kind === 'fault' ? '#FDE8E8' : sl.kind === 'warn' ? '#FFF3DD' : '#FFFFFF');
     setbg(dot, sl.kind === 'fault' ? COL.fault : sl.kind === 'warn' ? COL.warn : sl.dot || COL.idle);
-    vis(sbtn, !!sl.btn); vis(cnt, false); seth(sbtn, sl.count ? '<b>ACK</b><small>' + sl.count + ' faults</small>' : '<b>ACK</b>');
+    vis(sbtn, !!sl.btn); seth(sbtn, sl.count ? '<b>ACK</b><small>' + sl.count + ' faults</small>' : '<b>ACK</b>');
     st(stxt, { width: (sl.btn ? 217 : 303) + 'px' });
     const ma = modeAction();
     seth(bMode, ma[0] ? '<small>' + ma[0] + '</small><b style="font-size:16px;margin-top:2px">' + ma[1] + '</b>' : '<b style="font-size:16px">' + ma[1] + '</b>');
     tog(bMode, 'act', C.mode === 'NOT HOMED'); tog(bMode, 'dis', C.mode === 'HOMING');   // review 3: red STOP is the only stop
-    seth(bValve, '<small>' + (C.mode === 'MANUAL' ? 'Set' : 'View') + '</small><b style="font-size:16px;margin-top:2px">Valve</b>');
+    seth(bValve, '<small>' + (C.mode === 'MANUAL' ? 'Move' : 'View') + '</small><b style="font-size:16px;margin-top:2px">Valve</b>');
   };
 }
-function modeAction() {               // [small verb line, big target]
-  return { 'NOT HOMED': ['', 'Home'], HOMING: ['Homing', (homeStep().match(/\d of 3/) || ['...'])[0]], MANUAL: ['Go to', 'AUTO'], AUTO: ['Go to', 'MANUAL'], PAUSED: ['Auto paused', 'Resume'] }[C.mode];
+function modeAction() {               // [small verb line, big target]: the button names the action it takes
+  return { 'NOT HOMED': ['Reference', 'Valve'], HOMING: ['Referencing', (homeStep().match(/\d of 3/) || ['...'])[0]], MANUAL: ['Start', 'AUTO'], AUTO: ['Switch to', 'MANUAL'], PAUSED: ['Resume', 'AUTO'] }[C.mode];
+}
+// Regulation words (review item 1): one in-band reading is "Within target band"; "Stable" needs the pressure to have
+// stayed in the band for P.stableT seconds without a break.
+function regulation() {
+  if (PV == null) return 'none';
+  if (Math.abs(C.SP - PV) > P.band) return 'approach';
+  return C.inBandSince != null && t - C.inBandSince >= P.stableT ? 'stable' : 'band';
 }
 function statusLine() {
   if (C.faults.size) {
@@ -1061,23 +1072,25 @@ function statusLine() {
   }
   if (C.msg && performance.now() < C.msg.until) return { kind: C.msg.kind, text: C.msg.text };
   switch (C.mode) {
-    case 'NOT HOMED': return { kind: 'warn', text: 'Press Home to find the closed limit.' };
+    case 'NOT HOMED': return { kind: 'warn', text: 'Valve position unknown. Reference the valve to find the closed position.' };
     case 'HOMING': return { kind: 'info', dot: COL.blue, text: homeStep() + '. STOP to cancel.' };
-    case 'MANUAL': return { kind: 'info', dot: COL.muted, text: M.moving ? 'Moving to ' + pctOf(M.target).toFixed(1) + ' %.' : 'Valve held at ' + pctOf(M.pos).toFixed(1) + ' %.' };
+    case 'MANUAL': return { kind: 'info', dot: COL.muted, text: M.moving ? 'Manual. Moving to ' + pctOf(M.target).toFixed(1) + ' %.' : 'Manual. Valve held at ' + pctOf(M.pos).toFixed(1) + ' %.' };
     case 'AUTO': {
-      const near = PV != null && Math.abs(C.SP - PV) <= P.band;
-      return { kind: 'info', dot: COL.ok, text: near ? 'Holding ' + C.SP.toFixed(2) + ' mbar.' : 'Driving toward ' + C.SP.toFixed(2) + ' mbar.' };
+      const r = regulation(), sp = C.SP.toFixed(2);
+      if (r === 'stable') return { kind: 'info', dot: COL.ok, text: 'Stable at ' + sp + ' mbar: within ' + P.band.toFixed(2) + ' for ' + P.stableT + ' s.' };
+      if (r === 'band') return { kind: 'info', dot: COL.ok, text: 'Within target band, ' + sp + ' ± ' + P.band.toFixed(2) + ' mbar.' };
+      return { kind: 'info', dot: COL.ok, text: 'Approaching target, ' + sp + ' mbar.' };
     }
-    case 'PAUSED': return { kind: 'warn', text: 'W-02 Convergence timeout. Auto paused, valve held.' };
+    case 'PAUSED': return { kind: 'warn', text: 'AUTO paused (W-02, no convergence). Valve held at ' + pctOf(M.pos).toFixed(1) + ' %.' };
   }
   return { kind: 'info', text: '' };
 }
 function modePress() {
   if (C.mode === 'NOT HOMED') return homeAsk();
-  if (C.mode === 'HOMING') return refuse('Homing in progress: STOP to cancel');
-  if (C.mode === 'MANUAL') confirmBox('Switch to AUTO at ' + C.SP.toFixed(2) + ' mbar? Pressure now ' + fmtP(PV) + ' mbar.', 'Go to AUTO', 'act', toAuto);
-  else if (C.mode === 'PAUSED') confirmBox('Auto is paused (W-02). Resume auto at ' + C.SP.toFixed(2) + ' mbar, or go to manual?', 'Resume AUTO', 'act', toAuto, ['MANUAL', toManual]);
-  else confirmBox('Switch to MANUAL? Valve stops at its present position (' + pctOf(M.pos).toFixed(1) + ' %).', 'Go to MANUAL', 'act', toManual);
+  if (C.mode === 'HOMING') return refuse('Referencing: STOP to cancel');
+  if (C.mode === 'MANUAL') confirmBox('Start AUTO at ' + C.SP.toFixed(2) + ' mbar? Pressure now ' + fmtP(PV) + ' mbar.', 'Start AUTO', 'act', toAuto);
+  else if (C.mode === 'PAUSED') confirmBox('AUTO is paused (W-02). Resume AUTO at ' + C.SP.toFixed(2) + ' mbar, or switch to MANUAL?', 'Resume AUTO', 'act', toAuto, ['MANUAL', toManual]);
+  else confirmBox('Switch to MANUAL? The valve stops at its present position (' + pctOf(M.pos).toFixed(1) + ' %).', 'Switch to MANUAL', 'act', toManual);
 }
 
 /* ---- Overlays: confirm and keypad (never over the STOP slot) --------- */
@@ -1187,7 +1200,7 @@ function editCard(par, x, y, w, h, cap, fn) {
 /* ---- Valve ------------------------------------------------------------ */
 function canManual() { return C.mode === 'MANUAL'; }
 function manPct(v) { return setManSteps(v / 100 * P.POSMAX); }
-function notManual() { return refuse(C.mode === 'NOT HOMED' ? 'Not homed: press Home first (IL-2)' : 'Switch to manual to move the valve'); }
+function notManual() { return refuse(C.mode === 'NOT HOMED' ? 'Valve not referenced: reference it first (IL-2)' : 'Switch to manual to move the valve'); }
 function nudge(d) { if (!canManual()) return notManual(); return setManSteps(C.manPos + d / 100 * P.POSMAX); }
 function keypadPct() {
   if (!canManual()) return notManual();
@@ -1212,7 +1225,7 @@ function keypadFullSteps() {
     info: 'From the closed limit', onSet: v => (C.mode === 'AUTO' || C.mode === 'PAUSED') ? refuse('Set POS_MAX in manual') : confirmFullOpen(v, 'typed in steps') });
 }
 function fullOpenHere() {
-  if (!C.ref) return refuse('Not homed: press Home first (IL-2)');
+  if (!C.ref) return refuse('Valve not referenced: reference it first (IL-2)');
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to manual first');
   if (M.moving) return refuse('Wait for the valve to stop');
   if (M.pos < RANGE.POSMAX[0]) return refuse('Too close to closed to be fully open');
@@ -1251,77 +1264,148 @@ function jogBtn(par, x, y, w, h, label, dir) {
 }
 function buildValve() {
   const s = newScreen('valve');
-  // v24 (Ryan, 9 Oct: too many words, show the pressure):
-  //   row 1  valve reading | pressure | fully open setting
-  //   row 2  0 25 50 75 100 %
-  //   row 3  jog close | -1 % | type % | +1 % | jog open   (closed to open, left to right)
-  // v25 (Ryan: unclear these are live readings, and that fully open can be changed): live readings captioned
-  // "now", side by side; Change fully open is a button showing the present value.
-  // v26: three equal cells (Ryan): Valve now with its set-to position, Pressure now, Fully open with Change.
-  // v27 (review 3, findings 5-7): back on the column grid. Row 1: Valve now over columns 1-2 (caption carries
-  // the set position, one number per line), Pressure now in column 3, Fully open setting card in the side column.
-  // Rows 2-3: five 62 px cells over 10-353 (as the keypad); side column rows 2-3 empty.
-  // v35 (Ryan): pressure in column 1, valve over columns 2-3, each with the home cards' status strip at the left
-  // (pressure: green OK, amber simulated, red no signal; valve: green homed, blue homing, amber not homed).
-  const t3 = [[127, 226], [10, 109]];
-  const nowCard = (i, cap) => { const c = mk(s, t3[i][0], RY[0], t3[i][1], RH, 'card'); const strip = mk(c, 0, 6, 3, 36, ''); const cp = mk(c, 12, 5, null, null, 'cap', cap); return [c, st(mk(c, 12, 20, t3[i][1] - 22, 24, '', ''), { fontSize: '16px', lineHeight: '24px', textAlign: 'right' }), cp, strip]; };
-  const [lc, pct, setTo, vStrip] = nowCard(0, 'Valve now');
-  const barBg = st(mk(lc, 12, 42, t3[0][1] - 22, 3, ''), { background: COL.bg, borderRadius: '1px' });
+  // v46 (UI/UX review item 3): operator valve page. Moving the valve only; the 100 % travel setting moved to
+  // Commissioning > Valve setup, and the 0/25/50/75/100 % row was removed (large moves presented as shortcuts).
+  //   row 1  pressure | valve position (estimated) | requested | Enter %
+  //   row 2  hold Close | -1 % | +1 % | hold Open        (closed to open, left to right)
+  //   row 3  what the valve is doing, or why it cannot be moved now
+  const c4 = cols(4, 10, 470);
+  const nowCard = (x, cap) => { const c = mk(s, x, RY[0], 109, RH, 'card'); const strip = mk(c, 0, 6, 3, 36, ''); const cp = mk(c, 12, 5, null, null, 'cap', cap);
+    return { c, v: st(mk(c, 12, 20, 87, 24, '', ''), { fontSize: '16px', lineHeight: '24px', textAlign: 'right' }), cp, strip }; };
+  const pr = nowCard(c4[0][0], 'Pressure, mbar');   // unit in the caption so 1013.25 fits 109 px
+  const vp = nowCard(c4[1][0], 'Position, %');
+  const barBg = st(mk(vp.c, 12, 42, 87, 3, ''), { background: COL.bg, borderRadius: '1px' });
   const barFill = st(mk(barBg, 0, 0, 0, 3, ''), { background: COL.blue, borderRadius: '1px' });
-  const [, prv, , pStrip] = nowCard(1, 'Pressure, mbar');   // unit in the caption so 1013.25 fits 109 px
-  const fo = editCard(s, 361, RY[0], 109, RH, '100 %, turns', fullOpenMenu);   // v36 (Ryan): turns, not steps
-  // v30 (Ryan: spacing still weird, "Enter %"): rows 2 and 3 on one five-column grid across 10-470, so their
-  // column lines match. Row 2 presets; row 3 hold Jog, -1 %, Enter %, +1 %, hold Jog.
-  const c5f = cols(5, 10, 470);
-  const PRE = [0, 25, 50, 75, 100];
-  const pre = PRE.map((v, i) => btn(s, c5f[i][0], RY[1], c5f[i][1], RH, '<span style="font-size:16px">' + v + ' %</span>',
-    () => { if (!canManual()) return notManual(); return manPct(v); }));
-  const jc = jogBtn(s, c5f[0][0], RY[2], c5f[0][1], RH, '<small>hold</small><b>&#8249; Jog</b>', -1);
-  const n1 = btn(s, c5f[1][0], RY[2], c5f[1][1], RH, '<span style="font-size:16px">-1 %</span>', () => nudge(-1));
-  const bType = btn(s, c5f[2][0], RY[2], c5f[2][1], RH, '<span style="font-size:16px">Enter %</span>', keypadPct);
-  const n2 = btn(s, c5f[3][0], RY[2], c5f[3][1], RH, '<span style="font-size:16px">+1 %</span>', () => nudge(1));
-  const jo = jogBtn(s, c5f[4][0], RY[2], c5f[4][1], RH, '<small>hold</small><b>Jog &#8250;</b>', 1);
-  screens.valve.foot = () => canManual() ? 'Jog moves while held.' : (C.mode === 'AUTO' || C.mode === 'PAUSED') ? 'Auto is driving the valve.' : 'Not homed.';
+  const rq = nowCard(c4[2][0], 'Requested, %');
+  const bType = btn(s, c4[3][0], RY[0], c4[3][1], RH, '<small>Enter</small><b style="font-size:16px;margin-top:2px">%</b>', keypadPct, 'act');
+  const jc = jogBtn(s, c4[0][0], RY[1], c4[0][1], RH, '<small>hold</small><b>&#8249; Close</b>', -1);
+  const n1 = btn(s, c4[1][0], RY[1], c4[1][1], RH, '<span style="font-size:16px">-1 %</span>', () => nudge(-1));
+  const n2 = btn(s, c4[2][0], RY[1], c4[2][1], RH, '<span style="font-size:16px">+1 %</span>', () => nudge(1));
+  const jo = jogBtn(s, c4[3][0], RY[1], c4[3][1], RH, '<small>hold</small><b>Open &#8250;</b>', 1);
+  const why = st(mk(s, 10, RY[2], 460, RH, 'card'), {});
+  const wdot = st(mk(why, 12, 20, 8, 8, ''), { borderRadius: '4px' });
+  const wtxt = st(mk(why, 28, 0, 420, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center' });
+  screens.valve.foot = () => 'Position: where the valve is. Requested: where it is going.';
   screens.valve.update = () => {
-    const man = canManual();
-    const d = M.moving ? M.dir : 0;
+    const man = canManual(), auto = C.mode === 'AUTO' || C.mode === 'PAUSED';
     if (C.ref) {
-      set(pct, (d > 0 ? '\u2191 ' : d < 0 ? '\u2193 ' : '') + pctOf(M.pos).toFixed(1) + ' %'); setc(pct, COL.text);
-      barFill.style.width = (clamp(pctOf(M.pos), 0, 100) * (t3[0][1] - 22) / 100).toFixed(1) + 'px';
-      const tgt = C.mode === 'AUTO' || C.mode === 'PAUSED' ? C.posCmd : (M.moving ? M.target : C.manPos);
-      set(setTo, 'Valve now, set ' + pctOf(tgt).toFixed(1) + ' %');
-      vis(barBg, true);
+      set(vp.v, pctOf(M.pos).toFixed(1)); setc(vp.v, COL.text);
+      barFill.style.width = (clamp(pctOf(M.pos), 0, 100) * 87 / 100).toFixed(1) + 'px'; vis(barBg, true);
+      const tgt = auto ? C.posCmd : (M.moving ? M.target : C.manPos);
+      set(rq.v, pctOf(tgt).toFixed(1)); setc(rq.v, M.moving ? COL.blue : COL.text);
     } else {
-      set(pct, C.mode === 'HOMING' ? 'Homing' : 'Not homed'); setc(pct, C.mode === 'HOMING' ? COL.blue : COL.warn);
-      vis(barBg, false); set(setTo, 'Valve now');
+      set(vp.v, '----'); setc(vp.v, COL.idle); vis(barBg, false); set(rq.v, '----'); setc(rq.v, COL.idle);
     }
-    set(prv, fmtP(PV)); setc(prv, PV == null ? COL.fault : COL.text);
-    setbg(pStrip, PV == null ? COL.fault : COL.ok);
-    setbg(vStrip, C.ref ? COL.ok : C.mode === 'HOMING' ? COL.blue : COL.warn);   // same rule as the home valve card
-    [bType, ...pre, jc, n1, n2, jo].forEach(b => tog(b, 'dis', !man));
-    pre.forEach((b, i) => tog(b, 'on', man && !M.moving && C.manPos === Math.round(PRE[i] / 100 * P.POSMAX)));
-    set(fo.v, (P.POSMAX / FLP.spt).toFixed(2));
-    tog(fo.c, 'dis', C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING');
+    set(rq.cp, M.moving && C.ref ? (M.dir > 0 ? 'Opening to, %' : 'Closing to, %') : 'Requested, %');
+    set(pr.v, fmtP(PV)); setc(pr.v, PV == null ? COL.fault : COL.text);
+    setbg(pr.strip, PV == null ? COL.fault : COL.ok);
+    setbg(vp.strip, C.ref ? COL.ok : C.mode === 'HOMING' ? COL.blue : COL.warn); setbg(rq.strip, 'transparent');
+    [bType, jc, n1, n2, jo].forEach(b => tog(b, 'dis', !man));
+    // Row 3 says what the valve is doing, or why it cannot be moved (review item 3), in the same words as home.
+    let w, k = 'info';
+    if (C.faults.has('F-12')) { w = 'Stopped. Valve motion stopped; the valve was not commanded closed. Reset the fault on home before moving it.'; k = 'fault'; }
+    else if (C.faults.size) { w = 'Fault latched: valve movement blocked. Reset the fault on home first.'; k = 'fault'; }
+    else if (C.mode === 'NOT HOMED') { w = 'Valve not referenced, so its position is unknown. Use Menu > Reference valve first.'; k = 'warn'; }
+    else if (C.mode === 'HOMING') { w = homeStep() + '. Movement locked until referencing finishes.'; }
+    else if (C.mode === 'AUTO') w = 'AUTO is controlling the valve. Switch to MANUAL on home to move it here.';
+    else if (C.mode === 'PAUSED') { w = 'AUTO paused (W-02). Valve held. Resume AUTO or switch to MANUAL on home.'; k = 'warn'; }
+    else if (M.moving) w = (M.dir > 0 ? 'Opening' : 'Closing') + ' to ' + pctOf(M.target).toFixed(1) + ' %. Position is estimated from motor steps counted since referencing.';
+    else w = 'Valve held. Position is estimated from motor steps counted since referencing. Hold Close or Open to move continuously.';
+    set(wtxt, w); setc(wtxt, k === 'fault' ? '#B42324' : k === 'warn' ? '#9A5D00' : COL.text);
+    setbg(why, k === 'fault' ? '#FDE8E8' : k === 'warn' ? '#FFF3DD' : '#FFFFFF');
+    setbg(wdot, k === 'fault' ? COL.fault : k === 'warn' ? COL.warn : M.moving ? COL.blue : COL.idle);
   };
 }
 
 /* ---- Menu ---------------------------------------------------------- */
 function buildMenu() {
   const s = newScreen('menu');
-  // One row per category, by what the person is doing (Ryan, 9 Oct): running the cryostat, checking the
-  // hardware, changing saved settings. Name in column 1, screens in columns 2-4; STOP back in row 4.
-  // v24 (Ryan, 9 Oct): grouped by what it is about.
-  const groups = [['Pressure', [['Sensor', 'sensor'], ['Trend', 'trend']]],
-                  ['Valve', [['Motor', 'motor'], ['Homing', 'homing']]],   // v41: Valve screen only from home Set Valve
-                  ['System', [['Tuning', 'tune'], ['Faults and events', 'faults']]]];
-  const c4 = cols(4, 10, 470);
-  groups.forEach(([name, items], gi) => {
-    const y = RY[gi];
-    st(mk(s, c4[0][0], y, c4[0][1], RH, '', name), { fontSize: '16px', color: COL.muted, lineHeight: RH + 'px', paddingLeft: '2px' });
-    const ct = [[127, 168], [303, 167]];   // v29: two tiles per row across columns 2-4, no empty side column
-    items.forEach((it, i) => btn(s, ct[i][0], y, ct[i][1], RH, it[0], () => show(it[1])));
-  });
-  screens.menu.foot = () => 'Link ' + (BENCH.link === 'eth' ? 'Ethernet 192.168.1.50' : 'USB') + '. Firmware ' + FW + ', last reset power-on.';   // v37: link moved here from the header
+  // v46 (UI/UX review item 5): operator tasks, not components. Setpoint, mode and manual valve stay on home.
+  // Setup pages sit behind Commissioning.
+  const c2 = cols(2, 10, 470);
+  const tile = (x, y, w, label, go) => btn(s, x, y, w, RH, '<span style="font-size:16px">' + label + '</span>', () => show(go));
+  tile(c2[0][0], RY[0], c2[0][1], 'Trend', 'trend');
+  tile(c2[1][0], RY[0], c2[1][1], 'Alarms and events', 'faults');
+  tile(c2[0][0], RY[1], c2[0][1], 'Reference valve', 'ref');
+  tile(c2[1][0], RY[1], c2[1][1], 'System information', 'info');
+  tile(10, RY[2], 460, 'Commissioning', 'comm');
+  screens.menu.foot = () => 'Link ' + (BENCH.link === 'eth' ? 'Ethernet 192.168.1.50' : 'USB') + '. Firmware ' + FW + ', last reset power-on.';
+}
+// Read-only value card; long values drop from 16 px to 12 px so they fit (LVGL: two label styles).
+function infoCard(par, x, y, w, cap) {
+  const c = mk(par, x, y, w, RH, 'card'); const cp = mk(c, 10, 5, w - 20, null, 'cap', cap);
+  const v = st(mk(c, 10, 22, w - 20, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' });
+  return { c, cp, v, set: (txt, col) => { set(v, txt); setc(v, col || COL.text); st(v, { fontSize: txt.length * 9.2 > w - 20 ? '12px' : '16px' }); } };
+}
+
+/* ---- Reference valve (operator) --------------------------------------- */
+// v46 (UI/UX review items 1 and 5): "Home" renamed Reference valve. Guided: what it does, status, progress, start.
+// Offset and creep speed are commissioning settings (Valve setup).
+function buildRef() {
+  const s = newScreen('ref');
+  const stat = infoCard(s, 10, RY[0], 226, 'Reference');
+  const pos = infoCard(s, 244, RY[0], 109, 'Steps now');
+  const sw = infoCard(s, 361, RY[0], 109, 'Limit switch');
+  const last = infoCard(s, 10, RY[1], 226, 'Last referenced');
+  const over = infoCard(s, 244, RY[1], 109, 'Past switch');
+  const bh = btn(s, 361, RY[1], 109, 104, '<small>Start</small><b style="font-size:16px;margin-top:2px">Reference</b>', homeAsk, 'act');
+  const ex = st(mk(s, 10, RY[2], 343, RH, 'card'), {});
+  const ext = st(mk(ex, 12, 0, 323, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center' });
+  screens.ref.update = () => {
+    const hm = C.mode === 'HOMING' ? (homeStep().match(/(\d of 3): (.*)/) || []) : [];
+    set(stat.cp, hm[1] ? 'Referencing, step ' + hm[1] : 'Reference');
+    stat.set(C.mode === 'HOMING' ? (hm[2] ? hm[2][0].toUpperCase() + hm[2].slice(1) : 'Starting') : C.ref ? 'Referenced' : 'Not referenced', C.mode === 'HOMING' ? COL.blue : C.ref ? COL.text : COL.warn);
+    pos.set(fint(M.pos));
+    sw.set(LIM.active ? 'Open' : 'Closed', LIM.active ? COL.warn : COL.text);
+    last.set(C.lastHome ? stamp(C.lastHome.t) : 'Not since power-on');
+    over.set(fint(LIM.over), LIM.over ? COL.fault : COL.text);
+    const mins = Math.ceil(1.1 * P.POSMAX / P.fhome / 60);
+    set(ext, C.mode === 'HOMING' ? 'The valve is closing to the limit switch. STOP cancels; the valve is then not referenced.'
+      : 'Closes the valve until the limit switch opens, backs off, approaches slowly, then sets 0 %. Up to ' + mins + ' min. The pressure will change. MANUAL only.');
+    tog(bh, 'dis', C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING');
+  };
+  screens.ref.foot = () => C.mode === 'AUTO' || C.mode === 'PAUSED' ? 'Switch to MANUAL on home before referencing.' : C.mode === 'HOMING' ? 'STOP to cancel.' : 'Position is counted in steps from the closed limit.';
+}
+
+/* ---- System information (operator, read only) ------------------------- */
+// v46 (UI/UX review item 4): the operator sees what is loaded without editing it.
+function buildInfo() {
+  const s = newScreen('info');
+  const sen = infoCard(s, 10, RY[0], 226, 'Sensor');
+  const rng = infoCard(s, 244, RY[0], 109, 'Range, mbar');
+  const cal = infoCard(s, 361, RY[0], 109, 'Cal factor');
+  const calD = infoCard(s, 10, RY[1], 226, 'Calibration');
+  const lim = infoCard(s, 244, RY[1], 226, 'Target limits, mbar');
+  const cfg = infoCard(s, 10, RY[2], 226, 'Configuration');
+  const lnk = infoCard(s, 244, RY[2], 109, 'Link');
+  const fw = infoCard(s, 361, RY[2], 109, 'Firmware');
+  screens.info.update = () => {
+    const q = SENS.prof[SENS.active];
+    sen.set('Druck ' + q.model.split(' ')[0] + ' ' + q.model.split(' ')[1] + ', s/n ' + q.serial);
+    rng.set('0 to ' + q.fs);
+    cal.set(q.atm.toFixed(4));
+    calD.set('Cert. zero ' + q.zero.toFixed(3) + ', span ' + q.span.toFixed(2) + ' mV');
+    lim.set(P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(0));
+    cfg.set(cfgLabel(), cfgDirty() ? COL.warn : COL.text);
+    lnk.set(BENCH.link === 'eth' ? 'Ethernet' : 'USB');
+    fw.set(FW);
+  };
+  screens.info.foot = () => 'Read only. Settings are changed in Commissioning.';
+}
+function cfgDirty() { return pJSON() !== savedJSON() || JSON.stringify(MOT) !== MOT_SAVED || JSON.stringify(SENS.prof) !== SENS.saved; }
+function cfgLabel() { return 'Bench CF-11' + (cfgDirty() ? ', changed, not saved' : ', saved'); }
+
+/* ---- Commissioning hub ------------------------------------------------- */
+function buildComm() {
+  const s = newScreen('comm');
+  const c2 = cols(2, 10, 470);
+  const tile = (x, y, w, label, go) => btn(s, x, y, w, RH, '<span style="font-size:16px">' + label + '</span>', () => show(go));
+  tile(c2[0][0], RY[0], c2[0][1], 'Sensor', 'sensor');
+  tile(c2[1][0], RY[0], c2[1][1], 'Valve setup', 'motor');
+  tile(c2[0][0], RY[1], c2[0][1], 'Control tuning', 'tune');
+  tile(c2[1][0], RY[1], c2[1][1], 'Homing settings', 'homing');
+  st(mk(s, 10, RY[2], 460, RH, 'card'), { display: 'flex', alignItems: 'center', paddingLeft: '12px', fontSize: '12px', whiteSpace: 'normal' }).textContent = 'Interim (update 1): pages keep their own locks. Update 2 replaces them with one commissioning session.';
+  screens.comm.foot = () => 'Setup pages. Not needed for normal operation.';
 }
 
 /* ---- Sensor (today's main screen, moved) ----------------------------- */
@@ -1464,7 +1548,7 @@ function buildMotor() {
     });
     return [e, r];
   });
-  const pos = rdCard(s, 361, RY[0], 109, 'Steps now');
+  const fo = editCard(s, 361, RY[0], 109, RH, '100 %, turns', fullOpenMenu);   // v46: moved here from the operator Valve page
   // v45 (Ryan: too many words in the middle box): short value cards. Row 2 the last move and its target;
   // row 3 distance, time and mean speed, which is what a speed change shows.
   const vLast = rdCard(s, 10, RY[1], 226, 'Last move'), vLastCap = vLast.parentNode.firstChild, vTgt = rdCard(s, 244, RY[1], 109, 'Target, steps');
@@ -1475,7 +1559,7 @@ function buildMotor() {
   screens.motor.foot = () => JSON.stringify(MOT) !== MOT_SAVED ? 'Changed, not saved.' : motUnlocked ? 'Unlocked: tap a speed to change it.' : 'Locked. Hold Unlock to change the speeds.';
   screens.motor.update = () => {
     spd.forEach(([e, r]) => { set(e.v, String(MOT[r[1]])); setc(e.v, motUnlocked ? COL.text : COL.muted); });
-    set(pos, fint(M.pos));
+    set(fo.v, (P.POSMAX / FLP.spt).toFixed(2)); tog(fo.c, 'dis', C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING');
     const has = M.t0 != null, dur = has ? (M.moving ? t : M.tEnd) - M.t0 : 0, dist = has ? Math.abs(M.pos - M.from) : 0;
     set(vLast, M.moving ? 'Moving' : STOP_WORDS[M.lastStop] || M.lastStop); setc(vLast, M.moving ? COL.blue : M.lastStop === 'LIMIT' ? COL.warn : COL.text);
     set(vTgt, has ? fint(M.target) : '--'); set(vDist, has ? fint(dist) : '--'); set(vTook, has ? dur.toFixed(1) : '--'); set(vMean, has && dur > 0 ? fint(dist / dur) : '--');
@@ -1761,7 +1845,7 @@ function command(line) {
   if (w[0] === 'CTRL' && w[1] === 'MAN') {
     if (C.mode === 'AUTO' || C.mode === 'PAUSED') { if (!toManual()) return okErr(false); }
     if (w.length > 2) return okErr(isNaN(num) ? false : (num >= 0 && num <= 100 ? setManSteps(num / 100 * P.POSMAX) : refuse('0 to 100 %')));
-    return okErr(C.mode === 'MANUAL' ? true : refuse('Not homed'));
+    return okErr(C.mode === 'MANUAL' ? true : refuse('Valve not referenced'));
   }
   if (w[0] === 'CTRL' && w[1] === 'STEPS') return okErr(isNaN(num) ? false : setManSteps(num));
   if (w[0] === 'CTRL' && w[1] === 'SP') return okErr(isNaN(num) ? false : setSP(num));
@@ -1970,7 +2054,7 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-buildGlobal(); buildCtrl(); buildValve(); buildMenu(); buildSensor(); buildMotor(); buildHoming(); buildTune(); buildFaults(); buildTrend();
+buildGlobal(); buildCtrl(); buildValve(); buildMenu(); buildRef(); buildInfo(); buildComm(); buildSensor(); buildMotor(); buildHoming(); buildTune(); buildFaults(); buildTrend();
 setSpeed(1); setWin(600); fit();
 flBuildParams(); flBuildRead(); setPlumb('line'); setLink('usb'); flCurveCalc(); flDraw();
 conLog('PMC ' + FW + ' simulated. Boots homed at 0 % in manual (simulator default; the firmware plan G3 boots not homed). Type HELP for commands.');
