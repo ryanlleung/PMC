@@ -12,3 +12,6 @@ InitialTesting/build-MM4/*
 
 # Python bytecode.
 __pycache__/
+
+# Simulator test screenshots.
+simulator/tests/shots/
