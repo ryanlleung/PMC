@@ -8,6 +8,7 @@
 #include "lvgl.h"  // lv_snprintf
 #include "clicks.h"
 #include "cal.h"
+#include "fixed.h"
 #include "i2c_sdk_test.h"
 #include "stepper3.h"
 #include "link.h"
@@ -147,10 +148,10 @@ static void boost10_poll(void)
                     (long)boost10_trip_mv, pg);
     else
     {
-        int32_t cv = (boost10_wiper_to_mv(boost10_wiper) + 5) / 10;  // 10 mV
+        char v[16];
+        fixed_fmt(v, sizeof v, fixed_round(boost10_wiper_to_mv(boost10_wiper), 1), 2);
         lv_snprintf(boost10_status, STATUS_LEN,
-                    "S3 Boost 10: wiper %u (%ld.%02ld V nom), %s", boost10_wiper,
-                    (long)(cv / 100), (long)(cv % 100), pg);
+                    "S3 Boost 10: wiper %u (%s V nom), %s", boost10_wiper, v, pg);
     }
 }
 
@@ -364,29 +365,23 @@ static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
     int64_t p = druck_pressure_mmbar(raw_shunt, raw_bus, &r_ppb);
     state.r_ppb = (int32_t)r_ppb;
     if (r_ppb < DRUCK_R_MIN_PPB || r_ppb > DRUCK_R_MAX_PPB) {
-        int64_t ra = r_ppb < 0 ? -r_ppb : r_ppb;
+        char r[16];
         state.druck_absent = true;
         lv_snprintf(druck_value, sizeof druck_value, "----");
         lv_snprintf(druck_status, STATUS_LEN,
-                    "Druck: signal %s%ld.%03ld mV/V, outside 0.05-11 mV/V (not connected?)",
-                    r_ppb < 0 ? "-" : "", (long)(ra / 1000000), (long)(ra % 1000000 / 1000));
+                    "Druck: signal %s mV/V, outside 0.05-11 mV/V (not connected?)",
+                    fixed_fmt(r, sizeof r, r_ppb / 1000, 3));
         return;
     }
     state.reading_ok = true;
     state.p_mmbar = (int32_t)p;
 
-    // Round to 0.01 mbar.
-    int64_t pc = (p >= 0 ? p + 5 : p - 5) / 10;
-    int64_t pa = pc < 0 ? -pc : pc;
-    // r in mV/V to 5 decimals (units of 10 ppb).
-    int64_t r10 = r_ppb / 10;
-    int64_t ra = r10 < 0 ? -r10 : r10;
-
-    lv_snprintf(druck_value, sizeof druck_value, "%s%ld.%02ld",
-                pc < 0 ? "-" : "", (long)(pa / 100), (long)(pa % 100));
+    // Pressure rounded to 0.01 mbar; r in mV/V cut to 5 decimals.
+    char r[16];
+    fixed_fmt(druck_value, sizeof druck_value, fixed_round(p, 1), 2);
     lv_snprintf(druck_status, STATUS_LEN,
-                "Druck: %s mbar abs  r %s%ld.%05ld mV/V  exc %ld mV  %s",
-                druck_value, r10 < 0 ? "-" : "", (long)(ra / 100000), (long)(ra % 100000),
+                "Druck: %s mbar abs  r %s mV/V  exc %ld mV  %s",
+                druck_value, fixed_fmt(r, sizeof r, r_ppb / 10, 5),
                 (long)bus_mv, cal_is_default() ? "nominal cal" : cal_id());
 }
 
@@ -472,13 +467,12 @@ static void powermonitor_poll(void)
     boost10_check(bus_mv);
     druck_update(raw_shunt, raw_bus, bus_mv);
 
+    char sh[16], tc[16];
     lv_snprintf(powermonitor_status, STATUS_LEN,
                 "S4 Power Monitor: INA228 found @0x%02X\n"
-                "   Vshunt %s%ld.%ld uV   Vbus %ld mV   die %s%ld.%ld C",
-                pm_addr,
-                shunt_0u1 < 0 ? "-" : "", (long)(LV_ABS(shunt_0u1) / 10), (long)(LV_ABS(shunt_0u1) % 10),
-                (long)bus_mv,
-                temp_d1 < 0 ? "-" : "", (long)(LV_ABS(temp_d1) / 10), (long)(LV_ABS(temp_d1) % 10));
+                "   Vshunt %s uV   Vbus %ld mV   die %s C",
+                pm_addr, fixed_fmt(sh, sizeof sh, shunt_0u1, 1), (long)bus_mv,
+                fixed_fmt(tc, sizeof tc, temp_d1, 1));
     return;
 
 lost:
@@ -592,25 +586,6 @@ static bool pm_triggered(uint16_t cfg, int32_t *shunt, int32_t *bus)
     return true;
 }
 
-static uint32_t isqrt64(uint64_t v)
-{
-    uint64_t r = 0, bit = 1ULL << 62;
-    while (bit > v) bit >>= 2;
-    while (bit) {
-        if (v >= r + bit) { v -= r + bit; r = (r >> 1) + bit; }
-        else r >>= 1;
-        bit >>= 2;
-    }
-    return (uint32_t)r;
-}
-
-// 0.1 uV units as "-12345.6".
-static const char *fmt_0u1(char *buf, size_t n, int32_t v)
-{
-    lv_snprintf(buf, n, "%s%ld.%ld", v < 0 ? "-" : "", (long)(LV_ABS(v) / 10), (long)(LV_ABS(v) % 10));
-    return buf;
-}
-
 static void pmdiag_registers(void)
 {
     uint16_t cfg = 0, adc = 0, cal = 0, tc = 0, dg = 0, id = 0;
@@ -669,17 +644,17 @@ static void pmdiag_measure(int k)
         int32_t bus_mv = (int32_t)(((int64_t)raw_bus * 1953125) / 10000000);
         int64_t r_ppb = raw_bus ? sum * 1600000 / ((int64_t)raw_bus * n) : 0;
         boost10_check(bus_mv);
-        link_printf("PMDIAG %d %s: signal %s uV  exc %ld mV  ratio %ld.%06ld mV/V\r\n",
-                    k, st->what, fmt_0u1(a, sizeof a, mean), (long)bus_mv,
-                    (long)(r_ppb / 1000000), (long)LV_ABS(r_ppb % 1000000));
+        link_printf("PMDIAG %d %s: signal %s uV  exc %ld mV  ratio %s mV/V\r\n",
+                    k, st->what, fixed_fmt(a, sizeof a, mean, 1), (long)bus_mv,
+                    fixed_fmt(b, sizeof b, r_ppb, 6));
     } else if (n < 4) {  // on-chip averaged: the mean is the result
-        link_printf("PMDIAG %d %s: signal %s uV (n=%d)\r\n", k, st->what, fmt_0u1(a, sizeof a, mean), n);
+        link_printf("PMDIAG %d %s: signal %s uV (n=%d)\r\n", k, st->what, fixed_fmt(a, sizeof a, mean, 1), n);
     } else {
         link_printf("PMDIAG %d %s: n=%d mean %s min %s max %s sd %s uV\r\n", k, st->what, n,
-                    fmt_0u1(a, sizeof a, mean),
-                    fmt_0u1(b, sizeof b, (int32_t)(mn * 3125 / 1000)),
-                    fmt_0u1(c, sizeof c, (int32_t)(mx * 3125 / 1000)),
-                    fmt_0u1(d, sizeof d, sd));
+                    fixed_fmt(a, sizeof a, mean, 1),
+                    fixed_fmt(b, sizeof b, (int32_t)(mn * 3125 / 1000), 1),
+                    fixed_fmt(c, sizeof c, (int32_t)(mx * 3125 / 1000), 1),
+                    fixed_fmt(d, sizeof d, sd, 1));
     }
 }
 

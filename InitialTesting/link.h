@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /**
  * @brief Text link to the PC: the USB COM port or Ethernet (TCP), chosen by
@@ -29,5 +30,21 @@ bool link_chip_ok(void);
 
 // One-line state for the status lines.
 const char *link_status(void);
+
+/*
+ * Line assembly, shared by the USB and Ethernet code. CR, LF or CRLF end a
+ * line (terminals differ) and empty lines are ignored. Characters past the
+ * buffer are dropped.
+ */
+typedef struct {
+    char text[96];
+    size_t len;
+    uint32_t last_ms;    // lv_tick_get() at the last character that was not CR/LF
+} link_line_t;
+
+// Adds one received character. True with the line (no CR/LF) in out when it ends one.
+bool link_line_feed(link_line_t *l, char c, char *out, size_t n);
+// Ends a pending line once nothing has arrived for idle_ms. True with the line in out.
+bool link_line_idle(link_line_t *l, uint32_t idle_ms, char *out, size_t n);
 
 #endif // _LINK_H_

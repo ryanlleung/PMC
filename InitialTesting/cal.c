@@ -5,6 +5,7 @@
 #include "link.h"
 #include "extflash.h"
 #include "cal.h"
+#include "fixed.h"
 #include "clicks.h"   // live ratio for CAL ATM
 
 /* --------------------------------------------------------------------------
@@ -227,19 +228,6 @@ static bool parse_fixed(const char **s, int dec, int64_t *out)
     return true;
 }
 
-static void print_fixed(char *buf, size_t n, int64_t v, int dec)
-{
-    int64_t scale = 1;
-    for (int k = 0; k < dec; k++) scale *= 10;
-    int64_t a = v < 0 ? -v : v;
-    char frac[12];
-    int64_t f = a % scale;
-    // Zero-padded fraction without relying on "%0*ld" support in lv_snprintf.
-    for (int k = dec - 1; k >= 0; k--) { frac[k] = (char)('0' + f % 10); f /= 10; }
-    frac[dec] = '\0';
-    lv_snprintf(buf, n, "%s%ld.%s", v < 0 ? "-" : "", (long)(a / scale), frac);
-}
-
 static void show(void)
 {
     char r[20], p[20];
@@ -247,20 +235,20 @@ static void show(void)
                       active_is_default ? "default" : active_saved ? "flash" : "ram", active.id,
                       (unsigned long)active.npts, flash_ok ? "ok" : "missing");
     if (active.atm_ppm > 0) {
-        print_fixed(r, sizeof r, active.atm_ppm, 6);
+        fixed_fmt(r, sizeof r, active.atm_ppm, 6);
         link_printf("CAL ATM factor %s\r\n", r);
     } else {
         link_printf("CAL ATM factor unknown (saved by older firmware)\r\n");
     }
     if (active.atm_ref_mmbar > 0) {
         char u[20];
-        print_fixed(p, sizeof p, active.atm_ref_mmbar, 3);
-        print_fixed(u, sizeof u, active.atm_unc_mmbar, 3);
+        fixed_fmt(p, sizeof p, active.atm_ref_mmbar, 3);
+        fixed_fmt(u, sizeof u, active.atm_unc_mmbar, 3);
         link_printf("CAL ATM reference %s +/- %s mbar\r\n", p, u);
     }
     for (uint32_t i = 0; i < active.npts; i++) {
-        print_fixed(r, sizeof r, active.r_ppb[i], 6);
-        print_fixed(p, sizeof p, active.p_mmbar[i], 3);
+        fixed_fmt(r, sizeof r, active.r_ppb[i], 6);
+        fixed_fmt(p, sizeof p, active.p_mmbar[i], 3);
         link_printf("CAL PT %s %s\r\n", r, p);
     }
     link_printf("OK\r\n");
@@ -323,7 +311,7 @@ static void atm(const char *s)
     }
     int64_t k_ppm = r_now * 1000000 / r_exp;
     if (k_ppm < 850000 || k_ppm > 1150000) {
-        print_fixed(a, sizeof a, k_ppm, 6);
+        fixed_fmt(a, sizeof a, k_ppm, 6);
         link_printf("ERR factor %s is more than 15%% from 1, check CAL? and the pressure\r\n", a);
         return;
     }
@@ -341,13 +329,13 @@ static void atm(const char *s)
     if (n + 4 < CAL_ID_LEN && (n < 4 || strcmp(r.id + n - 4, "+atm") != 0))
         memcpy(r.id + n, "+atm", 5);
 
-    print_fixed(a, sizeof a, k_ppm, 6);
-    print_fixed(b, sizeof b, st->p_mmbar, 3);
+    fixed_fmt(a, sizeof a, k_ppm, 6);
+    fixed_fmt(b, sizeof b, st->p_mmbar, 3);
     active = r;
     active_is_default = false;
     active_saved = false;
     char u[20];
-    print_fixed(u, sizeof u, unc, 3);
+    fixed_fmt(u, sizeof u, unc, 3);
     link_printf("OK ratios x %s (was reading %s mbar), reference +/-%s mbar, not saved: CAL SAVE to keep\r\n", a, b, u);
 }
 

@@ -11,6 +11,7 @@
 #include "i2c_sdk_test.h"
 #include "pmc_config.h"
 #include "motor_screen.h"
+#include "fixed.h"
 
 lvgl_main_screen_ui_t lvgl_main_screen_ui;
 
@@ -190,15 +191,11 @@ static void set_hidden(lv_obj_t *o, bool hidden)
     }
 }
 
-// Fixed point with 2 decimals, rounded: v in units of 10^-dec.
+// Fixed point with 2 decimals, rounded, and the unit: v in units of 10^-dec.
 static void fmt_fixed2(char *buf, size_t n, int64_t v, int dec, const char *unit)
 {
-    int64_t scale = 1;
-    for (int k = 2; k < dec; k++) scale *= 10;
-    int64_t a = v < 0 ? -v : v;
-    a = (a + scale / 2) / scale;                   // now hundredths
-    lv_snprintf(buf, n, "%s%ld.%02ld %s", (v < 0 && a) ? "-" : "",
-                (long)(a / 100), (long)(a % 100), unit);
+    char t[24];
+    lv_snprintf(buf, n, "%s %s", fixed_fmt(t, sizeof t, fixed_round(v, dec - 2), 2), unit);
 }
 
 static void set_fixed2(lv_obj_t *l, int64_t v, int dec, const char *unit)
@@ -237,23 +234,16 @@ bool main_screen_data_command(const char *line)
 
 static void print_data_line(const clicks_state_t *s)
 {
-    char p[16] = "", r[16] = "";
-    int32_t sig = s->shunt_nv / 100;                 // 0.1 uV
+    char p[16] = "", r[16] = "", sig[16], die[16];
 
     if (s->reading_ok) {
-        int32_t pa = LV_ABS(s->p_mmbar);
-        lv_snprintf(p, sizeof p, "%s%ld.%03ld", s->p_mmbar < 0 ? "-" : "",
-                    (long)(pa / 1000), (long)(pa % 1000));
-        int32_t ra = LV_ABS(s->r_ppb);
-        lv_snprintf(r, sizeof r, "%s%ld.%06ld", s->r_ppb < 0 ? "-" : "",
-                    (long)(ra / 1000000), (long)(ra % 1000000));
+        fixed_fmt(p, sizeof p, s->p_mmbar, 3);
+        fixed_fmt(r, sizeof r, s->r_ppb, 6);
     }
-    int32_t da = LV_ABS(s->die_mc);
-    link_printf("DATA,%lu,%s,%s%ld.%ld,%ld,%s,%s%ld.%03ld,%ld,%d\r\n",
+    link_printf("DATA,%lu,%s,%s,%ld,%s,%s,%ld,%d\r\n",
                       (unsigned long)lv_tick_get(), p,
-                      sig < 0 ? "-" : "", (long)(LV_ABS(sig) / 10), (long)(LV_ABS(sig) % 10),
-                      (long)s->bus_mv, r,
-                      s->die_mc < 0 ? "-" : "", (long)(da / 1000), (long)(da % 1000),
+                      fixed_fmt(sig, sizeof sig, s->shunt_nv / 100, 1),   // 0.1 uV
+                      (long)s->bus_mv, r, fixed_fmt(die, sizeof die, s->die_mc, 3),
                       (long)s->boost_set_mv, s->reading_ok ? 1 : 0);
 }
 
@@ -385,11 +375,10 @@ static void status_timer_cb(lv_timer_t *t)
         set_color(cal_atm, COL_WARN);
     } else {
         // Gain as a factor and a percentage: 0.957300 shows x0.9573 (-4.27 %).
-        int32_t c = (LV_ABS(k - 1000000) + 50) / 100;   // 0.01 %
-        int32_t f = (k + 50) / 100;                     // 0.0001
-        set_text_fmt(cal_atm, "x%ld.%04ld (%s%ld.%02ld %%)",
-                              (long)(f / 10000), (long)(f % 10000),
-                              k < 1000000 ? "-" : "+", (long)(c / 100), (long)(c % 100));
+        char f[16], c[16];
+        fixed_fmt(f, sizeof f, fixed_round(k, 2), 4);
+        fixed_fmt(c, sizeof c, fixed_round(LV_ABS(k - 1000000), 2), 2);   // %
+        set_text_fmt(cal_atm, "x%s (%s%s %%)", f, k < 1000000 ? "-" : "+", c);
         set_color(cal_atm, COL_TEXT);
     }
 

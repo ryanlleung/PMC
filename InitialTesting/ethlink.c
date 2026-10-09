@@ -14,6 +14,7 @@
 #include "lvgl.h"   // lv_vsnprintf, lv_strlcpy
 #include "eth_hw.h"
 #include "ethlink.h"
+#include "link.h"
 
 /* --------------------------------------------------------------------------
  * One TCP server on PMC_TCP_PORT, one client at a time (a new connection
@@ -37,8 +38,7 @@ static bool was_linked;
 static bool new_client;
 
 // Line assembly for client input; reset when a new client connects.
-static char line[96];
-static size_t line_len;
+static link_line_t line;
 static char rx[64];
 static size_t rx_len, rx_pos;
 
@@ -169,7 +169,7 @@ void ethlink_task(void)
         drop_client();
         client = s;
         socketSetTimeout(client, 0);
-        line_len = rx_len = rx_pos = 0;
+        line.len = rx_len = rx_pos = 0;
         new_client = true;
     }
     if (client) {
@@ -219,19 +219,9 @@ bool ethlink_getline(char *buf, size_t n)
             rx_len = got;
         }
         // Bytes after a newline stay in rx for the next call.
-        while (rx_pos < rx_len) {
-            char c = rx[rx_pos++];
-            if (c == '\r' || c == '\n') {
-                if (line_len == 0)
-                    continue;
-                line[line_len] = '\0';
-                lv_strlcpy(buf, line, n);
-                line_len = 0;
+        while (rx_pos < rx_len)
+            if (link_line_feed(&line, rx[rx_pos++], buf, n))
                 return true;
-            }
-            if (line_len < sizeof line - 1)
-                line[line_len++] = c;
-        }
     }
 }
 

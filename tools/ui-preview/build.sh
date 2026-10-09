@@ -21,7 +21,7 @@ fi
 
 gcc $CFLAGS -o "$OUT/ui_preview" \
   "$HERE/sim_main.c" "$HERE/fake_hw.c" \
-  "$PROJ/main_screen.c" "$PROJ/motor_screen.c" \
+  "$PROJ/main_screen.c" "$PROJ/motor_screen.c" "$PROJ/fixed.c" \
   "$PROJ/build-MM4/generated/scr_main_screen.c" \
   "$PROJ/build-MM4/generated/screens.c" \
   "$OUT/liblvgl.a" -lm
