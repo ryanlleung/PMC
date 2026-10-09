@@ -1,0 +1,1983 @@
+<!doctype html><html><head><meta charset="utf8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>PMC Screen Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;family=Montserrat:wght@400;500;600&amp;display=swap">
+<style>
+/* Layout: device screen at the top; trend and serial console side by side under it; then the flow line, bench controls, guide, findings and change notes. */
+:root{
+  --bg:#EEF2F5; --paper:#FFFFFF; --ink:#1B2329; --muted:#56626D; --rule:#D2D9DF; --rule-strong:#A9B4BE;
+  --soft:#EEF2F5; --accent:#2D5877; --ok:#2C6A45; --warn:#8A5A0E; --bad:#9B3A30;
+  --c-pv:#2D5877; --c-sp:#B4561E; --c-pos:#2C8A55; --c-mech:#7A8793;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#12171B; --paper:#1A2026; --ink:#E1E6EA; --muted:#9AA6B1; --rule:#2F3841; --rule-strong:#4A5661;
+    --soft:#212931; --accent:#8DB8DA; --ok:#7FC59B; --warn:#E2B566; --bad:#EB8D82;
+    --c-pv:#8DB8DA; --c-sp:#E8A070; --c-pos:#7FC59B; --c-mech:#8E9AA6;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#12171B; --paper:#1A2026; --ink:#E1E6EA; --muted:#9AA6B1; --rule:#2F3841; --rule-strong:#4A5661;
+  --soft:#212931; --accent:#8DB8DA; --ok:#7FC59B; --warn:#E2B566; --bad:#EB8D82;
+  --c-pv:#8DB8DA; --c-sp:#E8A070; --c-pos:#7FC59B; --c-mech:#8E9AA6;
+}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.5;padding-inline:16px;padding-block:20px 56px}
+.wrap{max-width:1000px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1{font-size:1.5rem;font-weight:600;margin:0;text-wrap:balance}
+.sub{color:var(--muted);margin:2px 0 0;max-width:80ch}
+h2{font-size:1rem;font-weight:600;margin:0 0 8px}
+a{color:var(--accent)}
+.panel{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px 16px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,290px),1fr));gap:16px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.pbtn{font:inherit;font-size:13.5px;padding:5px 12px;border:1px solid var(--rule-strong);background:var(--soft);color:var(--ink);border-radius:4px;cursor:pointer}
+.pbtn:hover{border-color:var(--accent)}
+.pbtn.on{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+.pbtn:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+label.ck{display:flex;gap:8px;align-items:center;margin:4px 0;cursor:pointer}
+.kv{display:grid;grid-template-columns:auto 96px;gap:6px 10px;align-items:center;font-size:13.5px}
+.kv input{font:inherit;font-family:var(--mono);font-size:13px;width:96px;padding:3px 6px;border:1px solid var(--rule-strong);border-radius:4px;background:var(--paper);color:var(--ink)}
+.muted{color:var(--muted);font-size:13px}
+.devwrap{width:100%;display:flex;justify-content:center}
+.devbox{position:relative;border-radius:10px;background:#0E1216;padding:12px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.devclip{position:relative;overflow:hidden}
+canvas.chart{width:100%;height:260px;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--muted);margin-top:6px}
+.sw{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+.con{font-family:var(--mono);font-size:12.5px;background:var(--soft);border:1px solid var(--rule);border-radius:4px;height:254px;overflow-y:auto;padding:8px;white-space:pre-wrap;word-break:break-word}
+.con .in{color:var(--accent)} .con .err{color:var(--bad)} .con .evt{color:var(--warn)}
+.cin{display:flex;gap:8px;margin-top:8px}
+.cin input{flex:1;min-width:0;font-family:var(--mono);font-size:13px;padding:6px 8px;border:1px solid var(--rule-strong);border-radius:4px;background:var(--paper);color:var(--ink)}
+ol.try{margin:0;padding-left:1.3em;max-width:80ch} ol.try li{margin:3px 0}
+.note{border-left:3px solid var(--warn);padding:4px 12px;background:var(--soft);max-width:84ch;margin:8px 0 0}
+code{font-family:var(--mono);font-size:.9em}
+
+/* ---- device screen (fixed device colours, as on the SSD1963 panel) ---- */
+.dev{position:absolute;left:0;top:0;width:480px;height:272px;transform-origin:0 0;background:#DCE3EA;color:#1F2933;font-family:Montserrat,"Segoe UI",sans-serif;font-size:12px;font-weight:500;overflow:hidden;user-select:none;-webkit-user-select:none;font-variant-numeric:tabular-nums}
+.dev div{position:absolute;box-sizing:border-box;white-space:nowrap}
+.dev b,.dev strong,.dev small{font-weight:inherit}
+.dev .foot{display:flex;align-items:center}
+.dev .scr{left:0;top:0;width:480px;height:272px}
+.dev .hdr{background:#1F2933;color:#fff}
+.dev .card{background:#fff;border-radius:6px}
+.dev .cap{font-size:12px;color:#546374}
+.dev .b{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#FFFFFF;border:0;box-shadow:inset 0 -2px 0 #AEB9C4;border-radius:6px;cursor:pointer;color:#1F2933;text-align:center;line-height:1.15;font-size:16px}
+.dev .b.on{background:#3E4C59;color:#FFFFFF;box-shadow:none}
+.dev .b.on small{color:#D5DDE5}
+.dev .b.down{background:#E3E9EF;box-shadow:none}
+.dev .b.dis{color:#9AA4AE;background:#E9EEF2;box-shadow:none;cursor:default}
+.dev .b.red{background:#D63031;border-color:#D63031;color:#fff}
+.dev .b.red.down{background:#AA1E1E}
+.dev .b.act{background:#2D5877;color:#fff}
+.dev .b.act.down{background:#24475F}
+.dev .b.act small{color:#D5E2EC}
+.dev .b.act.dis,.dev .b.red.dis,.dev .b.grn.dis,.dev .b.amb.dis{background:#E9EEF2;box-shadow:none;color:#9AA4AE}
+.dev .b.act.dis small{color:#9AA4AE}
+.dev .b.grn{background:#2EA043;border-color:#2EA043;color:#fff}
+.dev .b.amb{background:#D68200;border-color:#D68200;color:#fff}
+.dev .b.dark{background:#1F2933;border-color:#1F2933;color:#fff;border-radius:0;box-shadow:none}
+.dev .hdr .b.red{border-radius:0}
+.dev .b.dark.down{background:#3C4856}
+.dev .b small{font-size:12px;color:#546374}
+.dev .b.dis small{color:#9AA4AE}
+.dev .flexrow{display:flex;gap:6px;align-items:center}
+.dev .flexrow span{padding:2px 7px;border-radius:3px;font-size:12px;line-height:14px}
+.dev .ov{left:0;top:0;width:480px;height:272px;background:rgba(40,50,60,.55)}
+.dev .modal{background:#fff;border-radius:8px}
+.dev .list{overflow-y:auto;white-space:normal;font-size:12px;line-height:16px}
+.dev .list p{margin:0 0 2px}
+.fl-big{font-weight:600;min-width:150px}
+.fl-big[aria-pressed="true"]{background:var(--accent);color:var(--paper);border-color:var(--accent)}
+.flsvgwrap{overflow-x:auto;margin:10px 0 4px}
+.flsvg{width:100%;min-width:620px;height:auto;display:block}
+.flsvg text{font-family:var(--sans);font-size:13px;fill:var(--ink);text-anchor:middle}
+.flsvg .fl-h{font-weight:600}
+.flsvg .fl-s{font-size:11px;fill:var(--muted)}
+.fl-vessel{fill:var(--soft);stroke:var(--rule-strong);stroke-width:2}
+.fl-liq{fill:var(--c-pv);opacity:.28}
+.fl-pipe{fill:none;stroke:var(--rule-strong);stroke-width:4;stroke-linejoin:round}
+.fl-pipe.live{stroke:var(--c-pv);stroke-dasharray:10 6;animation:fldash 1s linear infinite}
+.fl-pipe.gas.live{stroke:var(--c-sp)}
+.fl-valve{fill:var(--paper);stroke:var(--ink);stroke-width:2}
+.fl-valve.open{fill:var(--c-pv)}
+.fl-stem{fill:none;stroke:var(--ink);stroke-width:2}
+.fl-gauge{fill:var(--paper);stroke:var(--ink);stroke-width:2}
+.fl-gauge.on{stroke:var(--ok);stroke-width:3}
+@keyframes fldash{to{stroke-dashoffset:-16}}
+@media (prefers-reduced-motion: reduce){.fl-pipe.live{animation:none}}
+.flgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:16px;align-items:start}
+@media (max-width:760px){.flgrid{grid-template-columns:minmax(0,1fr)}}
+.fl-read{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0;font-size:13.5px}
+.fl-read dt{color:var(--muted)} .fl-read dd{margin:0;font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums}
+.fl-det{margin-top:10px} .fl-det summary{cursor:pointer;font-weight:600;font-size:14px}
+.kv2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:6px 28px;margin-top:8px}
+.kv2 label{display:grid;grid-template-columns:1fr 96px;gap:8px;align-items:center;font-size:13.5px}
+.kv2 input{font:inherit;font-family:var(--mono);font-size:13px;width:96px;padding:3px 6px;border:1px solid var(--rule-strong);border-radius:4px;background:var(--paper);color:var(--ink)}
+.fl-eq{max-width:92ch;font-size:14px} .fl-eq p{margin:8px 0}
+</style>
+
+<div class="wrap">
+<header>
+<h1>PMC screen simulator</h1>
+<p class="sub">Browser model of the controller screens in the <a href="https://claude.ai/artifact/9kyNykWgnvQuArgn74a5jd">PMC controller screen plan</a> (Rev C). The motor, pretend limit switch, PID and a physics model of the cryostat flow line are simulated in this page; nothing here talks to the board. Click the screen as you would touch it. Buttons act on press, as the firmware does.</p>
+</header>
+
+<div class="panel">
+<div class="devwrap"><div class="devbox"><div class="devclip" id="devclip"><div class="dev" id="dev"></div></div></div></div>
+<div class="row" style="margin-top:12px;justify-content:center">
+<span class="muted">Speed</span>
+<button class="pbtn" data-speed="1">1&times;</button><button class="pbtn" data-speed="5">5&times;</button><button class="pbtn" data-speed="20">20&times;</button><button class="pbtn" data-speed="50">50&times;</button>
+<button class="pbtn" id="pause">Pause</button>
+<button class="pbtn" id="reboot">Reboot board</button>
+<button class="pbtn" id="quick">Quick setup</button>
+<span class="muted" id="simclock"></span>
+</div>
+</div>
+
+<div class="grid2">
+<div class="panel">
+<div class="row" style="justify-content:space-between"><h2 style="margin:0">Trend</h2>
+<div class="row"><span class="muted">Window</span><button class="pbtn" data-win="120">2 min</button><button class="pbtn" data-win="600">10 min</button><button class="pbtn" data-win="1800">30 min</button></div></div>
+<canvas class="chart" id="chart"></canvas>
+<div class="legend"><span><span class="sw" style="color:var(--c-pv)"></span>PV, mbar (left)</span><span><span class="sw" style="color:var(--c-sp);border-top-style:dashed"></span>Setpoint, mbar (left)</span><span><span class="sw" style="color:var(--c-pos)"></span>Valve % from step count (right)</span><span><span class="sw" style="color:var(--c-mech);border-top-style:dotted"></span>Mechanism % (right)</span></div>
+</div>
+<div class="panel">
+<div class="row" style="justify-content:space-between;align-items:baseline"><h2 style="margin:0 0 8px">Serial console</h2><span class="muted">Board output, USB or TCP 5000</span></div>
+<div class="con" id="con"></div>
+<div class="cin"><input id="cin" placeholder="Planned commands, e.g. CTRL? or PID KP 4 or LIM SIM LOSE 300; HELP lists them" autocomplete="off" spellcheck="false"><button class="pbtn" id="csend">Send</button></div>
+</div>
+</div>
+
+<div class="panel" id="flpanel">
+<div class="row" style="justify-content:space-between;align-items:baseline"><h2 style="margin:0">Cryostat flow line</h2><span class="muted">Physics model on the bench side; the board only sees the Druck</span></div>
+<p class="muted" style="margin:4px 0 10px;max-width:92ch">Liquid helium from the main bath passes the needle valve and capillary into the pot (VTI or lambda fridge loop). It boils there, and a rotary pump draws the gas off through the pumping line. The Druck sits on that line outside the cryostat. The layout follows MercuryiTC manual UMC0071 &sect;6.1 and &sect;15.3 and auto needle valve handbook UMC0005. The needle follows the pretend mechanism, so lost steps and a slipping drive change the flow.</p>
+<div class="row">
+<button class="pbtn fl-big" id="fl-he" aria-pressed="false">Helium flow: off</button>
+<button class="pbtn fl-big" id="fl-pump" aria-pressed="true">Pump: on</button>
+<button class="pbtn" id="fl-empty">Empty pot</button>
+<span class="muted" id="fl-port"></span>
+</div>
+<div class="flsvgwrap"><svg id="fl-svg" class="flsvg" viewbox="0 0 960 250" role="img" aria-label="Flow line schematic: bath, helium supply, needle valve, capillary, pot, pumping line with Druck, rotary pump">
+<g class="fl-lbl">
+<rect x="20" y="28" width="170" height="194" rx="10" class="fl-vessel"/>
+<rect id="fl-bathliq" x="22" y="104" width="166" height="116" rx="8" class="fl-liq"/>
+<text x="105" y="50" class="fl-h">Main bath</text>
+<text x="105" y="68" id="fl-tb">LHe 4.24 K</text>
+<text x="105" y="86" id="fl-pb">1030 mbar</text>
+<path d="M 160 204 H 236" class="fl-pipe" id="fl-p1"/>
+<path d="M 236 192 L 236 216 L 262 192 L 262 216 Z" class="fl-valve" id="fl-hev"/>
+<text x="249" y="176" class="fl-h">Helium</text>
+<text x="249" y="240" id="fl-hes">off</text>
+<path d="M 262 204 H 326" class="fl-pipe" id="fl-p2"/>
+<path d="M 326 190 L 326 218 L 374 190 L 374 218 Z" class="fl-valve" id="fl-nv"/>
+<path d="M 350 204 V 150 M 336 150 H 364" class="fl-stem"/>
+<text x="350" y="120" class="fl-h">Needle valve</text>
+<text x="350" y="138" id="fl-nvp">0.0 %</text>
+<text x="350" y="240" id="fl-nvg">seated</text>
+<path d="M 374 204 H 404 l 6 -10 l 12 20 l 12 -20 l 12 20 l 12 -20 l 12 20 l 12 -20 l 12 20 l 6 -10 H 560" class="fl-pipe" id="fl-p3"/>
+<text x="470" y="176" id="fl-flow">no flow</text>
+<text x="470" y="240" id="fl-cap">capillary, 3 s</text>
+<rect x="560" y="108" width="124" height="114" rx="6" class="fl-vessel"/>
+<rect id="fl-potliq" x="562" y="220" width="120" height="0" rx="4" class="fl-liq"/>
+<text x="622" y="128" class="fl-h">Pot</text>
+<text x="622" y="146" id="fl-tp">4.20 K</text>
+<text x="622" y="164" id="fl-ml">dry</text>
+<text x="622" y="240" id="fl-reg"></text>
+<path d="M 622 108 V 54 H 734" class="fl-pipe gas" id="fl-p4"/>
+<circle cx="760" cy="54" r="26" class="fl-gauge" id="fl-dr"/>
+<text x="760" y="50" class="fl-h" id="fl-drp">0.02</text>
+<text x="760" y="66" class="fl-s">mbar</text>
+<text x="760" y="18" class="fl-h">Druck</text>
+<path d="M 786 54 H 890 V 82" class="fl-pipe gas" id="fl-p5"/>
+<circle cx="890" cy="112" r="30" class="fl-gauge" id="fl-pmp"/>
+<path d="M 872 112 A 18 18 0 1 1 890 130" class="fl-stem"/>
+<text x="890" y="164" class="fl-h">Rotary pump</text>
+<text x="890" y="182" id="fl-pms">on, 5 L/s</text>
+<text x="890" y="200" id="fl-thr"></text>
+<path d="M 890 142 V 150" class="fl-stem"/>
+</g>
+</svg></div>
+<div class="flgrid">
+<dl class="fl-read" id="fl-read"></dl>
+<div>
+<canvas class="chart" id="fl-chart" style="height:230px"></canvas>
+<div class="legend"><span><span class="sw" style="color:var(--c-pv)"></span>Steady pressure, liquid collecting in pot</span><span><span class="sw" style="color:var(--c-sp);border-top-style:dashed"></span>All inflow boiling off (pot dry, or full)</span><span><span class="sw" style="color:var(--ink);border-top-width:0"></span>&#9679; now</span></div>
+</div>
+</div>
+<details class="fl-det"><summary>Model parameters</summary>
+<div class="kv2" id="fl-params"></div>
+<div class="row" style="margin-top:8px"><button class="pbtn" id="fl-reset">Reset to defaults</button><span class="muted">Defaults are fitted so 34 % open gives about 5 mbar at 1.5 K (the CF-11 baseline) and the valve shut gives about 0.3 mbar, so 0.5 mbar (Ryan's lowest in normal running) is reachable just above the seat. Needle bore, taper, capillary, heat load and pump speed are not measured.</span></div>
+</details>
+<details class="fl-det"><summary>Equations, sources and what is left out</summary>
+<div class="fl-eq">
+<p><b>Needle.</b> Stem lift h = steps &divide; 16,512 &times; 0.5 mm, so 6 turns is 3.0 mm. The needle leaves the seat at h<sub>0</sub>; UMC0005 &sect;1.3 says flow can stop with the valve reading as high as 20 %. Annular gap &delta; = k<sub>gap</sub>(h &minus; h<sub>0</sub>), flow area A<sub>n</sub> = C<sub>d</sub>&middot;&pi;&middot;d<sub>seat</sub>&middot;&delta;. The capillary acts as a fixed orifice A<sub>c</sub> in series: 1/A&sup2; = 1/A<sub>n</sub>&sup2; + 1/A<sub>c</sub>&sup2;.</p>
+<p><b>Liquid flow.</b> &#7745;<sub>in</sub> = A&middot;&radic;(2&rho;<sub>L</sub>(P<sub>bath</sub> &minus; P<sub>pot</sub>)), &rho;<sub>L</sub> = 125 kg/m&sup3;. A pot at a few mbar against a 1 bar bath barely changes the flow, so the flow is set by the valve. It arrives after the capillary transport delay.</p>
+<p><b>Flash.</b> Liquid at the bath temperature (from P<sub>bath</sub> on ITS-90) brings &Delta;h = h<sub>L</sub>(T<sub>bath</sub>) &minus; h<sub>L</sub>(T) into the pot. At 1.5 K about 37 % of it flashes to gas, as UMC0071 &sect;6.1 describes at the needle.</p>
+<p><b>Pot with liquid.</b> The gas sits on the He-4 saturated vapour pressure curve, ITS-90 (1.25 to 5 K):<br>
+C&middot;dT/dt = Q + G<sub>b</sub>(T<sub>bath</sub> &minus; T) + &#7745;<sub>in</sub>&Delta;h &minus; L&middot;&#7745;<sub>evap</sub>, &nbsp; C = m<sub>L</sub>c<sub>L</sub> + C<sub>metal</sub><br>
+dm<sub>L</sub>/dt = &#7745;<sub>in</sub> &minus; &#7745;<sub>evap</sub><br>
+(V&middot;M/RT<sub>room</sub>)&middot;dP/dt = &#7745;<sub>evap</sub> &minus; S(P)&middot;P&middot;M/RT<sub>room</sub>, &nbsp; S(P) = S(1 &minus; P<sub>ult</sub>/P)</p>
+<p><b>Steady state.</b> With liquid in the pot, L&middot;&#7745;<sub>pumped</sub> = Q + &#7745;<sub>in</sub>&Delta;h. Only the flashed part and the heat load set the pressure, and the rest of the inflow collects as liquid. Below &#7745;* = Q/(L &minus; &Delta;h) the pot boils dry and P = &#7745;<sub>in</sub>RT<sub>room</sub>/(M&middot;S). A full pot overflows and the overflow boils in the pumping line, so the pressure goes back to the dry curve. Pressure control therefore holds the pressure but not the liquid level.</p>
+<p><b>Dry pot.</b> Everything that arrives boils at once. Spare heat warms the pot, and the outgoing gas carries c<sub>p</sub>(T &minus; T<sub>sat</sub>) away. With no flow the pot warms toward T<sub>bath</sub> + Q/G<sub>b</sub>.</p>
+<p><b>Pump off.</b> The gas builds up, and the pot warms along the vapour pressure curve until the relief valve lifts.</p>
+<p><b>Left out:</b> detail of two-phase choking in the gap; pressure drop in the pumping line between the pot and the Druck; the heat exchanger; superfluid film creep; bath level; stepper torque. ITS-90 vapour pressure is the exact equation. Liquid enthalpy, latent heat and density are rounded tables, good to about 10 %.</p>
+<p><b>Sources:</b> MercuryiTC Operator's Manual UMC0071 Issue 15. &sect;6.1 gives the flow line: bath, needle valve, loop, pumping line and rotary pump, with the pressure sensor on the pumping line outside the cryostat and liquid flash evaporating at the needle valve. &sect;6.2 gives the lambda fridge bands (35, 20 and 10 mbar), and &sect;15.3 gives VTI against siphon flow. Auto Needle Valve handbook UMC0005 Issue 3, &sect;1.3 and &sect;3.2.</p>
+</div>
+</details>
+</div>
+
+<div class="grid">
+<div class="panel">
+<h2>Bench conditions</h2>
+<label class="ck"><input type="checkbox" id="b-druck" checked=""> Druck connected</label>
+<label class="ck"><input type="checkbox" id="b-exc" checked=""> Excitation in window (10 V)</label>
+<label class="ck"><input type="checkbox" id="b-coupled" checked=""> Motor turning the mechanism (untick for a slipping or disconnected drive)</label>
+<div class="row" style="margin-top:8px"><span class="muted">Host link</span><button class="pbtn" data-link="usb">USB</button><button class="pbtn" data-link="eth">Ethernet 192.168.1.50</button></div>
+<div class="row" style="margin-top:8px"><span class="muted">Druck port</span><button class="pbtn" data-plumb="line">Cryostat line</button><button class="pbtn" data-plumb="air">Room air</button></div>
+<div class="kv" style="margin-top:8px"><span>Room air, mbar</span><input id="b-air" type="number" step="0.1" value="1013.4"></div>
+<div class="row" style="margin-top:8px"><span class="muted">Limit switch test</span><button class="pbtn" data-lim="NORMAL">Normal</button><button class="pbtn" data-lim="OPEN">Force open</button><button class="pbtn" data-lim="CLOSED">Force closed</button><button class="pbtn" id="b-lose">Lose 300 steps</button></div>
+<p class="muted" style="margin:10px 0 0">The board treats the limit switch as real. In the simulator it trips at a pretend seat 3000 steps below the start; the test buttons here stand in for a wiring fault or lost steps. Unticking the drive makes the step count move while the pretend seat and the process do not: lost steps, as a slipping gearbox would give.</p>
+</div>
+</div>
+
+<div class="panel">
+<h2>Try this</h2>
+<ol class="try">
+<li>The board starts homed at 0 % in manual. Quick setup turns the helium flow and pump on, homes if needed, sets SP 5 and manual 34 %. K_DIR +1, Kp 4 %/mbar, Ti 0.25 min and T_check 30 s are now the defaults.</li>
+<li>Move valve: enter a % open, use the presets, hold to jog, and change the fully open setting (turns, steps, or the present position).</li>
+<li>Go to AUTO. Change the setpoint to 6, then 20 (asks first, out of reach), then 5.</li>
+<li>STOP during a move, then ACK. STOP is in the same place on every screen and works over the keypad.</li>
+<li>Go to Trend in auto, then press STOP: the red bar at the bottom names the fault; tap it for Faults.</li>
+<li>Latch two faults (bench panel: Force open, then Home, then STOP): the home status line shows the higher priority one and a count.</li>
+<li>Tuning: tap a row (refused), hold Unlock for 1 s, then change K_DIR (asks first).</li>
+<li>Untick the drive in auto, then change the setpoint: F-10. Tick it again, ACK, go to manual 0 %: W-01 shows the steps that were lost.</li>
+<li>Bench panel: Lose 300 steps, then manual 0 %: W-01.</li>
+<li>Bench panel Force open, then Home: F-09. Force closed: F-07.</li>
+<li>In auto, turn the helium flow off. The pot boils dry and the valve winds open with nothing to show for it: F-16 after about 60 s. Turn the pump off instead: F-17.</li>
+<li>Stop the pump: the pressure climbs along the vapour pressure curve whatever the valve does.</li>
+</ol>
+</div>
+
+<div class="panel">
+<h2>What the simulation shows about the plan</h2>
+<p class="note"><b>F-10 at equilibrium.</b> As written in Control Logic &sect;3.6, any commanded move of at least DB in a T_check window must produce dP_min. Near the setpoint, noise alone moves pos_cmd by more than DB, the pressure barely changes, and F-10 trips while the loop is working. The simulator adds <b>F-10 min move</b> (default 1000 steps, about 1 %): windows with less net movement are not checked. Set it to 0 on the Tuning screen to see the false trip. This is a proposed change to &sect;3.6.</p>
+<p class="note"><b>F-10 must use the counted movement, and T_check must exceed the process time constant.</b> Comparing pressure against the change in pos_cmd gave a false wrong-way F-10 during a large setpoint step: the PI output eased back while the valve, still far from the command, kept opening and the pressure kept rising. The simulator compares against the step count instead. With the 20 s process lag, a 5 s window also misreads a reversal as a wrong-way response, so T_check now defaults to 30 s. Control Logic &sect;3.6 already says T_check must exceed the process time constant; the 5 s default does not, for this model.</p>
+<p class="note"><b>Integrator windup from a slow valve.</b> The valve moves at about 0.4 % per second, slower than the integrator ramps on a large error. Before this fix, a setpoint step from 4.5 to 10 mbar left the command up to 53 % ahead of the valve and overshot by 2.2 mbar. The same happened from a closed valve, because of the 15 % before the needle lifts. The fix holds the integrator while the valve is more than <b>I hold lead</b> (default 3000 steps, about 3 %) behind the command in the direction the integrator is pushing. Overshoot fell to 0.05 mbar or less on every step tried, and settling on large steps halved. This is a proposed addition to the anti-windup in Control Logic &sect;3.3. Set I hold lead to 0 on the Tuning screen to see the old behaviour.</p>
+<p class="note"><b>F-10 "wrong way" on a normal overshoot (Ryan, 8 Oct).</b> After a large move the pressure keeps going the same way for a minute or more (3 s line delay plus the pot). When the loop then reverses the valve to correct an overshoot or undershoot, the pressure is still answering the earlier, larger move, so two windows read as "valve opened, pressure fell" and F-10 tripped. Kp 4 tripped on 4 of 8 setpoint steps. The response monitor now compares the pressure change with the counted position passed through a first-order lag, <b>F-10 lag</b> (default 40 s, set 0 for the raw count). No false trips on the same steps at five gain settings; helium off, wrong K_DIR and a slipping drive still trip F-10 in 60, 60 and 150 s. Proposed change to Control Logic &sect;3.6.</p>
+<p class="note"><b>Valve inside its seat travel near 0.5 mbar.</b> Near the lowest operating pressure the loop can close the valve below the point where the needle leaves the seat (15 % in this model). Moving inside that travel changes nothing, so the loop is slow to recover and F-10 "no pressure response" trips. <b>Auto min</b> (default 14 % here) stops auto closing below that point; manual can still close fully. On the real valve the lift point is a commissioning measurement. Proposed addition to Control Logic &sect;3.3.</p>
+<p class="note"><b>Loss of helium.</b> Turning the helium flow off in auto winds the valve open while the pressure falls. F-10 trips after about 60 s. The text now names the supply first: "helium supply lost (bath empty, capillary blocked) or K_DIR wrong". v44: the case is now F-16 "Pressure falling, valve opening"; closing with the pressure rising (pump off) is F-17, and a valve already pinned fully open is judged too.</p>
+<p class="note"><b>Pot flooding.</b> With liquid in the pot, the model's inflow exceeds what the heat load boils off, so the pool grows in pressure control. After about 45 min at 10 mbar the pot fills and the pressure jumps. Empty pot resets it. This is a limit of the model, not a controller result.</p>
+<p class="note"><b>Deadband against noise.</b> With Kp 4 % per mbar and POS_MAX 99,072, 0.01 mbar of noise moves pos_cmd by about 40 steps, well over DB (8). The motor ticks back and forth at the setpoint. A larger DB or a smaller Kp stops it; worth watching on the bench before tuning.</p>
+</div>
+
+<div class="panel">
+<h2>Changes since the plan (simulator versions 7 to 17)</h2>
+<ul class="try">
+<li>Every screen has the same 40 px header: PMC or Back, title, mode badge (colour is mode only), clock HH:MM at the right.</li>
+<li>One STOP, 96 &times; 58 at bottom right, on every screen and above every overlay.</li>
+<li>Latched faults show as a red bar on every service screen. The home status line shows the highest priority fault, a fault count chip and ACK.</li>
+<li>P_MIN default 0.2 mbar (was 1): the pot runs down to about 0.5 mbar in normal operation (Ryan). Flow line refitted (heat load 2 mW, bath leak 1 mW/K, gap factor 3.94) so the shut-valve floor is about 0.3 mbar. A shorted or unplugged Druck is caught by the F-01 no-signal window, not by P_MIN.</li>
+<li>Fault priority (proposed for plan Rev C, F-16 and F-17 v44): F-01, F-03, F-15, F-07, F-08, F-09, F-10, F-16, F-17, F-13, F-02, F-06, F-12.</li>
+<li>No target under 40 px; status line 16 px, captions 12 px. Tuning on pages of 40 px rows, press and hold to unlock, Save in the sidebar.</li>
+<li>Mode button names the action (Go to AUTO, Go to MANUAL, Home). Valve card opens the Valve screen.</li>
+<li>Setpoint keypad shows PV, has &plusmn;0.1 and &plusmn;0.5 nudges, and asks first for changes over 5 mbar (2 in v7 to v20). K_DIR and fully open ask first.</li>
+<li>Trend ticks on round steps; time in auto is shaded.</li>
+<li>Home bottom row is Menu, Mode, Setpoint, Valve, STOP. Menu has two rows: running (Valve, Trend, Faults and events, Tuning) and setting up (Sensor, Motor service, Limit and SIM).</li>
+<li>v16, mm4 limits (reviews/2026-10-08-gui-embedded-evaluation.md): the device screen only uses what LVGL 9.4 on the mm4 draws well. Four font sizes, one weight (Montserrat Medium): 12, 16, 26, and 40 for the PV digits only. ASCII text only; &rsaquo; and &#9003; stand for LVGL's built-in arrow and backspace symbols. Buttons have a 2 px darker bottom edge in place of the blurred shadow. Trend lines are solid and all 2 px (lv_chart shares one line style). Locked tuning values are grey, not faded.</li>
+<li>v17, one grid on every screen (Ryan: button spacing looked weird; v16 layout review): 8 px gaps everywhere, columns 10-123, 131-244, 252-366, 374-470, rows 46-92, 100-146, 154-200 and 208-264. Buttons are 46 px tall (STOP and the status line 56). Footer notes sit beside STOP. Tuning shows six values per page. Menu has no STOP (Ryan, 8 Oct).</li>
+<li>v20 (Ryan: Setpoint and Valve buttons were different widths): the four columns are now equal, 109 px each (10-119, 127-236, 244-353, 361-470), on every screen. STOP and the side column are 109 px wide.</li>
+<li>v21 (Ryan, 9 Oct): dialogs centred on the screen above the STOP row; setpoint changes over 5 mbar ask first (was 2); home button row 56 px, the same as the status line and STOP; SIM process is its own screen, separate from Limit; Menu grouped by category (Operate: Valve, Trend, Faults and events. Set up: Tuning, Sensor, Limit. Service: Motor service, SIM process).</li>
+<li>v22 (Ryan, 9 Oct): one grid of four 48 px rows (y 48, 104, 160, 216) with 8 px gaps everywhere, so home is 2:1:1 (cards 104, buttons 48, status 48); STOP 109 &times; 48 and the status line 343 &times; 48 the same on every screen, Menu included; the footer on service screens styled like the home status line; pressure and valve cards share one layout; setpoint and error grey outside auto; Valve screen reordered closed to open with hold-to-jog; SIM process screen removed (serial SIM commands and the bench panel stay); Menu regrouped (Operate, Diagnostics, Settings); Sensor fields in plain words; clock without seconds.</li>
+<li>v23 (Ryan, 9 Oct): status line text 12 px; no target tick on the valve bars (it looked draggable); Valve screen labels say what they do and the fully-open value is a setting card in steps; Motor and Sensor pages switched by a segmented control; keypads without nudges, PV and SP (or the present value) fill the side column; Sensor gets sensor profiles and calibration entry; rising and falling judged over 30 s; the limit switch is shown as a real switch (the bench test buttons moved to the bench panel); home Setpoint and Valve buttons are actions (Change setpoint, Move valve), not values.</li>
+<li>v24 (Ryan, 9 Oct): keypad keys sit on the screen grid (entry in row 1, keys in rows 2-4 beside STOP) instead of inside a box with no bottom margin; Valve screen with fewer words and the pressure shown; home buttons Set pressure and Set valve; Menu grouped Pressure (Sensor, Trend), Valve (Valve, Motor and switch), System (Events, Tuning), with the limit switch now a page of the Motor and switch screen; sensor profiles chosen from a drop-down list by serial number, a new profile has Create and Cancel.</li>
+<li>v25 (Ryan, 9 Oct): header Back closes a keypad or dialog; homing asks first, names its three steps and can be stopped from the Mode button; the cards drop Error, Target and Steps for one line each (Setpoint / Set by or Moving to); Valve screen captions say Pressure now and Valve now, and Change fully open is a button; Menu System row reads Tuning, Faults and events; every label checked to fit its box.</li>
+<li>v26 (Ryan, 9 Oct): valve card line reads Set to N % (was Set by hand / auto); Valve screen top row three equal cards (Valve now with its set-to position, Pressure now, Fully open with Change); Motor and switch shows Valve now and Steps now, Home a double-height button in the side column.</li>
+<li>v27 (review round 3, Ryan: fix all): not-homed valve card one string; Faults list over two rows with paged events; Mode button shows the homing step, disabled (red STOP is the only stop); editable cards carry a › at the right edge; Valve screen back on the column grid; Fully open as a setting card; keypad without Cancel (header Back cancels), Set two rows tall; Valve now caption carries the set position; trend axis from 0 with a coloured legend above the plot; Sensor reading shows the serial in full.</li>
+<li>v41 (Ryan, 9 Oct): Menu has no Valve tile (home Set Valve is the way in); Motor and switch split into Motor (speeds and drive settings, last move, Save) and Homing (limit switch, last homing, offset, overtravel, progress, Home), no page switch.</li>
+<li>v42 (Ryan, 9 Oct): date and clock removed from the header; mode word and dot move to the right edge. Motor last-move card reads Moving / To N %, N steps while the valve moves; Valve calc. shows ---- when not homed.</li>
+<li>v43 (Ryan, 9 Oct): header mode word (MANUAL, AUTO, NOT HOMED) 16 px, the same as the title and Back.</li>
+<li>v44 (operator review, Ryan: correct all): Motor locked like Tuning, Step mode, Coil order, Hold and Valve calc. removed, last-move card 343x104; Homing keeps switch, last homing, past switch, progress and Home, with Offset and Creep behind a lock; Tuning six rows (Kp, Ti, P_MIN, Auto min, DB, K_DIR); F-10 split: F-10 no response, F-16 pressure falling with valve opening, F-17 pressure rising with valve closing; a window with the valve held at fully open or Auto min is judged; counts reset on windows not judged.</li>
+<li>v45 (Ryan, 9 Oct): Motor middle as short cards (Last move, Target, Moved, Took, Mean speed); Homing shows Steps now while homing, last homing with date and year, switch Closed / Open, button just Home; Sensor has two pages, Reading (no cal factor) and Sensor and calibration (sensor, range, Enter known pressure, zero, span, cal factor, nothing twice); Tuning full names, left column gain, integral time, valve direction, right lowest setpoint, lowest auto opening, deadband; faults and events dated with year and seconds.</li>
+<li>v40 (Ryan, header option B): mode shown as a white word with a coloured dot to its right, no box; date (09 Oct) over time (HH:MM) at the far right, no day of week.</li>
+<li>v39 (duplicates review, Ryan: all): Motor and switch has Speeds and Switch only (jog on the Valve screen); POS_MAX set only from the Valve fully open card; P_MAX gone, the setpoint ceiling is the sensor range; no Excitation field; one Sensor Save in the same cell on every page; Reading shows the air factor, saved state only on Calibration; switch state and contact in one card, homing offset beside it; not homed said once each (badge, '----', Home); no Manual: / Auto: prefix on the status line.</li>
+<li>v38 (Ryan, 9 Oct): mode badge back at the far right of the header, 109 x 30 over STOP's column (361-470); clock HH:MM right-aligned to 353, just left of it.</li>
+<li>v37 (Ryan, 9 Oct): SIM process removed (serial SIM commands, bench panel, header chip, 'simulated' state); the pretend limit switch and the flow-line model stay. Header the same on every screen: PMC or Back, title from column 2, mode badge 109 x 30 at 304, clock HH:MM at the right; date, Druck health and link left the header (link and firmware on the Menu status line).</li>
+<li>v36 (Ryan, 9 Oct): Valve fully open card reads "100 %, turns" (6.00); home pressure and valve cards are read only (no tap to Trend or Valve, no &rsaquo;).</li>
+<li>v35 (Ryan, 9 Oct): Valve screen top row is Pressure (column 1), Valve now (columns 2-3), 100 %, steps; both readings have the home cards' status strip; the unit moves to the pressure caption.</li>
+<li>v34 (Ryan, 9 Oct): mode badge 100 x 30 (was 96 x 22), same slot on every screen.</li>
+<li>v33 (Ryan, 9 Oct): home cards show no direction (arrows removed); only the states on limit, no signal and simulated remain.</li>
+<li>v32 (Ryan, 9 Oct): Go to MANUAL while the valve is moving ramps it down and holds where it stops (it used to finish the last auto move); arrows for rising / falling and opening / closing; Tuning rows say what they do (tap while locked, and on the keypad); mode badge one 96 px slot at the right of the header on every screen.</li>
+<li>v31 (Ryan, 9 Oct): home button row Menu, Set Pressure, Set Valve, then the mode button far right above STOP; pressure card setpoint line is "Setpoint" and the number with no unit, the number grey outside auto (no "auto off"); keypad SP value grey outside auto.</li>
+<li>v30 (Ryan, 9 Oct): home pressure card outside auto reads "Setpoint, auto off" in amber with the setpoint in grey; Valve rows 2 and 3 on one five-column grid across the full width (0, 25, 50, 75, 100 %; hold Jog, -1 %, Enter %, +1 %, hold Jog); Motor shows Steps now, then "Valve, calc." in grey; P_MAX default 1034 mbar (Druck full scale, Ryan; was 965); Faults events in their own scrolling list, no Newer / Older; Tuning unlocks after a 1 s hold and locks on a tap.</li>
+<li>v29 (Ryan, 9 Oct): no empty cells, and the cell above STOP always holds something. Menu tiles two per row across columns 2-4. Valve: Type % beside the presets, jog and nudge on the four columns. Sensor: tabs and cards across the full width, Save above STOP; Calibration has Stored in row 2 and Room-air check in row 3. Motor Speeds: Step mode, Coil order and Hold cards in row 3.</li>
+<li>v28 (Ryan, 9 Oct): outside auto the pressure card reads "Setpoint 5.00" with "not active" in amber; example second sensor profile removed, only the bench Druck s/n 5880156 remains.</li>
+<li>v19, the rest of the v16 layout review (Ryan: build all): every button label 16 px; fault count inside ACK so the fault text keeps two lines; selected options dark grey, actions blue; the fully-open setting renamed Set fully open; no raised edge on header buttons; keypad and dialogs open under the header, keypad on the grid (5 &times; 3 keys of 46 px) with nudges and the current value in the side column.</li>
+</ul>
+</div>
+</div>
+
+<script>
+"use strict";
+/* ======================================================================
+ * Model state
+ * ==================================================================== */
+const DT = 0.01;                       // simulation step, s
+const BOOT_CLOCK = 14 * 3600 + 30 * 60;
+const FW = 'v0.6.0';
+let t = 0;                             // simulated seconds since page load
+
+const DEF_P = { Kp: 4, Ti: 0.25, Kd: 0, DB: 8, Ts: 1, Pmin: 0.2, POSMAX: 99072, KDIR: 1,
+  fhome: 400, fcreep: 25, Nbackoff: 400, Nclear: 800, Noffset: 0, Tcheck: 30, Nresp: 5, dPmin: 0.05,
+  checkMin: 1000, Tconv: 1800, band: 0.1, leadMax: 3000, Tlag: 40, outMin: 14 };
+const RANGE = { Kp: [0.01, 100], Ti: [0, 100], Kd: [0, 100], DB: [0, 2000], Ts: [0.5, 10], Pmin: [0, 1034],
+  POSMAX: [1000, 300000], fhome: [16, 1000], fcreep: [16, 1000], Nbackoff: [10, 5000],
+  Nclear: [10, 10000], Noffset: [0, 5000], Tcheck: [1, 120], Nresp: [1, 50], dPmin: [0.001, 10],
+  checkMin: [0, 200000], Tconv: [10, 36000], band: [0.001, 10], leadMax: [0, 100000], Tlag: [0, 600], outMin: [0, 50] };
+const FLASH_KEY = 'pmc-sim-flash-v4';
+let flash = null;
+try { const s = localStorage.getItem(FLASH_KEY); if (s) flash = JSON.parse(s); } catch (e) { flash = null; }
+let P = Object.assign({}, DEF_P, flash || {});
+
+const MOT = { run: 400, start: 200, accel: 3200 };
+const BENCH = { druck: true, exc: true, coupled: true, air: 1013.4, plumb: 'line', link: 'usb' };
+const LIM = { force: 'NORMAL', hyst: 20, simPos: 3000, raw: false, active: false, clearSince: null, over: 0, deepest: 0 };
+const M = { pos: 0, moving: false, dir: 0, v: 0, acc: 0, target: 0, vrun: 400, vstart: 200, lastStop: 'none', onDone: null };
+const C = { mode: 'NOT HOMED', ref: false, SP: 5.0, manPos: 0, posCmd: 0, lastSent: 0, lastCorr: 0, I: 0, prevPV: null,
+  homeStage: '', homeT0: 0, lastHome: null, faults: new Map(), events: [], msg: null,
+  winT: 0, winPos: 0, winPV: null, posF: 0, noresp: 0, wrong: 0, convStart: 0, f02Since: null, refusal: '' };
+let PV = null, PVreal = BENCH.air, pvValid = true;
+let timers = [], nextMeas = 1, nextCtrl = 1;
+const trend = [];
+
+/* ======================================================================
+ * Cryostat flow line, physics model (bench side, not firmware)
+ * Bath -> helium supply -> needle valve -> capillary -> pot -> pumping line (Druck) -> rotary pump.
+ * Layout per MercuryiTC UMC0071 s6.1 and s15.3, auto needle valve UMC0005.
+ * ==================================================================== */
+const RGAS = 8.314, MHE = 4.0026, TROOM = 295, KPV = RGAS * TROOM / MHE;   // Pa m^3 of room-temperature gas per gram
+const ITS_LO = { A: [1.392408, 0.527153, 0.166756, 0.050988, 0.026514, 0.001975, -0.017976, 0.005409, 0.013259], B: 5.6, C: 2.9 };
+const ITS_HI = { A: [3.146631, 1.357655, 0.413923, 0.091159, 0.016349, 0.001826, -0.004325, -0.004973, 0], B: 10.3, C: 1.9 };
+function itsT(p) {                      // ITS-90 He-4 vapour pressure scale, p in Pa, 1.25 K to 5.0 K
+  const c = p < 5041.8 ? ITS_LO : ITS_HI, x = (Math.log(p) - c.B) / c.C;
+  let T = 0, xp = 1; for (const a of c.A) { T += a * xp; xp *= x; } return T;
+}
+const P125 = 114.7, T125 = itsT(P125), CC_B = 10.8;   // below 1.25 K: Clausius-Clapeyron, L about 90 J/mol
+function tsat(p) { if (p <= 0.01) return 0.5; if (p < P125) return 1 / (1 / T125 - Math.log(p / P125) / CC_B); return itsT(Math.min(p, 196000)); }
+const SVP = (() => { const lp = [], tt = []; for (let l = Math.log(0.02); l <= Math.log(196000) + 1e-9; l += 0.01) { lp.push(l); tt.push(tsat(Math.exp(l))); } return { lp, tt }; })();
+function psat(T) {                      // Pa, inverse of tsat
+  const { lp, tt } = SVP; if (T <= tt[0]) return Math.exp(lp[0]); if (T >= tt[tt.length - 1]) return Math.exp(lp[lp.length - 1]);
+  let lo = 0, hi = tt.length - 1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (tt[m] <= T) lo = m; else hi = m; }
+  return Math.exp(lp[lo] + (lp[hi] - lp[lo]) * (T - tt[lo]) / (tt[hi] - tt[lo]));
+}
+function interp(tab, T) { if (T <= tab[0][0]) return tab[0][1]; for (let i = 1; i < tab.length; i++) if (T <= tab[i][0]) { const [a, ya] = tab[i - 1], [b, yb] = tab[i]; return ya + (yb - ya) * (T - a) / (b - a); } return tab[tab.length - 1][1]; }
+// Saturated liquid He-4, rounded (about 10 %): enthalpy above 1 K (J/g), latent heat (J/g), density (g/mL)
+const HE_HL = [[1.0, 0], [1.4, 0.04], [1.6, 0.12], [1.8, 0.30], [2.0, 0.70], [2.17, 1.40], [2.5, 2.40], [3.0, 3.80], [3.5, 5.40], [4.0, 7.40], [4.22, 8.55], [5.0, 12.5]];
+const HE_L = [[1.0, 21.6], [1.5, 22.6], [2.17, 23.3], [3.0, 22.6], [4.22, 20.7], [5.0, 17.5]];
+const HE_RHO = [[1.0, 0.145], [2.17, 0.146], [3.0, 0.141], [4.22, 0.125], [5.0, 0.110]];
+const hL = T => interp(HE_HL, T), latent = T => interp(HE_L, T), rhoL = T => interp(HE_RHO, T);
+const cL = T => Math.max(0.05, (hL(T + 0.02) - hL(T - 0.02)) / 0.04);
+const CP_GAS = 5.19;                    // J/(g K)
+
+const FL_DEF = { bath: 1030, Q: 2, Gb: 1, Chw: 1, S: 5, ult: 0.02, V: 5, seat: 15, bore: 0.5, gap: 3.94, Cd: 0.6, cap: 140,
+  delay: 3, pot: 200, pitch: 0.5, turns: 6, spt: 16512, fnoise: 1, relief: 1200 };
+const FLP = Object.assign({}, FL_DEF);
+const FL = { P: 2.0, T: 1.34, mL: 10, he: true, pump: true, ring: new Float64Array(2000), ri: 0, rn: 0,
+  mIn: 0, mEv: 0, mOut: 0, fn: 0, lift: 0, gap: 0, dh: 0, regime: 'dry', mmax: 1 };
+
+function needleFlow(steps, Ppa) {      // liquid g/s through needle and capillary in series
+  const p = FLP;
+  const lift = clamp(steps, 0, p.turns * p.spt) / p.spt * p.pitch;            // mm
+  const h0 = p.seat / 100 * p.turns * p.pitch;
+  const gap = Math.max(0, lift - h0) * p.gap / 1000;                         // mm
+  const An = p.Cd * Math.PI * p.bore * gap;                                  // mm^2
+  const Ac = Math.PI * Math.pow(p.cap / 1000, 2) / 4;                        // mm^2
+  const A = An > 0 ? 1 / Math.sqrt(1 / (An * An) + 1 / (Ac * Ac)) : 0;
+  const m = A * 1e-6 * Math.sqrt(2 * 125 * Math.max(0, p.bath * 100 - Ppa)) * 1000;
+  return { lift, gap: gap * 1000, m, h0 };
+}
+function pumpSigma(Ppa) { return FL.pump ? FLP.S / 1000 * Math.max(0, 1 - FLP.ult * 100 / Math.max(Ppa, 1e-9)) / KPV : 0; }
+function gauss() { return (Math.random() + Math.random() + Math.random() - 1.5) * 2; }
+
+function flTick(dt) {
+  const p = FLP, s = FL, P0 = s.P * 100;
+  const nd = needleFlow(LIM.simPos, P0);
+  s.lift = nd.lift; s.gap = nd.gap;
+  s.fn += -s.fn * dt / 2 + p.fnoise / 100 * Math.sqrt(dt) * gauss();          // flow noise, 2 s correlation
+  const mv = s.he ? nd.m * Math.max(0, 1 + s.fn) : 0;
+  const N = s.ring.length, nDel = clamp(Math.round(p.delay / dt), 1, N - 1);   // capillary transport delay
+  s.ring[s.ri] = mv;
+  const mi = s.rn >= nDel ? s.ring[(s.ri - nDel + N) % N] : 0;
+  s.ri = (s.ri + 1) % N; if (s.rn < N) s.rn++;
+  const Tb = tsat(p.bath * 100), T0 = s.T, Te = Math.min(T0, 5.0);
+  const Ps0 = psat(Te), sl = (psat(Te + 0.005) - psat(Te - 0.005)) / 0.01;
+  const L = latent(Te), dh = hL(Tb) - hL(Te);
+  const a = (s.mL * cL(Te) + p.Chw) / dt, b = p.V / 1000 / (KPV * dt), sig = pumpSigma(P0);
+  const Tsp = tsat(P0);
+  const superheat = s.mL <= 0 && T0 > Tsp ? s.mEv * CP_GAS * (T0 - Tsp) : 0;
+  const E = p.Q / 1000 + p.Gb / 1000 * (Tb - T0) + mi * dh - superheat;
+  const G = 0.01, cap = s.mL / dt + mi;                                     // evaporation g/(s Pa), liquid available
+  let dT = 0, P1 = P0, mev = 0;
+  if (cap > 0) {                         // implicit pot temperature and gas pressure, evaporation pulls P to P_sat(T)
+    const A11 = a + L * G * sl, A12 = -L * G, B1 = E - L * G * Ps0;
+    const A21 = -G * sl, A22 = b + G + sig, B2 = b * P0 + G * Ps0;
+    const det = A11 * A22 - A12 * A21;
+    dT = (B1 * A22 - A12 * B2) / det; P1 = (A11 * B2 - A21 * B1) / det;
+    mev = G * (Ps0 + sl * dT - P1);
+  }
+  if (cap <= 0 || mev < 0 || mev > cap) {
+    mev = clamp(mev, 0, Math.max(0, cap));
+    dT = (E - L * mev) / a; P1 = (b * P0 + mev) / (b + sig);
+  }
+  s.T = Math.max(0.8, T0 + dT);
+  s.mL += (mi - mev) * dt; if (s.mL < 1e-9) s.mL = 0;
+  s.mmax = p.pot * rhoL(Te);
+  let over = false;
+  if (s.mL > s.mmax) { P1 += (s.mL - s.mmax) * KPV / (p.V / 1000); s.mL = s.mmax; over = true; }   // overflow boils in the line
+  s.P = clamp(P1, 0, p.relief * 100) / 100;
+  s.mIn = mi; s.mEv = mev; s.mOut = sig * s.P * 100; s.dh = dh;
+  s.regime = over ? 'full' : s.mL > 0 ? 'wet' : 'dry';
+}
+
+// Steady state against valve opening, for the chart
+function flWetP(steps) {                // liquid in the pot: L * pumped = Q + leak + inflow * flash
+  const p = FLP, Tb = tsat(p.bath * 100), hin = hL(Tb);
+  const f = T => { const Ps = psat(T); return latent(T) * pumpSigma(Ps) * Ps - (p.Q / 1000 + p.Gb / 1000 * (Tb - T) + needleFlow(steps, Ps).m * (hin - hL(T))); };
+  let lo = 0.9, hi = 5.0;
+  if (f(hi) < 0) return psat(hi) / 100;
+  if (f(lo) > 0) return psat(lo) / 100;
+  for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (f(m) > 0) hi = m; else lo = m; }
+  return psat((lo + hi) / 2) / 100;
+}
+function flDryP(steps) {                // everything that arrives boils off
+  const p = FLP;
+  const g = P => pumpSigma(P) * P - needleFlow(steps, P).m;
+  let lo = p.ult * 100 * 1.000001, hi = p.relief * 100;
+  if (g(hi) < 0) return p.relief;
+  for (let i = 0; i < 50; i++) { const m = Math.sqrt(lo * hi); if (g(m) > 0) hi = m; else lo = m; }
+  return Math.sqrt(lo * hi) / 100;
+}
+let flCurve = null;
+function flCurveCalc() {
+  const n = 81, out = [], full = FLP.turns * FLP.spt;
+  for (let i = 0; i < n; i++) { const pc = 100 * i / (n - 1), st = pc / 100 * full; out.push({ pc, wet: flWetP(st), dry: flDryP(st) }); }
+  flCurve = out;
+}
+
+/* ======================================================================
+ * Helpers
+ * ==================================================================== */
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function clock(ts) { const s = Math.floor(BOOT_CLOCK + ts) % 86400; return pad2(Math.floor(s / 3600)) + ':' + pad2(Math.floor(s / 60) % 60) + ':' + pad2(s % 60); }
+// v45 (Ryan: date with year): the board RTC date; the simulator boots on 09 Oct 2026 at 14:30.
+const MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
+function stamp(ts, sec) { const d = new Date(Date.UTC(2026, 9, 9) + Math.floor(BOOT_CLOCK + ts) * 1000); return pad2(d.getUTCDate()) + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes()) + (sec ? ':' + pad2(d.getUTCSeconds()) : ''); }
+function fint(n) { const s = Math.round(Math.abs(n)).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' '); return (n < 0 && Math.round(n) !== 0 ? '-' : '') + s; }
+function pctOf(steps) { return 100 * steps / P.POSMAX; }
+function pctMech() { return 100 * clamp(LIM.simPos, 0, P.POSMAX) / P.POSMAX; }
+function noise(pp) { return (Math.random() - 0.5) * pp; }
+function later(dt, fn) { timers.push({ at: t + dt, fn }); }
+function ev(tag, text) {
+  C.events.push({ t, tag, text });
+  if (C.events.length > 200) C.events.shift();
+  conLog('EVT,' + clock(t) + ',' + tag + ',' + text, 'evt');
+}
+function msg(text, kind) { C.msg = { text, kind: kind || 'warn', until: performance.now() + 5000 }; }
+function refuse(reason) { C.refusal = reason; msg(reason, 'warn'); return false; }
+function fmtP(v) { return v == null ? '----' : v.toFixed(2); }
+function sgn(v) { return v > 0 ? 1 : v < 0 ? -1 : 0; }
+
+/* ======================================================================
+ * Pretend limit switch (limit.c)
+ * ==================================================================== */
+function updateRaw() {
+  let raw;
+  if (LIM.force === 'OPEN') raw = true;
+  else if (LIM.force === 'CLOSED') raw = false;
+  else raw = LIM.simPos <= 0 ? true : (LIM.simPos >= LIM.hyst ? false : LIM.raw);
+  LIM.raw = raw;
+  if (raw) { LIM.active = true; LIM.clearSince = null; }
+  else if (LIM.active && LIM.clearSince === null) LIM.clearSince = t;
+}
+function debounceTick() {
+  updateRaw();
+  if (!LIM.raw && LIM.active && LIM.clearSince !== null && t - LIM.clearSince >= 0.1) { LIM.active = false; LIM.clearSince = null; }
+}
+
+/* ======================================================================
+ * Stepper (stepper3.c with go-to and retarget)
+ * ==================================================================== */
+function doStep() {
+  if (M.dir < 0 && LIM.active) { finish('LIMIT'); return false; }   // read before every closing step
+  M.pos += M.dir;
+  if (BENCH.coupled) {
+    // The seat is a hard stop 30 steps past the switch point: further closing steps are driven against it and lost.
+    if (M.dir > 0 || LIM.simPos > -30) LIM.simPos += M.dir;
+    if (M.dir < 0 && LIM.simPos < 0) { LIM.over++; LIM.deepest = Math.min(LIM.deepest, LIM.simPos); }
+  }
+  updateRaw();
+  return true;
+}
+function motorTick(dt) {
+  if (!M.moving) return;
+  const want = sgn(M.target - M.pos), a = MOT.accel;
+  if (want !== M.dir) {                         // target behind: ramp down, then turn
+    M.v -= a * dt;
+    if (M.v <= M.vstart) { M.dir = want; M.v = M.vstart; M.acc = 0; if (want === 0) { finish('DONE'); return; } }
+  } else {
+    const rem = Math.abs(M.target - M.pos), dstop = (M.v * M.v - M.vstart * M.vstart) / (2 * a);
+    M.v = rem <= dstop + 1 ? Math.max(M.vstart, M.v - a * dt) : Math.min(M.vrun, M.v + a * dt);
+  }
+  M.acc += M.v * dt;
+  while (M.acc >= 1 && M.moving) {
+    M.acc -= 1;
+    if (!doStep()) return;
+    if (M.pos === M.target) { finish('DONE'); return; }
+  }
+}
+function startMove(target, rate, onDone) {
+  target = Math.round(target);
+  M.vrun = rate || MOT.run;
+  M.target = target;
+  M.onDone = onDone || null;
+  if (!M.moving) {
+    if (target === M.pos) { if (onDone) { M.onDone = null; later(0, () => onDone('DONE')); } return true; }
+    if (target < M.pos && LIM.active) { M.onDone = null; M.lastStop = 'LIMIT'; if (onDone) later(0, () => onDone('LIMIT')); return false; }
+    M.from = M.pos; M.t0 = t;   // v45: start of the move, for the Motor screen
+    M.moving = true; M.dir = sgn(target - M.pos); M.vstart = Math.min(MOT.start, M.vrun); M.v = M.vstart; M.acc = 0;
+  }
+  return true;
+}
+function finish(reason) {
+  M.moving = false; M.v = 0; M.acc = 0; M.lastStop = reason; M.tEnd = t;
+  const cb = M.onDone; M.onDone = null;
+  if (reason === 'LIMIT' && C.mode !== 'HOMING') limitHit();
+  if (cb) cb(reason);
+}
+function stopMotor() { if (M.moving) { M.target = M.pos; finish('STOP'); } }
+
+// Switch opened outside homing (Control Logic 4.2): stop, set zero, W-01 if far from zero.
+function limitHit() {
+  if (!C.ref) return;
+  if (Math.abs(M.pos - P.Noffset) > 200) ev('W-01', 'Switch opened at count ' + fint(M.pos) + ', count reset to ' + P.Noffset);
+  M.pos = P.Noffset;
+  if (C.mode === 'MANUAL') { C.manPos = Math.max(C.manPos, P.Noffset); }
+}
+
+// Central permissive for manual, jog and auto moves.
+function requestMove(target, quiet) {
+  if (C.mode === 'HOMING') return quiet ? false : refuse('Homing in progress (IL-8)');
+  if (C.faults.size && !(LIM.active && target > M.pos)) return quiet ? false : refuse('Latched fault: ACK first (IL-9)');
+  if (C.ref) target = clamp(Math.round(target), 0, P.POSMAX);
+  if (!M.moving && target < M.pos && LIM.active) return quiet ? false : refuse('Closed limit active: closing blocked (IL-1)');
+  return startMove(target);
+}
+
+/* ======================================================================
+ * Homing (valve.c), two-stage, Control Logic 4
+ * ==================================================================== */
+// v25 (Ryan, 9 Oct: homing UX bad): ask first with what will happen, name the step while it runs,
+// Mode button becomes Stop, and say when it is done.
+function homeStep() { return { 'clearance move': 'Moving off the switch', 'fast approach': 'Homing 1 of 3: closing to the switch', 'back-off': 'Homing 2 of 3: backing off', 'creep approach': 'Homing 3 of 3: slow approach' }[C.homeStage] || 'Homing'; }
+function homeAsk() {
+  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to manual before homing');
+  if (C.faults.size) return refuse('Latched fault: ACK first (IL-9)');
+  const mins = Math.ceil(1.1 * P.POSMAX / P.fhome / 60);
+  confirmBox('Home the valve? It closes until the limit switch opens, then sets 0 %. Up to ' + mins + ' min. The pressure will change.', 'Home', 'act', home);
+}
+function home() {
+  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to manual before homing');
+  if (C.mode === 'HOMING') return refuse('Already homing');
+  if (C.faults.size) return refuse('Latched fault: ACK first (IL-9)');
+  stopMotor();
+  C.ref = false; C.mode = 'HOMING'; C.homeT0 = t;
+  ev('HOME', 'Homing started at count ' + fint(M.pos));
+  if (LIM.active) {
+    C.homeStage = 'clearance move';
+    startMove(M.pos + P.Nclear, P.fhome, r => {
+      if (r !== 'DONE') return homeAbort(r);
+      later(0.15, () => { if (LIM.active) homeFault('F-09', 'Switch still active after ' + P.Nclear + '-step clearance move'); else homeFast(); });
+    });
+  } else homeFast();
+  return true;
+}
+function homeFast() {
+  C.homeStage = 'fast approach';
+  const n = Math.round(1.1 * P.POSMAX);
+  startMove(M.pos - n, P.fhome, r => {
+    if (r === 'LIMIT') homeBack();
+    else if (r === 'DONE') homeFault('F-07', 'Homing: switch not found within ' + fint(n) + ' steps');
+    else homeAbort(r);
+  });
+}
+function homeBack() {
+  C.homeStage = 'back-off';
+  startMove(M.pos + P.Nbackoff, P.fhome, r => {
+    if (r !== 'DONE') return homeAbort(r);
+    later(0.15, () => { if (LIM.active) homeFault('F-09', 'Switch still active after ' + P.Nbackoff + '-step back-off'); else homeCreep(); });
+  });
+}
+function homeCreep() {
+  C.homeStage = 'creep approach';
+  startMove(M.pos - (P.Nbackoff + 200), P.fcreep, r => {
+    if (r === 'LIMIT') {
+      M.pos = P.Noffset; C.ref = true; C.mode = 'MANUAL'; C.homeStage = '';
+      C.manPos = C.posCmd = C.lastSent = M.pos;
+      C.lastHome = { t, dur: t - C.homeT0 };
+      ev('HOME', 'Homed in ' + (t - C.homeT0).toFixed(1) + ' s, position ' + P.Noffset);
+      msg('Homed. Valve closed at 0 %.', 'info');
+    } else if (r === 'DONE') homeFault('F-07', 'Homing: switch not found on creep approach');
+    else homeAbort(r);
+  });
+}
+function homeAbort(r) { if (C.mode === 'HOMING') { C.mode = 'NOT HOMED'; C.homeStage = ''; ev('HOME', 'Homing aborted (' + r.toLowerCase() + ')'); } }
+function homeFault(tag, text) { C.mode = 'NOT HOMED'; C.homeStage = ''; raise(tag, text, { ref: true }); }
+
+/* ======================================================================
+ * Faults and modes (ctrl.c)
+ * ==================================================================== */
+function raise(tag, text, o) {
+  o = o || {};
+  if (C.faults.has(tag)) return;
+  C.faults.set(tag, { text, t });
+  ev(tag, text);
+  stopMotor();
+  if (C.mode === 'AUTO' || C.mode === 'PAUSED') { C.mode = 'MANUAL'; }
+  if (C.mode === 'MANUAL') { C.manPos = C.posCmd = C.lastSent = M.pos; }
+  if (o.ref) { C.ref = false; if (C.mode !== 'HOMING') C.mode = 'NOT HOMED'; }
+}
+function ack() {
+  if (!C.faults.size) return refuse('Nothing to acknowledge');
+  for (const tag of [...C.faults.keys()]) {
+    if (tag === 'F-01' && !BENCH.druck) continue;
+    if (tag === 'F-03' && !BENCH.exc) continue;
+    C.faults.delete(tag); ev(tag, 'acknowledged');
+  }
+  if (C.faults.size) return refuse('Cause still present: ' + [...C.faults.keys()].join(', '));
+  return true;
+}
+function operatorStop() {
+  const wasHoming = C.mode === 'HOMING';
+  raise('F-12', 'Operator stop at count ' + fint(M.pos) + (wasHoming ? ', homing aborted' : ''));
+  return true;
+}
+function kpSteps() { return P.Kp / 100 * P.POSMAX; }
+function toAuto() {
+  if (C.mode === 'AUTO') return true;
+  if (!C.ref) return refuse('Auto refused: not homed (IL-2)');
+  if (C.mode === 'HOMING') return refuse('Auto refused: homing (IL-8)');
+  if (C.faults.size) return refuse('Auto refused: latched fault, ACK first (IL-9)');
+  if (!pvValid || PV == null) return refuse('Auto refused: pressure invalid (IL-3)');
+  if (C.SP < P.Pmin || C.SP > pMax()) return refuse('Auto refused: setpoint outside P_MIN to P_MAX (IL-4)');
+  if (PV < P.Pmin || PV > pMax()) return refuse('Auto refused: pressure ' + PV.toFixed(2) + ' outside P_MIN to the sensor range. Helium flow on? Open in manual first');
+  if (!P.KDIR) return refuse('Auto refused: K_DIR not set (IL-6)');
+  if (P.Kp == null || P.Ti == null) return refuse('Auto refused: Kp and Ti not set (Tuning)');
+  const e = P.KDIR * (C.SP - PV);
+  const now = C.mode === 'PAUSED' ? C.posCmd : C.manPos;
+  C.I = now - kpSteps() * e;                        // bumpless: first output equals the position in force
+  C.posCmd = C.lastSent = now; C.prevPV = PV;
+  C.winT = 0; C.winPos = C.posF; C.winPV = PV; C.noresp = 0; C.wrong = 0; C.convStart = t; C.f02Since = null;
+  ev('MODE', (C.mode === 'PAUSED' ? 'Auto resumed' : 'Auto') + ' at SP ' + C.SP.toFixed(2) + ' mbar, valve ' + pctOf(now).toFixed(1) + ' %');
+  C.mode = 'AUTO';
+  return true;
+}
+// v32 (Ryan: the valve kept going to the last auto command after Go to MANUAL): manual holds the actual
+// position. A move in progress ramps down at the normal decel and stops; manual then holds where it stopped.
+function stopPoint() {
+  if (!M.moving) return M.pos;
+  const d = Math.max(0, (M.v * M.v - M.vstart * M.vstart) / (2 * MOT.accel));
+  const p = M.pos + M.dir * Math.ceil(d);
+  return M.dir > 0 ? Math.min(p, M.target) : Math.max(p, M.target);
+}
+function toManual() {
+  if (C.mode !== 'AUTO' && C.mode !== 'PAUSED') return C.mode === 'MANUAL' ? true : refuse('Not in auto');
+  const at = stopPoint();
+  if (M.moving) M.target = at;   // ramp down to the stop point, no reversal
+  C.manPos = C.posCmd = C.lastSent = at; C.mode = 'MANUAL';
+  ev('MODE', 'Manual, valve stops at its present position (' + pctOf(at).toFixed(1) + ' %)');
+  return true;
+}
+function setSP(v) {
+  if (!(v >= P.Pmin && v <= pMax())) { ev('W-03', 'Setpoint ' + v + ' rejected, allowed ' + P.Pmin + ' to ' + pMax()); return refuse('W-03 Setpoint outside ' + P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(2)); }
+  C.SP = v; C.convStart = t; ev('SP', 'Setpoint ' + v.toFixed(2) + ' mbar');
+  return true;
+}
+function setManSteps(n) {
+  if (C.mode !== 'MANUAL') return refuse(C.mode === 'NOT HOMED' ? 'Not homed: press Home first (IL-2)' : 'Valve entry is for manual mode');
+  n = clamp(Math.round(n), 0, P.POSMAX);
+  if (!requestMove(n)) return false;
+  C.manPos = C.posCmd = C.lastSent = n;
+  return true;
+}
+function jog(n) {
+  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Jog locked in auto');
+  if (C.mode === 'HOMING') return refuse('Jog locked while homing (IL-8)');
+  let target = (M.moving ? M.target : M.pos) + n;
+  if (C.ref) target = clamp(target, 0, P.POSMAX);
+  if (!requestMove(target)) return false;
+  if (C.mode === 'MANUAL') C.manPos = C.posCmd = C.lastSent = target;
+  return true;
+}
+
+/* ======================================================================
+ * Measurement, process, control step
+ * ==================================================================== */
+function measure() {
+  PVreal = BENCH.plumb === 'line' ? FL.P + noise(0.01) : BENCH.air + noise(0.02);
+  if (!BENCH.druck) { pvValid = false; raise('F-01', 'No Druck signal'); }
+  else if (!BENCH.exc) { pvValid = false; raise('F-03', 'Excitation outside 9.5 to 10.5 V'); }
+  else pvValid = true;
+  PV = pvValid ? PVreal : null;   // v37 (Ryan): SIM process removed, the board always shows the Druck
+}
+function ctrlTick() {
+  // valve position lagged by the process time constant: the pressure answers this, not the raw count
+  C.posF = P.Tlag > 0 && C.ref && C.mode !== 'HOMING' ? C.posF + (M.pos - C.posF) * P.Ts / (P.Tlag + P.Ts) : M.pos;
+  if (C.mode !== 'AUTO' || PV == null) return;
+  // F-02, armed in auto only (G7)
+  if (PV < P.Pmin || PV > pMax()) { if (C.f02Since === null) C.f02Since = t; if (t - C.f02Since >= 5) { raise('F-02', PV < P.Pmin ? 'Pressure ' + PV.toFixed(2) + ' below P_MIN ' + P.Pmin + ' mbar, check helium flow and pump' : 'Pressure ' + PV.toFixed(2) + ' above the sensor range ' + pMax() + ' mbar'); return; } }
+  else C.f02Since = null;
+
+  const e = P.KDIR * (C.SP - PV);
+  const kp = kpSteps(), ki = P.Ti > 0 ? kp / (60 * P.Ti) : 0;
+  const d = -(P.Kd / 100 * P.POSMAX) * P.KDIR * (PV - (C.prevPV == null ? PV : C.prevPV)) / P.Ts;
+  C.prevPV = PV;
+  const iNew = C.I + ki * e * P.Ts;
+  const raw = kp * e + iNew + d;
+  let integrate = true;
+  const lo = P.outMin / 100 * P.POSMAX;                         // proposed: auto output low limit, % open
+  if (raw > P.POSMAX && e > 0) integrate = false;
+  if (raw < lo && e < 0) integrate = false;
+  if (LIM.active && raw < C.posCmd) integrate = false;          // IL-1 coupling, 3.3
+  const lead = C.posCmd - M.pos;                                // valve still travelling to the last command
+  if (P.leadMax > 0 && Math.abs(lead) > P.leadMax && sgn(ki * e) === sgn(lead)) integrate = false;   // proposed: travel anti-windup
+  if (integrate) C.I = iNew;
+  let cmd = clamp(kp * e + C.I + d, lo, P.POSMAX);
+  if (LIM.active && cmd < C.posCmd) cmd = C.posCmd;
+  C.posCmd = Math.round(cmd);
+  if (Math.abs(C.posCmd - C.lastSent) >= Math.max(1, P.DB)) {
+    if (requestMove(C.posCmd, true)) { C.lastCorr = C.posCmd - C.lastSent; C.lastSent = C.posCmd; }
+  }
+  // Response monitor (3.6), with the minimum-move threshold added here
+  C.winT += P.Ts;
+  if (C.winT >= P.Tcheck - 1e-9) {
+    const moved = C.posF - C.winPos, dP = PV - C.winPV;  // lagged counted movement, not pos_cmd or the raw count
+    // v44 (review, Ryan: correct all): a window held at a limit counts too. The valve sits fully open with PV below SP,
+    // or at Auto min with PV above SP, and the loop asks for more; before v44 such a window was never judged.
+    // Pinned means the lagged position sat at the limit for the whole window, so the pressure has caught up with the move there.
+    const err = P.KDIR * (C.SP - PV), tol = 0.01 * P.POSMAX, at = (x, v) => Math.abs(x - v) <= tol;
+    const pinOpen = err > 0 && at(M.pos, P.POSMAX) && at(C.posF, P.POSMAX) && at(C.winPos, P.POSMAX);
+    const pinMin = err < 0 && at(M.pos, lo) && at(C.posF, lo) && at(C.winPos, lo);
+    const way = Math.abs(moved) >= Math.max(P.DB, P.checkMin) ? sgn(moved) : !M.moving && pinOpen ? 1 : !M.moving && pinMin ? -1 : 0;
+    if (way) {
+      const exp = way * P.KDIR, judgedMove = Math.abs(moved) >= Math.max(P.DB, P.checkMin);
+      if (dP * exp < -P.dPmin) {
+        C.wrong = (C.wrongWay === way ? C.wrong : 0) + 1; C.wrongWay = way; C.noresp = 0;
+        if (C.wrong >= 2) {
+          if (way > 0) raise('F-16', 'Pressure falling, valve opening, two windows in a row: helium supply lost (bath empty or capillary blocked). If this happens on first use, check K_DIR.');
+          else raise('F-17', 'Pressure rising, valve closing, two windows in a row: pot not pumped (pump stopped, pumping valve shut, or heat load). If this happens on first use, check K_DIR.');
+          return;
+        }
+      }
+      else if (judgedMove && Math.abs(dP) < P.dPmin) { C.noresp++; C.wrong = 0; if (C.noresp >= P.Nresp) { raise('F-10', 'No pressure response in ' + P.Nresp + ' windows: valve not moving the needle (drive slipping, motor unplugged, needle seized)'); return; } }
+      else { C.noresp = 0; C.wrong = 0; }
+    }
+    else { C.noresp = 0; C.wrong = 0; }   // v44: a window not judged resets both counts, so trips need windows in a row
+    C.winT = 0; C.winPos = C.posF; C.winPV = PV;
+  }
+  // W-02 convergence timeout
+  if (Math.abs(C.SP - PV) <= P.band) C.convStart = t;
+  else if (t - C.convStart > P.Tconv) { stopMotor(); C.mode = 'PAUSED'; ev('W-02', 'Convergence timeout after ' + P.Tconv + ' s, auto paused'); }
+}
+function trendPush() {
+  trend.push({ t, pv: PV, sp: C.SP, pos: C.ref ? pctOf(M.pos) : null, mech: pctMech(), auto: C.mode === 'AUTO' });
+  if (trend.length > 1900) trend.shift();
+}
+function simTick() {
+  t += DT;
+  motorTick(DT);
+  debounceTick();
+  flTick(DT);
+  if (timers.length) {
+    const due = timers.filter(x => x.at <= t + 1e-9);
+    timers = timers.filter(x => x.at > t + 1e-9);
+    due.forEach(x => x.fn());
+  }
+  if (t >= nextMeas) { nextMeas += 1; measure(); trendPush(); }
+  if (t >= nextCtrl) { nextCtrl += P.Ts; ctrlTick(); }
+}
+function reboot() {
+  timers = []; M.moving = false; M.onDone = null; M.v = 0; M.pos = 0; M.target = 0; M.lastStop = 'none';
+  C.mode = 'NOT HOMED'; C.ref = false; C.faults.clear(); C.homeStage = ''; C.manPos = C.posCmd = C.lastSent = 0; C.I = 0; C.msg = null;
+  P = Object.assign({}, DEF_P, flash || {});
+  ev('F-14', 'Power-up (event only)');
+  bootHomed();
+}
+function bootHomed() {                  // simulator convenience (Ryan, 8 Oct): start homed, valve closed on the switch
+  LIM.simPos = 0; LIM.raw = true; LIM.active = true; LIM.clearSince = null;
+  M.pos = P.Noffset; C.ref = true; C.mode = 'MANUAL'; C.homeStage = '';
+  C.manPos = C.posCmd = C.lastSent = M.pos;
+  C.lastHome = { t, dur: 0 };
+  ev('HOME', 'Homed at boot (simulator default), position ' + M.pos);
+}
+
+/* ======================================================================
+ * Device screen
+ * Layout, every screen: header 0-40 (PMC or Back, title, mode badge, clock);
+ * STOP fixed at 361,216 109x48 above everything, overlays included, on every screen;
+ * content 10-353 x 48-208, side buttons 361-470 x 48-208 (three slots),
+ * status line or footer 10-353 x 216-264 (notes, messages, latched-fault bar).
+ * ==================================================================== */
+const dev = document.getElementById('dev');
+const screens = {};
+let current = null, overlay = null, sidePanel = null;
+const HDR = 40;
+const SP_CONFIRM = 5;                   // mbar: setpoint changes larger than this ask first (UX review 5; Ryan 9 Oct: 2 asked too often)
+// Fault priority, highest first (UX review 4; proposed for plan Rev C)
+const FAULT_ORDER = ['F-01', 'F-03', 'F-15', 'F-07', 'F-08', 'F-09', 'F-10', 'F-16', 'F-17', 'F-13', 'F-02', 'F-06', 'F-12'];   // v44: F-16, F-17 split from F-10
+const FAULT_SHORT = { 'F-01': 'No Druck signal', 'F-02': 'Pressure out of range', 'F-03': 'Excitation out of window', 'F-07': 'Limit not found while homing',
+  'F-08': 'Homing failed', 'F-09': 'Limit still active after clearance', 'F-10': 'No pressure response', 'F-16': 'Pressure falling, valve opening', 'F-17': 'Pressure rising, valve closing', 'F-12': 'Operator STOP', 'F-13': 'Motion timeout', 'F-15': 'Excitation supply tripped' };
+function faultRank(tag) { const i = FAULT_ORDER.indexOf(tag); return i < 0 ? 99 : i; }
+function faultsByPriority() { return [...C.faults].sort((a, b) => faultRank(a[0]) - faultRank(b[0]) || a[1].t - b[1].t); }
+function faultShort(tag, f) { return FAULT_SHORT[tag] || f.text; }
+
+function mk(par, x, y, w, h, cls, txt) {
+  const e = document.createElement('div');
+  if (cls) e.className = cls;
+  e.style.left = x + 'px'; e.style.top = y + 'px';
+  if (w != null) e.style.width = w + 'px';
+  if (h != null) e.style.height = h + 'px';
+  if (txt != null) e.textContent = txt;
+  par.appendChild(e);
+  return e;
+}
+function st(e, css) { Object.assign(e.style, css); return e; }
+function set(e, txt) { if (e.textContent !== txt) e.textContent = txt; }
+function seth(e, h) { if (e.innerHTML !== h) e.innerHTML = h; }
+function setc(e, col) { if (e.style.color !== col) e.style.color = col; }
+function setbg(e, col) { if (e.style.background !== col) e.style.background = col; }
+function vis(e, on) { const d = on ? '' : 'none'; if (e.style.display !== d) e.style.display = d; }
+function tog(e, cls, on) { if (e.classList.contains(cls) !== on) e.classList.toggle(cls, on); }
+function btn(par, x, y, w, h, label, fn, cls) {
+  const b = mk(par, x, y, w, h, 'b' + (cls ? ' ' + cls : ''));
+  b.innerHTML = label;
+  b.addEventListener('pointerdown', ev0 => {
+    ev0.preventDefault(); ev0.stopPropagation();
+    if (b.classList.contains('dis')) return;
+    b.classList.add('down');
+    fn(ev0);
+    updateUI();
+  });
+  const up = () => b.classList.remove('down');
+  b.addEventListener('pointerup', up); b.addEventListener('pointerleave', up);
+  return b;
+}
+function holdBtn(par, x, y, w, h, label, ms, fn, cls) {   // acts only after a press held for ms
+  const b = mk(par, x, y, w, h, 'b' + (cls ? ' ' + cls : ''));
+  b.innerHTML = label;
+  const bar = st(mk(b, 0, h - 5, 0, 5, ''), { background: '#2D5877', borderRadius: '0 0 3px 3px', left: '0' });
+  let tmr = null, t0 = 0, raf = null;
+  const stop = () => { clearTimeout(tmr); tmr = null; cancelAnimationFrame(raf); bar.style.width = '0px'; b.classList.remove('down'); };
+  const grow = () => { if (!tmr) return; bar.style.width = Math.min(w, w * (performance.now() - t0) / (typeof ms === 'function' ? 1000 : ms)) + 'px'; raf = requestAnimationFrame(grow); };
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (b.classList.contains('dis')) return;
+    const m = typeof ms === 'function' ? ms() : ms; if (!m) { fn(); updateUI(); return; }   // 0: acts on a tap (v30: Lock)
+    b.classList.add('down'); t0 = performance.now(); tmr = setTimeout(() => { stop(); fn(); updateUI(); }, m); grow(); });
+  b.addEventListener('pointerup', stop); b.addEventListener('pointerleave', stop);
+  return b;
+}
+const COL = { hdr: '#1F2933', text: '#1F2933', muted: '#546374', ok: '#2EA043', fault: '#D63031', warn: '#D68200', idle: '#969EA6', blue: '#2D5877', bg: '#E8EEF4' };
+const MODE_COL = { AUTO: '#2EA043', MANUAL: '#5B6B7B', 'NOT HOMED': '#D68200', HOMING: '#2D5877', PAUSED: '#D68200' };
+
+const TITLES = { menu: 'Menu', sensor: 'Sensor', motor: 'Motor', homing: 'Homing', tune: 'Tuning', faults: 'Faults and events', trend: 'Trend', valve: 'Valve' };
+function newScreen(name) {
+  const s = mk(dev, 0, HDR, 480, 272 - HDR, 'scr');
+  st(s, { top: '0px', height: '272px' });
+  vis(s, false);
+  screens[name] = { el: s, update: () => {}, foot: null, leave: null };
+  return s;
+}
+function show(name) {
+  closeOverlay();
+  if (current && current !== name && screens[current] && screens[current].leave) screens[current].leave();
+  for (const k in screens) vis(screens[k].el, k === name);
+  current = name; updateUI();
+}
+// One grid on every screen (v22): 8 px gaps, four equal 109 px columns 10-119 | 127-236 | 244-353 | 361-470,
+// four 48 px rows 48-96 | 104-152 | 160-208 | 216-264. Content 10-353 x 48-208, side column 361-470 with
+// three slots, bottom row = status line (10-353) beside STOP (361-470) on every screen.
+const RY = [48, 104, 160, 216], RH = 48;
+function side(s, i, label, fn, cls) { return btn(s, 361, RY[i], 109, RH, label, fn, cls); }
+// n equal cells across x0..x1 with 8 px gaps -> [x, w]
+function cols(n, x0 = 10, x1 = 353) { const c = []; for (let i = 0; i < n; i++) { const a = Math.round(x0 + i * (x1 - x0 + 8) / n), b = Math.round(x0 + (i + 1) * (x1 - x0 + 8) / n) - 8; c.push([a, b - a]); } return c; }
+
+/* ---- Global header, STOP and footer ---------------------------------- */
+let G = null;
+function buildGlobal() {
+  const h = st(mk(dev, 0, 0, 480, HDR, 'hdr'), { zIndex: '4' });
+  // v37 (Ryan, review header proposal): the same header on every screen. PMC (home) or Back in 0-119, text from x 10;
+  // title from x 127; mode badge 109 x 30 at 304-413; clock HH:MM 16 px right-aligned to 470. Date, Druck health and
+  // link left the header (link and firmware on the Menu status line; Druck faults show on the pressure card and F-01).
+  const back = st(btn(h, 0, 0, 119, HDR, '&#8249; Back', () => { if (overlay) closeOverlay(); else show('ctrl'); }, 'dark'), { alignItems: 'flex-start', paddingLeft: '10px' });   // v25: Back also closes a keypad or dialog
+  const pmc = st(mk(h, 10, 0, 109, HDR, '', 'PMC'), { fontSize: '16px', lineHeight: HDR + 'px' });
+  const title = st(mk(h, 127, 0, 170, HDR, '', ''), { fontSize: '16px', lineHeight: HDR + 'px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+  // v40 (Ryan, header option B): mode as a 12 px white word with a 10 px dot in the mode colour to its right (6 px gap), no box.
+  // v43 (Ryan, 9 Oct): mode word 16 px, the same size as the title and Back.
+  // v42 (Ryan, 9 Oct): date and clock removed from the header, so the mode word and dot sit at the right edge, dot ending at x 470.
+  const badge = st(mk(h, 300, 0, 154, HDR, '', ''), { color: '#fff', fontSize: '16px', lineHeight: HDR + 'px', textAlign: 'right', whiteSpace: 'nowrap' });
+  const mdot = st(mk(h, 460, 15, 10, 10, ''), { borderRadius: '5px' });
+  const stop = st(btn(dev, 361, 216, 109, 48, '<b style="font-size:26px">STOP</b>', () => { closeOverlay(); return operatorStop(); }, 'red'), { zIndex: '30' });
+  // Footer: same box, dot and text position as the home status line (Ryan, 9 Oct: console consistent on every screen).
+  const foot = st(mk(dev, 10, 216, 343, 48, 'card'), { zIndex: '6' });
+  const fdot = st(mk(foot, 12, 20, 8, 8, ''), { borderRadius: '4px' });
+  const ftxt = st(mk(foot, 28, 0, 303, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center', overflow: 'hidden' });
+  foot.addEventListener('pointerdown', e => { e.preventDefault(); if (foot.dataset.go) show(foot.dataset.go); });
+  G = { h, back, pmc, title, badge, mdot, stop, foot, fdot, ftxt };
+}
+const DAYS = 'Sun Mon Tue Wed Thu Fri Sat'.split(' ');
+function updateGlobal() {
+  const home = current === 'ctrl';
+  vis(G.back, !home || !!overlay); vis(G.title, !home); vis(G.pmc, home && !overlay);
+  set(G.title, TITLES[current] || '');
+  set(G.badge, C.mode === 'PAUSED' ? 'AUTO PAUSED' : C.mode);
+  setbg(G.mdot, MODE_COL[C.mode]);
+  // footer: toast, else latched-fault bar, else the screen's own note
+  const f = G.foot;
+  const toastOn = C.msg && performance.now() < C.msg.until;
+  const fl = faultsByPriority();
+  let mode = 'none', text = '', go = '';
+  if (home) mode = 'none';
+  else if (toastOn && !overlay) { mode = 'toast'; text = C.msg.text; }
+  else if (fl.length && current !== 'faults') { mode = 'fault'; text = fl.length > 1 ? fl[0][0] + ' latched, ' + fl.length + ' faults. Tap for Faults  ›' : fl[0][0] + ' ' + faultShort(fl[0][0], fl[0][1]) + '  ›'; go = 'faults'; }
+  else if (screens[current] && screens[current].foot) { mode = 'note'; text = screens[current].foot(); }
+  vis(f, mode !== 'none');
+  set(G.ftxt, text); f.dataset.go = go;
+  const warnT = mode === 'toast' && C.msg.kind !== 'info';   // v32: 'info' notes (tuning descriptions) stay plain
+  setbg(f, mode === 'fault' ? '#FDE8E8' : warnT ? '#FFF3DD' : '#FFFFFF');
+  setc(G.ftxt, mode === 'fault' ? '#B42324' : warnT ? '#9A5D00' : mode === 'toast' ? COL.text : (screens[current] && screens[current].footCol) || COL.text);
+  setbg(G.fdot, mode === 'fault' ? COL.fault : warnT ? COL.warn : mode === 'toast' ? COL.blue : COL.idle);
+  st(f, { cursor: go ? 'pointer' : 'default' });
+}
+
+/* ---- Controller (home) ---------------------------------------------- */
+// Pressure and valve cards share one layout (Ryan, 9 Oct: make them coherent): caption with unit and ›,
+// state word top right, left status edge, 40 px value right-aligned, a strip (divider or valve bar),
+// then one line: a 12 px label left and a 16 px value right (v25: Error, Target and Steps dropped).
+// Tapping opens Trend (pressure) or Valve.
+function readCard(s, x, cap, go) {
+  // v36 (Ryan): home cards are readouts only, no tap-through (Trend and Valve stay on Menu and the Set Valve button).
+  const c = mk(s, x, RY[0], 226, 104, 'card');
+  const stripe = mk(c, 0, 6, 3, 92, '');
+  mk(c, 12, 5, null, null, 'cap', cap);
+  const state = st(mk(c, 120, 5, 94, null, '', ''), { fontSize: '12px', textAlign: 'right' });
+  const val = st(mk(c, 12, 15, 202, 47, '', ''), { fontSize: '40px', textAlign: 'right', lineHeight: '47px' });
+  const strip = st(mk(c, 12, 63, 202, 6, ''), { background: COL.bg, borderRadius: '2px' });
+  const l1 = st(mk(c, 12, 76, 130, 22, '', ''), { fontSize: '12px', lineHeight: '22px', color: COL.muted });
+  const v1 = st(mk(c, 100, 76, 114, 22, '', ''), { fontSize: '16px', lineHeight: '22px', textAlign: 'right' });
+  return { c, stripe, state, val, strip, l1, v1 };
+}
+function buildCtrl() {
+  const s = newScreen('ctrl');
+  // Rows 2:1:1 (Ryan, 9 Oct): cards 48-152 (two grid rows), buttons 160-208, status line + STOP 216-264.
+  const pc = readCard(s, 10, 'Pressure, mbar abs', 'trend');
+  st(pc.strip, { top: '66px', height: '1px' });
+  const vc = readCard(s, 244, 'Valve open, %', 'valve');
+  const barFill = st(mk(vc.strip, 0, 0, 0, 6, ''), { background: COL.blue, borderRadius: '2px' });
+  const BAR = 202;   // no target tick: it looked like a drag handle (Ryan, 9 Oct)
+
+  btn(s, 10, RY[2], 109, RH, '<span style="font-size:16px">Menu</span>', () => show('menu'));
+  const bMode = btn(s, 361, RY[2], 109, RH, '', modePress);   // v31 (Ryan): mode button far right, above STOP
+  // Actions, not values (Ryan, 9 Oct): the values are in the cards above; same verb-over-target form as the Mode button.
+  const bSp = btn(s, 127, RY[2], 109, RH, '<small>Set</small><b style="font-size:16px;margin-top:2px">Pressure</b>', () => keypadSP());   // v24: Set + the card it changes
+  const bValve = btn(s, 244, RY[2], 109, RH, '', () => show('valve'));
+
+  const sb = mk(s, 10, RY[3], 343, RH, 'card'); st(sb, { cursor: 'pointer' });
+  sb.addEventListener('pointerdown', ev0 => { if (ev0.target === sb || ev0.target.parentNode === sb) { if (C.faults.size) show('faults'); } });
+  const dot = st(mk(sb, 12, 20, 8, 8, ''), { borderRadius: '4px' });
+  const stxt = st(mk(sb, 28, 0, 303, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center', overflow: 'hidden' });
+  const cnt = st(mk(sb, 186, 13, 72, 22, '', ''), { fontSize: '12px', lineHeight: '22px', textAlign: 'center', borderRadius: '11px', background: '#B42324', color: '#fff' });
+  const sbtn = btn(sb, 253, 4, 86, 40, '<b>ACK</b>', ack, 'act');
+
+  screens.ctrl.update = () => {
+    // Pressure card
+    const auto = C.mode === 'AUTO' || C.mode === 'PAUSED';
+    set(pc.val, fmtP(PV));
+    setc(pc.val, PV == null ? COL.fault : COL.text);
+    setbg(pc.stripe, PV == null ? COL.fault : COL.ok);
+    // Trend word: 5 s mean now against the 5 s mean 30 s ago; moves under max(0.2 mbar, 3 % of PV) read steady (Ryan, 9 Oct: too sensitive at 10 s / 0.05 mbar).
+    const mean = (a, b) => { const q = trend.slice(Math.max(0, trend.length - b), trend.length - a).filter(x => x.pv != null); return q.length ? q.reduce((u, x) => u + x.pv, 0) / q.length : null; };
+    const m0 = trend.length > 35 ? mean(0, 5) : null, m1 = trend.length > 35 ? mean(30, 35) : null;
+    const dp = m0 != null && m1 != null ? m0 - m1 : 0, thr = Math.max(0.2, 0.03 * Math.abs(PV || 0));
+    // v33 (Ryan): no direction shown on home (words in v31, arrows in v32, both removed); states stay words.
+    set(pc.state, PV == null ? 'no signal' : '');
+    setc(pc.state, COL.fault);
+    // v31 (Ryan: too many words, no unit): "Setpoint" and the number only (the card title gives mbar abs);
+    // outside auto the number is light grey (COL.idle), as for other inactive values.
+    set(pc.l1, 'Setpoint'); setc(pc.l1, COL.muted);
+    set(pc.v1, C.SP.toFixed(2)); setc(pc.v1, auto ? COL.text : COL.idle);
+    // Valve card, same layout
+    const d = M.moving ? M.dir : 0;
+    set(vc.state, LIM.active ? 'on limit' : '');
+    setc(vc.state, LIM.active ? COL.warn : d ? COL.blue : COL.idle);
+    setbg(vc.stripe, C.ref ? COL.ok : C.mode === 'HOMING' ? COL.blue : COL.warn);
+    if (C.ref) {
+      set(vc.val, pctOf(M.pos).toFixed(1)); setc(vc.val, COL.text); st(vc.val, { fontSize: '40px' });
+      barFill.style.width = (clamp(pctOf(M.pos), 0, 100) * BAR / 100).toFixed(1) + 'px';
+      barFill.style.background = M.pos > 0.95 * P.POSMAX ? COL.warn : COL.blue;
+      const tgt = auto ? C.posCmd : (M.moving ? M.target : C.manPos);
+      vis(vc.strip, true);
+      st(vc.l1, { width: '130px' });
+      set(vc.l1, 'Set to'); set(vc.v1, pctOf(tgt).toFixed(1) + ' %');   // v26: the commanded position, by hand or by auto
+    } else {
+      // v39 (review): not homed is said once each: badge NOT HOMED, card "----" / Position unknown, button Home.
+      set(vc.val, C.mode === 'HOMING' ? 'Homing' : '----'); setc(vc.val, C.mode === 'HOMING' ? COL.blue : COL.idle); st(vc.val, { fontSize: C.mode === 'HOMING' ? '26px' : '40px' });
+      vis(vc.strip, false);
+      set(vc.l1, C.mode === 'HOMING' ? homeStep().replace('Homing ', 'Step ') : 'Position unknown'); set(vc.v1, '');
+      st(vc.l1, { width: C.mode === 'HOMING' ? '202px' : '130px', whiteSpace: 'normal', overflow: 'hidden' });
+    }
+    const sl = statusLine();
+    set(stxt, sl.text); setc(stxt, sl.kind === 'fault' ? '#B42324' : sl.kind === 'warn' ? '#9A5D00' : COL.text);
+    setbg(sb, sl.kind === 'fault' ? '#FDE8E8' : sl.kind === 'warn' ? '#FFF3DD' : '#FFFFFF');
+    setbg(dot, sl.kind === 'fault' ? COL.fault : sl.kind === 'warn' ? COL.warn : sl.dot || COL.idle);
+    vis(sbtn, !!sl.btn); vis(cnt, false); seth(sbtn, sl.count ? '<b>ACK</b><small>' + sl.count + ' faults</small>' : '<b>ACK</b>');
+    st(stxt, { width: (sl.btn ? 217 : 303) + 'px' });
+    const ma = modeAction();
+    seth(bMode, ma[0] ? '<small>' + ma[0] + '</small><b style="font-size:16px;margin-top:2px">' + ma[1] + '</b>' : '<b style="font-size:16px">' + ma[1] + '</b>');
+    tog(bMode, 'act', C.mode === 'NOT HOMED'); tog(bMode, 'dis', C.mode === 'HOMING');   // review 3: red STOP is the only stop
+    seth(bValve, '<small>' + (C.mode === 'MANUAL' ? 'Set' : 'View') + '</small><b style="font-size:16px;margin-top:2px">Valve</b>');
+  };
+}
+function modeAction() {               // [small verb line, big target]
+  return { 'NOT HOMED': ['', 'Home'], HOMING: ['Homing', (homeStep().match(/\d of 3/) || ['...'])[0]], MANUAL: ['Go to', 'AUTO'], AUTO: ['Go to', 'MANUAL'], PAUSED: ['Auto paused', 'Resume'] }[C.mode];
+}
+function statusLine() {
+  if (C.faults.size) {
+    const fl = faultsByPriority(); const [tag, f] = fl[0];
+    return { kind: 'fault', text: tag + ' ' + faultShort(tag, f), btn: 'ACK', count: fl.length > 1 ? fl.length : 0 };
+  }
+  if (C.msg && performance.now() < C.msg.until) return { kind: C.msg.kind, text: C.msg.text };
+  switch (C.mode) {
+    case 'NOT HOMED': return { kind: 'warn', text: 'Press Home to find the closed limit.' };
+    case 'HOMING': return { kind: 'info', dot: COL.blue, text: homeStep() + '. STOP to cancel.' };
+    case 'MANUAL': return { kind: 'info', dot: COL.muted, text: M.moving ? 'Moving to ' + pctOf(M.target).toFixed(1) + ' %.' : 'Valve held at ' + pctOf(M.pos).toFixed(1) + ' %.' };
+    case 'AUTO': {
+      const near = PV != null && Math.abs(C.SP - PV) <= P.band;
+      return { kind: 'info', dot: COL.ok, text: near ? 'Holding ' + C.SP.toFixed(2) + ' mbar.' : 'Driving toward ' + C.SP.toFixed(2) + ' mbar.' };
+    }
+    case 'PAUSED': return { kind: 'warn', text: 'W-02 Convergence timeout. Auto paused, valve held.' };
+  }
+  return { kind: 'info', text: '' };
+}
+function modePress() {
+  if (C.mode === 'NOT HOMED') return homeAsk();
+  if (C.mode === 'HOMING') return refuse('Homing in progress: STOP to cancel');
+  if (C.mode === 'MANUAL') confirmBox('Switch to AUTO at ' + C.SP.toFixed(2) + ' mbar? Pressure now ' + fmtP(PV) + ' mbar.', 'Go to AUTO', 'act', toAuto);
+  else if (C.mode === 'PAUSED') confirmBox('Auto is paused (W-02). Resume auto at ' + C.SP.toFixed(2) + ' mbar, or go to manual?', 'Resume AUTO', 'act', toAuto, ['MANUAL', toManual]);
+  else confirmBox('Switch to MANUAL? Valve stops at its present position (' + pctOf(M.pos).toFixed(1) + ' %).', 'Go to MANUAL', 'act', toManual);
+}
+
+/* ---- Overlays: confirm and keypad (never over the STOP slot) --------- */
+let screensKeypadNow = null;
+function closeOverlay() { if (overlay) { overlay.remove(); overlay = null; } if (sidePanel) { sidePanel.remove(); sidePanel = null; } screensKeypadNow = null; }
+function confirmBox(text, okLabel, okCls, fn, alt) {
+  closeOverlay();
+  overlay = st(mk(dev, 0, HDR, 480, 272 - HDR, 'ov'), { zIndex: '10' });
+  const m = mk(overlay, 70, 8, 340, 156, 'modal');   // centred: x (480-340)/2, y in the band 40-212 above STOP
+  st(mk(m, 16, 14, 308, 70, '', text), { whiteSpace: 'normal', fontSize: '16px', lineHeight: '19px' });
+  if (alt) {
+    btn(m, 16, 94, 97, 48, 'Cancel', () => closeOverlay());
+    btn(m, 121, 94, 98, 48, '<b>' + alt[0] + '</b>', () => { closeOverlay(); alt[1](); });
+    btn(m, 227, 94, 97, 48, '<b style="white-space:normal">' + okLabel + '</b>', () => { closeOverlay(); fn(); }, okCls);
+  } else {
+    btn(m, 16, 94, 150, 48, 'Cancel', () => closeOverlay());
+    btn(m, 174, 94, 150, 48, '<b>' + okLabel + '</b>', () => { closeOverlay(); fn(); }, okCls);
+  }
+}
+function keypad(o) {
+  closeOverlay();
+  overlay = st(mk(dev, 0, HDR, 480, 272 - HDR, 'ov'), { zIndex: '10' });
+  // On the screen grid (Ryan, 9 Oct: the boxed keypad had no bottom margin): entry field in row 1,
+  // keys 5 x 3 in rows 2-4 across 10-353, the last row beside STOP. Overlay y is relative to the header (40).
+  st(overlay, { background: '#DCE3EA' });   // opaque: the screen underneath must not show between keys
+  const m = mk(overlay, 0, 0, 480, 232, '');
+  const field = mk(m, 10, RY[0] - HDR, 343, RH, 'card');
+  st(mk(field, 10, 6, 200, 16, '', o.title), { fontSize: '12px', lineHeight: '16px', overflow: 'hidden', textOverflow: 'ellipsis' });
+  const info = st(mk(field, 10, 24, 200, 16, '', o.info), { fontSize: '12px', color: COL.muted, lineHeight: '16px', overflow: 'hidden', textOverflow: 'ellipsis' });
+  const val = st(mk(field, 190, 0, 143, 48, '', ''), { fontSize: '26px', textAlign: 'right', lineHeight: '48px' });
+  let entry = '';
+  const show1 = () => set(val, entry === '' ? ' ' : entry);
+  show1();
+  const kc = cols(5), ky = [RY[1] - HDR, RY[2] - HDR, RY[3] - HDR];
+  // v27 (review 3, findings 6 and 10): no Cancel key, the header Back cancels; delete two cells wide, Set two rows tall.
+  const keys = [['7', '8', '9', 'del', null], ['4', '5', '6', '0', 'set'], ['1', '2', '3', '.', null]];
+  keys.forEach((r, ri) => r.forEach((k, ci) => {
+    if (k == null) return;
+    const [x, w] = kc[ci], y = ky[ri];
+    if (k === 'set') { btn(m, x, y, w, 104, '<b>Set</b>', commit, 'act'); return; }
+    if (k === 'del') { btn(m, x, y, kc[4][0] + kc[4][1] - x, 48, '&#9003;', () => { entry = entry.slice(0, -1); show1(); }); return; }
+    btn(m, x, y, w, 48, k, () => key(k), k === '.' && o.dec === 0 ? 'dis' : '');
+  }));
+  // Side column (Ryan, 9 Oct): no nudges; one card fills 361-470 x 48-208 above STOP with PV and SP
+  // (setpoint) or the present value (everything else).
+  sidePanel = st(mk(dev, 361, 48, 109, 160, 'card'), { zIndex: '11' });
+  const rowsP = o.panel ? o.panel() : [['Now', o.now || '']];
+  const pv = rowsP.map((rw, i) => {
+    const y = rowsP.length === 1 ? 52 : 18 + i * 72;
+    st(mk(sidePanel, 10, y, 89, 16, '', rw[0]), { fontSize: '12px', color: COL.muted, lineHeight: '16px' });
+    return st(mk(sidePanel, 4, y + 18, 97, 32, '', rw[1]), { fontSize: '26px', lineHeight: '32px', textAlign: 'right', overflow: 'hidden' });
+  });
+  const fit = () => pv.forEach(e => st(e, { fontSize: e.textContent.length > 6 ? '16px' : '26px' }));
+  fit();
+  const tint = () => (o.panel ? o.panel() : rowsP).forEach((rw, i) => setc(pv[i], rw[2] || COL.text));   // v31: SP grey outside auto
+  tint();
+  if (o.panel) screensKeypadNow = () => { o.panel().forEach((rw, i) => set(pv[i], rw[1])); fit(); tint(); };
+  function key(k) {
+    if (entry.length >= 9) return;
+    if (k === '.' && (o.dec === 0 || entry.includes('.'))) return;
+    entry += k; show1();
+  }
+  function commit() {
+    if (entry === '' || entry === '.') { closeOverlay(); return; }
+    const v = parseFloat(entry);
+    if (!(v >= o.min && v <= o.max)) { set(info, 'Outside ' + o.min + ' to ' + o.max + (o.w03 ? ' (W-03)' : '')); setc(info, COL.fault); if (o.w03) ev('W-03', 'Setpoint ' + v + ' rejected'); return; }
+    const r = o.onSet(v);
+    if (r === false) { set(info, C.refusal); setc(info, COL.fault); return; }
+    closeOverlay();
+    if (r && r.then) r.then();
+  }
+}
+function spPanel() { const on = C.mode === 'AUTO' || C.mode === 'PAUSED'; return [['PV, mbar', fmtP(PV)], ['SP, mbar', C.SP.toFixed(2), on ? null : COL.idle]]; }   // v28: same rule as the home card
+function keypadSP() {
+  keypad({ title: 'Setpoint, mbar abs', panel: spPanel, min: P.Pmin, max: pMax(), w03: true,
+    info: 'Range ' + P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(2),
+    onSet: v => {
+      if (Math.abs(v - C.SP) > SP_CONFIRM) return { then: () => confirmBox('Change the setpoint from ' + C.SP.toFixed(2) + ' to ' + v.toFixed(2) + ' mbar? That is ' + (v >= C.SP ? '+' : '-') + Math.abs(v - C.SP).toFixed(2) + ' mbar.', 'Change', 'act', () => setSP(v)) };
+      return setSP(v);
+    } });
+}
+
+/* ---- Segmented control: page switch, not an action (Ryan, 9 Oct: Jog / Settings read as buttons) ---- */
+// One grey track with the options inside it; the shown page is a raised white segment, the others flat text.
+function segmented(par, x, y, w, labels, get, setp) {
+  const tr = st(mk(par, x, y, w, RH, ''), { background: '#C3CDD7', borderRadius: '6px' });
+  const n = labels.length, iw = (w - 8) / n;
+  const segs = labels.map((l, i) => {
+    const b = st(mk(tr, 4 + i * iw, 4, iw, RH - 8, ''), { borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', cursor: 'pointer' });
+    b.textContent = l;
+    b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); setp(i); updateUI(); });
+    return b;
+  });
+  return () => segs.forEach((b, i) => { const on = get() === i; setbg(b, on ? '#FFFFFF' : 'transparent'); setc(b, on ? COL.text : COL.muted); st(b, { boxShadow: on ? 'inset 0 -2px 0 #AEB9C4' : 'none' }); });
+}
+// Tap-to-change setting: caption, value, and a 16 px › at the right edge (review 3, finding 4: editable
+// cards must look different from readouts, which stay flat with no ›).
+function editCard(par, x, y, w, h, cap, fn) {
+  const c = st(mk(par, x, y, w, h, 'card'), { cursor: 'pointer' });
+  c.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (c.classList.contains('dis')) return; fn(); updateUI(); });
+  st(mk(c, 10, 5, w - 20, 16, '', cap), { fontSize: '12px', color: COL.muted, lineHeight: '16px', overflow: 'hidden' });
+  const v = st(mk(c, 10, 23, w - 30, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden' });
+  const ch = st(mk(c, w - 20, 0, 14, h, '', '\u203A'), { fontSize: '16px', color: COL.blue, lineHeight: h + 'px', textAlign: 'center' });
+  return { c, v, ch };
+}
+
+/* ---- Valve ------------------------------------------------------------ */
+function canManual() { return C.mode === 'MANUAL'; }
+function manPct(v) { return setManSteps(v / 100 * P.POSMAX); }
+function notManual() { return refuse(C.mode === 'NOT HOMED' ? 'Not homed: press Home first (IL-2)' : 'Switch to manual to move the valve'); }
+function nudge(d) { if (!canManual()) return notManual(); return setManSteps(C.manPos + d / 100 * P.POSMAX); }
+function keypadPct() {
+  if (!canManual()) return notManual();
+  keypad({ title: 'Go to % open', panel: () => [['Open now, %', C.ref ? pctOf(M.pos).toFixed(1) : '--']], min: 0, max: 100,
+    info: '0 closed, 100 = ' + fint(P.POSMAX) + ' steps', onSet: v => manPct(v) });
+}
+function setFullOpen(steps, how) {
+  steps = Math.round(steps);
+  if (!setParam('POSMAX', steps)) return false;
+  ev('VALVE', 'Fully open set to ' + fint(steps) + ' steps (' + (steps / FLP.spt).toFixed(2) + ' turns), ' + how);
+  return true;
+}
+function confirmFullOpen(steps, how) {
+  return { then: () => confirmBox('Make fully open ' + fint(Math.round(steps)) + ' steps (' + (steps / FLP.spt).toFixed(2) + ' turns)? Every % on the screen rescales.', 'Set', 'act', () => setFullOpen(steps, how)) };
+}
+function keypadTurns() {
+  keypad({ title: 'Fully open, output turns', now: (P.POSMAX / FLP.spt).toFixed(2), min: RANGE.POSMAX[0] / FLP.spt, max: RANGE.POSMAX[1] / FLP.spt,
+    info: fint(FLP.spt) + ' steps per turn', onSet: v => (C.mode === 'AUTO' || C.mode === 'PAUSED') ? refuse('Set POS_MAX in manual') : confirmFullOpen(v * FLP.spt, 'typed in turns') });
+}
+function keypadFullSteps() {
+  keypad({ title: 'Fully open, steps', now: fint(P.POSMAX), min: RANGE.POSMAX[0], max: RANGE.POSMAX[1], dec: 0,
+    info: 'From the closed limit', onSet: v => (C.mode === 'AUTO' || C.mode === 'PAUSED') ? refuse('Set POS_MAX in manual') : confirmFullOpen(v, 'typed in steps') });
+}
+function fullOpenHere() {
+  if (!C.ref) return refuse('Not homed: press Home first (IL-2)');
+  if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to manual first');
+  if (M.moving) return refuse('Wait for the valve to stop');
+  if (M.pos < RANGE.POSMAX[0]) return refuse('Too close to closed to be fully open');
+  confirmFullOpen(M.pos, 'set at the present position').then();
+}
+function fullOpenMenu() {
+  closeOverlay();
+  overlay = st(mk(dev, 0, HDR, 480, 272 - HDR, 'ov'), { zIndex: '10' });
+  const m = mk(overlay, 70, 4, 340, 164, 'modal');   // centred like the confirm dialog
+  st(mk(m, 16, 8, 308, 22, '', 'Change the fully open setting'), { fontSize: '16px', lineHeight: '22px' });
+  st(mk(m, 16, 30, 308, 18, '', fint(P.POSMAX) + ' steps, ' + (P.POSMAX / FLP.spt).toFixed(2) + ' turns, ' + (P.POSMAX / FLP.spt * FLP.pitch).toFixed(2) + ' mm lift'), { fontSize: '12px' });
+  const lock = C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING';
+  const b1 = btn(m, 16, 52, 150, 48, 'Type turns', keypadTurns);
+  const b2 = btn(m, 174, 52, 150, 48, 'Type steps', keypadFullSteps);
+  const b3 = btn(m, 16, 108, 150, 48, '<small>Use present position</small><b>' + fint(M.pos) + ' steps</b>', fullOpenHere);
+  [b1, b2, b3].forEach(b => tog(b, 'dis', lock)); if (!canManual()) tog(b3, 'dis', true);
+  btn(m, 174, 108, 150, 48, 'Close', closeOverlay);
+  if (lock) st(mk(m, 180, 12, 144, 16, '', 'Locked in auto'), { fontSize: '12px', color: COL.warn, textAlign: 'right' });
+}
+// Hold-to-jog (Ryan, 9 Oct): moves toward closed or fully open while pressed, stops on release.
+// In LVGL: LV_EVENT_PRESSED starts, RELEASED or PRESS_LOST stops; the touch is polled every 5 ms.
+function jogStart(dir) { if (!canManual()) return notManual(); return setManSteps(dir > 0 ? P.POSMAX : 0); }
+function jogEnd() {
+  if (C.mode !== 'MANUAL' || !M.moving) return;
+  const dstop = Math.ceil((M.v * M.v - M.vstart * M.vstart) / (2 * MOT.accel));   // ramp down from here
+  setManSteps(M.pos + M.dir * dstop);
+}
+function jogBtn(par, x, y, w, h, label, dir) {
+  const b = mk(par, x, y, w, h, 'b');
+  b.innerHTML = label;
+  let held = false;
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (b.classList.contains('dis')) return; b.classList.add('down'); held = true; jogStart(dir); updateUI(); });
+  const up = () => { b.classList.remove('down'); if (held) { held = false; jogEnd(); updateUI(); } };
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(k => b.addEventListener(k, up));
+  return b;
+}
+function buildValve() {
+  const s = newScreen('valve');
+  // v24 (Ryan, 9 Oct: too many words, show the pressure):
+  //   row 1  valve reading | pressure | fully open setting
+  //   row 2  0 25 50 75 100 %
+  //   row 3  jog close | -1 % | type % | +1 % | jog open   (closed to open, left to right)
+  // v25 (Ryan: unclear these are live readings, and that fully open can be changed): live readings captioned
+  // "now", side by side; Change fully open is a button showing the present value.
+  // v26: three equal cells (Ryan): Valve now with its set-to position, Pressure now, Fully open with Change.
+  // v27 (review 3, findings 5-7): back on the column grid. Row 1: Valve now over columns 1-2 (caption carries
+  // the set position, one number per line), Pressure now in column 3, Fully open setting card in the side column.
+  // Rows 2-3: five 62 px cells over 10-353 (as the keypad); side column rows 2-3 empty.
+  // v35 (Ryan): pressure in column 1, valve over columns 2-3, each with the home cards' status strip at the left
+  // (pressure: green OK, amber simulated, red no signal; valve: green homed, blue homing, amber not homed).
+  const t3 = [[127, 226], [10, 109]];
+  const nowCard = (i, cap) => { const c = mk(s, t3[i][0], RY[0], t3[i][1], RH, 'card'); const strip = mk(c, 0, 6, 3, 36, ''); const cp = mk(c, 12, 5, null, null, 'cap', cap); return [c, st(mk(c, 12, 20, t3[i][1] - 22, 24, '', ''), { fontSize: '16px', lineHeight: '24px', textAlign: 'right' }), cp, strip]; };
+  const [lc, pct, setTo, vStrip] = nowCard(0, 'Valve now');
+  const barBg = st(mk(lc, 12, 42, t3[0][1] - 22, 3, ''), { background: COL.bg, borderRadius: '1px' });
+  const barFill = st(mk(barBg, 0, 0, 0, 3, ''), { background: COL.blue, borderRadius: '1px' });
+  const [, prv, , pStrip] = nowCard(1, 'Pressure, mbar');   // unit in the caption so 1013.25 fits 109 px
+  const fo = editCard(s, 361, RY[0], 109, RH, '100 %, turns', fullOpenMenu);   // v36 (Ryan): turns, not steps
+  // v30 (Ryan: spacing still weird, "Enter %"): rows 2 and 3 on one five-column grid across 10-470, so their
+  // column lines match. Row 2 presets; row 3 hold Jog, -1 %, Enter %, +1 %, hold Jog.
+  const c5f = cols(5, 10, 470);
+  const PRE = [0, 25, 50, 75, 100];
+  const pre = PRE.map((v, i) => btn(s, c5f[i][0], RY[1], c5f[i][1], RH, '<span style="font-size:16px">' + v + ' %</span>',
+    () => { if (!canManual()) return notManual(); return manPct(v); }));
+  const jc = jogBtn(s, c5f[0][0], RY[2], c5f[0][1], RH, '<small>hold</small><b>&#8249; Jog</b>', -1);
+  const n1 = btn(s, c5f[1][0], RY[2], c5f[1][1], RH, '<span style="font-size:16px">-1 %</span>', () => nudge(-1));
+  const bType = btn(s, c5f[2][0], RY[2], c5f[2][1], RH, '<span style="font-size:16px">Enter %</span>', keypadPct);
+  const n2 = btn(s, c5f[3][0], RY[2], c5f[3][1], RH, '<span style="font-size:16px">+1 %</span>', () => nudge(1));
+  const jo = jogBtn(s, c5f[4][0], RY[2], c5f[4][1], RH, '<small>hold</small><b>Jog &#8250;</b>', 1);
+  screens.valve.foot = () => canManual() ? 'Jog moves while held.' : (C.mode === 'AUTO' || C.mode === 'PAUSED') ? 'Auto is driving the valve.' : 'Not homed.';
+  screens.valve.update = () => {
+    const man = canManual();
+    const d = M.moving ? M.dir : 0;
+    if (C.ref) {
+      set(pct, (d > 0 ? '\u2191 ' : d < 0 ? '\u2193 ' : '') + pctOf(M.pos).toFixed(1) + ' %'); setc(pct, COL.text);
+      barFill.style.width = (clamp(pctOf(M.pos), 0, 100) * (t3[0][1] - 22) / 100).toFixed(1) + 'px';
+      const tgt = C.mode === 'AUTO' || C.mode === 'PAUSED' ? C.posCmd : (M.moving ? M.target : C.manPos);
+      set(setTo, 'Valve now, set ' + pctOf(tgt).toFixed(1) + ' %');
+      vis(barBg, true);
+    } else {
+      set(pct, C.mode === 'HOMING' ? 'Homing' : 'Not homed'); setc(pct, C.mode === 'HOMING' ? COL.blue : COL.warn);
+      vis(barBg, false); set(setTo, 'Valve now');
+    }
+    set(prv, fmtP(PV)); setc(prv, PV == null ? COL.fault : COL.text);
+    setbg(pStrip, PV == null ? COL.fault : COL.ok);
+    setbg(vStrip, C.ref ? COL.ok : C.mode === 'HOMING' ? COL.blue : COL.warn);   // same rule as the home valve card
+    [bType, ...pre, jc, n1, n2, jo].forEach(b => tog(b, 'dis', !man));
+    pre.forEach((b, i) => tog(b, 'on', man && !M.moving && C.manPos === Math.round(PRE[i] / 100 * P.POSMAX)));
+    set(fo.v, (P.POSMAX / FLP.spt).toFixed(2));
+    tog(fo.c, 'dis', C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING');
+  };
+}
+
+/* ---- Menu ---------------------------------------------------------- */
+function buildMenu() {
+  const s = newScreen('menu');
+  // One row per category, by what the person is doing (Ryan, 9 Oct): running the cryostat, checking the
+  // hardware, changing saved settings. Name in column 1, screens in columns 2-4; STOP back in row 4.
+  // v24 (Ryan, 9 Oct): grouped by what it is about.
+  const groups = [['Pressure', [['Sensor', 'sensor'], ['Trend', 'trend']]],
+                  ['Valve', [['Motor', 'motor'], ['Homing', 'homing']]],   // v41: Valve screen only from home Set Valve
+                  ['System', [['Tuning', 'tune'], ['Faults and events', 'faults']]]];
+  const c4 = cols(4, 10, 470);
+  groups.forEach(([name, items], gi) => {
+    const y = RY[gi];
+    st(mk(s, c4[0][0], y, c4[0][1], RH, '', name), { fontSize: '16px', color: COL.muted, lineHeight: RH + 'px', paddingLeft: '2px' });
+    const ct = [[127, 168], [303, 167]];   // v29: two tiles per row across columns 2-4, no empty side column
+    items.forEach((it, i) => btn(s, ct[i][0], y, ct[i][1], RH, it[0], () => show(it[1])));
+  });
+  screens.menu.foot = () => 'Link ' + (BENCH.link === 'eth' ? 'Ethernet 192.168.1.50' : 'USB') + '. Firmware ' + FW + ', last reset power-on.';   // v37: link moved here from the header
+}
+
+/* ---- Sensor (today's main screen, moved) ----------------------------- */
+// Sensor profiles and calibration (Ryan, 9 Oct). One profile per transducer; the active one sets range and
+// excitation, and carries its calibration (cert zero and span at 10 V, room-air factor). Saved to serial flash.
+// No text keyboard: a profile is named by model, range and serial (digits from the keypad).
+const SENS = { active: 0, page: 0, saved: null, draft: null,
+  prof: [{ model: 'UNIK 5000 PDCR50G1', fs: 1034, type: 'abs', serial: 5880156, exc: 10.0, zero: 0.05, span: 100.02, atm: 1.0512, atmDate: '08 Oct' }] };   // the bench Druck only
+SENS.saved = JSON.stringify(SENS.prof);
+// Drop-down list of profiles by serial number, over rows 1-3 (never over STOP); last item adds a profile.
+function profileList() {
+  closeOverlay();
+  overlay = st(mk(dev, 0, HDR, 480, 272 - HDR, 'ov'), { zIndex: '10' });
+  overlay.addEventListener('pointerdown', e => { if (e.target === overlay) closeOverlay(); updateUI(); });
+  const items = SENS.prof.map((q, i) => ['s/n ' + q.serial + ', 0 to ' + q.fs + ' mbar abs', i]);
+  if (SENS.prof.length < 3) items.push(['+ New profile', 'new']);
+  // v29: opens under the full-width box in row 2; three rows reach row 4, so it stays left of STOP then.
+  const ih = 40, lw = items.length > 2 ? 343 : 460, box = st(mk(overlay, 10, RY[1] - HDR, lw, ih * items.length, 'card'), { overflow: 'hidden' });
+  items.forEach(([label, k], i) => {
+    const it = st(mk(box, 0, i * ih, lw, ih, '', label), { fontSize: '16px', lineHeight: ih + 'px', paddingLeft: '12px', cursor: 'pointer', borderTop: i ? '1px solid ' + COL.bg : 'none',
+      background: k === SENS.active ? '#3E4C59' : '#FFFFFF', color: k === SENS.active ? '#FFFFFF' : k === 'new' ? COL.blue : COL.text });
+    it.addEventListener('pointerdown', e => {
+      e.preventDefault(); e.stopPropagation(); closeOverlay();
+      if (C.mode === 'AUTO' || C.mode === 'PAUSED') { sensLocked(); updateUI(); return; }
+      if (k === 'new') { SENS.draft = Object.assign({}, SENS.prof[SENS.active], { serial: 0, zero: 0, span: 100, atm: 1, atmDate: '' }); }
+      else if (k !== SENS.active) confirmBox('Use the sensor s/n ' + SENS.prof[k].serial + '? Range and calibration change now.', 'Use', 'act', () => { SENS.active = k; ev('SENS', 'Sensor in use ' + profName(SENS.prof[k])); });
+      updateUI();
+    });
+  });
+}
+// v39 (review, Ryan: all): the setpoint ceiling is the range of the sensor in use; P_MAX left Tuning.
+function pMax() { return SENS.prof[SENS.active].fs; }
+function sensLocked() { return C.mode === 'AUTO' || C.mode === 'PAUSED' ? refuse('Switch to manual to change the sensor') : false; }
+function profName(q) { return 'Druck ' + q.fs + ' mbar ' + q.type + (q.serial ? ', s/n ' + q.serial : ''); }
+function buildSensor() {
+  const s = newScreen('sensor');
+  // v45 (Ryan): two pages. Reading, and Sensor and calibration (profiles and calibration combined, nothing shown twice).
+  const segUpd = segmented(s, 10, RY[0], 460, ['Reading', 'Sensor and calibration'], () => SENS.page, i => { SENS.page = i; });
+  const pg = [0, 1].map(() => st(mk(s, 0, 0, 480, 272, ''), { pointerEvents: 'none' }));
+  const auto = el => st(el, { pointerEvents: 'auto' });
+  // Page 0, reading
+  const pc = mk(pg[0], 10, RY[1], 460, RH, 'card');   // v29: Sensor cards across the full width
+  const edge = mk(pc, 0, 6, 3, 36, '');
+  mk(pc, 12, 5, null, null, 'cap', 'Druck, mbar abs');
+  const sub = st(mk(pc, 12, 23, 220, 18, '', ''), { fontSize: '12px', color: COL.muted, overflow: 'hidden', textOverflow: 'ellipsis' });
+  const pv = st(mk(pc, 300, 4, 150, 40, '', ''), { fontSize: '26px', textAlign: 'right', lineHeight: '40px' });
+  const d = mk(pg[0], 10, RY[2], 343, RH, 'card');   // v39: Save in the side cell
+  const fld = (x, c) => { mk(d, x, 5, null, null, 'cap', c); return st(mk(d, x, 20, 100, null, '', '--'), { fontSize: '16px', overflow: 'hidden', textOverflow: 'ellipsis' }); };
+  // Plain words for the operator (v22): no chip names. v45 (Ryan): no calibration factor here, it is on the other page.
+  const f1 = fld(12, 'Signal, mV/V'), f2 = fld(128, 'Supply, V'), f3 = fld(240, 'Board, C');
+  // Page 1, sensor and calibration. Row 2: sensor in use (drop-down by serial number; in a draft, tap to enter the
+  // serial) and its range; Calibrate to a known pressure beside them. Row 3: certificate zero and span, the factor.
+  const cur = () => SENS.draft || SENS.prof[SENS.active];
+  const dd = st(mk(pg[1], 10, RY[1], 226, RH, 'card'), { cursor: 'pointer', pointerEvents: 'auto' });
+  const ddCap = mk(dd, 12, 5, null, null, 'cap', 'Sensor in use');
+  const ddVal = st(mk(dd, 12, 22, 180, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden', whiteSpace: 'nowrap' });
+  const ddArrow = st(mk(dd, 192, 0, 28, 48, '', '▾'), { fontSize: '16px', lineHeight: '48px', textAlign: 'center', color: COL.muted });
+  dd.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation();
+    if (SENS.draft) { if (sensLocked()) return updateUI(); keypad({ title: 'Serial number', now: String(SENS.draft.serial || ''), min: 1, max: 99999999, dec: 0, info: 'From the Druck label', onSet: v => { SENS.draft.serial = Math.round(v); return true; } }); updateUI(); return; }
+    profileList(); });
+  const edit = (x, y, cap, key, dec, min, max, info) => { const e = editCard(pg[1], x, y, 109, RH, cap, () => {
+    if (C.mode === 'AUTO' || C.mode === 'PAUSED') return sensLocked();
+    const q = cur();
+    keypad({ title: cap, now: dec ? q[key].toFixed(dec) : String(q[key]), min, max, dec: dec === 0 ? 0 : undefined, info, onSet: v => { q[key] = dec === 0 ? Math.round(v) : v; return true; } });
+  }); auto(e.c); return [e, key, dec]; };
+  const ed = [edit(244, RY[1], 'Range, mbar', 'fs', 0, 100, 35000, 'Full scale, mbar abs'),
+              edit(10, RY[2], 'Zero, mV', 'zero', 3, -5, 5, 'Certificate zero at 10 V'),
+              edit(127, RY[2], 'Span, mV', 'span', 3, 50, 150, 'Certificate span at 10 V')];
+  const fc = mk(pg[1], 244, RY[2], 109, RH, 'card');
+  mk(fc, 10, 5, null, null, 'cap', 'Cal factor');
+  const fv = st(mk(fc, 10, 23, 89, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden' });
+  // v45 (Ryan: room-air check becomes enter a known pressure): any reference, not only room air.
+  const bKnown = side(s, 1, '<small>Enter known</small><b style="font-size:16px">Pressure</b>', () => {
+    if (C.mode === 'AUTO' || C.mode === 'PAUSED') return sensLocked();
+    if (!(BENCH.druck && BENCH.exc)) return refuse('No Druck signal');
+    const q = SENS.prof[SENS.active], raw = PVreal / q.atm;
+    keypad({ title: 'Known pressure now, mbar abs', now: PVreal.toFixed(1), min: 1, max: q.fs, info: 'From a reference gauge or barometer',
+      onSet: v => ({ then: () => confirmBox('Set the cal factor to ' + (v / raw).toFixed(4) + ' (was ' + q.atm.toFixed(4) + ')? Readings scale by ' + ((v / raw / q.atm - 1) * 100).toFixed(2) + ' %.', 'Set', 'act', () => { q.atm = v / raw; q.atmDate = '09 Oct 2026'; ev('CAL', 'Cal factor ' + q.atm.toFixed(4) + ' from known pressure ' + v.toFixed(1) + ' mbar'); }) }) });
+  });
+  const bCreate = side(s, 2, '<b>Create</b>', () => {
+    const q = SENS.draft;
+    if (!q.serial) return refuse('Enter the serial number first');
+    if (SENS.prof.some(x => x.serial === q.serial)) return refuse('A profile for s/n ' + q.serial + ' exists');
+    SENS.prof.push(q); SENS.draft = null; SENS.active = SENS.prof.length - 1; ev('SENS', 'New profile ' + profName(q) + ', now in use'); return true;
+  }, 'act');
+  const bCancel = side(s, 1, 'Cancel', () => { SENS.draft = null; return true; });
+  const bSave = side(s, 2, '<b>Save</b>', () => { SENS.saved = JSON.stringify(SENS.prof); ev('SENS', 'Sensor profiles and calibration saved to serial flash (simulated)'); return true; }, 'act');
+  screens.sensor.foot = () => (SENS.page === 0 ? 'The Druck reading and its supply.' : SENS.draft ? 'New sensor: tap to enter the serial number, set range, zero and span, then Create.' : 'Tap the sensor to change it or add one. Enter known pressure sets the cal factor.') + (JSON.stringify(SENS.prof) !== SENS.saved ? ' Changed, not saved.' : '');
+  screens.sensor.update = () => {
+    if (SENS.page > 1) SENS.page = 1;
+    segUpd(); pg.forEach((e, i) => vis(e, i === SENS.page));
+    if (SENS.page !== 1 && SENS.draft) SENS.draft = null;   // leaving the page cancels a draft
+    const nd = !!SENS.draft;
+    vis(bCreate, nd); vis(bCancel, nd); vis(bSave, !nd); vis(bKnown, SENS.page === 1 && !nd);
+    const dirty = JSON.stringify(SENS.prof) !== SENS.saved;
+    tog(bSave, 'dis', !dirty);
+    set(ddCap, nd ? 'New sensor, serial' : 'Sensor in use'); set(ddArrow, nd ? '›' : '▾'); setc(ddArrow, nd ? COL.blue : COL.muted);
+    set(ddVal, nd ? (SENS.draft.serial ? 's/n ' + SENS.draft.serial : 'enter') : 's/n ' + SENS.prof[SENS.active].serial); setc(ddVal, nd && !SENS.draft.serial ? COL.warn : COL.text);
+    st(dd, { boxShadow: nd ? 'none' : 'inset 0 0 0 2px #AEB9C4' });
+    screens.sensor.footCol = dirty ? '#9A5D00' : null;
+    const A = SENS.prof[SENS.active], ok = BENCH.druck && BENCH.exc, q = cur();
+    set(pv, ok ? PVreal.toFixed(2) : '----'); setbg(edge, !ok ? COL.fault : COL.ok);
+    set(sub, !BENCH.druck ? 'No signal, check the sensor is connected' : !BENCH.exc ? 'Supply to the Druck out of range' : 's/n ' + A.serial + ', 0 to ' + A.fs + ' mbar');
+    setc(sub, ok ? COL.muted : COL.fault);
+    set(f1, BENCH.druck ? (PVreal / A.fs * 10).toFixed(3) : '0.000');
+    set(f2, BENCH.exc ? A.exc.toFixed(2) : '8.71'); setc(f2, BENCH.exc ? COL.text : COL.fault);
+    set(f3, '23.5');
+    ed.forEach(([e, k, dc]) => set(e.v, dc ? q[k].toFixed(dc) : String(q[k])));
+    set(fv, q.atm.toFixed(4));
+  };
+}
+
+/* ---- Motor service --------------------------------------------------- */
+const RATES = [16, 25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 600, 800, 1000];
+const ACCELS = [25, 50, 100, 200, 400, 800, 1600, 3200, 6400];
+const SIZES = [1, 10, 100, 1000, 10000];
+function stepList(list, v, dir) {
+  let i = list.reduce((b, x, k) => Math.abs(x - v) < Math.abs(list[b] - v) ? k : b, 0);
+  if (dir > 0 && list[i] <= v && i + 1 < list.length) i++; else if (dir < 0 && list[i] >= v && i > 0) i--;
+  return list[i];
+}
+// v41 (Ryan: Set Valve and Menu > Valve did the same; split motor parameters and homing): two Menu screens,
+// Motor (drive settings) and Homing (limit switch and Home), no page switch on either.
+let MOT_SAVED = JSON.stringify(MOT);
+const DRV_LOCK = () => C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING';
+function rdCard(par, x, y, w, cap, muted) { const c = mk(par, x, y, w, RH, 'card'); mk(c, 10, 5, w - 20, null, 'cap', cap); return st(mk(c, 10, 22, w - 20, 20, '', ''), { fontSize: '16px', lineHeight: '20px', overflow: 'hidden', whiteSpace: 'nowrap', color: muted ? COL.muted : COL.text }); }
+const STOP_WORDS = { DONE: 'Reached target', LIMIT: 'Limit switch', STOP: 'Stopped', none: 'None yet' };
+let motUnlocked = false, homUnlocked = false;
+function buildMotor() {
+  const s = newScreen('motor');
+  // v44 (review, Ryan: correct all): service screen, locked like Tuning. Row 1 Run, Start, Accel, Steps now;
+  // rows 2-3 the last move (what stopped it, where, target); side Lock above Save. Step mode, coil order and hold
+  // are wiring settings read over serial (VER?); Valve calc. duplicated the Valve screen.
+  const c3 = cols(3);
+  const spd = [['Run, steps/s', 'run', RATES], ['Start, steps/s', 'start', RATES], ['Accel, step/s/s', 'accel', ACCELS]].map((r, i) => {
+    const e = editCard(s, c3[i][0], RY[0], c3[i][1], RH, r[0], () => {
+      if (!motUnlocked) return msg('Hold Unlock to change the motor speeds.', 'info');
+      if (M.moving) return refuse('Busy: stop first');
+      keypad({ title: r[0], now: String(MOT[r[1]]), min: r[2][0], max: r[2][r[2].length - 1], dec: 0, info: 'Range ' + r[2][0] + ' to ' + r[2][r[2].length - 1], onSet: v => { MOT[r[1]] = Math.round(v); return true; } });
+    });
+    return [e, r];
+  });
+  const pos = rdCard(s, 361, RY[0], 109, 'Steps now');
+  // v45 (Ryan: too many words in the middle box): short value cards. Row 2 the last move and its target;
+  // row 3 distance, time and mean speed, which is what a speed change shows.
+  const vLast = rdCard(s, 10, RY[1], 226, 'Last move'), vLastCap = vLast.parentNode.firstChild, vTgt = rdCard(s, 244, RY[1], 109, 'Target, steps');
+  const vDist = rdCard(s, 10, RY[2], 109, 'Moved, steps'), vTook = rdCard(s, 127, RY[2], 109, 'Took, s'), vMean = rdCard(s, 244, RY[2], 109, 'Mean, steps/s');
+  const bLock = holdBtn(s, 361, RY[1], 109, RH, '', () => motUnlocked ? 0 : 1000, () => { motUnlocked = !motUnlocked; ev('MOT', motUnlocked ? 'Motor unlocked' : 'Motor locked'); });
+  const bSave = side(s, 2, '<b>Save</b>', () => { MOT_SAVED = JSON.stringify(MOT); ev('MOT', 'Motor settings saved to serial flash (proposed)'); return true; }, 'act');
+  screens.motor.leave = () => { motUnlocked = false; };
+  screens.motor.foot = () => JSON.stringify(MOT) !== MOT_SAVED ? 'Changed, not saved.' : motUnlocked ? 'Unlocked: tap a speed to change it.' : 'Locked. Hold Unlock to change the speeds.';
+  screens.motor.update = () => {
+    spd.forEach(([e, r]) => { set(e.v, String(MOT[r[1]])); setc(e.v, motUnlocked ? COL.text : COL.muted); });
+    set(pos, fint(M.pos));
+    const has = M.t0 != null, dur = has ? (M.moving ? t : M.tEnd) - M.t0 : 0, dist = has ? Math.abs(M.pos - M.from) : 0;
+    set(vLast, M.moving ? 'Moving' : STOP_WORDS[M.lastStop] || M.lastStop); setc(vLast, M.moving ? COL.blue : M.lastStop === 'LIMIT' ? COL.warn : COL.text);
+    set(vTgt, has ? fint(M.target) : '--'); set(vDist, has ? fint(dist) : '--'); set(vTook, has ? dur.toFixed(1) : '--'); set(vMean, has && dur > 0 ? fint(dist / dur) : '--');
+    tog(bSave, 'dis', JSON.stringify(MOT) === MOT_SAVED);
+    screens.motor.footCol = JSON.stringify(MOT) !== MOT_SAVED ? '#9A5D00' : COL.muted;
+    lockLabel(bLock, motUnlocked);
+  };
+}
+function buildHoming() {
+  const s = newScreen('homing');
+  // v44 (review, Ryan: correct all): operator screen, stays usable. Row 1 switch, last homing, past switch;
+  // row 2 progress, Home over rows 2-3; row 3 Offset and Creep (service, editable only when unlocked) and Lock.
+  // v45 (Ryan): last homing with date and year (226 wide to fit), steps visible while homing (above Lock), Home only.
+  const vHome = rdCard(s, 10, RY[0], 226, 'Last homing');
+  const vState = rdCard(s, 244, RY[0], 109, 'Switch, NC'), vOver = rdCard(s, 361, RY[0], 109, 'Past switch');
+  const vStep = rdCard(s, 10, RY[1], 226, 'Homing'), vStepCap = vStep.parentNode.firstChild, pos = rdCard(s, 244, RY[1], 109, 'Steps now');
+  const bh = btn(s, 361, RY[1], 109, 104, '<b style="font-size:16px">Home</b>', homeAsk, 'act');
+  const svc = (x, cap, key, unit) => editCard(s, x, RY[2], 109, RH, cap, () => {
+    if (!homUnlocked) return msg('Hold Unlock to change ' + cap.split(',')[0] + '.', 'info');
+    if (C.mode === 'HOMING') return refuse('Busy: homing');
+    const rg = RANGE[key];
+    keypad({ title: cap + ', ' + rg[0] + ' to ' + rg[1], now: String(P[key]), min: rg[0], max: rg[1], dec: 0, info: unit,
+      onSet: v => { if (!setParam(key, v)) return false; flash = Object.assign({}, flash || DEF_P, { [key]: P[key] }); try { localStorage.setItem(FLASH_KEY, JSON.stringify(flash)); } catch (e) { } ev('HOME', cap + ' set to ' + P[key] + ' and saved'); return true; } });
+  });
+  const eOff = svc(10, 'Offset, steps', 'Noffset', 'Count set at the closed limit');
+  const eCreep = svc(127, 'Creep, steps/s', 'fcreep', 'Slow final approach speed');
+  const bLock = holdBtn(s, 244, RY[2], 109, RH, '', () => homUnlocked ? 0 : 1000, () => { homUnlocked = !homUnlocked; ev('HOME', homUnlocked ? 'Homing settings unlocked' : 'Homing settings locked'); });
+  screens.homing.leave = () => { homUnlocked = false; };
+  screens.homing.foot = () => C.mode === 'HOMING' ? 'STOP to cancel.' : homUnlocked ? 'Unlocked: Offset and Creep save when set.' : 'Home closes to the switch, then sets 0 %.';
+  screens.homing.update = () => {
+    set(vState, LIM.active ? 'Open' : 'Closed'); setc(vState, LIM.active ? COL.warn : COL.text);
+    set(vHome, C.lastHome ? stamp(C.lastHome.t) : 'Not since power-on'); set(pos, fint(M.pos));
+    set(vOver, fint(LIM.over)); setc(vOver, LIM.over ? COL.fault : COL.text);
+    const hm = C.mode === 'HOMING' ? (homeStep().match(/(\d of 3): (.*)/) || []) : [];
+    set(vStepCap, hm[1] ? 'Homing, step ' + hm[1] : 'Homing');
+    set(vStep, C.mode === 'HOMING' ? (hm[2] ? hm[2][0].toUpperCase() + hm[2].slice(1) : 'Starting') : C.ref ? 'Homed' : 'Not homed'); setc(vStep, C.mode === 'HOMING' ? COL.blue : C.ref ? COL.text : COL.warn);
+    set(eOff.v, fint(P.Noffset)); set(eCreep.v, fint(P.fcreep));
+    [eOff, eCreep].forEach(e => setc(e.v, homUnlocked ? COL.text : COL.muted));
+    tog(bh, 'dis', DRV_LOCK());
+    lockLabel(bLock, homUnlocked);
+  };
+}
+
+/* ---- Limit and simulation -------------------------------------------- */
+
+/* ---- Tuning ---------------------------------------------------------- */
+// v32 (Ryan: say what each one is): [name, key, unit, decimals, short (keypad, about 30 chars), long (status line)].
+// v44 (review, Ryan: correct all): six rows on the screen. Kd, T_s, T_check, N_resp, dP_min, F-10 min move,
+// I hold lead and F-10 lag are set over serial only (CTRL commands); f_creep moved to Homing as Creep.
+// v45 (Ryan): full names, not variable names; left column Kp, Ti, valve direction (bottom), right P_MIN, Auto min, DB.
+const TUNE = [
+  ['Proportional gain', 'Kp', '%/mbar', 2, 'Gain, % open per mbar error', 'Proportional gain (Kp): % open per mbar of pressure error.'],
+  ['Integral time', 'Ti', 'min', 2, 'Integral time, 0 is off', 'Integral time (Ti): how fast auto removes a steady error. 0 turns it off.'],
+  ['Valve direction', 'KDIR', '', 0, '+1: opening raises pressure', 'Valve direction (K_DIR): +1 if opening the valve raises the pressure.'],
+  ['Lowest setpoint', 'Pmin', 'mbar', 2, 'Lowest setpoint allowed', 'Lowest setpoint (P_MIN). Auto faults (F-02) below it.'],
+  ['Lowest auto opening', 'outMin', '% open', 1, 'Auto never closes below this', 'Lowest auto opening (Auto min): auto never closes the valve below this.'],
+  ['Deadband', 'DB', 'steps', 0, 'Smaller moves are skipped', 'Deadband (DB): auto skips moves smaller than this.']];
+function setParam(key, v) {
+  if (key === 'KDIR') { if (v !== 1 && v !== -1) return refuse('K_DIR is +1 or -1'); if (C.mode === 'AUTO') return refuse('Set K_DIR in manual'); P.KDIR = v; return true; }
+  const r = RANGE[key];
+  if (!(v >= r[0] && v <= r[1])) return refuse(key + ' outside ' + r[0] + ' to ' + r[1]);
+  if (['DB', 'POSMAX', 'fhome', 'fcreep', 'Nbackoff', 'Nclear', 'Noffset', 'Nresp', 'checkMin', 'leadMax'].includes(key)) v = Math.round(v);
+  if (key === 'Kp' && C.mode === 'AUTO' && P.Kp != null) { const e = P.KDIR * (C.SP - PV); C.I += (P.Kp - v) / 100 * P.POSMAX * e; } // keep output continuous
+  if (key === 'POSMAX' && (C.mode === 'AUTO' || C.mode === 'PAUSED')) return refuse('Set POS_MAX in manual');
+  P[key] = v;
+  if (key === 'POSMAX' && C.ref) { C.manPos = Math.min(C.manPos, v); }
+  return true;
+}
+function savedJSON() { return JSON.stringify(flash || DEF_P); }
+function pJSON() { const o = {}; for (const k in DEF_P) o[k] = P[k]; return JSON.stringify(o); }
+function saveP() {
+  const o = {}; for (const k in DEF_P) o[k] = P[k];
+  flash = o;
+  try { localStorage.setItem(FLASH_KEY, JSON.stringify(o)); } catch (e) { }
+  ev('CTRL', 'Settings saved to serial flash (simulated)');
+  return true;
+}
+let tunePage = 0, tuneUnlocked = false;
+function buildTune() {
+  const s = newScreen('tune');
+  const rows = TUNE.map((r, i) => {
+    const pg = Math.floor(i / 6), k = i % 6;
+    const row = st(mk(s, cols(2)[Math.floor(k / 3)][0], RY[k % 3], cols(2)[Math.floor(k / 3)][1], RH, 'card'), { cursor: 'pointer' });
+    st(mk(row, 8, 4, 152, 16, '', r[0]), { fontSize: '12px', color: COL.muted, lineHeight: '16px' });
+    const v = st(mk(row, 8, 22, 134, 20, '', ''), { fontSize: '16px', textAlign: 'right', lineHeight: '20px' });
+    st(mk(row, 148, 0, 14, RH, '', '\u203A'), { fontSize: '16px', color: COL.blue, lineHeight: RH + 'px', textAlign: 'center' });   // editable (review 3)
+    row.addEventListener('pointerdown', () => {
+      if (!tuneUnlocked) { msg(r[5] + ' Hold Unlock to change.', 'info'); return; }
+      if (r[1] === 'KDIR') {
+        const nv = P.KDIR === 1 ? -1 : 1;
+        if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Set K_DIR in manual');
+        return confirmBox('Change the valve direction from ' + (P.KDIR === 1 ? '+1' : '-1') + ' to ' + (nv === 1 ? '+1' : '-1') + '? Auto will drive the valve the other way.', 'Change', 'act', () => setParam('KDIR', nv));
+      }
+      const rg = RANGE[r[1]];
+      keypad({ title: r[0] + (r[2] ? ', ' + r[2] : '') + ', ' + rg[0] + ' to ' + rg[1], now: P[r[1]] == null ? 'not set' : (+P[r[1]]).toFixed(r[3]), min: rg[0], max: rg[1], dec: r[3] === 0 ? 0 : undefined,
+        info: r[4], onSet: x => r[1] === 'POSMAX' ? ((C.mode === 'AUTO' || C.mode === 'PAUSED') ? refuse('Set POS_MAX in manual') : confirmFullOpen(x, 'set on Tuning')) : setParam(r[1], x) });
+    });
+    return [row, v, r, pg];
+  });
+  const bLock = holdBtn(s, 361, RY[0], 109, 104, '', () => tuneUnlocked ? 0 : 1000, () => { tuneUnlocked = !tuneUnlocked; ev('TUNE', tuneUnlocked ? 'Tuning unlocked' : 'Tuning locked'); });
+  const bSave = side(s, 2, '<b>Save</b>', saveP, 'act');
+  screens.tune.leave = () => { tuneUnlocked = false; };
+  screens.tune.foot = () => pJSON() !== savedJSON() ? 'Changed, not saved to flash.' : tuneUnlocked ? 'Unlocked: tap a row to change it.' : 'Locked. Tap a row to see what it does; hold Unlock to edit.';
+  screens.tune.footCol = null;
+  screens.tune.update = () => {
+    rows.forEach(([row, v, r, pg]) => {
+      vis(row, pg === tunePage);
+      const x = P[r[1]];
+      if (r[1] === 'KDIR') { set(v, x === 1 ? '+1' : x === -1 ? '-1' : 'not set'); setc(v, x ? COL.text : COL.warn); }
+      else { set(v, x == null ? 'not set' : (r[3] === 0 ? fint(x) : (+x).toFixed(r[3])) + (r[2] ? ' ' + r[2] : '')); setc(v, x == null ? COL.warn : COL.text); }
+      // Locked rows: muted value colour, not opacity (opacity in LVGL renders the row into a 24 KB layer).
+      if (!tuneUnlocked && x != null) setc(v, COL.muted);
+    });
+    tog(bSave, 'dis', pJSON() === savedJSON());
+    screens.tune.footCol = pJSON() !== savedJSON() ? '#9A5D00' : COL.muted;
+    lockLabel(bLock, tuneUnlocked);
+  };
+}
+function lockLabel(b, on) {
+  let l = b.querySelector('.lbl'); if (!l) { l = document.createElement('span'); l.className = 'lbl'; b.insertBefore(l, b.firstChild); }
+  seth(l, on ? '<b>Lock</b>' : '<small>Hold to</small><b>Unlock</b>');
+  st(l, { display: 'flex', flexDirection: 'column', alignItems: 'center' });
+}
+
+/* ---- Faults and events ------------------------------------------------ */
+function buildFaults() {
+  const s = newScreen('faults');
+  // v30 (Ryan): event history is its own scrolling list (rows 2-3, full width), no Newer / Older buttons.
+  // Row 1: latched faults (scrolls when more than one), ACK beside it. In LVGL both lists are scrollable
+  // lv_obj containers of labels (drag to scroll, scrollbar shown while moving).
+  const fc = mk(s, 10, RY[0], 343, RH, 'card');
+  // Highest priority first, each a 16 px name over a 12 px date and time (v45, Ryan); scrolls past one; the count is on ACK.
+  const fl = st(mk(fc, 10, 4, 327, 40, 'list'), { fontSize: '16px', lineHeight: '20px', overflowY: 'auto', scrollbarWidth: 'thin' });
+  const ba = side(s, 0, '<b>ACK</b>', ack, 'act');
+  const ec = mk(s, 10, RY[1], 460, 104, 'card');
+  mk(ec, 10, 3, null, null, 'cap', 'Events, newest first');
+  const el = st(mk(ec, 10, 19, 446, 83, ''), { fontSize: '12px', lineHeight: '16px', overflowY: 'auto', whiteSpace: 'normal', scrollbarWidth: 'thin' });
+  [fl, el].forEach(box => {   // drag to scroll, as on the touch panel
+    let y0 = null, s0 = 0;
+    box.addEventListener('pointerdown', e => { y0 = e.clientY; s0 = box.scrollTop; box.setPointerCapture(e.pointerId); });
+    box.addEventListener('pointermove', e => { if (y0 != null) box.scrollTop = s0 - (e.clientY - y0) / (dev.getBoundingClientRect().width / 480); });
+    box.addEventListener('pointerup', () => { y0 = null; });
+  });
+  let lastN = -1, lastF = null;
+  screens.faults.foot = () => C.faults.size ? 'Fix the cause, then ACK. Drag a list to scroll it.' : 'No latched faults. Drag the events to scroll.';
+  screens.faults.update = () => {
+    const fk = faultsByPriority().map(([k, f]) => k + f.t).join('|');
+    if (fk !== lastF) { lastF = fk; fl.innerHTML = ''; fl.scrollTop = 0; if (!C.faults.size) { const p = document.createElement('p'); p.textContent = 'No latched faults'; p.style.color = COL.muted; p.style.margin = '0'; fl.appendChild(p); } faultsByPriority().forEach(([k, f]) => { const p = document.createElement('p'); p.textContent = k + '  ' + faultShort(k, f); p.style.color = COL.fault; p.style.margin = '0'; p.style.whiteSpace = 'nowrap'; p.style.overflow = 'hidden'; p.style.textOverflow = 'ellipsis'; fl.appendChild(p);
+      const q = document.createElement('p'); q.textContent = stamp(f.t, true); st(q, { color: COL.muted, margin: '0', fontSize: '12px', lineHeight: '16px', paddingBottom: '4px' }); fl.appendChild(q); }); }   // v45 (Ryan): date with year and seconds under each fault
+    seth(ba, C.faults.size > 1 ? '<small>ACK</small><b style="font-size:16px">' + C.faults.size + ' faults</b>' : '<b>ACK</b>');
+    tog(ba, 'dis', !C.faults.size);
+    if (C.events.length !== lastN) {
+      const keep = el.scrollTop; lastN = C.events.length; el.innerHTML = '';
+      const evs = C.events.slice().reverse();
+      if (!evs.length) { const p = document.createElement('p'); p.textContent = 'None'; p.style.color = COL.muted; el.appendChild(p); }
+      evs.forEach(e => { const p = document.createElement('p'); p.textContent = stamp(e.t, true) + '  ' + e.tag + '  ' + e.text; p.style.padding = '2px 0'; p.style.margin = '0'; p.style.borderTop = '1px solid ' + COL.bg;
+        p.style.color = /^F-/.test(e.tag) ? COL.fault : /^W-/.test(e.tag) ? '#9A5D00' : COL.text; el.appendChild(p); });
+      el.scrollTop = keep;
+    }
+  };
+}
+
+/* ---- Trend ----------------------------------------------------------- */
+let devCanvas, devWin = 600;
+function buildTrend() {
+  const s = newScreen('trend');
+  const c = mk(s, 10, RY[0], 343, 160, 'card');
+  devCanvas = document.createElement('canvas');
+  devCanvas.width = 686; devCanvas.height = 320;
+  st(devCanvas, { position: 'absolute', left: '0', top: '0', width: '343px', height: '160px' });
+  c.appendChild(devCanvas);
+  const wb = [[120, '2 min'], [600, '10 min'], [1800, '30 min']].map((w, i) => [side(s, i, '<span style="font-size:16px">' + w[1] + '</span>', () => { devWin = w[0]; }), w[0]]);
+  screens.trend.foot = () => 'Shaded: time in auto.';
+  screens.trend.update = () => {
+    wb.forEach(([b, w]) => tog(b, 'on', devWin === w));
+    drawChart(devCanvas, devWin, { pv: '#2D5877', sp: '#B4561E', pos: '#2EA043', mech: '#969EA6', grid: '#E3E9EF', text: '#546374', band: 'rgba(46,160,67,0.09)', font: 'Montserrat, sans-serif', solid: true }, 2, true);
+  };
+}
+
+/* ---- Chart (device trend and bench chart) ---------------------------- */
+function drawChart(cv, win, col, scale, compact) {
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H); ctx.scale(scale, scale);
+  const w = W / scale, h = H / scale;
+  const L = compact ? 40 : 52, R = compact ? 42 : 44, T = compact ? 24 : 12, B = compact ? 20 : 24;   // compact: legend row above the plot
+  const pw = w - L - R, ph = h - T - B;
+  const pts = trend.filter(p => p.t >= t - win);
+  let lo = Infinity, hi = -Infinity;
+  pts.forEach(p => { if (p.pv != null) { lo = Math.min(lo, p.pv); hi = Math.max(hi, p.pv); } lo = Math.min(lo, p.sp); hi = Math.max(hi, p.sp); });
+  if (!isFinite(lo)) { lo = 0; hi = 10; }
+  { const sp0 = Math.max(0.5, hi - lo), mid = (hi + lo) / 2; lo = Math.max(0, mid - sp0 * 0.6); hi = mid + sp0 * 0.6; }   // absolute pressure: axis never below 0
+  // rounded tick step (0.1, 0.2, 0.5, 1, 2, 5 ...) giving 3 to 5 intervals; axis snapped to multiples of it
+  let step = 0.1;
+  for (const m of [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500]) { step = m; if ((hi - lo) / m <= 5) break; }
+  lo = Math.max(0, Math.floor(lo / step + 1e-9) * step); hi = Math.ceil(hi / step - 1e-9) * step; if (hi - lo < step) hi = lo + step;
+  const dec = step < 1 ? 1 : 0;
+  const xOf = tt => L + pw * (1 - (t - tt) / win);
+  const yP = v => T + ph * (1 - (v - lo) / (hi - lo));
+  const yPct = v => T + ph * (1 - v / 100);
+  ctx.font = (col.solid ? '500 12px ' : '11px ') + col.font; ctx.lineWidth = 1;
+  // shade spans in auto
+  if (col.band) {
+    ctx.fillStyle = col.band; let x0 = null;
+    pts.forEach((p, i) => {
+      if (p.auto && x0 == null) x0 = xOf(p.t);
+      const endRun = x0 != null && (!p.auto || i === pts.length - 1);
+      if (endRun) { const x1 = xOf(p.t); ctx.fillRect(Math.max(L, x0), T, Math.min(L + pw, x1) - Math.max(L, x0), ph); x0 = null; }
+    });
+  }
+  const nT = Math.round((hi - lo) / step);
+  for (let i = 0; i <= nT; i++) {
+    const v = lo + i * step, y = yP(v);
+    ctx.strokeStyle = col.grid; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke();
+    ctx.fillStyle = col.text; ctx.textAlign = 'right'; ctx.fillText(v.toFixed(dec), L - 4, y + 4);
+  }
+  ctx.textAlign = 'left';
+  for (let i = 0; i <= 4; i++) { const y = yPct(100 - 25 * i); ctx.fillText((100 - 25 * i) + '%', L + pw + 4, y + 4); }
+  ctx.textAlign = 'center'; ctx.fillStyle = col.text;
+  ctx.fillText('-' + Math.round(win / 60) + ' min', L + 18, h - 6); ctx.fillText('now', L + pw - 10, h - 6);
+  // Device trend (col.solid): one 2 px width, no dashes. lv_chart shares one line style across series,
+  // and the LVGL SW renderer dashes only horizontal and vertical lines.
+  const line = (key, color, yf, dash, wdt) => {
+    ctx.strokeStyle = color; ctx.lineWidth = col.solid ? 2 : wdt; ctx.setLineDash(col.solid ? [] : dash); ctx.beginPath(); let pen = false;
+    pts.forEach(p => { const v = p[key]; if (v == null) { pen = false; return; } const x = xOf(p.t), y = yf(v); if (!pen) { ctx.moveTo(x, y); pen = true; } else ctx.lineTo(x, y); });
+    ctx.stroke(); ctx.setLineDash([]);
+  };
+  ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+  line('mech', col.mech, yPct, [2, 3], 1.2);
+  line('pos', col.pos, yPct, [], 1.4);
+  line('sp', col.sp, yP, [6, 4], 1.4);
+  line('pv', col.pv, yP, [], 1.8);
+  const last = pts[pts.length - 1];
+  if (last && last.pv != null) { ctx.fillStyle = col.pv; ctx.beginPath(); ctx.arc(xOf(last.t), yP(last.pv), 3, 0, 7); ctx.fill(); }
+  ctx.restore();
+  if (compact) {   // legend above the plot, each word in its line's colour (review 3, finding 8)
+    ctx.textAlign = 'left'; let x = L;
+    [['PV', col.pv], [' and ', col.text], ['SP', col.sp], [' mbar, left.  ', col.text], ['Valve %', col.pos], [', right', col.text]].forEach(([w, c]) => { ctx.fillStyle = c; ctx.fillText(w, x, 14); x += ctx.measureText(w).width; });
+  }
+}
+let benchWin = 600;
+const bench = document.getElementById('chart');
+function drawBench() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = bench.getBoundingClientRect();
+  const W = Math.max(300, Math.round(r.width * dpr)), H = Math.round(260 * dpr);
+  if (bench.width !== W || bench.height !== H) { bench.width = W; bench.height = H; }
+  const cs = getComputedStyle(document.documentElement);
+  const g = n => cs.getPropertyValue(n).trim();
+  drawChart(bench, benchWin, { pv: g('--c-pv'), sp: g('--c-sp'), pos: g('--c-pos'), mech: g('--c-mech'), grid: g('--rule'), text: g('--muted'), band: 'rgba(46,160,67,0.10)', font: 'IBM Plex Sans, sans-serif' }, dpr, false);
+}
+
+/* ======================================================================
+ * Serial console (planned commands)
+ * ==================================================================== */
+const con = document.getElementById('con');
+function conLog(text, cls) {
+  const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls;
+  con.appendChild(d);
+  while (con.childNodes.length > 400) con.removeChild(con.firstChild);
+  con.scrollTop = con.scrollHeight;
+}
+const HELP = [
+  'CTRL? | CTRL HOME | CTRL STOP | CTRL AUTO | CTRL MAN [%] | CTRL STEPS n | CTRL SP mbar | CTRL ACK | CTRL LOG? | CTRL SAVE | CTRL LOAD | CTRL DEFAULTS',
+  'PID? | PID KP|TI|KD|DB|TS|PMIN|TCHECK|NRESP|DPMIN|TCONV|CHECKMIN|LEAD|TLAG|OUTMIN v | PID KDIR +1|-1',
+  'VALVE? | VALVE POSMAX|FHOME|FCREEP|BACKOFF|CLEAR|OFFSET v',
+  'LIM? | LIM SIM AT n | LIM SIM HYST n | LIM SIM NORMAL|OPEN|CLOSED | LIM SIM LOSE n',
+  'MOT? | MOT MOVE n | MOT STOP | MOT RATE|START|ACCEL v'];
+function okErr(r, okText) { conLog(r === false ? 'ERR ' + C.refusal : 'OK' + (okText ? ' ' + okText : ''), r === false ? 'err' : ''); }
+function command(line) {
+  const u = line.trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!u) return;
+  conLog('> ' + line.trim(), 'in');
+  const w = u.split(' '), num = parseFloat(w[w.length - 1]);
+  C.refusal = 'bad value';
+  const pmap = { KP: 'Kp', TI: 'Ti', KD: 'Kd', DB: 'DB', TS: 'Ts', PMIN: 'Pmin', TCHECK: 'Tcheck', NRESP: 'Nresp', DPMIN: 'dPmin', TCONV: 'Tconv', CHECKMIN: 'checkMin', LEAD: 'leadMax', TLAG: 'Tlag', OUTMIN: 'outMin' };
+  const vmap = { POSMAX: 'POSMAX', FHOME: 'fhome', FCREEP: 'fcreep', BACKOFF: 'Nbackoff', CLEAR: 'Nclear', OFFSET: 'Noffset' };
+  if (u === 'HELP') { HELP.forEach(l => conLog(l)); return; }
+  if (u === 'CTRL?') { conLog('mode=' + C.mode + ' homed=' + (C.ref ? 1 : 0) + ' pv=' + fmtP(PV) + ' sp=' + C.SP.toFixed(2) + ' pos=' + M.pos + ' target=' + (C.mode === 'AUTO' ? C.posCmd : C.manPos) + ' open=' + pctOf(M.pos).toFixed(1) + '% I=' + Math.round(C.I) + ' faults=' + ([...C.faults.keys()].join(',') || 'none')); conLog('OK'); return; }
+  if (u === 'CTRL HOME') return okErr(home());
+  if (u === 'CTRL STOP') return okErr(operatorStop());
+  if (u === 'CTRL AUTO') return okErr(toAuto());
+  if (w[0] === 'CTRL' && w[1] === 'MAN') {
+    if (C.mode === 'AUTO' || C.mode === 'PAUSED') { if (!toManual()) return okErr(false); }
+    if (w.length > 2) return okErr(isNaN(num) ? false : (num >= 0 && num <= 100 ? setManSteps(num / 100 * P.POSMAX) : refuse('0 to 100 %')));
+    return okErr(C.mode === 'MANUAL' ? true : refuse('Not homed'));
+  }
+  if (w[0] === 'CTRL' && w[1] === 'STEPS') return okErr(isNaN(num) ? false : setManSteps(num));
+  if (w[0] === 'CTRL' && w[1] === 'SP') return okErr(isNaN(num) ? false : setSP(num));
+  if (u === 'CTRL ACK') return okErr(ack());
+  if (u === 'CTRL LOG?') { C.events.slice(-20).forEach(e => conLog('EVT,' + clock(e.t) + ',' + e.tag + ',' + e.text)); conLog('OK'); return; }
+  if (u === 'CTRL SAVE') return okErr(saveP());
+  if (u === 'CTRL LOAD') { P = Object.assign({}, DEF_P, flash || {}); return okErr(true, 'loaded'); }
+  if (u === 'CTRL DEFAULTS') { if (C.mode === 'AUTO') return okErr(refuse('Switch to manual first')); P = Object.assign({}, DEF_P); return okErr(true, 'defaults, not saved'); }
+  if (u === 'PID?') { conLog(Object.keys(pmap).map(k => k + '=' + P[pmap[k]]).join(' ') + ' KDIR=' + P.KDIR); conLog('OK'); return; }
+  if (w[0] === 'PID' && w[1] === 'KDIR') return okErr(setParam('KDIR', num));
+  if (w[0] === 'PID' && pmap[w[1]]) return okErr(isNaN(num) ? false : setParam(pmap[w[1]], num));
+  if (u === 'VALVE?') { conLog('homed=' + (C.ref ? 1 : 0) + ' pos=' + M.pos + ' open=' + pctOf(M.pos).toFixed(1) + '% ' + Object.keys(vmap).map(k => k + '=' + P[vmap[k]]).join(' ')); conLog('OK'); return; }
+  if (w[0] === 'VALVE' && vmap[w[1]]) { if (C.mode === 'HOMING') return okErr(refuse('Homing in progress')); return okErr(isNaN(num) ? false : setParam(vmap[w[1]], num)); }
+  if (u === 'LIM?') { conLog('source=simulated force=' + LIM.force + ' contact=' + (LIM.raw ? 'open' : 'closed') + ' active=' + (LIM.active ? 1 : 0) + ' seat=' + LIM.simPos + ' hyst=' + LIM.hyst + ' overtravel=' + LIM.over + ' last_home=' + (C.lastHome ? clock(C.lastHome.t) : 'none')); conLog('OK'); return; }
+  if (w[0] === 'LIM' && w[1] === 'SIM') {
+    if (w[2] === 'AT' && !isNaN(num)) { if (M.moving) return okErr(refuse('Busy')); LIM.simPos = Math.round(num); updateRaw(); return okErr(true); }
+    if (w[2] === 'HYST' && !isNaN(num)) { LIM.hyst = clamp(Math.round(num), 0, 1000); return okErr(true); }
+    if (['NORMAL', 'OPEN', 'CLOSED'].includes(w[2])) { LIM.force = w[2]; ev('LIM', 'Pretend switch ' + w[2].toLowerCase()); return okErr(true); }
+    if (w[2] === 'LOSE' && !isNaN(num)) { LIM.simPos -= Math.round(num); ev('LIM', 'Simulated ' + Math.round(num) + ' lost steps'); return okErr(true); }
+  }
+  if (u === 'MOT?') { conLog('pos=' + M.pos + ' moving=' + (M.moving ? M.dir : 0) + ' rate=' + MOT.run + ' start=' + MOT.start + ' accel=' + MOT.accel + ' mode=FULL order=0213 last_stop=' + M.lastStop); conLog('OK'); return; }
+  if (u === 'MOT STOP') { stopMotor(); return okErr(true, 'stopped at ' + M.pos); }
+  if (w[0] === 'MOT' && w[1] === 'MOVE' && !isNaN(num)) return okErr(jog(Math.round(num)));
+  if (w[0] === 'MOT' && ['RATE', 'START', 'ACCEL'].includes(w[1]) && !isNaN(num)) {
+    if (M.moving) return okErr(refuse('busy, MOT STOP first'));
+    if (C.mode === 'AUTO' || C.mode === 'HOMING') return okErr(refuse('auto running'));
+    const k = { RATE: 'run', START: 'start', ACCEL: 'accel' }[w[1]];
+    MOT[k] = clamp(Math.round(num), k === 'accel' ? 10 : 16, k === 'accel' ? 20000 : 1000); return okErr(true);
+  }
+  conLog('ERR unknown command (HELP lists them)', 'err');
+}
+document.getElementById('csend').addEventListener('click', () => { const i = document.getElementById('cin'); command(i.value); i.value = ''; });
+document.getElementById('cin').addEventListener('keydown', e => { if (e.key === 'Enter') { command(e.target.value); e.target.value = ''; } });
+
+/* ======================================================================
+ * Bench panel wiring
+ * ==================================================================== */
+let speed = 1, paused = false, quick = null;
+function setSpeed(v) { speed = v; document.querySelectorAll('[data-speed]').forEach(b => b.classList.toggle('on', +b.dataset.speed === v)); }
+document.querySelectorAll('[data-speed]').forEach(b => b.addEventListener('click', () => setSpeed(+b.dataset.speed)));
+function setWin(v) { benchWin = v; document.querySelectorAll('[data-win]').forEach(b => b.classList.toggle('on', +b.dataset.win === v)); drawBench(); }
+document.querySelectorAll('[data-win]').forEach(b => b.addEventListener('click', () => setWin(+b.dataset.win)));
+document.getElementById('pause').addEventListener('click', e => { paused = !paused; e.target.textContent = paused ? 'Run' : 'Pause'; e.target.classList.toggle('on', paused); });
+document.getElementById('reboot').addEventListener('click', () => { reboot(); show('ctrl'); });
+document.getElementById('quick').addEventListener('click', () => {
+  setSpeed(20);
+  if (C.faults.size) command('CTRL ACK');
+  quick = [() => { setPlumb('line'); setPump(true); setHe(true); return true; }, () => { if (!C.ref && C.mode !== 'HOMING') home(); return true; }, () => C.mode === 'MANUAL' && C.ref, 'CTRL SP 5', 'CTRL MAN 34', () => !M.moving, () => { setSpeed(5); return true; }];
+});
+function runQuick() {
+  if (!quick) return;
+  while (quick.length) {
+    const s = quick[0];
+    if (typeof s === 'function') { if (!s()) return; quick.shift(); }
+    else { quick.shift(); command(s); if (s === 'CTRL HOME' && C.mode !== 'HOMING' && !C.ref) { quick = null; return; } }
+  }
+  quick = null;
+}
+const bind = (id, fn) => document.getElementById(id).addEventListener('change', e => fn(e.target));
+bind('b-druck', e => { BENCH.druck = e.checked; });
+bind('b-exc', e => { BENCH.exc = e.checked; });
+bind('b-coupled', e => { BENCH.coupled = e.checked; ev('BENCH', e.checked ? 'Drive turning the mechanism' : 'Drive slipping: count moves, mechanism does not'); });
+bind('b-air', e => { const v = parseFloat(e.value); if (v > 0 && v < 1100) BENCH.air = v; });
+
+
+/* ======================================================================
+ * Flow line panel
+ * ==================================================================== */
+const FL_PARAMS = [
+  ['bath', 'Bath pressure, mbar abs', 800, 1300, 1], ['Q', 'Heat load on pot, mW', 0, 1000, 1], ['Gb', 'Pot to bath leak, mW/K', 0, 100, 0.1],
+  ['Chw', 'Pot metal heat capacity, J/K', 0.01, 100, 0.1], ['S', 'Pump speed at pot, L/s', 0.1, 100, 0.5], ['ult', 'Pump ultimate, mbar', 0.001, 10, 0.01],
+  ['V', 'Gas volume, pot and line, L', 0.1, 100, 0.5], ['seat', 'Needle leaves seat at, % travel', 0, 90, 1], ['bore', 'Seat bore, mm', 0.05, 5, 0.05],
+  ['gap', 'Gap per mm of lift, µm/mm', 0.1, 200, 0.1], ['Cd', 'Discharge coefficient', 0.05, 1, 0.05], ['cap', 'Capillary equivalent bore, µm', 10, 2000, 10],
+  ['delay', 'Capillary transport delay, s', 0.01, 19, 0.5], ['pot', 'Pot volume, mL', 1, 5000, 10], ['pitch', 'Thread pitch, mm', 0.05, 5, 0.05],
+  ['turns', 'Turns, closed to open', 0.5, 50, 0.5], ['spt', 'Full steps per output turn', 100, 100000, 1], ['fnoise', 'Flow noise, % rms', 0, 20, 0.5],
+  ['relief', 'Relief valve, mbar abs', 100, 3000, 10]];
+const fl$ = id => document.getElementById(id);
+function flSync() { FL_PARAMS.forEach(([k]) => { const el = fl$('flp-' + k); if (el && document.activeElement !== el) el.value = FLP[k]; }); }
+function flBuildParams() {
+  const box = fl$('fl-params');
+  FL_PARAMS.forEach(([k, lab, lo, hi, step]) => {
+    const l = document.createElement('label');
+    const sp = document.createElement('span'); sp.textContent = lab;
+    const inp = document.createElement('input'); inp.type = 'number'; inp.id = 'flp-' + k; inp.min = lo; inp.max = hi; inp.step = step;
+    inp.addEventListener('change', () => { const v = parseFloat(inp.value); if (!isNaN(v) && v >= lo && v <= hi) { FLP[k] = v; flCurveCalc(); flDraw(); } else inp.value = FLP[k]; });
+    l.append(sp, inp); box.appendChild(l);
+  });
+  flSync();
+}
+function setHe(on) { if (FL.he === on) return; FL.he = on; ev('BENCH', 'Helium flow ' + (on ? 'on' : 'off')); flButtons(); }
+function setPump(on) { if (FL.pump === on) return; FL.pump = on; ev('BENCH', 'Pump ' + (on ? 'on' : 'off')); flButtons(); flCurveCalc(); }
+function setPlumb(v) { BENCH.plumb = v; document.querySelectorAll('[data-plumb]').forEach(b => b.classList.toggle('on', b.dataset.plumb === v)); flButtons(); }
+function flButtons() {
+  const he = fl$('fl-he'), pu = fl$('fl-pump');
+  he.textContent = 'Helium flow: ' + (FL.he ? 'on' : 'off'); he.setAttribute('aria-pressed', FL.he ? 'true' : 'false');
+  pu.textContent = 'Pump: ' + (FL.pump ? 'on' : 'off'); pu.setAttribute('aria-pressed', FL.pump ? 'true' : 'false');
+  fl$('fl-port').textContent = BENCH.plumb === 'line' ? 'Druck plumbed to this line' : 'Druck is open to room air, not this line';
+}
+function fmtMass(gps) { return gps < 1e-4 ? '0' : (gps * 1000).toFixed(2) + ' mg/s'; }
+function lph(gps) { return (gps * 3600 / 125).toFixed(3) + ' L/h liquid'; }
+const flRows = {};
+function flRow(key, label) { const dl = fl$('fl-read'); const dt = document.createElement('dt'); dt.textContent = label; const dd = document.createElement('dd'); dl.append(dt, dd); flRows[key] = dd; }
+function flBuildRead() {
+  [['nv', 'Needle (mechanism)'], ['gap', 'Needle gap'], ['in', 'Liquid into pot'], ['flash', 'Flashes on arrival'], ['ev', 'Boiling off'],
+   ['pot', 'Liquid in pot'], ['tp', 'Pot temperature'], ['p', 'Pressure at Druck'], ['thr', 'Pump throughput']].forEach(r => flRow(r[0], r[1]));
+}
+function flPctMech() { return 100 * clamp(LIM.simPos, 0, FLP.turns * FLP.spt) / (FLP.turns * FLP.spt); }
+function flUpdate() {
+  const s = FL, p = FLP, pc = flPctMech(), h0 = p.seat / 100 * p.turns * p.pitch;
+  const Tb = tsat(p.bath * 100), L = latent(Math.min(s.T, 5));
+  set(fl$('fl-tb'), 'LHe ' + Tb.toFixed(2) + ' K');
+  set(fl$('fl-pb'), p.bath.toFixed(0) + ' mbar');
+  const feed = s.he;
+  tog(fl$('fl-hev'), 'open', feed); set(fl$('fl-hes'), feed ? 'on' : 'off');
+  tog(fl$('fl-p1'), 'live', feed); tog(fl$('fl-p2'), 'live', feed);
+  const flowing = s.mIn > 1e-5;
+  tog(fl$('fl-nv'), 'open', feed && s.gap > 0); tog(fl$('fl-p3'), 'live', flowing);
+  set(fl$('fl-nvp'), pc.toFixed(1) + ' %, lift ' + s.lift.toFixed(2) + ' mm');
+  set(fl$('fl-nvg'), s.gap > 0 ? 'gap ' + s.gap.toFixed(2) + ' µm' : 'seated (lifts at ' + h0.toFixed(2) + ' mm)');
+  set(fl$('fl-flow'), flowing ? fmtMass(s.mIn) : 'no flow');
+  set(fl$('fl-cap'), 'capillary, ' + p.delay + ' s');
+  const frac = s.mmax > 0 ? s.mL / s.mmax : 0, liq = fl$('fl-potliq'), hgt = Math.round(110 * frac);
+  liq.setAttribute('y', 220 - hgt); liq.setAttribute('height', hgt);
+  set(fl$('fl-tp'), s.T.toFixed(3) + ' K');
+  set(fl$('fl-ml'), s.mL > 0 ? (s.mL / rhoL(Math.min(s.T, 5))).toFixed(0) + ' mL liquid' : 'dry');
+  set(fl$('fl-reg'), s.regime === 'full' ? 'full, overflowing' : s.regime === 'wet' ? (s.mIn > s.mEv ? 'liquid collecting' : 'liquid boiling away') : 'dry');
+  const gasLive = FL.pump && s.mOut > 1e-5;
+  tog(fl$('fl-p4'), 'live', gasLive); tog(fl$('fl-p5'), 'live', gasLive);
+  set(fl$('fl-drp'), s.P < 10 ? s.P.toFixed(2) : s.P.toFixed(0));
+  tog(fl$('fl-pmp'), 'on', FL.pump);
+  set(fl$('fl-pms'), FL.pump ? 'on, ' + p.S + ' L/s' : 'off');
+  set(fl$('fl-thr'), FL.pump ? (s.mOut * KPV * 10).toFixed(1) + ' mbar L/s' : '');
+  set(flRows.nv, pc.toFixed(1) + ' % of ' + p.turns + ' turns, lift ' + s.lift.toFixed(3) + ' mm, leaves seat at ' + h0.toFixed(2) + ' mm');
+  set(flRows.gap, s.gap.toFixed(2) + ' µm');
+  set(flRows.in, fmtMass(s.mIn) + ' (' + lph(s.mIn) + ')');
+  set(flRows.flash, s.mL > 0 || s.mIn > 0 ? (100 * Math.max(0, s.dh) / L).toFixed(0) + ' % of the inflow' : '-');
+  set(flRows.ev, fmtMass(s.mEv));
+  set(flRows.pot, s.mL > 0 ? s.mL.toFixed(2) + ' g, ' + (100 * frac).toFixed(0) + ' % of ' + p.pot + ' mL' : 'dry');
+  set(flRows.tp, s.T.toFixed(3) + ' K, ' + (s.mL > 0 ? 'saturated liquid' : 'dry, T_sat ' + tsat(s.P * 100).toFixed(2) + ' K'));
+  set(flRows.p, s.P.toFixed(3) + ' mbar');
+  set(flRows.thr, FL.pump ? (s.mOut * KPV * 10).toFixed(1) + ' mbar L/s (' + lph(s.mOut) + ' equivalent)' : 'pump off');
+}
+function flDraw() {
+  const cv = fl$('fl-chart'); if (!cv) return;
+  if (!flCurve) flCurveCalc();
+  const dpr = window.devicePixelRatio || 1, r = cv.getBoundingClientRect();
+  const W = Math.max(280, Math.round(r.width * dpr)), H = Math.round(230 * dpr);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
+  const x = cv.getContext('2d'); x.clearRect(0, 0, W, H);
+  const L = 44 * dpr, R = 24 * dpr, T = 10 * dpr, B = 30 * dpr, pw = W - L - R, ph = H - T - B;
+  const now = FL.P, pcNow = flPctMech();
+  let ymax = 0; flCurve.forEach(c => { ymax = Math.max(ymax, Math.min(c.wet, c.dry), Math.min(c.dry, 60)); });
+  ymax = Math.max(ymax, Math.min(now, 60), 1);
+  const steps = [1, 2, 5, 10, 20, 50, 100, 200]; let st2 = steps.find(v => ymax / v <= 6) || 500; ymax = Math.ceil(ymax / st2) * st2;
+  const X = v => L + pw * v / 100, Y = v => T + ph * (1 - Math.min(v, ymax * 1.05) / ymax);
+  x.font = (11 * dpr) + 'px IBM Plex Sans, sans-serif'; x.fillStyle = g('--muted'); x.strokeStyle = g('--rule'); x.lineWidth = dpr;
+  for (let v = 0; v <= ymax + 1e-9; v += st2) { x.beginPath(); x.moveTo(L, Y(v)); x.lineTo(W - R, Y(v)); x.stroke(); x.textAlign = 'right'; x.fillText(v.toString(), L - 6 * dpr, Y(v) + 4 * dpr); }
+  for (let v = 0; v <= 100; v += 20) { x.textAlign = 'center'; x.fillText(v + ' %', X(v), H - 10 * dpr); }
+  x.save(); x.translate(12 * dpr, T + ph / 2); x.rotate(-Math.PI / 2); x.textAlign = 'center'; x.fillText('mbar', 0, 0); x.restore();
+  const seat = FLP.seat; x.strokeStyle = g('--rule-strong'); x.setLineDash([2 * dpr, 3 * dpr]); x.beginPath(); x.moveTo(X(seat), T); x.lineTo(X(seat), T + ph); x.stroke();
+  x.textAlign = 'left'; x.fillText('leaves seat', X(seat) + 4 * dpr, T + 12 * dpr);
+  const line = (key, col, dash) => { x.strokeStyle = col; x.lineWidth = 2 * dpr; x.setLineDash(dash); x.beginPath(); flCurve.forEach((c, i) => { const yy = Y(c[key]); i ? x.lineTo(X(c.pc), yy) : x.moveTo(X(c.pc), yy); }); x.stroke(); };
+  line('dry', g('--c-sp'), [6 * dpr, 4 * dpr]); line('wet', g('--c-pv'), []);
+  x.setLineDash([]); x.fillStyle = g('--ink'); x.beginPath(); x.arc(X(pcNow), Y(now), 4.5 * dpr, 0, 2 * Math.PI); x.fill();
+}
+document.getElementById('fl-he').addEventListener('click', () => setHe(!FL.he));
+document.getElementById('fl-pump').addEventListener('click', () => setPump(!FL.pump));
+document.getElementById('fl-empty').addEventListener('click', () => { FL.mL = 0; ev('BENCH', 'Pot emptied'); });
+document.getElementById('fl-reset').addEventListener('click', () => { Object.assign(FLP, FL_DEF); flSync(); flCurveCalc(); flDraw(); });
+document.querySelectorAll('[data-plumb]').forEach(b => b.addEventListener('click', () => setPlumb(b.dataset.plumb)));
+function setLink(v) { BENCH.link = v; document.querySelectorAll('[data-link]').forEach(b => b.classList.toggle('on', b.dataset.link === v)); }
+document.querySelectorAll('[data-link]').forEach(b => b.addEventListener('click', () => setLink(b.dataset.link)));
+function benchLimButtons() { document.querySelectorAll('[data-lim]').forEach(b => b.classList.toggle('on', b.dataset.lim === LIM.force)); }
+document.querySelectorAll('[data-lim]').forEach(b => b.addEventListener('click', () => { LIM.force = b.dataset.lim; ev('LIM', 'Bench test: switch ' + b.textContent.toLowerCase()); benchLimButtons(); }));
+document.getElementById('b-lose').addEventListener('click', () => { LIM.simPos -= 300; ev('LIM', 'Bench test: 300 lost steps'); });
+setTimeout(benchLimButtons, 0);
+
+/* ======================================================================
+ * Scaling, loop
+ * ==================================================================== */
+const clip = document.getElementById('devclip');
+function fit() {
+  const avail = Math.min(960, document.querySelector('.panel').clientWidth - 64);
+  const s = clamp(avail / 480, 0.6, 2);
+  dev.style.transform = 'scale(' + s + ')';
+  clip.style.width = (480 * s) + 'px'; clip.style.height = (272 * s) + 'px';
+}
+window.addEventListener('resize', () => { fit(); drawBench(); flDraw(); });
+
+let lastUI = 0, lastBench = 0;
+function updateUI() {
+  if (current && screens[current]) screens[current].update();
+  updateGlobal();
+  if (screensKeypadNow && overlay) screensKeypadNow();
+  document.getElementById('simclock').textContent = 'Board clock ' + clock(t);
+  flUpdate();
+}
+let lastReal = performance.now(), simAcc = 0;
+function frame(now) {
+  const dtR = Math.min(0.1, (now - lastReal) / 1000); lastReal = now;
+  if (!paused) { simAcc += dtR * speed; let n = 0; while (simAcc >= DT && n < 6000) { simTick(); simAcc -= DT; n++; } if (n >= 6000) simAcc = 0; }
+  runQuick();
+  if (now - lastUI > 100) { updateUI(); lastUI = now; }
+  if (now - lastBench > 500) { drawBench(); flDraw(); lastBench = now; }
+  requestAnimationFrame(frame);
+}
+
+buildGlobal(); buildCtrl(); buildValve(); buildMenu(); buildSensor(); buildMotor(); buildHoming(); buildTune(); buildFaults(); buildTrend();
+setSpeed(1); setWin(600); fit();
+flBuildParams(); flBuildRead(); setPlumb('line'); setLink('usb'); flCurveCalc(); flDraw();
+conLog('PMC ' + FW + ' simulated. Boots homed at 0 % in manual (simulator default; the firmware plan G3 boots not homed). Type HELP for commands.');
+ev('F-14', 'Power-up (event only)');
+bootHomed();
+show('ctrl');
+requestAnimationFrame(frame);
+</script>
+
+</body></html>
