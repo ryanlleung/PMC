@@ -9,8 +9,8 @@ Writes druck_YYYYMMDD_HHMMSS.csv unless -o is given. Stop with Ctrl+C.
 Ethernet: TCP port 5000 (give host:port for another). The board takes one
 connection at a time; a new one replaces the old, and the logger then
 reconnects on its own (so running druck_cal.py only leaves a short gap).
-USB: needs pyserial (pip install pyserial); close the NECTO UART Terminal
-first, only one program can hold the COM port.
+USB: close the NECTO UART Terminal first, only one program can hold the
+COM port. Needs pyserial either way (pip install pyserial).
 
 Columns: pc_time (local, ISO), then the board's fields:
 t_ms, p_mbar, signal_uV, exc_mV, ratio_mV_per_V, die_C, set_mV, ok.
@@ -20,64 +20,45 @@ to the console only.
 import argparse
 import datetime as dt
 import re
-import socket
 import sys
 import time
+
+import serial   # pip install pyserial
 
 TCP_PORT = 5000
 
 FIELDS = ["t_ms", "p_mbar", "signal_uV", "exc_mV", "ratio_mV_per_V", "die_C", "set_mV", "ok"]
 
 
-class LineSock:
-    """Minimal line reader over TCP that survives read timeouts."""
-
-    def __init__(self, sock):
-        self.sock, self.buf = sock, b""
-
-    def readline(self):
-        while b"\n" not in self.buf:
-            chunk = self.sock.recv(1024)     # socket.timeout if nothing arrives
-            if not chunk:
-                line, self.buf = self.buf, b""
-                return line                  # b"" = closed
-            self.buf += chunk
-        line, _, self.buf = self.buf.partition(b"\n")
-        return line + b"\n"
-
-    def write(self, data):
-        self.sock.sendall(data)
-
-    def close(self):
-        self.sock.close()
-
-
 class Link:
-    """Line-based link to the board: a COM port, or TCP to host[:port]."""
+    """Line-based link to the board: a COM port, or TCP to host[:port].
+
+    pyserial opens both (TCP through its socket:// URL), so reads and
+    writes are the same either way.
+    """
 
     def __init__(self, target, timeout=2.0):
-        self.sock = None
-        if re.match(r"^(COM\d+|/dev/)", target, re.I):
-            import serial
-            self.port = serial.Serial(target, 115200, timeout=timeout)
-            self.port.dtr = True    # baud is ignored by USB CDC
-        else:
+        if not re.match(r"^(COM\d+|/dev/)", target, re.I):
             host, _, port = target.partition(":")
-            self.sock = socket.create_connection((host, int(port or TCP_PORT)), timeout=5)
-            self.sock.settimeout(timeout)
-            self.port = LineSock(self.sock)
+            target = f"socket://{host}:{port or TCP_PORT}"
+        self.port = serial.serial_for_url(target, baudrate=115200, timeout=timeout)
+        self.port.dtr = True    # baud and DTR are ignored over TCP
+        self.buf = b""
         # In case DATA OFF was left set from a terminal session.
         self.write("DATA ON\n")
         # Board clock from the PC's local time.
         self.write(time.strftime("TIME SET %Y-%m-%d %H:%M:%S\n"))
 
     def readline(self):
-        try:
-            line = self.port.readline()
-        except (socket.timeout, TimeoutError):
+        """One line without its ending, or "" if none is complete yet.
+
+        A read that times out mid-line keeps the part it has for the next
+        call. A closed TCP connection raises SerialException (an OSError).
+        """
+        self.buf += self.port.readline()
+        if not self.buf.endswith(b"\n"):
             return ""
-        if self.sock is not None and line == b"":
-            raise ConnectionError("board closed the connection")
+        line, self.buf = self.buf, b""
         return line.decode("ascii", errors="replace").strip()
 
     def write(self, text):
@@ -85,8 +66,6 @@ class Link:
 
     def close(self):
         self.port.close()
-        if self.sock is not None:
-            self.sock.close()
 
 
 def main():
