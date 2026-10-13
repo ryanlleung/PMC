@@ -101,7 +101,7 @@ code{font-family:var(--mono);font-size:.9em}
 /* WP023 proposal (S4, S5): status strip kinds and alarm annunciation. info = white; prompt = light grey, black text,
    no icon; warn = dark grey 63, white text, white icon; fault = black, white text, red border and icon. An
    unacknowledged fault blinks the border (not the text) between red and grey at 1 Hz (WP023 s9.2 p49, s8.2 p21). */
-.dev .k-prompt{background:#E0E0E0 !important;color:#000 !important}
+.dev .k-prompt{background:#E0E0E0 !important;color:#000 !important;box-shadow:inset 0 0 0 1px #3F3F3F}
 .dev .k-warn{background:#3F3F3F !important;color:#fff !important;--symin:#3F3F3F}
 .dev .k-fault{background:#000 !important;color:#fff !important;box-shadow:inset 0 0 0 3px #D63031;--symin:#000}
 .dev .k-fault.unack{animation:almblink 1s steps(1) infinite}
@@ -336,7 +336,7 @@ const DEF_P = { Kp: 4, Ti: 0.25, Kd: 0, DB: 8, Ts: 1, Pmin: 0.2, POSMAX: 99072, 
 const RANGE = { Kp: [0.01, 100], Ti: [0, 100], Kd: [0, 100], DB: [0, 2000], Ts: [0.5, 10], Pmin: [0, 1034],
   POSMAX: [1000, 300000], fhome: [16, 1000], fcreep: [16, 1000], Nbackoff: [10, 5000],
   Nclear: [10, 10000], Noffset: [0, 5000], Tcheck: [1, 120], Nresp: [1, 50], dPmin: [0.001, 10],
-  checkMin: [0, 200000], Tconv: [10, 36000], band: [0.001, 10], leadMax: [0, 100000], Tlag: [0, 600], outMin: [0, 50], stableT: [5, 3600],
+  checkMin: [0, 200000], Tconv: [10, 36000], band: [0.1, 10], leadMax: [0, 100000], Tlag: [0, 600], outMin: [0, 50], stableT: [5, 3600],
   spMax: [0.1, 35000], alarmLo: [0, 1034] };
 const DEF_MOT = { run: 400, start: 200, accel: 3200, rev: 0 };
 // v49: calibration identity (calId, calDate) carried with the profile and shown to operators and commissioners.
@@ -748,6 +748,7 @@ function buzz() {
   if (buzzMute) return;
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();   // eval 6: a context made before the first touch starts suspended
     for (let i = 0; i < 3; i++) {
       const o = audioCtx.createOscillator(), g = audioCtx.createGain(), t0 = audioCtx.currentTime + i * 0.25;
       o.frequency.value = 2400; g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.08, t0 + 0.03); g.gain.linearRampToValueAtTime(0, t0 + 0.15);
@@ -835,6 +836,7 @@ function toManual() {
   return true;
 }
 function setSP(v) {
+  v = Math.round(v * 10) / 10;   // S3 (eval 5): targets are 0.1 mbar everywhere, serial included, so home never rounds one
   if (!(v >= P.Pmin && v <= pMax())) { ev('W-03', 'Setpoint ' + v + ' rejected, allowed ' + P.Pmin + ' to ' + pMax()); return refuse('W-03 Setpoint outside ' + P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(2)); }
   C.SP = v; C.spSet = true; C.convStart = t; C.inBandSince = null; ev('SP', 'Setpoint ' + v.toFixed(2) + ' mbar');
   return true;
@@ -1210,10 +1212,10 @@ function homeTile(s, x, name, unit, fname, onTap) {
   const fill = st(mk(bar, 0, 0, 0, 8, ''), { background: '#7B8794' });
   const ticks = [], labels = [];
   const mark = st(mk(bar, 0, -3, 3, 14, ''), { background: COL.text });
-  st(mk(c, 12, 116, 44, 40, 'cap', fname), { lineHeight: '40px' });
-  const f = st(mk(c, 58, 116, 97, 40, ''), { borderRadius: '4px', fontSize: '26px', lineHeight: '38px', textAlign: 'right', boxSizing: 'border-box', cursor: 'pointer' });
-  const fv = mk(f, 0, 0, 97 - 22, 38, '', ''); st(fv, { textAlign: 'right', lineHeight: '38px', overflow: 'hidden' });
-  const chev = st(mk(f, 97 - 19, 0, 14, 38, ''), { lineHeight: '38px', color: COL.blue }); chev.innerHTML = sym('RIGHT', 14);
+  st(mk(c, 12, 116, 40, 40, 'cap', fname), { lineHeight: '40px' });
+  const f = st(mk(c, 52, 116, 103, 40, ''), { borderRadius: '4px', fontSize: '26px', lineHeight: '38px', textAlign: 'right', boxSizing: 'border-box', cursor: 'pointer' });
+  const fv = mk(f, 0, 0, 103 - 20, 38, '', ''); st(fv, { textAlign: 'right', lineHeight: '38px', overflow: 'hidden' });
+  const chev = st(mk(f, 103 - 18, 0, 14, 38, ''), { lineHeight: '38px', color: COL.blue }); chev.innerHTML = sym('RIGHT', 14);
   f.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); onTap(); updateUI(); });
   return { c, val, sp, bar, zone, fill, ticks, labels, mark, f, fv, chev };
 }
@@ -1223,37 +1225,48 @@ function tileTicks(T, xs, labs) {
 }
 function tileField(T, active, text) {
   set(T.fv, text); vis(T.chev, active);
-  st(T.fv, { width: (active ? 97 - 22 : 97 - 10) + 'px' });
+  st(T.fv, { width: (active ? 103 - 20 : 103 - 8) + 'px' });
   fitTo(T.fv, [26, 16]);
   st(T.f, active ? { background: '#E9F0F6', borderBottom: '3px solid ' + COL.blue, borderRadius: '4px 4px 0 0', color: COL.text }
                  : { background: '#EEF2F6', borderBottom: '3px solid #EEF2F6', borderRadius: '4px', color: COL.idle });
 }
 function tileMark(T, X, now) { vis(T.mark, now != null); if (now != null) st(T.mark, { left: (X(now) - 1).toFixed(1) + 'px' }); }
-// Sparkline: one pen, no axes. Pressure in AUTO: linear, centred on the target, +/- max(0.5 mbar, 5 x band), so the
-// target band is about 7 px tall at the default band and steadiness is comparable between targets; the target is a
-// dashed line and the band a light grey stripe. Pressure with no target in use: autoscaled over the window (min span
-// 1 mbar; log when the window spans more than a decade). Valve: 0 to 100 % fixed. Off-scale values pin to the edge.
-// LVGL: lv_chart, 120 points (one per 5 s), line series 2 px; the target dash is horizontal so the SW renderer can dash it.
+// Sparkline: one pen, no axes, 10 min. Eval (13 Oct) item 1: the scale never clips. Pressure: linear, covering the
+// window's readings and targets, at least max(1 mbar, 10 x band) tall and centred on the present target in AUTO, so a
+// steady hold shows the band about 5 px tall and a target step or an approach shows its real size; log when the window
+// spans more than a decade (pump-down). The target is drawn as its own stepped history (dashed, AUTO spans only) with
+// the band as a light stripe around it. Valve: 0 to 100 % fixed.
+// LVGL: lv_chart, 120 points (one per 5 s), line series 2 px; the stepped target is horizontal and vertical segments,
+// which the SW renderer can dash.
 function drawSpark(cv, key, auto) {
   const ctx = cv.getContext('2d'), W = cv.width / 2, H = cv.height / 2;
   ctx.setTransform(2, 0, 0, 2, 0, 0); ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = '#F3F6F8'; ctx.fillRect(0, 0, W, H);
   const pts = trend.filter(p => p.t >= t - SPARK_WIN && (Math.round(p.t) % 5 === 0 || p === trend[trend.length - 1]));
+  const xOf = tt => (1 - (t - tt) / SPARK_WIN) * (W - 3);
   let yOf;
   if (key === 'pos') yOf = v => H - 2 - clamp(v, 0, 100) / 100 * (H - 4);
-  else if (auto && C.spSet) {
-    const half = Math.max(0.5, 5 * P.band), lo = C.SP - half, hi = C.SP + half;
-    yOf = v => clamp(H - 2 - (v - lo) / (hi - lo) * (H - 4), 1, H - 1);
-    ctx.fillStyle = '#DCE3EA'; ctx.fillRect(0, yOf(C.SP + P.band), W, Math.max(1, yOf(C.SP - P.band) - yOf(C.SP + P.band)));
-    ctx.strokeStyle = '#3F3F3F'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(0, Math.round(yOf(C.SP)) + 0.5); ctx.lineTo(W, Math.round(yOf(C.SP)) + 0.5); ctx.stroke(); ctx.setLineDash([]);
-  } else {
+  else {
     const vs = pts.map(p => p.pv).filter(v => v != null && v > 0);
+    pts.forEach(p => { if (p.auto) vs.push(p.sp); });
+    const useSP = auto && C.spSet;
+    if (useSP) vs.push(C.SP);
     let lo = vs.length ? Math.min(...vs) : 0, hi = vs.length ? Math.max(...vs) : 1;
     if (vs.length && hi / Math.max(lo, 1e-3) > 10) { const L0 = Math.log10(Math.max(lo, 1e-3)), L1 = Math.log10(hi); yOf = v => H - 2 - (Math.log10(Math.max(v, 1e-3)) - L0) / (L1 - L0) * (H - 4); }
-    else { const m = (lo + hi) / 2, h = Math.max(0.5, (hi - lo) / 2 * 1.15); lo = m - h; hi = m + h; yOf = v => H - 2 - (v - lo) / (hi - lo) * (H - 4); }
+    else {
+      const minSpan = Math.max(1, 10 * P.band);
+      if (hi - lo < minSpan) { const c = useSP ? C.SP : (lo + hi) / 2; const h = Math.max(minSpan / 2, c - lo, hi - c); lo = c - h; hi = c + h; }
+      else { const pad = (hi - lo) * 0.08; lo -= pad; hi += pad; }
+      yOf = v => H - 2 - (v - lo) / (hi - lo) * (H - 4);
+    }
+    // stepped target history with its band, AUTO spans only
+    ctx.fillStyle = '#DCE3EA';
+    for (let i = 1; i < pts.length; i++) { const p = pts[i - 1]; if (!p.auto) continue; const y0 = yOf(p.sp + P.band), y1 = yOf(p.sp - P.band); ctx.fillRect(xOf(p.t), y0, xOf(pts[i].t) - xOf(p.t) + 0.5, Math.max(1, y1 - y0)); }
+    ctx.strokeStyle = '#3F3F3F'; ctx.lineWidth = 1; ctx.setLineDash([4, 3]); ctx.beginPath(); let pen = false;
+    pts.forEach((p, i) => { if (!p.auto) { pen = false; return; } const X = xOf(p.t), Y = Math.round(yOf(p.sp)) + 0.5; if (!pen) { ctx.moveTo(X, Y); pen = true; } else { ctx.lineTo(X, Math.round(yOf(pts[i - 1].sp)) + 0.5); ctx.lineTo(X, Y); } });
+    ctx.stroke(); ctx.setLineDash([]);
   }
-  const xOf = tt => (1 - (t - tt) / SPARK_WIN) * (W - 3);
-  ctx.strokeStyle = key === 'pos' ? '#5B6B7B' : '#1F2933'; ctx.lineWidth = 1.5; ctx.beginPath(); let pen = false, last = null;
+  ctx.strokeStyle = key === 'pos' ? '#7B8794' : '#2D5877'; ctx.lineWidth = 1.5; ctx.beginPath(); let pen = false, last = null;
   pts.forEach(p => { const v = p[key]; if (v == null) { pen = false; return; } const X = xOf(p.t), Y = yOf(v); if (pen) ctx.lineTo(X, Y); else { ctx.moveTo(X, Y); pen = true; } last = [X, Y]; });
   ctx.stroke();
   if (last) { ctx.fillStyle = ctx.strokeStyle; ctx.beginPath(); ctx.arc(last[0], last[1], 2, 0, 7); ctx.fill(); }
@@ -2171,7 +2184,7 @@ function buildTrend() {
     wb.forEach(([b, w]) => tog(b, 'on', devWin === w));
     // S8 (R15; WP023 s8.12.7 p32, s6.3 p15): pens told apart by colour, width and dash; normal states in greys;
     // legend words match home (Pressure, Target, Valve). AUTO spans shaded light grey.
-    drawChart(devCanvas, devWin, { pv: '#2D5877', sp: '#3F3F3F', pos: '#969EA6', mech: '#969EA6', grid: '#E3E9EF', text: '#546374', band: 'rgba(91,107,123,0.10)', font: 'Montserrat, sans-serif', solid: true, wp023: true }, 2, true);
+    drawChart(devCanvas, devWin, { pv: '#2D5877', sp: '#3F3F3F', pos: '#7B8794', mech: '#969EA6', grid: '#E3E9EF', text: '#546374', band: 'rgba(91,107,123,0.10)', font: 'Montserrat, sans-serif', solid: true, wp023: true }, 2, true);
   };
 }
 
@@ -2234,7 +2247,7 @@ function drawChart(cv, win, col, scale, compact) {
   ctx.restore();
   if (compact) {   // legend above the plot, each word in its line's colour (review 3, finding 8)
     ctx.textAlign = 'left'; let x = L;
-    (col.wp023 ? [['Pressure', col.pv], [', ', col.text], ['Target - -', col.sp], [' mbar.  ', col.text], ['Valve %', '#5B6B7B'], [' right', col.text]]
+    (col.wp023 ? [['Pressure', col.pv], [', ', col.text], ['Target - -', col.sp], [' mbar.  ', col.text], ['Valve %', col.pos], [' right', col.text]]
       : [['PV', col.pv], [' and ', col.text], ['SP', col.sp], [' mbar, left.  ', col.text], ['Valve %', col.pos], [', right', col.text]]).forEach(([w, c]) => { ctx.fillStyle = c; ctx.fillText(w, x, 14); x += ctx.measureText(w).width; });
   }
 }
@@ -2353,6 +2366,7 @@ document.getElementById('native').addEventListener('click', e => { nativeSize = 
 // S12: 4.3 in panel, 480 px over about 95.0 mm = 0.198 mm/px; a CSS px is 0.2646 mm, so the panel is 0.748 of 1:1.
 let physSize = false;
 document.getElementById('physical').addEventListener('click', e => { physSize = !physSize; nativeSize = false; e.target.classList.toggle('on', physSize); document.getElementById('native').classList.remove('on'); fit(); });
+document.addEventListener('pointerdown', () => { try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === 'suspended') audioCtx.resume(); lastBuzz = -1e9; } catch (e) { } }, { once: true });
 document.getElementById('mute').addEventListener('click', e => { buzzMute = !buzzMute; e.target.classList.toggle('on', buzzMute); buzz(); });
 document.getElementById('reboot').addEventListener('click', () => { reboot(); show('ctrl'); });
 document.getElementById('quick').addEventListener('click', () => {

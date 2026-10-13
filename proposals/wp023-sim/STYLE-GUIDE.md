@@ -29,12 +29,12 @@ Rev A, 13 Oct 2026. Proposed, not approved. It implements `HMI-PHILOSOPHY.md` an
 | Field not editable | `#EEF2F6`, text `#969EA6` |
 | Mode dot in header | `#C3CDD7`: filled = AUTO, ring = any other mode; `#D63031` with a fault |
 | Status: info | white, grey dot |
-| Status: prompt (normal, needs action) | `#E0E0E0`, black text, no icon |
+| Status: prompt (normal, needs action) | `#E0E0E0`, black text, 1 px `#3F3F3F` outline, no icon |
 | Status: warning (abnormal, no response needed) | `#3F3F3F`, white text, white warning icon |
 | Status: fault | `#000000`, white text, 3 px `#D63031` border and red warning icon |
 | Unacknowledged fault | the red borders blink red/`#7B8794`, 1 Hz; text never blinks |
 | Unapplied commissioning change | `#6A4C93` (while no low-priority alarm class exists) |
-| Trend pens | pressure `#2D5877` 2 px; target `#3F3F3F` dashed; valve `#969EA6` 1.5 px; AUTO spans `#5B6B7B` at 10 % |
+| Trend pens | pressure `#2D5877` 2 px; target `#3F3F3F` dashed; valve `#7B8794` 1.5 px; AUTO spans `#5B6B7B` at 10 % |
 | STOP | `#D63031` (deviation, section 9) |
 
 Green and amber are not used.
@@ -60,7 +60,7 @@ Montserrat Medium, ASCII plus degree and bullet. Sizes 12 (labels, units, status
 | Editable field | tinted, blue underline, chevron | tap opens keypad |
 | Read-only value | flat, no edge | readings on detail pages |
 | Status strip | card by kind (section 3) | bottom row on every screen |
-| Sparkline | 143 × 32, one pen, no axes, 10 min | home tiles; tap opens Trend |
+| Sparkline | 143 × 32, one pen, no axes, 10 min, never clipped; stepped dashed target and band in AUTO | home tiles; tap opens Trend (a navigation target without a chevron) |
 | Bar | 8 px, value marker 3 × 14 px | pressure log 0.1-1000 with low-alarm zone; valve 0-100 % |
 
 Each command button label names the action, not the state. A second 12 px line holds only state ("3 faults", "2 of 3").

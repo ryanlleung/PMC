@@ -31,6 +31,8 @@ Read each task aloud. Ask the operator to think aloud.
 | Words they use for: reference/home, target/setpoint, regulating, go to | |
 | Task 3: right answer? time to answer? | |
 | Task 5: seconds to notice; seen first (blink, buzzer, tile border) | |
+| Task 5: could they tell the fault strip (black) from a warning strip (dark grey)? | |
+| Did they find that tapping the history line opens Trend (task 8)? | |
 | Taps that missed or hit the wrong button | |
 | Hesitations over 5 s, by screen | |
 
