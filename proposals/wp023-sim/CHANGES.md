@@ -21,6 +21,21 @@ Status key: **Built** = in this copy; the acceptance check is automated in `test
 | S13 | HMI philosophy, style guide and operator test protocol. | R1, R3, D7; s1 p4, s1.1 p5, s6.1 p15, s8.11.5 p28 | Doc | `HMI-PHILOSOPHY.md`, `STYLE-GUIDE.md`, `OPERATOR-TEST.md` |
 | S14 | Documented deviations, no change: red STOP (R8, D5), one mode slot with confirmation (R9, D3), Back only (R14), Reference valve shown instead of a disabled Start AUTO (R17), units in captions (R19). | s8.1, s8.15, s7, s8.3, s8.10 | Doc | Listed in `STYLE-GUIDE.md` section 9 |
 | S15 | Firmware: trigger buttons on release (`LV_EVENT_CLICKED`), not on press. Draw the sparklines as `lv_chart` with 120 points (one per 5 s). Drive the buzzer from the Mikromedia piezo (confirm it is fitted on the STM32F4 board). Measure call-up time (2 s or less) and touch feedback (0.5 to 2 s) on the panel. | R10, R12, R18; s10.2, s10.3 p55 | Firmware | Measured on the mm4 |
+| S16 | Menu: the Alarms and events button carries the alarm state. With a fault latched it shows a second line ("1 fault, not acknowledged") and the alarm border, blinking while unacknowledged. | Menu review M1; s9.3.1 p50 | Built (T) | F-01 shows "1 fault, not acknowledged" on the Menu |
+| S17 | Menu footer shows the process status like every other page (was "Link USB. Firmware ..."). Link and firmware stay on System information. | M2; s6.7 p16, Ryan 9 Oct (status strip on every screen) | Built (T) | Menu footer reads "Stable at 5.0 mbar ..." in AUTO |
+| S18 | Diagnostics moves onto the Menu and opens without the PIN. It is read only, and the fault detail pages send the operator to the readings it holds. It stays on the Commissioning page too. The Menu now fills its 2 × 3 grid. | M3; s3.1 p8 (level 4 for troubleshooting) | Built (T) | Diagnostics opens with commissioning locked |
+| S19 | Reference valve page in operator terms: "Valve, %" instead of "Steps now", "Seat switch: At seat / Off seat" instead of "Limit switch: Open / Closed" (an NC contact reads backwards to an operator), and "Past switch" removed. Step counts and the contact state stay on Diagnostics. | M4; s8.12 p28, s8.9 p24 | Built (T) | No step counts on the page |
+| S20 | Alarms and events: each latched fault shows its state under the time ("Not acknowledged", "Acknowledged, cause present", "Cause gone, Reset fault clears"). | M5; s9.8.1 p55 | Built (T) | F-01 after re-plugging reads "Cause gone, Reset fault clears" |
+| S21 | Event history in text colour; red is kept for the active faults above it. Event words match the screen: Referencing/Referenced (was Homing/Homed, tag REF was HOME), "Auto at target 5.0 mbar" (was "at SP 5.00"), target changes "TARGET Set to 5.0 mbar" (was "SP Setpoint 5.00"). The serial EVT lines change the same way (firmware note). | M6; s9.8.1 p55, R2 terms | Built (T) | No HOME, Homed, Setpoint or "at SP" in the event log |
+
+## Menu and lower pages, 13 Oct
+
+Reviewed after Ryan asked (13 Oct). The first review only treated the Menu as a navigation level. S16 to S21 come from this pass. Reviewed with no change:
+
+- Commissioning page, Setup guide, Sensor, Valve setup (three tabs), Pressure limits, Control tuning, Configuration: field, navigation and side-column patterns are consistent with `STYLE-GUIDE.md` section 6. Engineering units and 0.01 mbar are right at level 4.
+- The open padlock beside Back while commissioning is open is small, but it is Ryan's v52 decision (static mark, no countdown). The operator test can check it.
+- The event list keeps the full date with year and seconds (Ryan, v45).
+- Diagnostics abbreviations ("Uncal.", "Switch, NC") are kept: the page is for the commissioning engineer, and the 109 px cards have no room for more. "Board, C" now reads "Board, °C".
 
 ## Reversals of Ryan's earlier decisions
 
@@ -55,4 +70,4 @@ Full write-up: `/mnt/project-files/reviews/2026-10-13-wp023-proposal-evaluation.
 
 ## Test run
 
-`node tests/run.js tests/wp023.js` (the S-item checks), `tests/workflows.js`, `tests/regression.js` and `tests/audit.js` in this folder all pass, and the audit has no findings (13 Oct 2026, after the evaluation fixes). The audit checks text fit, overlap and target size only; usability needs `OPERATOR-TEST.md`.
+`node tests/run.js tests/wp023.js` (the S-item checks), `tests/workflows.js`, `tests/regression.js` and `tests/audit.js` in this folder all pass, and the audit has no findings (13 Oct 2026, after the evaluation fixes and the Menu pass). The audit checks text fit, overlap and target size only; usability needs `OPERATOR-TEST.md`.

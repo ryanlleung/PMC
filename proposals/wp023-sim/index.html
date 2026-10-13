@@ -111,6 +111,7 @@ code{font-family:var(--mono);font-size:.9em}
 @keyframes hdrblink{0%{box-shadow:inset 0 -4px 0 #D63031}50%{box-shadow:inset 0 -4px 0 #7B8794}}
 .dev .tile-alm{box-shadow:inset 0 0 0 3px #D63031}
 .dev .tile-alm.unack{animation:almblink 1s steps(1) infinite}
+.dev .b.tile-alm{box-shadow:inset 0 0 0 3px #D63031}
 .dev .flexrow{display:flex;gap:6px;align-items:center}
 .dev .flexrow span{padding:2px 7px;border-radius:3px;font-size:12px;line-height:14px}
 .dev .ov{left:0;top:0;width:480px;height:272px;background:rgba(40,50,60,.55)}
@@ -668,7 +669,7 @@ function home() {
   if (C.faults.size) return refuse('Fault latched: reset the fault first (IL-9)');
   stopMotor();
   C.ref = false; C.mode = 'HOMING'; C.homeT0 = t;
-  ev('HOME', 'Homing started at count ' + fint(M.pos));
+  ev('REF', 'Referencing started at count ' + fint(M.pos));
   if (LIM.active) {
     C.homeStage = 'clearance move';
     startMove(M.pos + P.Nclear, P.fhome, r => {
@@ -701,13 +702,13 @@ function homeCreep() {
       M.pos = P.Noffset; C.ref = true; C.mode = 'MANUAL'; C.homeStage = '';
       C.manPos = C.posCmd = C.lastSent = M.pos;
       C.lastHome = { t, dur: t - C.homeT0 };
-      ev('HOME', 'Homed in ' + (t - C.homeT0).toFixed(1) + ' s, position ' + P.Noffset);
+      ev('REF', 'Referenced in ' + (t - C.homeT0).toFixed(1) + ' s, position ' + P.Noffset);
       msg('Valve referenced. Closed at 0 %.', 'info');
     } else if (r === 'DONE') homeFault('F-07', 'Homing: switch not found on creep approach');
     else homeAbort(r);
   });
 }
-function homeAbort(r) { if (C.mode === 'HOMING') { C.mode = 'NOT HOMED'; C.homeStage = ''; ev('HOME', 'Homing aborted (' + r.toLowerCase() + ')'); } }
+function homeAbort(r) { if (C.mode === 'HOMING') { C.mode = 'NOT HOMED'; C.homeStage = ''; ev('REF', 'Referencing aborted (' + r.toLowerCase() + ')'); } }
 function homeFault(tag, text) { C.mode = 'NOT HOMED'; C.homeStage = ''; raise(tag, text, { ref: true }); }
 
 /* ======================================================================
@@ -815,7 +816,7 @@ function toAuto() {
   C.I = now - kpSteps() * e;                        // bumpless: first output equals the position in force
   C.posCmd = C.lastSent = now; C.prevPV = PV;
   C.winT = 0; C.winPos = C.posF; C.winPV = PV; C.noresp = 0; C.wrong = 0; C.convStart = t; C.f02Since = null;
-  ev('MODE', (C.mode === 'PAUSED' ? 'Auto resumed' : 'Auto') + ' at SP ' + C.SP.toFixed(2) + ' mbar, valve ' + pctOf(now).toFixed(1) + ' %');
+  ev('MODE', (C.mode === 'PAUSED' ? 'Auto resumed' : 'Auto') + ' at target ' + fmtOp(C.SP) + ' mbar, valve ' + pctOf(now).toFixed(1) + ' %');
   C.mode = 'AUTO';
   return true;
 }
@@ -838,7 +839,7 @@ function toManual() {
 function setSP(v) {
   v = Math.round(v * 10) / 10;   // S3 (eval 5): targets are 0.1 mbar everywhere, serial included, so home never rounds one
   if (!(v >= P.Pmin && v <= pMax())) { ev('W-03', 'Setpoint ' + v + ' rejected, allowed ' + P.Pmin + ' to ' + pMax()); return refuse('W-03 Setpoint outside ' + P.Pmin.toFixed(2) + ' to ' + pMax().toFixed(2)); }
-  C.SP = v; C.spSet = true; C.convStart = t; C.inBandSince = null; ev('SP', 'Setpoint ' + v.toFixed(2) + ' mbar');
+  C.SP = v; C.spSet = true; C.convStart = t; C.inBandSince = null; ev('TARGET', 'Set to ' + fmtOp(v) + ' mbar');
   return true;
 }
 function setManSteps(n) {
@@ -962,14 +963,14 @@ function reboot() {
   ev('F-14', 'Power-up (event only)');
   // v48 (review item 8): a restart no longer invents a reference or moves the mechanism. The step count restarts
   // at 0 with the valve wherever it was, so the controller boots NOT REFERENCED (plan G3).
-  ev('HOME', 'Boot: valve not referenced');
+  ev('REF', 'Boot: valve not referenced');
 }
 function bootHomed() {                  // simulator convenience (Ryan, 8 Oct): start homed, valve closed on the switch
   LIM.simPos = 0; LIM.raw = true; LIM.active = true; LIM.clearSince = null;
   M.pos = P.Noffset; C.ref = true; C.mode = 'MANUAL'; C.homeStage = '';
   C.manPos = C.posCmd = C.lastSent = M.pos;
   C.lastHome = { t, dur: 0 };
-  ev('HOME', 'Demo starting condition (simulator only): referenced at ' + M.pos);
+  ev('REF', 'Demo starting condition (simulator only): referenced at ' + M.pos);
 }
 
 /* ======================================================================
@@ -1609,13 +1610,21 @@ function buildMenu() {
   // Commissioning needs the PIN.
   const c2 = cols(2, 10, 470);
   const tile = (c, r, label, fn) => navBtn(s, c2[c][0], RY[r], c2[c][1], RH, label, fn);
+  // WP023 proposal S16 to S18: the Alarms tile carries the alarm state (s9.3.1 p50); Diagnostics is read only and
+  // opens without the PIN (s3.1 p8, level 4 for troubleshooting); the footer keeps the process status (s6.7 p16).
   tile(0, 0, 'Trend', () => show('trend'));
-  tile(1, 0, 'Alarms and events', () => show('faults'));
+  const ba = tile(1, 0, 'Alarms and events', () => show('faults'));
   tile(0, 1, 'Reference valve', () => show('ref'));
   tile(1, 1, 'System information', () => show('info'));
-  const bc = tile(0, 2, '', commTile);
-  screens.menu.update = () => seth(bc, navLab((ACC.on ? '' : sym('LOCK', 14) + ' ') + 'Commissioning'));
-  screens.menu.foot = () => 'Link ' + (BENCH.link === 'eth' ? 'Ethernet 192.168.1.50' : 'USB') + '. Firmware ' + FW + '.';
+  tile(0, 2, 'Diagnostics', () => show('diag'));
+  const bc = tile(1, 2, '', commTile);
+  let lastA = null;
+  screens.menu.update = () => {
+    seth(bc, navLab((ACC.on ? '' : sym('LOCK', 14) + ' ') + 'Commissioning'));
+    const n = C.faults.size, ua = unacked(), a = n + '|' + ua;
+    if (a !== lastA) { lastA = a; seth(ba, navLab('Alarms and events', n ? plural(n, 'fault') + (ua ? ', not acknowledged' : '') : '')); }
+    tog(ba, 'tile-alm', n > 0); tog(ba, 'unack', n > 0 && ua);
+  };
 }
 // Read-only value (v52): flat panel, 12 px caption, one 16 px line. A value that does not fit is cut with "..." and a
 // grey chevron, and a tap opens it in full (LV_LABEL_LONG_DOT); the size never changes.
@@ -1640,10 +1649,10 @@ function buildRef() {
   const s = newScreen('ref');
   // v52: values and the action only; what referencing does is behind Help (side slot 1, as on settings pages).
   const stat = infoCard(s, 10, RY[0], 226, 'Reference');
-  const pos = infoCard(s, 244, RY[0], 109, 'Steps now');
+  // S19: operator units; step counts and the past-switch count stay on Diagnostics.
+  const pos = infoCard(s, 244, RY[0], 109, 'Valve, %');
   const last = infoCard(s, 10, RY[1], 226, 'Last referenced');
-  const sw = infoCard(s, 244, RY[1], 109, 'Limit switch');
-  const over = infoCard(s, 10, RY[2], 109, 'Past switch');
+  const sw = infoCard(s, 244, RY[1], 109, 'Seat switch');
   navBtn(s, 361, RY[0], 109, RH, 'Help', () => textView('Reference valve', [
     'Finds the closed position: closes to the limit switch, backs off, approaches slowly and sets 0 %. Takes up to ' + Math.ceil(1.1 * P.POSMAX / P.fhome / 60) + ' min; the pressure will change.',
     'MANUAL only. STOP cancels; the valve is then not referenced.', 'Position is counted in steps from the closed limit.']));
@@ -1652,10 +1661,9 @@ function buildRef() {
     const hm = C.mode === 'HOMING' ? (homeStep().match(/(\d of 3): (.*)/) || []) : [];
     set(stat.cp, hm[1] ? 'Referencing, step ' + hm[1] : 'Reference');
     stat.set(C.mode === 'HOMING' ? (hm[2] ? hm[2][0].toUpperCase() + hm[2].slice(1) : 'Starting') : C.ref ? 'Referenced' : 'Not referenced', C.mode === 'HOMING' || C.ref ? COL.text : COL.warn);
-    pos.set(fint(M.pos));
-    sw.set(LIM.active ? 'Open' : 'Closed', LIM.active ? COL.warn : COL.text);
+    pos.set(C.ref || C.mode === 'HOMING' ? pctOf(M.pos).toFixed(1) : '--');
+    sw.set(LIM.active ? 'At seat' : 'Off seat');
     last.set(C.lastHome ? stamp(C.lastHome.t) : 'Not since power-on');
-    over.set(fint(LIM.over), LIM.over ? COL.fault : COL.text);
     tog(bh, 'dis', C.mode === 'AUTO' || C.mode === 'PAUSED' || C.mode === 'HOMING');
   };
   screens.ref.foot = () => C.mode === 'AUTO' || C.mode === 'PAUSED' ? 'AUTO on: referencing needs MANUAL.' : C.mode === 'HOMING' ? 'Referencing. STOP cancels.' : '';
@@ -1696,7 +1704,7 @@ function buildInfo() {
 // PIN 2468; a long press is the alternative if the workplace does not need a PIN). Closes on Exit or after 10 min
 // without a touch. The serial port shares the same session (ACCESS pin / ACCESS EXIT).
 const ACC = { on: false, last: 0, pin: '2468', idleMs: 10 * 60 * 1000 };
-const COMM_PAGES = ['comm', 'sensor', 'motor', 'tune', 'limits', 'diag', 'cfg', 'guide'];
+const COMM_PAGES = ['comm', 'sensor', 'motor', 'tune', 'limits', 'cfg', 'guide'];   // S18: Diagnostics is read only, no PIN
 function accTouch() { if (ACC.on) ACC.last = performance.now(); }
 function accLeft() { return Math.max(0, ACC.idleMs - (performance.now() - ACC.last)); }
 function accEnter(via) {
@@ -2046,7 +2054,7 @@ function buildDiag() {
   // v47: raw readings and drive diagnostics, read only (were the Sensor Reading page and the Motor last-move cards).
   const c4 = cols(4, 10, 470);
   const g = (r, c, cap) => infoCard(s, c4[c][0], RY[r], c4[c][1], cap);
-  const sig = g(0, 0, 'Signal, mV/V'), raw = g(0, 1, 'Uncal., mbar'), sup = g(0, 2, 'Supply, V'), brd = g(0, 3, 'Board, C');
+  const sig = g(0, 0, 'Signal, mV/V'), raw = g(0, 1, 'Uncal., mbar'), sup = g(0, 2, 'Supply, V'), brd = g(0, 3, 'Board, \u00B0C');
   const pos = g(1, 0, 'Steps now'), sw = g(1, 1, 'Switch, NC'), over = g(1, 2, 'Past switch'), lnk = g(1, 3, 'Link');
   const last = g(2, 0, 'Last move'), tgt = g(2, 1, 'Target position'), dist = g(2, 2, 'Moved, steps'), took = g(2, 3, 'Took, s');
   screens.diag.update = () => {
@@ -2154,9 +2162,9 @@ function buildFaults() {
   });
   let lastN = -1, lastF = null;
   screens.faults.update = () => {
-    const fk = faultsByPriority().map(([k, f]) => k + f.t).join('|');
+    const fk = faultsByPriority().map(([k, f]) => k + f.t + f.acked + faultCanReset(k)).join('|');   // S20: state shown per fault
     if (fk !== lastF) { lastF = fk; fl.innerHTML = ''; fl.scrollTop = 0; if (!C.faults.size) { const p = document.createElement('p'); p.textContent = 'No latched faults'; p.style.color = COL.muted; p.style.margin = '0'; fl.appendChild(p); } faultsByPriority().forEach(([k, f]) => { const p = document.createElement('p'); p.innerHTML = (k + '  ' + faultShort(k, f)).replace(/</g, '&lt;') + ' ' + sym('RIGHT', 12); p.style.color = COL.fault; p.style.margin = '0'; p.style.cursor = 'pointer'; p.addEventListener('pointerup', () => { faultDetail(k); updateUI(); }); p.style.whiteSpace = 'nowrap'; p.style.overflow = 'hidden'; p.style.textOverflow = 'ellipsis'; fl.appendChild(p);
-      const q = document.createElement('p'); q.textContent = stamp(f.t, true); st(q, { color: COL.muted, margin: '0', fontSize: '12px', lineHeight: '16px', paddingBottom: '4px' }); fl.appendChild(q); }); }   // v45 (Ryan): date with year and seconds under each fault
+      const q = document.createElement('p'); q.textContent = stamp(f.t, true) + '  ' + (!f.acked ? 'Not acknowledged' : faultCanReset(k) ? 'Cause gone, Reset fault clears' : 'Acknowledged, cause present'); st(q, { color: COL.muted, margin: '0', fontSize: '12px', lineHeight: '16px', paddingBottom: '4px' }); fl.appendChild(q); }); }   // v45 (Ryan): date with year and seconds under each fault
     seth(ba, lab('Reset fault', C.faults.size > 1 ? C.faults.size + ' faults' : ''));
     tog(ba, 'dis', !C.faults.size);
     if (C.evSeq !== lastN) {   // v48: by sequence number; the count stops changing once the 200-event history is full
@@ -2164,7 +2172,7 @@ function buildFaults() {
       const evs = C.events.slice().reverse();
       if (!evs.length) { const p = document.createElement('p'); p.textContent = 'None'; p.style.color = COL.muted; el.appendChild(p); }
       evs.forEach(e => { const p = document.createElement('p'); p.textContent = stamp(e.t, true) + '  ' + e.tag + '  ' + e.text; p.style.padding = '2px 0'; p.style.margin = '0'; p.style.borderTop = '1px solid ' + COL.bg;
-        p.style.color = /^F-/.test(e.tag) ? COL.fault : /^W-/.test(e.tag) ? '#3F3F3F' : COL.text; el.appendChild(p); });
+        p.style.color = COL.text; el.appendChild(p); });   // S21: history in text colour; red is for active faults only (s9.8.1 p55)
       el.scrollTop = keep;
     }
   };

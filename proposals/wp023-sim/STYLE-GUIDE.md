@@ -14,7 +14,7 @@ Rev A, 13 Oct 2026. Proposed, not approved. It implements `HMI-PHILOSOPHY.md` an
 |---|---|
 | 1 and 2 | Home |
 | 3 | Valve, Reference valve, Trend, Alarms and events |
-| 4 | Fault detail, System information, Help panels, Commissioning pages |
+| 4 | Fault detail, System information, Diagnostics (read only, no PIN), Help panels, Commissioning pages (PIN) |
 
 ## 3. Colour (WP023 s8.1)
 
@@ -67,9 +67,11 @@ Each command button label names the action, not the state. A second 12 px line h
 
 ## 7. Alarms (WP023 s9)
 
+- Navigation buttons that lead to alarms (Menu > Alarms and events) carry the alarm state on their second line and the alarm border.
 - Classes: F codes are alarms (one priority); W codes are warnings; not referenced is a prompt; mode changes and setpoints are events (logged, not annunciated).
 - A new F code is unacknowledged: blinking borders on the status strip, the header rule and the owning tile, plus buzzer bursts (3 × 2.4 kHz every 10 s).
 - A tap on the status strip acknowledges all faults. Reset fault clears latches whose cause has gone, and also acknowledges.
+- The alarm list shows each fault's state. The event history is in text colour; red is for active faults only.
 - The fault detail page gives what happened, the controller's action, what to check, and when it can be reset.
 
 ## 8. Interaction

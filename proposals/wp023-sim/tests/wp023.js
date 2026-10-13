@@ -1,4 +1,4 @@
-// WP023 proposal acceptance checks (CHANGES.md S1 to S12). Run: node tests/run.js tests/wp023.js
+// WP023 proposal acceptance checks (CHANGES.md S1 to S21). Run: node tests/run.js tests/wp023.js
 module.exports = async (p, h) => {
   const { ok } = h, ev = f => p.evaluate(f);
   await ev(() => { localStorage.clear(); SAVED = defaultCfg(); loadActive(SAVED); bootHomed(); setHe(true); setPump(true); show('ctrl'); });
@@ -41,5 +41,22 @@ module.exports = async (p, h) => {
   // S11: refresh interval
   r = await ev(() => /lastUI > 500/.test(frame.toString()));
   ok(r, 'S11 device values refresh at 2 Hz');
+  // S16 to S21: Menu and lower pages
+  r = await ev(() => { accExit('test', true); bootHomed(); BENCH.druck = false; for (let i = 0; i < 300; i++) simTick(); show('menu'); updateUI();
+    const tiles = [...document.querySelectorAll('#dev .b')].filter(b => b.offsetParent);
+    const al = tiles.find(b => /^Alarms and events/.test(b.textContent));
+    return { al: al.textContent, alm: al.classList.contains('tile-alm') && al.classList.contains('unack'), diag: tiles.some(b => b.textContent.trim() === 'Diagnostics') }; });
+  ok(/1 fault, not acknowledged/.test(r.al) && r.alm, 'S16 Menu Alarms tile shows the fault state and blinks: ' + r.al);
+  r = await ev(() => { show('diag'); updateUI(); return current; });
+  ok(r === 'diag', 'S18 Diagnostics opens without the PIN');
+  r = await ev(() => { ackAll(); BENCH.druck = true; for (let i = 0; i < 300; i++) simTick(); show('faults'); updateUI();
+    const ps = [...document.querySelectorAll('#dev p')].filter(e => e.offsetParent); return { st: ps.map(e => e.textContent).join(' | '), red: ps.filter(e => /^\d/.test(e.textContent) && e.style.color === 'rgb(214, 48, 49)').length }; });
+  ok(/Cause gone, Reset fault clears/.test(r.st) && r.red === 0, 'S20 S21 fault state shown, history not red');
+  r = await ev(() => { ack(); show('menu'); updateUI(); return G.ftxt.textContent; });
+  ok(!/Firmware/.test(r), 'S17 Menu footer keeps the process status: ' + r);
+  r = await ev(() => { show('ref'); updateUI(); return screens.ref.el.textContent; });
+  ok(/Valve, %/.test(r) && /Seat switch/.test(r) && !/Steps now|Past switch/.test(r), 'S19 Reference page in operator terms');
+  r = await ev(() => C.events.map(e => e.tag + ' ' + e.text).join(' | '));
+  ok(!/HOME|Homed|Setpoint|at SP/.test(r), 'S21 event words match the screen terms');
   await h.audit('wp023-final');
 };
