@@ -9,7 +9,7 @@ module.exports = async (p, h) => {
   let o = await st(); ok(o.badge === 'NOT REFERENCED' && o.mode === 'NOT HOMED', 'WF1 real start boots NOT REFERENCED'); await shot('wf1-1-boot');
   await tap('Reference valve'); await shot('wf1-2-ask'); await tap('Start reference'); await run(3); await shot('wf1-3-referencing');
   await run(400); o = await st(); ok(o.mode === 'MANUAL' && o.pos === 0, 'WF1 referenced, MANUAL at 0 %');
-  await tap('Valve'); await tap('Enter position'); await keys('34'); await tap('Set'); await run(120); await tap('Back');
+  await tap('Valve'); await tap('Go to'); await keys('34'); await tap('Set'); await run(120); await tap('Back');
   ok(await ev(() => !C.spSet), 'WF1 no default target');
   await tap('Start AUTO'); await keys('5'); await shot('wf1-4-target'); await tap('Set');
   await run(5); o = await st(); ok(o.mode === 'AUTO', 'WF1 first Start AUTO asks for the target and starts AUTO');
@@ -20,7 +20,7 @@ module.exports = async (p, h) => {
   // 2. AUTO -> Valve page -> MANUAL -> enter position -> navigate away while moving
   await tap('Valve'); await shot('wf2-1-valve-auto'); await tap('Switch to MANUAL'); await shot('wf2-2-confirm'); await tap('Switch to MANUAL');
   o = await st(); ok(o.mode === 'MANUAL' && o.cur === 'valve', 'WF2 switched to MANUAL from the Valve page');
-  await tap('Enter position'); await keys('60'); await tap('Set'); await run(2); await shot('wf2-3-moving');
+  await tap('Go to'); await keys('60'); await tap('Set'); await run(2); await shot('wf2-3-moving');
   const a = await st(); await tap('Back'); await run(1); const b = await st();
   ok(a.moving && b.moving && a.target === b.target && b.cur === 'ctrl', 'WF2 leaving the Valve page keeps the move');
   await shot('wf2-4-home-moving'); await run(400); o = await st(); ok(Math.abs(o.pos - 60) < 0.2, 'WF2 move finished at ' + o.pos + ' %');

@@ -63,6 +63,8 @@ Montserrat Medium, ASCII plus degree and bullet. Sizes 12 (labels, units, status
 | Sparkline | 143 × 32, one pen, no axes, 10 min, never clipped; stepped dashed target and band in AUTO | home tiles; tap opens Trend (a navigation target without a chevron) |
 | Bar | 8 px, value marker 3 × 14 px | pressure log 0.1-1000 with low-alarm zone; valve 0-100 % |
 
+Text is as short as it can be (Ryan 13 Oct). The header carries the mode, so status text does not repeat it. Status, dialogs and refusals are one short phrase, with no hints such as "Tap for ..." (a chevron shows a target opens something). Explanations go behind Help.
+
 Each command button label names the action, not the state. A second 12 px line holds only state ("3 faults", "2 of 3").
 
 ## 7. Alarms (WP023 s9)

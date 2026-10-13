@@ -644,10 +644,10 @@ function limitHit() {
 
 // Central permissive for manual, jog and auto moves.
 function requestMove(target, quiet) {
-  if (C.mode === 'HOMING') return quiet ? false : refuse('Referencing in progress (IL-8)');
-  if (C.faults.size) return quiet ? false : refuse('Fault latched: reset the fault first (IL-9)');
+  if (C.mode === 'HOMING') return quiet ? false : refuse('Referencing');
+  if (C.faults.size) return quiet ? false : refuse('Reset the fault first');
   if (C.ref) target = clamp(Math.round(target), 0, P.POSMAX);
-  if (!M.moving && target < M.pos && LIM.active) return quiet ? false : refuse('Closed limit active: closing blocked (IL-1)');
+  if (!M.moving && target < M.pos && LIM.active) return quiet ? false : refuse('At seat, cannot close');
   return startMove(target);
 }
 
@@ -659,14 +659,14 @@ function requestMove(target, quiet) {
 function homeStep() { return { 'clearance move': 'Moving off the switch', 'fast approach': 'Referencing 1 of 3: closing to the switch', 'back-off': 'Referencing 2 of 3: backing off', 'creep approach': 'Referencing 3 of 3: slow approach' }[C.homeStage] || 'Referencing'; }
 function homeAsk() {
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to MANUAL before referencing');
-  if (C.faults.size) return refuse('Fault latched: reset the fault first (IL-9)');
+  if (C.faults.size) return refuse('Reset the fault first');
   const mins = Math.ceil(1.1 * P.POSMAX / P.fhome / 60);
-  confirmBox('Reference the valve? It closes until the limit switch opens, then sets 0 %. Up to ' + mins + ' min. The pressure will change.', 'Start reference', 'act', home);
+  confirmBox('Reference the valve? It closes to the seat, up to ' + mins + ' min.', 'Start reference', 'act', home);
 }
 function home() {
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Switch to MANUAL before referencing');
   if (C.mode === 'HOMING') return refuse('Already referencing');
-  if (C.faults.size) return refuse('Fault latched: reset the fault first (IL-9)');
+  if (C.faults.size) return refuse('Reset the fault first');
   stopMotor();
   C.ref = false; C.mode = 'HOMING'; C.homeT0 = t;
   ev('REF', 'Referencing started at count ' + fint(M.pos));
@@ -703,7 +703,7 @@ function homeCreep() {
       C.manPos = C.posCmd = C.lastSent = M.pos;
       C.lastHome = { t, dur: t - C.homeT0 };
       ev('REF', 'Referenced in ' + (t - C.homeT0).toFixed(1) + ' s, position ' + P.Noffset);
-      msg('Valve referenced. Closed at 0 %.', 'info');
+      msg('Referenced', 'info');
     } else if (r === 'DONE') homeFault('F-07', 'Homing: switch not found on creep approach');
     else homeAbort(r);
   });
@@ -762,7 +762,7 @@ function ack() {
   ackAll();   // S5: Reset fault also acknowledges
   for (const tag of [...C.faults.keys()]) { if (faultCanReset(tag)) { C.faults.delete(tag); ev(tag, 'reset by operator'); } }
   if (C.faults.size) return refuse('Not reset, cause still present: ' + [...C.faults.keys()].join(', '));
-  msg('Fault reset. ' + (C.ref ? 'MANUAL, valve held. Start AUTO when ready.' : 'Valve not referenced.'), 'info');
+  msg('Fault reset' + (C.ref ? '' : ', valve not referenced'), 'info');
   return true;
 }
 // What happened, what the controller did, what to check, what allows reset (review item 6).
@@ -802,15 +802,15 @@ function operatorStop() {
 function kpSteps() { return P.Kp / 100 * P.POSMAX; }
 function toAuto() {
   if (C.mode === 'AUTO') return true;
-  if (!C.ref) return refuse('Auto refused: valve not referenced (IL-2)');
-  if (C.mode === 'HOMING') return refuse('Auto refused: referencing (IL-8)');
-  if (C.faults.size) return refuse('Auto refused: fault latched, reset it first (IL-9)');
-  if (!pvValid || PV == null) return refuse('Auto refused: pressure invalid (IL-3)');
-  if (!C.spSet) return refuse('Auto refused: no target set');
-  if (C.SP < P.Pmin || C.SP > pMax()) return refuse('Auto refused: target outside Target min to Target max (IL-4)');
-  if (PV < P.alarmLo || PV > sensFs()) return refuse('Auto refused: pressure ' + PV.toFixed(2) + ' below the low alarm or above the sensor range. Helium flow on? Open in manual first');
-  if (!P.KDIR) return refuse('Auto refused: K_DIR not set (IL-6)');
-  if (P.Kp == null || P.Ti == null) return refuse('Auto refused: Kp and Ti not set (Tuning)');
+  if (!C.ref) return refuse('Reference the valve first');
+  if (C.mode === 'HOMING') return refuse('Referencing');
+  if (C.faults.size) return refuse('Reset the fault first');
+  if (!pvValid || PV == null) return refuse('No valid pressure');
+  if (!C.spSet) return refuse('Set a target first');
+  if (C.SP < P.Pmin || C.SP > pMax()) return refuse('Target outside limits');
+  if (PV < P.alarmLo || PV > sensFs()) return refuse('Pressure ' + fmtOp(PV) + ' mbar outside limits. Open the valve in MANUAL first');
+  if (!P.KDIR) return refuse('Pressure response not set');
+  if (P.Kp == null || P.Ti == null) return refuse('Tuning not set');
   const e = P.KDIR * (C.SP - PV);
   const now = C.mode === 'PAUSED' ? C.posCmd : C.manPos;
   C.I = now - kpSteps() * e;                        // bumpless: first output equals the position in force
@@ -843,7 +843,7 @@ function setSP(v) {
   return true;
 }
 function setManSteps(n) {
-  if (C.mode !== 'MANUAL') return refuse(C.mode === 'NOT HOMED' ? 'Valve not referenced: reference it first (IL-2)' : 'Valve entry is for manual mode');
+  if (C.mode !== 'MANUAL') return refuse(C.mode === 'NOT HOMED' ? 'Reference the valve first' : 'MANUAL only');
   n = clamp(Math.round(n), 0, P.POSMAX);
   if (!requestMove(n)) return false;
   C.manPos = C.posCmd = C.lastSent = n;
@@ -851,7 +851,7 @@ function setManSteps(n) {
 }
 function jog(n) {
   if (C.mode === 'AUTO' || C.mode === 'PAUSED') return refuse('Jog locked in auto');
-  if (C.mode === 'HOMING') return refuse('Movement locked while referencing (IL-8)');
+  if (C.mode === 'HOMING') return refuse('Referencing');
   let target = (M.moving ? M.target : M.pos) + n;
   if (C.ref) target = clamp(target, 0, P.POSMAX);
   if (!requestMove(target)) return false;
@@ -884,7 +884,7 @@ function ctrlTick() {
   if (C.mode !== 'AUTO' || PV == null) { C.inBandSince = null; return; }
   if (Math.abs(C.SP - PV) > P.band) C.inBandSince = null; else if (C.inBandSince == null) C.inBandSince = t;
   // F-02, armed in auto only (G7)
-  if (PV < P.alarmLo || PV > sensFs()) { if (C.f02Since === null) C.f02Since = t; if (t - C.f02Since >= 5) { raise('F-02', PV < P.alarmLo ? 'Pressure ' + PV.toFixed(2) + ' below the low alarm ' + P.alarmLo + ' mbar, check helium flow and pump' : 'Pressure ' + PV.toFixed(2) + ' above the sensor range ' + sensFs() + ' mbar'); return; } }
+  if (PV < P.alarmLo || PV > sensFs()) { if (C.f02Since === null) C.f02Since = t; if (t - C.f02Since >= 5) { raise('F-02', PV < P.alarmLo ? 'Pressure ' + PV.toFixed(2) + ' below the low alarm ' + P.alarmLo + ' mbar, check helium supply and pump' : 'Pressure ' + PV.toFixed(2) + ' above the sensor range ' + sensFs() + ' mbar'); return; } }
   else C.f02Since = null;
 
   const e = P.KDIR * (C.SP - PV);
@@ -1165,7 +1165,7 @@ function updateGlobal() {
   let mode = 'none', text = '', go = '';
   if (home) mode = 'none';
   // v48 (review item 6): a latched fault outranks messages; a refusal still shows while it is fresh, then the fault returns.
-  else if (fl.length && current !== 'faults' && !(toastOn && C.msg.kind === 'warn' && !overlay)) { mode = 'fault'; text = (fl[0][0] === 'F-12' ? 'Stopped: valve not commanded closed.' : fl[0][0] + ' ' + faultShort(fl[0][0], fl[0][1]) + '.') + (fl.length > 1 ? ' ' + fl.length + ' faults.' : '') + ' Tap for Alarms.'; go = 'faults'; }
+  else if (fl.length && current !== 'faults' && !(toastOn && C.msg.kind === 'warn' && !overlay)) { mode = 'fault'; text = (fl[0][0] === 'F-12' ? 'Stopped. Valve held, not closed.' : fl[0][0] + ' ' + faultShort(fl[0][0], fl[0][1])) + (fl.length > 1 ? ' (+' + (fl.length - 1) + ')' : ''); go = 'faults'; }
   else if (toastOn && !overlay) { mode = 'toast'; text = C.msg.text; }
   else if (screens[current] && screens[current].foot) { mode = 'note'; text = screens[current].foot(); go = screens[current].footGo ? screens[current].footGo() : ''; }
   // Ryan (9 Oct): the status strip beside STOP stays on every screen. With nothing page-specific it shows the
@@ -1338,22 +1338,22 @@ function statusLine() {
   if (C.faults.size) {
     const fl = faultsByPriority(); const [tag, f] = fl[0];
     // v48: STOP says what it did and what it did not do.
-    if (tag === 'F-12') return { kind: 'fault', text: 'Stopped. AUTO off, valve motion stopped; valve not commanded closed.', btn: 1, count: fl.length > 1 ? fl.length : 0 };
-    return { kind: 'fault', text: tag + ' ' + faultShort(tag, f) + '. Tap for details.', btn: 1, count: fl.length > 1 ? fl.length : 0 };
+    if (tag === 'F-12') return { kind: 'fault', text: 'Stopped. Valve held, not closed.', btn: 1, count: fl.length > 1 ? fl.length : 0 };
+    return { kind: 'fault', text: tag + ' ' + faultShort(tag, f), btn: 1, count: fl.length > 1 ? fl.length : 0 };
   }
   if (C.msg && performance.now() < C.msg.until) return { kind: C.msg.kind, text: C.msg.text, btn: C.mode === 'PAUSED' ? 'manual' : 0 };   // the paused choice stays on screen
   switch (C.mode) {
-    case 'NOT HOMED': return { kind: 'prompt', text: 'Valve position unknown. Reference the valve.' };   // S4: a prompt, not a warning (WP023 s9.8.1 p55)
-    case 'HOMING': return { kind: 'info', dot: COL.grey, text: homeStep() + '. STOP cancels.' };
-    case 'MANUAL': return { kind: 'info', dot: COL.muted, text: M.moving ? 'Manual. Moving to ' + pctOf(M.target).toFixed(1) + ' %.' : 'Manual. Valve held at ' + pctOf(M.pos).toFixed(1) + ' %.' };
+    case 'NOT HOMED': return { kind: 'prompt', text: 'Valve not referenced' };   // S4: a prompt, not a warning (WP023 s9.8.1 p55)
+    case 'HOMING': return { kind: 'info', dot: COL.grey, text: homeStep() };
+    case 'MANUAL': return { kind: 'info', dot: COL.muted, text: M.moving ? 'Moving to ' + pctOf(M.target).toFixed(1) + ' %' : 'Valve held' };
     case 'AUTO': {
       const r = regulation(), sp = fmtOp(C.SP);
-      if (r === 'stable') return { kind: 'info', dot: COL.ok, text: 'Stable at ' + sp + ' mbar: within ' + fmtLim(P.band) + ' for ' + P.stableT + ' s.' };
-      if (r === 'band') return { kind: 'info', dot: COL.ok, text: 'Within target band, ' + sp + ' +/- ' + fmtLim(P.band) + ' mbar.' };
+      if (r === 'stable') return { kind: 'info', dot: COL.ok, text: 'Stable at ' + sp + ' mbar' };
+      if (r === 'band') return { kind: 'info', dot: COL.ok, text: 'In band, ' + sp + ' +/- ' + fmtLim(P.band) + ' mbar' };
       // v51 (review 9 Oct): "Approaching" claimed progress that is not measured; outside the band it is Regulating.
-      return { kind: 'info', dot: COL.ok, text: 'Regulating to ' + sp + ' mbar, outside the target band.' };
+      return { kind: 'info', dot: COL.ok, text: 'Regulating to ' + sp + ' mbar' };
     }
-    case 'PAUSED': return { kind: 'warn', text: 'AUTO paused (W-02): no convergence, valve held.', btn: 'manual' };
+    case 'PAUSED': return { kind: 'warn', text: 'W-02 Not settling, valve held', btn: 'manual' };
   }
   return { kind: 'info', text: '' };
 }
@@ -1362,9 +1362,9 @@ function modePress() {
   if (C.mode === 'HOMING') return refuse('Referencing: STOP to cancel');
   if (C.mode === 'MANUAL') {
     if (!C.spSet) return keypadStart();   // no default target (Ryan, 10 Oct): the first Start AUTO asks for one
-    confirmBox('Start AUTO at ' + fmtOp(C.SP) + ' mbar? Pressure now ' + fmtOp(PV) + ' mbar.', 'Start AUTO', 'act', toAuto, ['New target', keypadStart]);
+    confirmBox('Start AUTO at ' + fmtOp(C.SP) + ' mbar?', 'Start AUTO', 'act', toAuto, ['New target', keypadStart]);
   }
-  else if (C.mode === 'PAUSED') confirmBox('Resume AUTO at ' + fmtOp(C.SP) + ' mbar, or switch to MANUAL?', 'Resume AUTO', 'act', toAuto, ['MANUAL', toManual]);
+  else if (C.mode === 'PAUSED') confirmBox('Resume AUTO at ' + fmtOp(C.SP) + ' mbar?', 'Resume AUTO', 'act', toAuto, ['MANUAL', toManual]);
   else askManual();
 }
 
@@ -1461,7 +1461,7 @@ function keypadSP() {
   keypad({ title: 'Target, mbar abs', panel: spPanel, min: P.Pmin, max: pMax(), w03: true, dec: 1,
     info: 'Allowed ' + fmtLim(P.Pmin) + ' to ' + fmtLim(pMax()),
     onSet: v => {
-      if (Math.abs(v - C.SP) > SP_CONFIRM) return { then: () => confirmBox('Change the target from ' + fmtOp(C.SP) + ' to ' + fmtOp(v) + ' mbar? That is ' + (v >= C.SP ? '+' : '-') + Math.abs(v - C.SP).toFixed(1) + ' mbar.', 'Change target', 'act', () => setSP(v)) };
+      if (Math.abs(v - C.SP) > SP_CONFIRM) return { then: () => confirmBox('Change target ' + fmtOp(C.SP) + ' to ' + fmtOp(v) + ' mbar?', 'Change target', 'act', () => setSP(v)) };
       return setSP(v);
     } });
 }
@@ -1516,11 +1516,12 @@ function textView(title, lines) {
 function canManual() { return C.mode === 'MANUAL'; }
 function manPct(v) { return setManSteps(v / 100 * P.POSMAX); }
 function notManual() { return refuse(C.mode === 'NOT HOMED' ? 'Reference the valve first' : C.faults.size ? 'Reset the fault first' : 'Switch to MANUAL first'); }
+const STEP_PCT = 5;   // Ryan 13 Oct: the step buttons move 5 % (were 1 %)
 function nudge(d) { if (!canManual()) return notManual(); return setManSteps(C.manPos + d / 100 * P.POSMAX); }
 function keypadPct() {
   if (!canManual()) return notManual();
-  keypad({ title: 'Requested position, %', panel: () => [['Valve position', C.ref ? pctOf(M.pos).toFixed(1) : '--']], min: 0, max: 100,
-    info: '0 closed, 100 fully open', onSet: v => manPct(v) });
+  keypad({ title: 'Go to, %', panel: () => [['Valve, %', C.ref ? pctOf(M.pos).toFixed(1) : '--']], min: 0, max: 100,
+    info: '0 closed, 100 open', onSet: v => manPct(v) });
 }
 // Hold-to-jog (Ryan, 9 Oct): moves toward closed or fully open while pressed, stops on release.
 // In LVGL: LV_EVENT_PRESSED starts, RELEASED or PRESS_LOST stops; the touch is polled every 5 ms.
@@ -1551,31 +1552,28 @@ function buildValve() {
   const c3 = cols(3, 10, 470), c4 = [0, 1, 2, 3].map(i => [Math.round(10 + i * (460 + 12) / 4), Math.round((460 + 12) / 4) - 12]);
   const nowCard = (k, cap) => { const [x, w] = c3[k]; const c = mk(s, x, RY[0], w, RH, 'ro'); const strip = mk(c, 0, 6, 3, 36, ''); const cp = mk(c, 12, 5, null, null, 'cap', cap);
     return { c, v: st(mk(c, 12, 20, w - 24, 24, '', ''), { fontSize: '16px', lineHeight: '24px', textAlign: 'right' }), cp, strip, w }; };
+  // Ryan 13 Oct: less text. Units in the captions; the status strip carries the state (the "why" card is gone).
   const pr = nowCard(0, 'Pressure, mbar');
-  const vp = nowCard(1, 'Valve position');
+  const vp = nowCard(1, 'Valve, %');
   const barBg = st(mk(vp.c, 12, 42, vp.w - 24, 3, ''), { background: COL.bg, borderRadius: '1px' });
   const barFill = st(mk(barBg, 0, 0, 0, 3, ''), { background: COL.grey, borderRadius: '1px' });
-  const rq = nowCard(2, 'Requested position');
-  const jc = jogBtn(s, c4[0][0], RY[1], c4[0][1], RH, lab('Hold to close'), -1);
-  const n1 = btn(s, c4[1][0], RY[1], c4[1][1], RH, lab('-1 %'), () => nudge(-1));
-  const n2 = btn(s, c4[2][0], RY[1], c4[2][1], RH, lab('+1 %'), () => nudge(1));
-  const jo = jogBtn(s, c4[3][0], RY[1], c4[3][1], RH, lab('Hold to open'), 1);
+  const rq = nowCard(2, 'Go to, %');
+  // Ryan 13 Oct: steps of 5 %. Close and Open move while held (Help says so).
+  const jc = jogBtn(s, c4[0][0], RY[1], c4[0][1], RH, lab('Close'), -1);
+  const n1 = btn(s, c4[1][0], RY[1], c4[1][1], RH, lab('-5 %'), () => nudge(-STEP_PCT));
+  const n2 = btn(s, c4[2][0], RY[1], c4[2][1], RH, lab('+5 %'), () => nudge(STEP_PCT));
+  const jo = jogBtn(s, c4[3][0], RY[1], c4[3][1], RH, lab('Open'), 1);
   const bAct = btn(s, 10, RY[2], 109, RH, '', () => isAuto() ? askManual() : keypadPct(), 'act');
-  // v52: the strip states what the valve is doing; the longer explanation is behind Help.
-  const why = st(mk(s, 127, RY[2], 226, RH, 'card'), {});
-  const wdot = st(mk(why, 12, 20, 8, 8, ''), { borderRadius: '4px' });
-  const wtxt = st(mk(why, 28, 0, 190, 48, '', ''), { fontSize: '12px', lineHeight: '16px', whiteSpace: 'normal', display: 'flex', alignItems: 'center' });
   navBtn(s, 361, RY[2], 109, RH, 'Help', () => textView('Valve', [
-    'Valve position is estimated from motor steps counted since referencing, 0 % closed to 100 % fully open. It is not a flow.',
-    'Hold to close and Hold to open move while pressed and stop on release. -1 % and +1 % step the requested position. Enter position moves to a typed value.',
-    'The valve moves by hand in MANUAL only. Leaving this page does not stop a move; STOP does.']));
+    'Position is counted in motor steps from the closed limit: 0 % closed, 100 % open.',
+    'Close and Open move while held. -5 % and +5 % step. Go to takes a typed value. MANUAL only; STOP stops.']));
   screens.valve.update = () => {
     const man = canManual(), auto = isAuto();
     if (C.ref) {
-      set(vp.v, pctOf(M.pos).toFixed(1) + ' %'); setc(vp.v, COL.text);
+      set(vp.v, pctOf(M.pos).toFixed(1)); setc(vp.v, COL.text);
       barFill.style.width = (clamp(pctOf(M.pos), 0, 100) * (vp.w - 24) / 100).toFixed(1) + 'px'; vis(barBg, true);
       const tgt = auto ? C.posCmd : (M.moving ? M.target : C.manPos);
-      set(rq.v, pctOf(tgt).toFixed(1) + ' %'); setc(rq.v, COL.text);
+      set(rq.v, pctOf(tgt).toFixed(1)); setc(rq.v, COL.text);
     } else {
       set(vp.v, '----'); setc(vp.v, COL.idle); vis(barBg, false); set(rq.v, '----'); setc(rq.v, COL.idle);
     }
@@ -1584,22 +1582,11 @@ function buildValve() {
     setbg(pr.strip, PV == null ? COL.fault : 'transparent');
     setbg(vp.strip, 'transparent'); setbg(rq.strip, 'transparent');
     [jc, n1, n2, jo].forEach(b => tog(b, 'dis', !man));
-    seth(bAct, lab(auto ? 'Switch to MANUAL' : 'Enter position'));
+    seth(bAct, lab(auto ? 'Switch to MANUAL' : 'Go to'));
     tog(bAct, 'dis', !(man || (auto && !C.faults.size)));
-    let w, k = 'info';
-    if (C.faults.has('F-12')) { w = 'Stopped. Reset fault on home to move.'; k = 'fault'; }
-    else if (C.faults.size) { w = 'Fault latched: movement blocked.'; k = 'fault'; }
-    else if (C.mode === 'NOT HOMED') { w = 'Position unknown: not referenced.'; k = 'prompt'; }
-    else if (C.mode === 'HOMING') { w = homeStep() + '.'; }
-    else if (C.mode === 'AUTO') w = 'AUTO is moving the valve.';
-    else if (C.mode === 'PAUSED') { w = 'AUTO paused (W-02), valve held.'; k = 'warn'; }
-    else if (M.moving) w = (M.dir > 0 ? 'Opening' : 'Closing') + ' to ' + pctOf(M.target).toFixed(1) + ' %.';
-    else w = 'MANUAL, valve held.';
-    set(wtxt, w); setc(wtxt, k === 'fault' || k === 'warn' ? '#FFFFFF' : k === 'prompt' ? '#000000' : COL.text);
-    stripKind(why, k, wdot, COL.idle);
   };
 }
-function askManual() { confirmBox('Switch to MANUAL? AUTO stops and the valve is held at ' + pctOf(M.pos).toFixed(1) + ' %.', 'Switch to MANUAL', 'act', toManual); }
+function askManual() { confirmBox('Switch to MANUAL? Valve holds at ' + pctOf(M.pos).toFixed(1) + ' %.', 'Switch to MANUAL', 'act', toManual); }
 
 /* ---- Menu ---------------------------------------------------------- */
 function buildMenu() {
@@ -1622,7 +1609,7 @@ function buildMenu() {
   screens.menu.update = () => {
     seth(bc, navLab((ACC.on ? '' : sym('LOCK', 14) + ' ') + 'Commissioning'));
     const n = C.faults.size, ua = unacked(), a = n + '|' + ua;
-    if (a !== lastA) { lastA = a; seth(ba, navLab('Alarms and events', n ? plural(n, 'fault') + (ua ? ', not acknowledged' : '') : '')); }
+    if (a !== lastA) { lastA = a; seth(ba, navLab('Alarms and events', n ? plural(n, 'fault') : '')); }
     tog(ba, 'tile-alm', n > 0); tog(ba, 'unack', n > 0 && ua);
   };
 }
@@ -1710,7 +1697,7 @@ function accLeft() { return Math.max(0, ACC.idleMs - (performance.now() - ACC.la
 function accEnter(via) {
   ACC.on = true; ACC.last = performance.now(); ev('ACCESS', 'Commissioning opened (' + via + ')');
   // v52: the timeout is explained once, here, instead of a countdown in the header.
-  msg('Commissioning open. Locks after 10 min without a touch.' + (DRAFT.size ? ' ' + plural(DRAFT.size, 'unapplied change') + ' kept from before.' : ''), 'info');
+  msg('Commissioning open, locks after 10 min idle.' + (DRAFT.size ? ' ' + plural(DRAFT.size, 'unapplied change') + ' kept from before.' : ''), 'info');
   return true;
 }
 // v51 (review 9 Oct): closing the session removes editing access only. It never changes the control mode or moves the
@@ -2164,7 +2151,7 @@ function buildFaults() {
   screens.faults.update = () => {
     const fk = faultsByPriority().map(([k, f]) => k + f.t + f.acked + faultCanReset(k)).join('|');   // S20: state shown per fault
     if (fk !== lastF) { lastF = fk; fl.innerHTML = ''; fl.scrollTop = 0; if (!C.faults.size) { const p = document.createElement('p'); p.textContent = 'No latched faults'; p.style.color = COL.muted; p.style.margin = '0'; fl.appendChild(p); } faultsByPriority().forEach(([k, f]) => { const p = document.createElement('p'); p.innerHTML = (k + '  ' + faultShort(k, f)).replace(/</g, '&lt;') + ' ' + sym('RIGHT', 12); p.style.color = COL.fault; p.style.margin = '0'; p.style.cursor = 'pointer'; p.addEventListener('pointerup', () => { faultDetail(k); updateUI(); }); p.style.whiteSpace = 'nowrap'; p.style.overflow = 'hidden'; p.style.textOverflow = 'ellipsis'; fl.appendChild(p);
-      const q = document.createElement('p'); q.textContent = stamp(f.t, true) + '  ' + (!f.acked ? 'Not acknowledged' : faultCanReset(k) ? 'Cause gone, Reset fault clears' : 'Acknowledged, cause present'); st(q, { color: COL.muted, margin: '0', fontSize: '12px', lineHeight: '16px', paddingBottom: '4px' }); fl.appendChild(q); }); }   // v45 (Ryan): date with year and seconds under each fault
+      const q = document.createElement('p'); q.textContent = stamp(f.t, true) + '  ' + (!f.acked ? 'New' : faultCanReset(k) ? 'Cleared, reset' : 'Active'); st(q, { color: COL.muted, margin: '0', fontSize: '12px', lineHeight: '16px', paddingBottom: '4px' }); fl.appendChild(q); }); }   // v45 (Ryan): date with year and seconds under each fault
     seth(ba, lab('Reset fault', C.faults.size > 1 ? C.faults.size + ' faults' : ''));
     tog(ba, 'dis', !C.faults.size);
     if (C.evSeq !== lastN) {   // v48: by sequence number; the count stops changing once the 200-event history is full

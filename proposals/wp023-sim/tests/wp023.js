@@ -1,4 +1,4 @@
-// WP023 proposal acceptance checks (CHANGES.md S1 to S21). Run: node tests/run.js tests/wp023.js
+// WP023 proposal acceptance checks (CHANGES.md S1 to S23). Run: node tests/run.js tests/wp023.js
 module.exports = async (p, h) => {
   const { ok } = h, ev = f => p.evaluate(f);
   await ev(() => { localStorage.clear(); SAVED = defaultCfg(); loadActive(SAVED); bootHomed(); setHe(true); setPump(true); show('ctrl'); });
@@ -31,13 +31,17 @@ module.exports = async (p, h) => {
   ok(!r.ua && r.latched && !r.blink, 'S5 tap acknowledges, blink stops, latch stays');
   await ev(() => { BENCH.druck = true; for (let i = 0; i < 300; i++) simTick(); ack(); updateUI(); });
   // S4: not referenced is a prompt
-  r = await ev(() => { document.getElementById('reboot').click(); show('ctrl'); updateUI(); return [...document.querySelectorAll('#dev .card')].some(e => e.classList.contains('k-prompt') && /Reference the valve/.test(e.textContent)); });
+  r = await ev(() => { document.getElementById('reboot').click(); show('ctrl'); updateUI(); return [...document.querySelectorAll('#dev .card')].some(e => e.classList.contains('k-prompt') && /Valve not referenced/.test(e.textContent)); });
   ok(r, 'S4 not referenced shown as a prompt');
   r = await banned(); ok(r.length === 0, 'S4 no green or amber at boot: ' + r.join(','));
   // S9: jog row gaps
-  r = await ev(() => { bootHomed(); show('valve'); updateUI(); const bs = [...document.querySelectorAll('#dev .b')].filter(b => /Hold to|1 %/.test(b.textContent)).map(b => b.getBoundingClientRect()).sort((a, b) => a.left - b.left);
+  r = await ev(() => { bootHomed(); show('valve'); updateUI(); const bs = [...document.querySelectorAll('#dev .b')].filter(b => /^(Close|Open|[-+]5 %)$/.test(b.textContent.trim())).map(b => b.getBoundingClientRect()).sort((a, b) => a.left - b.left);
     return bs.slice(1).map((b, i) => Math.round(b.left - bs[i].right)); });
   ok(r.length === 3 && r.every(g => g >= 12), 'S9 jog row gaps ' + r.join(','));
+  // S22: step buttons move 5 %
+  r = await ev(() => { toManual(); const a = C.manPos; nudge(STEP_PCT); return +(100 * (C.manPos - a) / P.POSMAX).toFixed(2); });
+  ok(r === 5, 'S22 +5 % button steps the valve by ' + r + ' %');
+  await ev(() => { nudge(-STEP_PCT); });
   // S11: refresh interval
   r = await ev(() => /lastUI > 500/.test(frame.toString()));
   ok(r, 'S11 device values refresh at 2 Hz');
@@ -46,12 +50,12 @@ module.exports = async (p, h) => {
     const tiles = [...document.querySelectorAll('#dev .b')].filter(b => b.offsetParent);
     const al = tiles.find(b => /^Alarms and events/.test(b.textContent));
     return { al: al.textContent, alm: al.classList.contains('tile-alm') && al.classList.contains('unack'), diag: tiles.some(b => b.textContent.trim() === 'Diagnostics') }; });
-  ok(/1 fault, not acknowledged/.test(r.al) && r.alm, 'S16 Menu Alarms tile shows the fault state and blinks: ' + r.al);
+  ok(/1 fault/.test(r.al) && r.alm, 'S16 Menu Alarms tile shows the fault state and blinks: ' + r.al);
   r = await ev(() => { show('diag'); updateUI(); return current; });
   ok(r === 'diag', 'S18 Diagnostics opens without the PIN');
   r = await ev(() => { ackAll(); BENCH.druck = true; for (let i = 0; i < 300; i++) simTick(); show('faults'); updateUI();
     const ps = [...document.querySelectorAll('#dev p')].filter(e => e.offsetParent); return { st: ps.map(e => e.textContent).join(' | '), red: ps.filter(e => /^\d/.test(e.textContent) && e.style.color === 'rgb(214, 48, 49)').length }; });
-  ok(/Cause gone, Reset fault clears/.test(r.st) && r.red === 0, 'S20 S21 fault state shown, history not red');
+  ok(/Cleared, reset/.test(r.st) && r.red === 0, 'S20 S21 fault state shown, history not red');
   r = await ev(() => { ack(); show('menu'); updateUI(); return G.ftxt.textContent; });
   ok(!/Firmware/.test(r), 'S17 Menu footer keeps the process status: ' + r);
   r = await ev(() => { show('ref'); updateUI(); return screens.ref.el.textContent; });
