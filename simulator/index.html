@@ -1212,7 +1212,8 @@ function vbarX(p) { return clamp(p, 0, 100) * PBAR / 100; }
 // WP023 proposal S1, S2 (review R4, R5; WP023 s6.7 p16, s8.12.5 p31, s8.12.8 p33; iTC home "label left, boxed value
 // right" rows, references/itc-mercury-screens/04): each tile has caption + unit (y 4), the reading at 26 px (y 20), a
 // 10 min sparkline 143 x 32 (y 50, tap area 143 x 40), a slim 8 px bar (y 86) with end labels (y 96) and a setpoint
-// row (y 116): label left, editable field right (x 58-155, 40 px). Both sparklines share one time axis so pressure and
+// row (y 116): label left, editable field right (x 73-155, 32 px high, Ryan 14 Oct). No time label on the sparkline
+// (WP023 s8.12.8: no axes; Ryan 14 Oct dropped "10 min"); Trend carries the axes. Both sparklines share one time axis so pressure and
 // valve moves line up; a tap on either opens Trend. The 30 s band and the direction arrow are removed (the sparkline
 // shows both). The pressure bar keeps the log scale for range context and adds the low-alarm zone (R5).
 const SPARK_WIN = 600;
@@ -1224,7 +1225,6 @@ function homeTile(s, x, name, unit, fname, onTap) {
   mk(c, 12, 4, 90, null, 'cap', name);
   st(mk(c, 75, 4, 80, null, 'cap', unit), { textAlign: 'right' });
   const val = st(mk(c, 12, 20, PBAR, 28, '', ''), { fontSize: '26px', lineHeight: '28px', textAlign: 'right' });
-  st(mk(c, 12, 34, 48, null, 'cap', '10 min'), { color: COL.muted });   // Ryan (14 Oct): the sparkline's time range
   const hit = st(mk(c, 12, 46, PBAR, 40, ''), { cursor: 'pointer' });
   hit.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); show('trend'); });
   const sp = document.createElement('canvas'); sp.width = PBAR * 2; sp.height = 64;
@@ -1235,9 +1235,9 @@ function homeTile(s, x, name, unit, fname, onTap) {
   const ticks = [], labels = [];
   const mark = st(mk(bar, 0, -3, 3, 14, ''), { background: COL.text });
   st(mk(c, 12, 116, 40, 40, 'cap', fname), { lineHeight: '40px' });
-  const f = st(mk(c, 155 - SPW, 116, SPW, 40, ''), { borderRadius: '4px', fontSize: '16px', lineHeight: '38px', textAlign: 'right', boxSizing: 'border-box', cursor: 'pointer' });
-  const fv = mk(f, 0, 0, SPW - 18, 38, '', ''); st(fv, { textAlign: 'right', lineHeight: '38px', overflow: 'hidden' });
-  const chev = st(mk(f, SPW - 16, 0, 14, 38, ''), { lineHeight: '38px', color: COL.blue }); chev.innerHTML = sym('RIGHT', 14);
+  const f = st(mk(c, 155 - SPW, 120, SPW, 32, ''), { borderRadius: '4px', fontSize: '16px', lineHeight: '30px', textAlign: 'right', boxSizing: 'border-box', cursor: 'pointer' });
+  const fv = mk(f, 0, 0, SPW - 18, 30, '', ''); st(fv, { textAlign: 'right', lineHeight: '30px', overflow: 'hidden' });
+  const chev = st(mk(f, SPW - 16, 0, 14, 30, ''), { lineHeight: '30px', color: COL.blue }); chev.innerHTML = sym('RIGHT', 14);
   f.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); onTap(); updateUI(); });
   return { c, val, sp, bar, zone, fill, ticks, labels, mark, f, fv, chev };
 }

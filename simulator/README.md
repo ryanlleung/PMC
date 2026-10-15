@@ -99,3 +99,8 @@ The audit flags clipped or cut text, text overlapping text or buttons, text outs
 Page load starts referenced at 0 % in MANUAL as a demo starting condition (labelled under the screen); Reboot board (real start) boots not referenced, as the firmware will. Settings saved in the simulator are kept in the browser's local storage; the laptop panel has Erase simulated flash.
 
 This folder is independent of `InitialTesting/` and `tools/ui-preview/` and is not part of the firmware build. Firmware has not been changed to match.
+
+## v63 (14 Oct, Ryan)
+
+- "10 min" label beside the sparkline dropped (WP023 s8.12.8: sparklines carry no axes; Trend has them).
+- Target and Go to boxes 40 to 32 px high, same centre line.
