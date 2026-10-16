@@ -9,13 +9,14 @@
 #include "valvepos.h"
 #include "motor_screen.h"
 #include "fixed.h"
+#include "cfg.h"
 #include "ui.h"
 
 /* --------------------------------------------------------------------------
  * Fonts: tabular digits. Every digit takes the width of the widest, so a
  * right-aligned reading does not shift as it changes.
  * ------------------------------------------------------------------------ */
-lv_font_t ui_num_16, ui_num_26;
+lv_font_t ui_num_16, ui_num_26, ui_num_40;
 
 static bool num_glyph_dsc(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uint32_t letter, uint32_t next)
 {
@@ -328,7 +329,7 @@ bool ui_btn_disabled(lv_event_t *e)
 /* --------------------------------------------------------------------------
  * Frame on lv_layer_top(): header, status strip, STOP
  * ------------------------------------------------------------------------ */
-#define TITLE_X 141   // Menu tile at 129 plus its 12 px text inset
+#define HDR_BTN_W 48  // Back and Home, icons only
 static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *mode_dot, *fault_rule;
 static lv_obj_t *strip, *strip_dot, *strip_icon, *strip_text, *strip_ok, *strip_act;
 static lv_obj_t *stop_btn;
@@ -362,6 +363,11 @@ static void frame_refresh(void);
 static void back_event(lv_event_t *e)
 {
     (void)e;
+    ui_back();
+}
+
+void ui_back(void)
+{
     if (overlay)
         ui_overlay_close();
     else if (back_n)
@@ -414,23 +420,27 @@ static void build_frame(void)
     lv_obj_set_style_bg_opa(fault_rule, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(fault_rule, UI_FAULT, 0);
     lv_obj_add_flag(fault_rule, LV_OBJ_FLAG_HIDDEN);
-    // Back and Home, icons only, fill the first 129 px so the title starts
-    // over the text of Menu's tiles (Ryan, 16 Oct). Home is hidden on Home
-    // and under popups, where Back closes the popup.
-    back_btn = ui_btn(hdr, 0, 0, 64, 40, UI_DARK, LV_SYMBOL_LEFT, back_event, NULL);
-    home_btn = ui_btn(hdr, 64, 0, 65, 40, UI_DARK, LV_SYMBOL_HOME, home_event, NULL);
+    // Back and Home, icons only, 48 px each; the title is centred (Ryan,
+    // 16 Oct). Home is hidden on Home and under popups, where Back closes
+    // the popup.
+    back_btn = ui_btn(hdr, 0, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_LEFT, back_event, NULL);
+    home_btn = ui_btn(hdr, HDR_BTN_W, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_HOME, home_event, NULL);
     // A touch in the 8 px gap under the header is Back's, not the page's.
     lv_obj_set_ext_click_area(hdr, 8);
     lv_obj_set_ext_click_area(back_btn, 8);
     lv_obj_set_ext_click_area(home_btn, 8);
+    // The fault rule runs the full width, over Back and Home (not clickable,
+    // so their touches still reach them).
+    lv_obj_move_foreground(fault_rule);
     for (int i = 0; i < 2; i++) {
         lv_obj_t *l = lv_obj_get_child(i ? home_btn : back_btn, 0);
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(l);
     }
-    pmc_lbl = ui_label(hdr, 10, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_LEFT,
-                       "Needle valve controller");
-    title_lbl = ui_label(hdr, TITLE_X, 11, 293 - TITLE_X, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_LEFT, "");
+    pmc_lbl = ui_label(hdr, 10, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER,
+                       "Pressure controller");
+    lv_label_set_long_mode(pmc_lbl, LV_LABEL_LONG_DOT);
+    title_lbl = ui_label(hdr, 100, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
     lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_DOT);
     mode_lbl = ui_label(hdr, 296, 11, 158, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_RIGHT, "");
     mode_dot = plain(hdr);
@@ -550,6 +560,31 @@ static void strip_draw(ui_strip_kind_t kind, lv_color_t dot, const char *text, b
 
 }
 
+static int32_t text_w(const char *t)
+{
+    lv_point_t sz;
+    lv_text_get_size(&sz, t, &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return sz.x;
+}
+
+// Centre the title on the screen; when the mode word leaves no room for
+// that, centre it in the gap between Back and Home (or the edge, on Home)
+// and the mode word, and cut it with dots only if it is wider than the gap.
+static void title_fit(lv_obj_t *l, const char *text, const char *mode_txt, int32_t left)
+{
+    int32_t right = 454 - text_w(mode_txt) - 8;
+    int32_t w = text_w(text);
+    int32_t x = 240 - w / 2;
+    if (w > right - left)
+        w = right - left;
+    if (x < left || x + w > right)
+        x = left + (right - left - w) / 2;
+    lv_obj_set_pos(l, x, 11);
+    lv_obj_set_width(l, w + 1);
+}
+
+static void override_cancel_event(lv_event_t *e);
+
 static void frame_refresh(void)
 {
     const char *tag, *text;
@@ -563,20 +598,51 @@ static void frame_refresh(void)
     show(home_btn, !home && !overlay);
     show(pmc_lbl, home && !overlay);
     show(title_lbl, !home);
-    if (!home)
-        ui_set_text(title_lbl, cur->title);
-    ui_set_text(mode_lbl, f12 ? "STOPPED" : nf ? "FAULT" : valve_mode_name());
+    const char *mode_txt = f12 ? "STOPPED" : nf ? "FAULT" : valve_mode_name();
+    static const char *fit_mode, *fit_title;
+    // Home's title: "<cryostat> pressure controller" (Settings > Cryostat name).
+    static char home_title[CFG_NAME_LEN + 24], fit_name[CFG_NAME_LEN + 1] = "\x01";
+    bool renamed = strcmp(cfg_name(), fit_name) != 0;
+    if (renamed) {
+        lv_strlcpy(fit_name, cfg_name(), sizeof fit_name);
+        if (fit_name[0])
+            lv_snprintf(home_title, sizeof home_title, "%s pressure controller", fit_name);
+        else
+            lv_strlcpy(home_title, "Pressure controller", sizeof home_title);
+        ui_set_text(pmc_lbl, home_title);
+    }
+    ui_set_text(mode_lbl, mode_txt);
+    if (renamed || mode_txt != fit_mode || (!home && cur->title != fit_title)) {
+        fit_mode = mode_txt;
+        if (!home) {
+            fit_title = cur->title;
+            ui_set_text(title_lbl, cur->title);
+            title_fit(title_lbl, cur->title, mode_txt, 2 * HDR_BTN_W + 4);
+        }
+        // Home's title sits on the left (Ryan, 16 Oct: centred left the
+        // top left empty); it is centred in the gap only if it is too long.
+        title_fit(pmc_lbl, home_title, mode_txt, 10);
+        if (text_w(home_title) < 454 - text_w(mode_txt) - 8 - 12)
+            lv_obj_set_x(pmc_lbl, 12);
+    }
     show(fault_rule, nf > 0);
     bool op = !valve_stop_latches();
     if (op != lv_obj_has_state(stop_btn, LV_STATE_USER_2)) {
         if (op) lv_obj_add_state(stop_btn, LV_STATE_USER_2);
         else    lv_obj_remove_state(stop_btn, LV_STATE_USER_2);
     }
-    // Dot: red with a fault, filled grey in AUTO (not built), else a ring.
-    lv_opa_t opa = nf ? LV_OPA_COVER : LV_OPA_TRANSP;
-    if (lv_obj_get_style_bg_opa(mode_dot, 0) != opa) {
-        lv_obj_set_style_bg_opa(mode_dot, opa, 0);
-        lv_obj_set_style_border_width(mode_dot, nf ? 0 : 2, 0);
+    // Mode dot (simulator WP023 S4): red and filled with a latched fault,
+    // filled grey in AUTO, a grey ring in every other mode; shape, not
+    // colour, tells AUTO apart. (Before 0.10.5 the ring never drew: its
+    // border was only set on a change of fill, and the first was none.)
+    static int dot_kind = -1;
+    bool in_auto = false;      // AUTO comes in stage 8
+    int kind = nf ? 2 : in_auto ? 1 : 0;
+    if (kind != dot_kind) {
+        dot_kind = kind;
+        lv_obj_set_style_bg_opa(mode_dot, kind ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_color(mode_dot, kind == 2 ? UI_FAULT : lv_color_hex(0xC3CDD7), 0);
+        lv_obj_set_style_border_width(mode_dot, kind ? 0 : 2, 0);
     }
 
     question_check();
@@ -585,9 +651,11 @@ static void frame_refresh(void)
     act_cb = NULL;
     if (cur->refresh)
         cur->refresh();
-    show(strip, !overlay || !kp_open);   // the keypad uses the strip's row
     if (msg_until && (int32_t)(lv_tick_get() - msg_until) >= 0)
         msg_until = 0;
+    // The keypad uses the strip's row; an empty line (Home, idle) hides it.
+    bool quiet = !msg_until && !nf && !stepper3_override() && !line_text[0];
+    show(strip, (!overlay || !kp_open) && !quiet);
     char buf[96];
     if (msg_until) {
         strip_draw(UI_STRIP_WARN, UI_IDLE, msg_text, true, false);
@@ -600,10 +668,20 @@ static void frame_refresh(void)
             lv_snprintf(buf, sizeof buf, "%s %s", tag, text);
         strip_draw(UI_STRIP_FAULT, UI_IDLE, buf, false, act_cb != NULL);
     } else if (stepper3_override()) {
-        strip_draw(UI_STRIP_WARN, UI_IDLE, "Limit override on", false, act_cb != NULL);
+        // Cancel on every screen while it is armed (Ryan, 16 Oct).
+        ui_strip_action("Cancel", NULL, override_cancel_event);
+        strip_draw(UI_STRIP_WARN, UI_IDLE, "Limit override on", false, true);
     } else {
         strip_draw(line_kind, line_dot, line_text, false, act_cb != NULL);
     }
+}
+
+static void override_cancel_event(lv_event_t *e)
+{
+    (void)e;
+    stepper3_override_cancel();
+    valve_event("LIM", "Limit override off (screen)");
+    ui_msg("Limit override off.");
 }
 
 static void fast_timer(lv_timer_t *t)
@@ -677,18 +755,29 @@ void ui_home(void)
     if (service) {
         service = false;
         show(frame, true);
+        motor_screen_close();   // its LVGL heap back
     } else if (old != home_scr) {
         lv_obj_delete(old);
     }
     frame_refresh();
 }
 
-// Back from the motor screen: Settings, with Menu and Home behind it.
-static void service_back(void)
+// Back from the motor screen: Settings, with Menu and Home behind it. Run
+// after the Back event, so the motor screen can be freed before Menu and
+// Settings are built (both at once ran a host test's heap out).
+static void service_back_now(void *p)
 {
+    (void)p;
+    if (!service)
+        return;
     ui_home();
     ui_open(&ui_scr_menu);
     ui_open(&ui_scr_settings);
+}
+
+static void service_back(void)
+{
+    lv_async_call(service_back_now, NULL);
 }
 
 void ui_service(void)
@@ -696,16 +785,16 @@ void ui_service(void)
     ui_overlay_close();
     show(frame, false);
     service = true;
-    static bool built;
-    if (!built) {
-        motor_screen_init(service_back);   // kept once built
-        built = true;
-    }
-    motor_screen_show();
-    if (cur_scr != home_scr)
+    // The screen left (Settings) goes first, so the two are never built
+    // at once; the motor screen is built on open and freed on leave.
+    if (cur_scr != home_scr) {
+        lv_screen_load(home_scr);
         lv_obj_delete(cur_scr);
+    }
     cur = &ui_scr_home;
     cur_scr = home_scr;
+    motor_screen_init(service_back);
+    motor_screen_show();
 }
 
 bool ui_on_service(void) { return service; }
@@ -953,12 +1042,12 @@ void ui_pick(const char *title, const char *const *items, int n, int sel, void (
 }
 
 // Confirm and question dialogs.
-static void (*confirm_ok)(void), (*confirm_cancel)(void);
+static void (*confirm_ok)(void), (*confirm_cancel)(void), (*confirm_mid)(void);
 
 static void confirm_event(lv_event_t *e)
 {
-    bool ok = lv_event_get_user_data(e) != NULL;
-    void (*f)(void) = ok ? confirm_ok : confirm_cancel;
+    intptr_t k = (intptr_t)lv_event_get_user_data(e);   // 0 cancel, 1 OK, 2 middle
+    void (*f)(void) = k == 1 ? confirm_ok : k == 2 ? confirm_mid : confirm_cancel;
     ui_overlay_close();
     if (f)
         f();
@@ -967,11 +1056,18 @@ static void confirm_event(lv_event_t *e)
 
 void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void))
 {
+    ui_ask3(text, cancel, on_cancel, NULL, NULL, ok, on_ok);
+}
+
+void ui_ask3(const char *text, const char *cancel, void (*on_cancel)(void), const char *mid,
+             void (*on_mid)(void), const char *ok, void (*on_ok)(void))
+{
     lv_obj_t *o = overlay_new();
     lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
     lv_obj_set_style_bg_opa(o, 140, 0);
     confirm_ok = on_ok;
     confirm_cancel = on_cancel;
+    confirm_mid = on_mid;
     lv_obj_t *box = ui_card(o, 70, 0, 340, 100);
     lv_obj_set_style_radius(box, 8, 0);
     lv_obj_t *t = ui_label(box, 16, 14, 308, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, text);
@@ -983,8 +1079,14 @@ void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const
     lv_obj_set_height(t, th);
     lv_obj_set_size(box, 340, h);
     lv_obj_set_y(box, (168 - h) / 2);
-    ui_btn(box, 16, by, 150, 48, UI_SECONDARY, cancel, confirm_event, NULL);
-    ui_btn(box, 174, by, 150, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
+    if (mid) {
+        ui_btn(box, 16, by, 96, 48, UI_SECONDARY, cancel, confirm_event, NULL);
+        ui_btn(box, 122, by, 96, 48, UI_SECONDARY, mid, confirm_event, (void *)2);
+        ui_btn(box, 228, by, 96, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
+    } else {
+        ui_btn(box, 16, by, 150, 48, UI_SECONDARY, cancel, confirm_event, NULL);
+        ui_btn(box, 174, by, 150, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
+    }
     frame_refresh();
 }
 
@@ -1120,9 +1222,9 @@ static void question_check(void)
         int32_t pm = valve_pos_max();
         ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
         lv_snprintf(t, sizeof t, "Valve position saved at %s %% before the restart. "
-                    "Use it, or calibrate the valve?", v);
+                    "Use it, or home the valve?", v);
         lv_snprintf(ok, sizeof ok, "Use %s %%", v);
-        ui_ask(t, "Calibrate", sp_calibrate, ok, sp_use);
+        ui_ask(t, "Home", sp_calibrate, ok, sp_use);
     }
     asking = false;
     overlay_q = want;
@@ -1135,6 +1237,7 @@ void ui_init(void)
 {
     num_font(&ui_num_16, &ui_font_16);
     num_font(&ui_num_26, &ui_font_26);
+    num_font(&ui_num_40, &ui_font_40);
     styles_init();
     home_scr = new_screen();
     cur_scr = home_scr;

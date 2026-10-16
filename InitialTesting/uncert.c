@@ -3,10 +3,11 @@
 #include "lvgl.h"   // lv_snprintf
 #include "link.h"
 #include "cal.h"
+#include "cfg.h"
 #include "fixed.h"
 #include "uncert.h"
 
-#define DRUCK_ACC_MMBAR   414      // 0.04 % of 1034.214 mbar (15 psia FS)
+#define DRUCK_ACC_PPM     400      // 0.04 % of full scale (UNIK 5000)
 #define INA_OFFSET_NV     1000     // INA228 shunt offset, 1 uV max
 #define NOISE_N           10
 
@@ -34,7 +35,12 @@ static void compute(const clicks_state_t *s, terms_t *t)
     if (!cal_bench(&r_vac, &t->vac_p, &r_air, &t->air_p)) { t->why = "no bench cal"; return; }
 
     t->ok = true;
-    t->druck = DRUCK_ACC_MMBAR;
+    // 0.04 % of the full scale of the sensor in use (0.414 mbar at 15 psi).
+    cfg_sensor_t sn;
+    int32_t fs = cfg_psi10_mmbar(150);
+    if (cfg_sensor(cfg_sensor_active(), &sn) && sn.fs_mmbar > 0)
+        fs = sn.fs_mmbar;
+    t->druck = (int32_t)(((int64_t)fs * DRUCK_ACC_PPM + 500000) / 1000000);
 
     // The vacuum point's pressure error shifts every reading (offset-type,
     // kept at full size). The air point's sets the gain, so it scales with

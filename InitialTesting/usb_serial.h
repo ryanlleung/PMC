@@ -22,6 +22,9 @@ const char *usb_serial_status(void);
 
 // printf-style output to the COM port. Dropped until the PC has enumerated the port.
 void usb_serial_printf(const char *fmt, ...);
+// Bytes usb_serial_printf can take now without waiting; large when not
+// enumerated (output is dropped at once then).
+size_t usb_serial_tx_room(void);
 
 // Non-blocking line input. Returns true with a complete line in buf (no CR/LF,
 // NUL-terminated) once one has arrived; longer lines are cut to n - 1 chars.

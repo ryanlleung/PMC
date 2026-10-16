@@ -111,6 +111,7 @@ const char *sysinfo_reset_reason(void) { return fake_wdt ? "watchdog" : "power-o
 bool sysinfo_reset_abnormal(void) { return fake_wdt; }
 const char *sysinfo_line(void) { return "PMC firmware 0.3.0 (preview), last reset: power-on"; }
 // Link output goes to stderr so the DATA line format can be checked.
+size_t link_tx_room(void) { return 4096; }
 void link_printf(const char *fmt, ...)
 {
     va_list ap;
@@ -141,14 +142,17 @@ static stepper3_stop_t m_stop = STEPPER3_STOP_NONE;
 bool stepper3_move(int32_t steps) { m_pos += steps; m_stop = STEPPER3_STOP_DONE; return steps != 0; }
 void stepper3_stop(void) {}
 void stepper3_off(void) {}
-bool stepper3_busy(void) { return false; }
+bool fake_busy;   // set by the "moving" scenario
+bool stepper3_busy(void) { return fake_busy; }
 int32_t stepper3_position(void) { return m_pos; }
 void stepper3_zero(void) { m_pos = 0; }
 stepper3_stop_t stepper3_last_stop(void) { return m_stop; }
 bool stepper3_limit_open(void) { return limit_state() != LIMIT_CLOSED; }
 bool stepper3_limit_fitted(void) { return true; }
-bool stepper3_override(void) { return false; }
-void stepper3_override_arm(void) {}
+const char *stepper3_refusal(void) { return "refused"; }
+bool fake_override;   // set by the "overon" scenario
+bool stepper3_override(void) { return fake_override; }
+void stepper3_override_arm(void) { fake_override = true; }
 bool stepper3_set_rate(uint32_t v) { m_rate = v; return true; }
 bool stepper3_set_start(uint32_t v) { m_start = v; return true; }
 bool stepper3_set_accel(uint32_t v) { m_accel = v; return true; }

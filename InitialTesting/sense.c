@@ -8,6 +8,7 @@
 #include "uncert.h"
 #include "fixed.h"
 #include "valve.h"
+#include "trend.h"
 #include "sense.h"
 
 /*
@@ -88,6 +89,7 @@ void sense_second(void)
     uncert_update(s);
     cal_update(s);
     valve_sense(s);
+    trend_second(s);
     if (s->pm_found && data_on && !s->pm_diag)
         print_data_line(s);
 }

@@ -49,7 +49,7 @@ static bool moving;
 valve_mode_t valve_mode(void) { return v_mode; }
 const char *valve_mode_name(void)
 {
-    return v_mode == VALVE_CALIBRATING ? "CALIBRATING" : v_mode == VALVE_MANUAL ? "MANUAL" : "NOT CALIBRATED";
+    return v_mode == VALVE_CALIBRATING ? "HOMING" : v_mode == VALVE_MANUAL ? "MANUAL" : "NOT HOMED";
 }
 bool valve_calibrated(void) { return v_cal; }
 int32_t valve_pct10(void) { return v_pct10; }
@@ -59,6 +59,7 @@ int32_t valve_target_pct_milli(void) { return valve_target_pct10() * 100; }
 int valve_cal_step(void) { return v_step; }
 uint32_t valve_cal_budget_s(void) { return 300; }
 uint32_t valve_cal_elapsed_s(void) { return v_mode == VALVE_CALIBRATING ? 42 : 0; }
+bool valve_set_closed(const char **why) { (void)why; v_cal = true; v_mode = VALVE_MANUAL; v_pct10 = 0; return true; }
 bool valve_calibrate(const char **why) { (void)why; v_mode = VALVE_CALIBRATING; v_step = 1; return true; }
 bool valve_goto_pct10(int32_t p, const char **why) { (void)why; v_target10 = p; moving = true; return true; }
 bool valve_goto_pct100(int32_t p, const char **why) { return valve_goto_pct10(p / 10, why); }
@@ -96,7 +97,7 @@ bool valve_fault_get(int i, valve_fault_t *f)
 }
 static const char *const ev_tag[] = { "F-12", "W-01", "REF", "REF", "F-14" };
 static const char *const ev_text[] = { "Operator stop at count 33880", "Point set as 0 %, count 0",
-    "Calibrated in 15 s, position 0", "Calibrating started at count 1203", "Power-up (event only), valve not calibrated" };
+    "Homed in 15 s, position 0", "Homing started at count 1203", "Power-up (event only), valve not homed" };
 int valve_event_count(void) { return 5; }
 uint32_t valve_event_total(void) { return 5; }
 bool valve_event_get(int i, uint32_t *age, const char **tag, const char **text)
@@ -113,7 +114,8 @@ const char *valve_last_cal_iso(void) { return "2026-10-05 14:28:59"; }
 bool stepper3_last_move(int32_t *from, uint32_t *ms) { if (!v_cal) return false; *from = 0; *ms = 41300; return true; }
 void stepper3_stop_ramped(void) {}
 bool stepper3_busy(void);
-void stepper3_override_cancel(void) {}
+extern bool fake_override;
+void stepper3_override_cancel(void) { fake_override = false; }
 
 /* Settings store: the real cfg.c and cal.c over a serial flash in RAM. */
 static uint8_t *flash;
@@ -246,16 +248,31 @@ int main(int argc, char **argv)
     bool page = !strcmp(st, "valve") || !strcmp(st, "valvenc") || !strcmp(st, "limithit") ||
                 !strcmp(st, "calpage") || !strcmp(st, "faults") || !strcmp(st, "detail") || !strcmp(st, "diag") ||
                 !strcmp(st, "help") || !strcmp(st, "help2") || !strcmp(st, "help3") || !strcmp(st, "back") || !strcmp(st, "svc") ||
-                !strncmp(st, "set-", 4) || !strncmp(st, "cal", 3);
+                !strncmp(st, "set-", 4) || !strncmp(st, "cal", 3) || strstr(st, "trend");
     if (!strcmp(st, "manual") || !strcmp(st, "moving") || !strcmp(st, "stop") || !strcmp(st, "keypad") ||
         !strcmp(st, "neg") || (page && strcmp(st, "valvenc"))) {
         v_mode = VALVE_MANUAL; v_cal = true; v_pct10 = 342;
     }
-    if (!strcmp(st, "moving")) { moving = true; v_target10 = 500; }
+    if (!strcmp(st, "moving")) { extern bool fake_busy; fake_busy = moving = true; v_target10 = 500; }
     if (!strcmp(st, "calib") || !strcmp(st, "calpage2")) { v_mode = VALVE_CALIBRATING; v_step = 2; }
     if (!strcmp(st, "nodruck")) v_f01 = true;
     if (!strcmp(st, "faults") || !strcmp(st, "detail")) { v_f01 = true; v_f12 = true; }
 
+    // An hour of trend: pumped down from air, then held near 5 mbar with the
+    // valve moved by hand (stage 7 previews).
+    if (v_cal && strcmp(st, "notrend")) {
+        int32_t keep = v_pct10;
+        clicks_state_t s = *clicks_state();
+        for (int i = 0; i < 3600; i++) {
+            double tt = i;
+            double p = i < 900 ? 1013.0 * exp(-tt / 120.0) + 5.0 : 5.0 + (i > 2700 ? 0.8 : 0) + (i > 3300 ? -0.5 : 0);
+            p += 0.15 * sin(tt / 23.0) + 0.05 * sin(tt / 3.1);
+            s.p_mmbar = (int32_t)(p * 1000);
+            v_pct10 = i < 900 ? 342 : i > 3300 ? 300 : i > 2700 ? 380 : 342;
+            trend_second(&s);
+        }
+        v_pct10 = keep;
+    }
     lv_init();
     static uint8_t pool2[POOL2_KB * 1024] __attribute__((aligned(8)));   // 24 KB as main.c board_init; 64-bit pointers need more
     lv_mem_add_pool(pool2, sizeof pool2);
@@ -280,22 +297,29 @@ int main(int argc, char **argv)
     size_t before = heap_used();
     for (int i = 0; i < 10; i++) {
         tap(415, 184);          // Menu
-        tap(60, 20);            // Back
+        tap(24, 20);            // Back
     }
     tap(300, 184);              // Go to box (opens the keypad in MANUAL)
-    tap(60, 20);                // Back closes it
+    tap(24, 20);                // Back closes it
     for (int i = 0; i < 5; i++) {
-        tap(415, 128); tap(60, 20);                             // Valve
-        tap(415, 184); tap(350, 72); tap(60, 20); tap(60, 20);  // Faults and log
-        tap(415, 184); tap(120, 128); tap(60, 20); tap(60, 20); // Calibrate valve
-        tap(415, 184); tap(120, 184); tap(60, 20); tap(60, 20); // Diagnostics
+        // The 0.6.0 motor screen first (review, 16 Oct: it stayed built and
+        // a settings keypad after it ran the heap out). Its Back opens
+        // Settings, with Menu behind.
+        tap(415, 184); tap(379, 184); ui_service(); run(300);   // from Settings
+        tap(40, 15); run(300);                                  // its Back: Settings
+        tap(24, 20); tap(24, 20);                               // Menu, Home
+        tap(415, 128); tap(24, 20);                             // Valve
+        tap(415, 184); tap(350, 72); tap(24, 20); tap(24, 20);  // Faults and log
+        tap(415, 184); tap(120, 128); tap(24, 20); tap(24, 20); // Calibrate valve
+        tap(415, 184); tap(120, 184); tap(24, 20); tap(24, 20); // Diagnostics
         tap(415, 184); tap(379, 184);                           // Settings
-        tap(120, 72); tap(60, 20);                              //   Pressure sensor
-        tap(356, 72); tap(270, 72); tap(60, 20);                //   Valve setup, Drive tab
-        tap(120, 128); tap(94, 72); tap(60, 20); tap(60, 20);   //   Control tuning, keypad
-        tap(356, 128); tap(60, 20);                             //   Review and save
-        tap(60, 20); tap(60, 20);
-        tap(415, 184); tap(379, 128); tap(60, 20); tap(60, 20); // Calibrate sensor
+        tap(120, 72); tap(24, 20);                              //   Cryostat name
+        tap(356, 72); tap(24, 20);                              //   Pressure sensor
+        tap(120, 128); tap(270, 72); tap(24, 20);               //   Valve setup, Drive tab
+        tap(356, 128); tap(94, 72); tap(24, 20); tap(24, 20);   //   Control tuning, keypad
+        tap(120, 184); tap(24, 20);                             //   Review and save
+        tap(24, 20); tap(24, 20);
+        tap(415, 184); tap(379, 128); tap(24, 20); tap(24, 20); // Calibrate sensor
     }
     run(1200);
     size_t after = heap_used();
@@ -309,6 +333,8 @@ int main(int argc, char **argv)
     }
 
     if (!strcmp(st, "stop")) tap(415, 240);
+    if (!strcmp(st, "motor")) { tap(415, 184); tap(379, 184); ui_service(); }   // Settings > Motor override
+    if (!strcmp(st, "overon")) { fake_override = true; tap(415, 184); }   // Menu, override armed
     if (!strcmp(st, "menu")) tap(415, 184);
     if (!strcmp(st, "keypad")) { tap(300, 184); tap(41, 184); tap(111, 240); tap(251, 240); tap(111, 184); tap(111, 184); }
     if (!strcmp(st, "confirm")) tap(415, 72);
@@ -334,29 +360,34 @@ int main(int argc, char **argv)
     bool set = !strncmp(st, "set-", 4);
     if (set) { tap(415, 184); tap(379, 184); }
     if (!strcmp(st, "set-sensor") || !strcmp(st, "set-pick") || !strncmp(st, "set-add", 7) ||
-        !strcmp(st, "set-caldetail")) tap(120, 72);
+        !strcmp(st, "set-caldetail")) tap(356, 72);
     if (!strcmp(st, "set-pick")) tap(120, 72);
+    if (!strncmp(st, "set-name", 8)) { tap(120, 72); tap(331, 189); tap(331, 189); tap(24, 65); tap(338, 65); }
+    if (!strcmp(st, "set-named")) { tap(415, 128); tap(24, 20); tap(24, 20); }   // Use name, Settings, Home
     if (!strncmp(st, "set-add", 7)) { tap(298, 72); tap(41, 240); tap(111, 240); tap(181, 240); tap(321, 184); }
     if (!strcmp(st, "set-addask") || !strcmp(st, "set-addcal")) tap(250, 84);   // 30 psi (second column)
     if (!strcmp(st, "set-addcal")) tap(318, 164);   // Calibrate
 
     if (!strcmp(st, "set-caldetail")) tap(120, 128);
-    if (!strncmp(st, "set-valve", 9)) tap(356, 72);
+    if (!strncmp(st, "set-valve", 9)) tap(120, 128);
     if (!strcmp(st, "set-valve2")) tap(182, 72);
     if (!strcmp(st, "set-valve3")) tap(294, 72);
     if (!strcmp(st, "set-valvepos")) tap(94, 128);
-    if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) tap(120, 128);
+    if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) tap(356, 128);
     if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") ||
         !strcmp(st, "set-saved")) { tap(94, 72); tap(181, 240); tap(251, 240); tap(111, 184); }
     if (!strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(321, 184);
     if (!strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(415, 128);
     if (!strcmp(st, "set-saved")) tap(249, 136 + 40);
-    if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) tap(356, 128);
+    if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) tap(120, 184);
     if (!strcmp(st, "set-load")) tap(120, 184);
-    if (!strcmp(st, "set-override")) tap(120, 184);
+    if (!strcmp(st, "set-override")) tap(298, 184);
+    if (strstr(st, "trend")) { tap(415, 184); tap(210, 72); }   // Menu, Trend
+    if (!strcmp(st, "trend1h")) { tap(415, 72); tap(415, 72); }
+    if (!strcmp(st, "trend1m")) { tap(415, 184); tap(415, 184); tap(415, 184); }
     if (!strcmp(st, "calsensor") || !strcmp(st, "calvac")) { tap(415, 184); tap(379, 128); }
     if (!strcmp(st, "calvac")) tap(298, 128);
-    if (!strcmp(st, "back")) { tap(415, 184); tap(120, 184); tap(60, 20); }   // Diagnostics, Back: Menu
+    if (!strcmp(st, "back")) { tap(415, 184); tap(120, 184); tap(24, 20); }   // Diagnostics, Back: Menu
     if (!strcmp(st, "help") || !strcmp(st, "help2") || !strcmp(st, "help3")) { tap(415, 128); tap(415, 184); }
     if (!strcmp(st, "help2")) tap(TVX, 172);
     if (!strcmp(st, "help3")) { tap(TVX, 172); tap(TVX, 172); tap(TVX, 172); tap(TVX, 172); }

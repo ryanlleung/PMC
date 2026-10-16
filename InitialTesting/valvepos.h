@@ -11,7 +11,7 @@
  * The count is written once the valve is calibrated and has stood still
  * for 2 s; the moment a move starts (or the calibration is lost) an
  * "unsafe" entry is written, so a power cut mid-move leaves nothing to
- * offer. At start-up a safe entry is only offered: the screen asks
+ * offer. If that entry cannot be written (two tries), the move is refused. At start-up a safe entry is only offered: the screen asks
  * "Use saved X % / Calibrate" and nothing is taken without the operator.
  * Any move, or a calibration, withdraws the offer.
  *

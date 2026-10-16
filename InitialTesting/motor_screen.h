@@ -9,7 +9,9 @@
  * Opened from Menu > Motor service (ui_service()); Back calls back(),
  * which returns to Home.
  */
-void motor_screen_init(void (*back)(void));
+void motor_screen_init(void (*back)(void));   // builds it
 void motor_screen_show(void);
+// Frees it (after another screen is loaded); init() builds it again.
+void motor_screen_close(void);
 
 #endif // _MOTOR_SCREEN_H_

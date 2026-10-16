@@ -102,6 +102,9 @@ static volatile uint32_t moves_ended;   // counts moves ended, for stepper3_move
 static int32_t move_from;                // last move: start position and times
 static uint32_t move_t0;
 static volatile uint32_t move_t1;       // 0 while it runs
+static void (*ref_cb)(const char *why);   // stepper3_on_reference_change
+static bool (*move_cb)(const char **why);  // stepper3_on_move_start
+static const char *refusal = "";
 static const char *lock_why;            // MOT and screen moves refused while set
 
 static char status_text[160];
@@ -343,9 +346,11 @@ bool stepper3_goto_rate(int32_t to, uint32_t sps)
 {
     if (sps == 0)
         sps = rate_run;
+    refusal = "rate out of range";
     if (sps < RATE_MIN || sps > RATE_MAX)
         return false;
     int32_t dist = to - position;
+    refusal = "target too far";
     if (dist > STEPPER3_MAX_MOVE || dist < -STEPPER3_MAX_MOVE)
         return false;
 
@@ -381,8 +386,19 @@ from_rest:
     }
     if (dist < 0 && stepper3_limit_open()) {
         last_stop = STEPPER3_STOP_LIMIT;
+        refusal = "limit open, closing move refused";
         return false;
     }
+    // The saved position is withdrawn before anything moves; if it cannot
+    // be, nothing moves (a restart would offer a stale count).
+    const char *why = NULL;
+    if (move_cb && !move_cb(&why)) {
+        if (!hold && energised)
+            coils_off();
+        refusal = why ? why : "refused";
+        return false;
+    }
+
     // An armed override is used up by this move, whichever way it goes.
     if (override_armed) {
         override_armed = false;
@@ -489,10 +505,23 @@ bool stepper3_busy(void)               { return run_state != ST_IDLE; }
 int32_t stepper3_position(void)        { return position; }
 stepper3_stop_t stepper3_last_stop(void) { return last_stop; }
 
+void stepper3_on_reference_change(void (*cb)(const char *why)) { ref_cb = cb; }
+void stepper3_on_move_start(bool (*cb)(const char **why))     { move_cb = cb; }
+const char *stepper3_refusal(void)                             { return refusal; }
+
+static void ref_changed(const char *why)
+{
+    if (ref_cb)
+        ref_cb(why);
+}
+
 void stepper3_zero(void)
 {
-    if (run_state == ST_IDLE)
-        position = 0;
+    if (run_state != ST_IDLE)
+        return;
+    if (position != 0)
+        ref_changed("motor count zeroed");
+    position = 0;
 }
 
 const char *stepper3_status(void)
@@ -545,6 +574,8 @@ bool stepper3_set_mode(stepper3_mode_t nm)
 {
     if (run_state != ST_IDLE || nm > STEPPER3_HALF)
         return false;
+    if (nm != mode)
+        ref_changed("step mode changed");
     // Keep the position in the new step size.
     if (mode == STEPPER3_HALF && nm != STEPPER3_HALF)
         position /= 2;
@@ -570,6 +601,8 @@ bool stepper3_set_reverse(bool on)
 {
     if (run_state != ST_IDLE)
         return false;
+    if (on != reverse)
+        ref_changed("motor direction changed");
     reverse = on;
     return true;
 }
@@ -584,6 +617,8 @@ bool stepper3_set_order(const uint8_t o[4])
             return false;
         seen |= 1u << o[i];
     }
+    if (memcmp(order, o, sizeof order) != 0)
+        ref_changed("coil order changed");
     memcpy(order, o, sizeof order);
     if (energised)
         coils_off();
@@ -672,7 +707,7 @@ static void goto_command(const char *s)
         if (to - position > STEPPER3_MAX_MOVE || position - to > STEPPER3_MAX_MOVE)
             link_printf("ERR more than %d steps from %ld\r\n", STEPPER3_MAX_MOVE, (long)position);
         else
-            link_printf("ERR limit open, closing move refused\r\n");
+            link_printf("ERR %s\r\n", stepper3_refusal());
         return;
     }
     if (moving)
@@ -739,8 +774,7 @@ bool stepper3_command(const char *line)
         if (!parse_int(a + 5, -STEPPER3_MAX_MOVE, STEPPER3_MAX_MOVE, &v) || v == 0)
             link_printf("ERR expected: MOT MOVE <steps>, 1 to %d either way\r\n", STEPPER3_MAX_MOVE);
         else if (!stepper3_move((int32_t)v))
-            link_printf(run_state == ST_MOVING ? "ERR target more than %d steps away\r\n"
-                        : "ERR limit open, closing move refused\r\n", STEPPER3_MAX_MOVE);
+            link_printf("ERR %s\r\n", stepper3_refusal());
         else
             link_printf("OK moving to %ld from %ld\r\n", (long)stepper3_target(), (long)position);
     } else if (strncmp(a, " GOTO", 5) == 0) {

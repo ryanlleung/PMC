@@ -24,9 +24,10 @@
 LV_FONT_DECLARE(ui_font_12)
 LV_FONT_DECLARE(ui_font_16)
 LV_FONT_DECLARE(ui_font_26)
+LV_FONT_DECLARE(ui_font_40)
 
 // Fonts with every digit as wide as the widest, for right-aligned numbers.
-extern lv_font_t ui_num_16, ui_num_26;
+extern lv_font_t ui_num_16, ui_num_26, ui_num_40;
 
 // Colour roles (STYLE-GUIDE.md section 3).
 #define UI_BG      lv_color_hex(0xDCE3EA)
@@ -83,6 +84,7 @@ void ui_init(void);            // after the drivers and valve/cfg init
 void ui_open(const ui_screen_t *s);
 bool ui_showing(const ui_screen_t *s);   // that screen is up
 void ui_home(void);            // back to Home (deletes the screen left)
+void ui_back(void);            // as the header Back
 void ui_service(void);         // the 0.6.0 motor screen (Settings > Motor override), frame hidden
 bool ui_on_service(void);
 
@@ -122,6 +124,9 @@ void ui_keypad_ex(const ui_kp_t *k);
 void ui_confirm(const char *text, const char *ok, void (*on_ok)(void));
 // Same with a named cancel button and its own action.
 void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void));
+// With a third button between them (NULL mid: as ui_ask).
+void ui_ask3(const char *text, const char *cancel, void (*on_cancel)(void), const char *mid,
+             void (*on_mid)(void), const char *ok, void (*on_ok)(void));
 // A list to pick one of (Sensor in use, Load settings); sel -1 for none.
 // Tapping outside closes it.
 void ui_pick(const char *title, const char *const *items, int n, int sel, void (*on_pick)(int i));
@@ -140,10 +145,14 @@ void ui_status_line(void);     // mode/move line and Reset fault, in a screen's 
 void ui_calibrate_ask(void);   // the Calibrate valve confirm
 int32_t ui_log_px(int32_t p_mmbar, int32_t w);   // 0.1-1000 mbar on a log scale, 0 to w px
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
+// Trend and the Home sparklines (ui_trend.c). A sparkline redraws when
+// invalidated (Home does it once a second); a tap opens Trend.
+extern const ui_screen_t ui_scr_trend;
+lv_obj_t *ui_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h, bool valve);
 // Valve, Calibrate valve, Faults and log, Diagnostics (ui_valve.c).
 extern const ui_screen_t ui_scr_valve, ui_scr_calib, ui_scr_faults, ui_scr_diag;
-// Settings, its four pages and Calibrate sensor (ui_settings.c).
-extern const ui_screen_t ui_scr_settings, ui_scr_sensor_set, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
+// Settings, its five pages and Calibrate sensor (ui_settings.c).
+extern const ui_screen_t ui_scr_settings, ui_scr_name, ui_scr_sensor_set, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
                          ui_scr_sensor_cal;
 
 #endif // _UI_H_

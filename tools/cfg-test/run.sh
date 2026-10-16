@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds and runs the host test of the settings store and the saved valve
-# position (test_cfg.c). Needs gcc; uses the LVGL library tools/ui-preview
+# position and the trend slots (test_cfg.c). Needs gcc; uses the LVGL library tools/ui-preview
 # builds (for lv_snprintf and the tick). -v prints the link and event lines.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -11,5 +11,5 @@ mkdir -p "$HERE/out"
 gcc -O1 -g -Wall -Wextra -Wno-unused-parameter -DLV_CONF_INCLUDE_SIMPLE -DLV_LVGL_H_INCLUDE_SIMPLE \
   -I"$PROJ/lvgl_940" -I"$PROJ/lvgl_940/lv_conf/heavy" -I"$PROJ" \
   -o "$HERE/out/test_cfg" "$HERE/test_cfg.c" \
-  "$PROJ/cfg.c" "$PROJ/cal.c" "$PROJ/valvepos.c" "$PROJ/fixed.c" "$LVGL" -lm
+  "$PROJ/cfg.c" "$PROJ/cal.c" "$PROJ/valvepos.c" "$PROJ/trend.c" "$PROJ/fixed.c" "$LVGL" -lm
 "$HERE/out/test_cfg" "$@"

@@ -186,6 +186,15 @@ void ethlink_task(void)
         ip_text[0] = '\0';
 }
 
+size_t ethlink_tx_room(void)
+{
+    if (!client)
+        return (size_t)-1;
+    // Buffered and not yet sent, plus sent and not yet acknowledged.
+    size_t used = (size_t)client->sndUser + (size_t)(client->sndNxt - client->sndUna);
+    return used < client->txBufferSize ? client->txBufferSize - used : 0;
+}
+
 void ethlink_printf(const char *fmt, ...)
 {
     char buf[256];

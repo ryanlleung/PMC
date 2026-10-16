@@ -81,6 +81,13 @@ const char *usb_serial_status(void)
     return "USB: port open";
 }
 
+size_t usb_serial_tx_room(void)
+{
+    if (!tud_mounted())
+        return (size_t)-1;
+    return tud_cdc_write_available();
+}
+
 void usb_serial_printf(const char *fmt, ...)
 {
     char buf[256];

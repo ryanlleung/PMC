@@ -17,6 +17,9 @@ void ethlink_task(void);
 
 // printf-style output to the connected client. Dropped if none.
 void ethlink_printf(const char *fmt, ...);
+// Free space in the client's TCP send buffer; large with no client
+// (output is dropped at once then).
+size_t ethlink_tx_room(void);
 
 // Non-blocking line input from the client, as usb_serial_getline().
 bool ethlink_getline(char *buf, size_t n);

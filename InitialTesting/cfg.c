@@ -15,6 +15,9 @@
  * the crc field. One per 4 KB sector, two sectors used in turn, the higher
  * rev is the newest. Below the old cal record at 0x7FF000.
  *
+ * Version 3 (0.10.9) adds the cryostat name; version 2 records load with
+ * the default name.
+ *
  * Version 2 (0.9.0) adds the control tuning, the sensors on the board (each
  * with its own cal) and the save time. Version 1 records (0.6.0 to 0.8.x)
  * still load, as one sensor (the bench Druck) with default tuning; the
@@ -24,7 +27,7 @@
 #define CFG_ADDR_A   0x7FD000UL
 #define CFG_ADDR_B   0x7FE000UL
 #define CFG_MAGIC    0x47464350UL   // "PCFG"
-#define CFG_VERSION  2
+#define CFG_VERSION  3
 
 enum { M_RATE, M_START, M_ACCEL, M_MODE, M_HOLD, M_DIR, M_ORDER, M_N };
 static const char *const mot_name[M_N] = { "RATE", "START", "ACCEL", "MODE", "HOLD", "DIR", "ORDER" };
@@ -56,8 +59,22 @@ typedef struct {
     uint32_t active;             // index of the sensor in use
     cfg_sens_t sens[CFG_SENS_MAX];
     char saved_at[20];           // "YYYY-MM-DD HH:MM:SS", "" if the clock was not set
+    char name[CFG_NAME_LEN + 4]; // cryostat name, NUL-terminated (version 3)
     uint32_t crc;
 } cfg_rec_t;
+
+// Version 2 (0.9.0 to 0.10.8), read only: version 3 without the name.
+typedef struct {
+    uint32_t magic, version, size, rev;
+    int32_t mot[M_N];
+    int32_t valve[VALVE_N_SETTINGS];
+    int32_t tune[T_N];
+    uint32_t nsens, active;
+    cfg_sens_t sens[CFG_SENS_MAX];
+    char saved_at[20];
+    uint32_t crc;
+} cfg_rec_v2_t;
+_Static_assert(offsetof(cfg_rec_v2_t, crc) == offsetof(cfg_rec_t, name), "v2 is v3 up to the name");
 
 // Version 1 (0.6.0 to 0.8.x), read only.
 typedef struct {
@@ -76,6 +93,9 @@ typedef struct {
 // Live sensor list. The cal of the sensor in use lives in cal.c.
 static uint32_t nsens = 1, active_sens;
 static cfg_sens_t sens[CFG_SENS_MAX] = { { FACTORY_SERIAL, FACTORY_PSI10, 0, { 0 } } };
+// Live cryostat name, in the header ("CF-11 pressure controller").
+#define FACTORY_NAME "CF-11"
+static char cname[CFG_NAME_LEN + 1] = FACTORY_NAME;
 
 static const uint32_t slot_addr[2] = { CFG_ADDR_A, CFG_ADDR_B };
 static cfg_rec_t slot[2];        // as read from each sector (version 1 converted)
@@ -164,6 +184,7 @@ static void capture(cfg_rec_t *r)
     r->nsens = nsens;
     r->active = active_sens;
     memcpy(r->sens, sens, sizeof r->sens);
+    lv_strlcpy(r->name, cname, sizeof r->name);
     cfg_sens_t *a = &r->sens[active_sens];
     a->has_cal = !cal_is_default();
     if (a->has_cal)
@@ -197,6 +218,8 @@ static const char *values_why(const cfg_rec_t *r)
             return tune_name[i];
     if (r->nsens < 1 || r->nsens > CFG_SENS_MAX || r->active >= r->nsens)
         return "SENSOR";
+    if (!cfg_name_ok(r->name))
+        return "NAME";
     for (uint32_t i = 0; i < r->nsens; i++) {
         const cfg_sens_t *q = &r->sens[i];
         if (q->psi10 < 10 || q->psi10 > 10000 || q->has_cal > 1 || (q->has_cal && !cal_record_ok(&q->cal)))
@@ -224,12 +247,24 @@ static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
     r->sens[0].psi10 = FACTORY_PSI10;
     r->sens[0].has_cal = v->has_cal;
     r->sens[0].cal = v->cal;
+    lv_strlcpy(r->name, FACTORY_NAME, sizeof r->name);
+}
+
+// A version 2 record as version 3: the default name.
+static void from_v2(const cfg_rec_v2_t *v, cfg_rec_t *r)
+{
+    memset(r, 0, sizeof *r);
+    memcpy(r, v, offsetof(cfg_rec_v2_t, crc));
+    r->version = CFG_VERSION;
+    r->size = sizeof *r;
+    lv_strlcpy(r->name, FACTORY_NAME, sizeof r->name);
 }
 
 // Reads one sector into slot[i]; NULL if usable, else why not.
 static const char *read_slot(int i)
 {
     static cfg_rec_v1_t v1;
+    static cfg_rec_v2_t v2;
     cfg_rec_t *r = &slot[i];
     extflash_read(slot_addr[i], r, sizeof *r);
     slot_ver[i] = r->version;
@@ -240,6 +275,11 @@ static const char *read_slot(int i)
         if (v1.crc != crc32(&v1, offsetof(cfg_rec_v1_t, crc)))
             return "CRC mismatch";
         from_v1(&v1, r);
+    } else if (r->magic == CFG_MAGIC && r->version == 2 && r->size == sizeof v2) {
+        memcpy(&v2, r, sizeof v2);
+        if (v2.crc != crc32(&v2, offsetof(cfg_rec_v2_t, crc)))
+            return "CRC mismatch";
+        from_v2(&v2, r);
     } else if (r->magic != CFG_MAGIC || r->version != CFG_VERSION || r->size != sizeof *r) {
         return "not a settings record of this version";
     } else if (r->crc != rec_crc(r)) {
@@ -325,6 +365,12 @@ static int diff(const cfg_rec_t *live, const cfg_rec_t *b, bool print, char *buf
             link_printf("CFG DIFF TUNE %s saved %ld, now %ld\r\n", tune_name[i], (long)b->tune[i],
                         (long)live->tune[i]);
     }
+    if (strcmp(live->name, b->name) != 0) {
+        count++;
+        LINE("Cryostat name: %s\n", live->name[0] ? live->name : "none");
+        if (print)
+            link_printf("CFG DIFF NAME saved \"%s\", now \"%s\"\r\n", b->name, live->name);
+    }
     if (live->sens[live->active].serial != b->sens[b->active].serial) {
         count++;
         if (print)
@@ -398,6 +444,7 @@ static bool apply(const cfg_rec_t *r, bool with_sensors)
     stepper3_set_order(o);
     valve_set_settings(r->valve);
     memcpy(tune, r->tune, sizeof tune);
+    lv_strlcpy(cname, r->name, sizeof cname);
     if (with_sensors) {
         nsens = r->nsens;
         active_sens = r->active;
@@ -832,6 +879,29 @@ static void test(const char *what)
     }
 }
 
+bool cfg_name_ok(const char *n)
+{
+    for (size_t i = 0; i <= CFG_NAME_LEN; i++) {
+        if (n[i] == '\0')
+            return true;
+        if (n[i] < 0x20 || n[i] > 0x7E)
+            return false;
+    }
+    return false;   // too long
+}
+
+const char *cfg_name(void) { return cname; }
+
+bool cfg_set_name(const char *n, const char **why)
+{
+    if (!cfg_name_ok(n)) {
+        *why = "name: up to 12 letters, digits, spaces or signs";
+        return false;
+    }
+    lv_strlcpy(cname, n, sizeof cname);
+    return true;
+}
+
 bool cfg_command(const char *line)
 {
     if (strncmp(line, "CFG", 3) != 0 || (line[3] != ' ' && line[3] != '?' && line[3] != '\0'))
@@ -849,6 +919,14 @@ bool cfg_command(const char *line)
         cfg_save();
     } else if (strncmp(a, " LOAD ", 6) == 0) {
         load(a + 6);
+    } else if (strcmp(a, " NAME?") == 0) {
+        link_printf("CFG NAME \"%s\"\r\nOK\r\n", cname);
+    } else if (strncmp(a, " NAME", 5) == 0 && (a[5] == ' ' || a[5] == '\0')) {
+        const char *why;
+        if (cfg_set_name(a[5] ? a + 6 : "", &why))
+            link_printf("OK name \"%s\" (unsaved until CFG SAVE)\r\n", cname);
+        else
+            link_printf("ERR %s\r\n", why);
     } else if (strncmp(a, " TEST ", 6) == 0) {
         test(a + 6);
     } else {

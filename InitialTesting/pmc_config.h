@@ -19,7 +19,7 @@
 #define PMC_PM_DIAG       1
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.9.18"
+#define PMC_FW_VERSION    "0.10.11"
 
 // 1 shows the +/- mbar uncertainty under the unit; UNC? works either way.
 #define PMC_SHOW_UNCERTAINTY 0

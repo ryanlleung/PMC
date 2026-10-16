@@ -46,6 +46,7 @@ bool link_chip_ok(void)                      { return ethlink_link_up() && ethli
 
 const char *link_chip_text(void)            { return ethlink_chip_text(); }
 bool link_take_new_client(void)              { return ethlink_take_new_client(); }
+size_t link_tx_room(void)                    { return ethlink_tx_room(); }
 
 void link_printf(const char *fmt, ...)
 {
@@ -64,6 +65,7 @@ void link_task(void)                         { usb_serial_task(); }
 bool link_getline(char *buf, size_t n)       { return usb_serial_getline(buf, n); }
 const char *link_status(void)                { return usb_serial_status(); }
 const char *link_chip_text(void)              { return "USB"; }
+size_t link_tx_room(void)                    { return usb_serial_tx_room(); }
 
 bool link_take_new_client(void)
 {

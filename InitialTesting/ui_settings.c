@@ -113,9 +113,9 @@ static const field_t F[CFG_N] = {
     [CFG_POSMAX]  = { "100 % travel", "turns", 2, K_TURNS, "Output turns from closed to fully open" },
     [CFG_REVERSE] = { "Motor direction", NULL, 0, K_TOGGLE, "Reversed if Open drives the valve closed; saving it clears the zero" },
     [CFG_OFFSET]  = { "Zero offset", "steps", 0, K_NUM, "Count set at the closed limit" },
-    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Calibration step 2: off the switch before the slow close" },
-    [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM, "Calibration step 1: closing fast to the switch" },
-    [CFG_FCREEP]  = { "Slow close", "steps/s", 0, K_NUM, "Calibration step 3: closing slowly onto the switch" },
+    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Homing step 2: off the switch before the slow close" },
+    [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM, "Homing step 1: closing fast to the switch" },
+    [CFG_FCREEP]  = { "Slow close", "steps/s", 0, K_NUM, "Homing step 3: closing slowly onto the switch" },
     [CFG_RATE]    = { "Run speed", "steps/s", 0, K_NUM, "Normal move speed" },
     [CFG_START]   = { "Start speed", "steps/s", 0, K_NUM, "Speed at the start and end of a move" },
     [CFG_ACCEL]   = { "Acceleration", "steps/s/s", 0, K_NUM, "Ramp between start and run" },
@@ -519,10 +519,10 @@ static void side_refresh(void)
 /* --------------------------------------------------------------------------
  * Settings
  * ------------------------------------------------------------------------ */
-extern const ui_screen_t ui_scr_sensor_set, ui_scr_valve_set, ui_scr_tune, ui_scr_review;
+extern const ui_screen_t ui_scr_name, ui_scr_sensor_set, ui_scr_valve_set, ui_scr_tune, ui_scr_review;
 
 static struct {
-    lv_obj_t *tile[4], *over;
+    lv_obj_t *tile[5], *over;
 } st;
 
 static void tile_cb(lv_event_t *e)
@@ -558,21 +558,21 @@ static void motor_cb(lv_event_t *e)
         ui_msg("Wait for the valve to stop");
         return;
     }
-    ui_confirm("Open Motor override? It drives the motor directly by steps. "
-               "Back returns here.", "Open", motor_go);
+    ui_confirm("Open Motor override? It drives the motor directly by steps.", "Open", motor_go);
 }
 
 static void settings_build(lv_obj_t *scr)
 {
-    static const char *const names[4] = { "Choose sensor", "Valve setup", "Control tuning", "Review and save" };
-    const ui_screen_t *const to[4] = { &ui_scr_sensor_set, &ui_scr_valve_set, &ui_scr_tune, &ui_scr_review };
-    for (int i = 0; i < 4; i++)
+    static const char *const names[5] = { "Cryostat name", "Choose sensor", "Valve setup", "Control tuning",
+                                          "Review and save" };
+    const ui_screen_t *const to[5] = { &ui_scr_name, &ui_scr_sensor_set, &ui_scr_valve_set, &ui_scr_tune,
+                                       &ui_scr_review };
+    for (int i = 0; i < 5; i++)
         st.tile[i] = ui_btn(scr, i % 2 ? 244 : 10, RY[i / 2], 226, RH, UI_NAV, names[i], tile_cb, (void *)to[i]);
     // The overrides look apart from the pages: a dark outline, and Limit
     // override filled dark while it is armed.
-    st.over = ui_btn(scr, 10, RY[2], 226, RH, UI_SECONDARY, "Limit override", override_cb, NULL);
-    lv_obj_t *m = ui_btn(scr, 244, RY[2], 226, RH, UI_SECONDARY, "Motor override", motor_cb, NULL);
-    ui_btn_text(m, "Motor override", "Direct step control");
+    st.over = ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Limit\noverride", override_cb, NULL);
+    lv_obj_t *m = ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Motor\noverride", motor_cb, NULL);
     for (int i = 0; i < 2; i++) {
         lv_obj_t *b = i ? m : st.over;
         lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, 0);
@@ -589,14 +589,16 @@ static void settings_refresh(void)
     // Which sensor is read; calibrating it is Menu > Calibrate > Sensor.
     if (cfg_sensor(cfg_sensor_active(), &s)) {
         lv_snprintf(t, sizeof t, "In use: %s", sensor_name(p, sizeof p, s.serial));
-        ui_btn_text(st.tile[0], "Choose sensor", t);
+        ui_btn_text(st.tile[1], "Choose sensor", t);
     }
+    ui_btn_text(st.tile[0], "Cryostat name", cfg_name()[0] ? cfg_name() : "None");
     lv_snprintf(t, sizeof t, "%s turns", value_text(d, sizeof d, CFG_POSMAX, live(CFG_POSMAX)));
-    ui_btn_text(st.tile[1], "Valve setup", t);
+    ui_btn_text(st.tile[2], "Valve setup", t);
     lv_snprintf(t, sizeof t, "Gain %s", fixed_fmt(d, sizeof d, live(CFG_KP), 2));
-    ui_btn_text(st.tile[2], "Control tuning", t);
+    ui_btn_text(st.tile[3], "Control tuning", t);
     bool ov = stepper3_override();
-    ui_btn_text(st.over, "Limit override", ov ? "Next move: tap to cancel" : "Off");
+    // Armed shows as the dark fill and the strip; the state line would not fit.
+    ui_btn_text(st.over, ov ? "Cancel\noverride" : "Limit\noverride", NULL);
     lv_color_t ob = ov ? UI_WARN : UI_CARD;
     if (!lv_color_eq(lv_obj_get_style_bg_color(st.over, 0), ob)) {
         lv_obj_set_style_bg_color(st.over, ob, 0);
@@ -623,6 +625,128 @@ static void settings_refresh(void)
 }
 
 const ui_screen_t ui_scr_settings = { "Settings", settings_build, settings_refresh, NULL };
+
+/* --------------------------------------------------------------------------
+ * Cryostat name (Settings > Cryostat name): a keyboard for the name in the
+ * Home title, "<name> pressure controller". Use name puts it in use at
+ * once, unsaved until Save settings, like a sensor change.
+ * ------------------------------------------------------------------------ */
+static struct {
+    lv_obj_t *kb, *text, *use;
+    char buf[CFG_NAME_LEN + 1];
+} nm;
+
+static const char *const nm_map[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+    "A", "S", "D", "F", "G", "H", "J", "K", "L", "-", "\n",
+    "Z", "X", "C", "V", "B", "N", "M", "Space", "Del", ""
+};
+
+static void nm_show(void)
+{
+    // The end being typed stays in view.
+    const char *t = nm.buf;
+    lv_point_t sz;
+    for (;;) {
+        lv_text_get_size(&sz, t, &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (sz.x <= 89 || !*t)
+            break;
+        t++;
+    }
+    ui_set_text(nm.text, t[0] ? t : "None");
+    ui_set_color(nm.text, t[0] ? UI_TEXT : UI_MUTED);
+    ui_btn_enable(nm.use, strcmp(nm.buf, cfg_name()) != 0);
+}
+
+static void nm_key(lv_event_t *e)
+{
+    (void)e;
+    uint32_t id = lv_buttonmatrix_get_selected_button(nm.kb);
+    const char *k = lv_buttonmatrix_get_button_text(nm.kb, id);
+    size_t n = strlen(nm.buf);
+    if (!k)
+        return;
+    if (!strcmp(k, "Del")) {
+        if (n)
+            nm.buf[n - 1] = '\0';
+    } else if (n >= CFG_NAME_LEN) {
+        ui_msg("Up to 12 characters");
+        return;
+    } else {
+        nm.buf[n] = strcmp(k, "Space") ? k[0] : ' ';
+        nm.buf[n + 1] = '\0';
+    }
+    nm_show();
+}
+
+static void nm_use(lv_event_t *e)
+{
+    if (ui_btn_disabled(e))
+        return;
+    // No spaces at the ends.
+    char *a = nm.buf;
+    while (*a == ' ')
+        a++;
+    size_t n = strlen(a);
+    while (n && a[n - 1] == ' ')
+        a[--n] = '\0';
+    const char *why = NULL;
+    if (!cfg_set_name(a, &why)) {
+        ui_msg(why);
+        return;
+    }
+    valve_event("CFG", a[0] ? "Cryostat name set (screen)" : "Cryostat name cleared (screen)");
+    ui_back();
+}
+
+static void nm_cancel(lv_event_t *e)
+{
+    (void)e;
+    ui_back();
+}
+
+static void nm_build(lv_obj_t *scr)
+{
+    lv_strlcpy(nm.buf, cfg_name(), sizeof nm.buf);
+    nm.kb = lv_buttonmatrix_create(scr);
+    lv_obj_set_pos(nm.kb, 10, RY[0]);
+    lv_obj_set_size(nm.kb, 343, 160);
+    lv_buttonmatrix_set_map(nm.kb, nm_map);
+    // Bottom row: Z to M as the keys above, Space and Del wider.
+    for (uint32_t i = 30; i < 37; i++)
+        lv_buttonmatrix_set_button_width(nm.kb, i, 4);
+    lv_buttonmatrix_set_button_width(nm.kb, 37, 7);
+    lv_buttonmatrix_set_button_width(nm.kb, 38, 5);
+    lv_obj_set_style_bg_opa(nm.kb, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(nm.kb, 0, 0);
+    lv_obj_set_style_radius(nm.kb, 0, 0);
+    lv_obj_set_style_pad_all(nm.kb, 0, 0);
+    lv_obj_set_style_pad_gap(nm.kb, 6, 0);
+    lv_obj_set_style_bg_opa(nm.kb, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(nm.kb, UI_CARD, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(nm.kb, lv_color_hex(0xE3E9EF), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_radius(nm.kb, 6, LV_PART_ITEMS);
+    lv_obj_set_style_border_side(nm.kb, LV_BORDER_SIDE_BOTTOM, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(nm.kb, 2, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(nm.kb, 0, LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(nm.kb, lv_color_hex(0xAEB9C4), LV_PART_ITEMS);
+    lv_obj_set_style_shadow_width(nm.kb, 0, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(nm.kb, &ui_font_16, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(nm.kb, UI_TEXT, LV_PART_ITEMS);
+    lv_obj_add_event_cb(nm.kb, nm_key, LV_EVENT_VALUE_CHANGED, NULL);
+    nm.text = ui_info(scr, 361, RY[0], 109, RH, "Name");
+    nm.use = ui_btn(scr, 361, RY[1], 109, RH, UI_PRIMARY, "Use name", nm_use, NULL);
+    ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Cancel", nm_cancel, NULL);
+    nm_show();
+}
+
+static void nm_refresh(void)
+{
+    ui_strip_set(UI_STRIP_INFO, UI_MUTED, "Shown on Home. Save settings to keep it.");
+}
+
+const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
 
 /* --------------------------------------------------------------------------
  * Choose sensor
@@ -840,7 +964,7 @@ typedef struct {
 
 static const tab_t valve_tabs[3] = {
     { "Valve", { CFG_POSMAX, CFG_REVERSE }, 2, NULL },
-    { "Calibrate", { CFG_BACKOFF, CFG_FHOME, CFG_FCREEP }, 3, NULL },
+    { "Homing", { CFG_BACKOFF, CFG_FHOME, CFG_FCREEP }, 3, NULL },
     { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Used by manual and AUTO moves. Saved when the valve is stopped." },
 };
 static const tab_t tune_tab[1] = {
@@ -1134,7 +1258,7 @@ static struct {
 } cs;
 
 // The header names the sensor being calibrated: "Calibrate 5880156" (with
-// "s/n" it does not fit beside NOT CALIBRATED).
+// "s/n" it does not fit beside NOT HOMED).
 static char cs_title[32] = "Calibrate sensor";
 
 static void cs_title_set(void)

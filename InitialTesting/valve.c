@@ -57,6 +57,13 @@ typedef struct {
 static event_t events[EVT_N];
 static uint32_t evt_count;     // total logged since boot
 
+#define EVT_LINE 120   // link room wanted before an EVT? line goes out
+static struct {
+    bool active;
+    uint32_t next, end, since;
+} edump;
+static void evt_dump_task(void);
+
 static void evt_print(const event_t *e)
 {
     link_printf("EVT %lu.%lu %s %s\r\n", (unsigned long)(e->t_ms / 1000),
@@ -103,7 +110,8 @@ static bool calibrated;
 static bool cal_was;     // calibrated before this calibration started
 static cal_stage_t cal_stage;
 static bool cal_moving;           // a calibration move is running
-static uint32_t cal_settle_from;  // non-zero: waiting SETTLE_MS before the next stage
+static uint32_t cal_settle_from;  // when the wait started
+static bool cal_settling;         // waiting SETTLE_MS before the next stage
 static uint32_t cal_t0;
 static uint32_t seq_seen;         // stepper3_move_seq() last handled
 
@@ -111,6 +119,7 @@ static bool question;             // switch-pressed question waiting
 static int32_t question_at;       // count where the switch was pressed
 
 static uint32_t cal_done_ms, cal_took_s;   // last good calibration
+static bool cal_done;
 static char cal_done_iso[20];              // its wall time, "" if the clock is not set
 static int32_t switch_at;         // count where the switch last opened
 static bool switch_was_open;
@@ -151,7 +160,7 @@ static void cal_end(valve_mode_t m)
     mode = m;
     cal_stage = CAL_NONE;
     cal_moving = false;
-    cal_settle_from = 0;
+    cal_settling = false;
     update_lock();
 }
 
@@ -164,7 +173,7 @@ static void cal_abort(const char *why)
     // An operator STOP keeps the earlier calibration: the step count kept
     // counting through the cancelled moves, so the position is still known.
     bool keep = cal_was && !strcmp(why, "STOP");
-    ev("REF", "Calibrating aborted (%s)%s", why, keep ? ", earlier calibration kept" : "");
+    ev("REF", "Homing aborted (%s)%s", why, keep ? ", earlier homing kept" : "");
     calibrated = keep;
     cal_end(keep ? VALVE_MANUAL : VALVE_NOT_CAL);
 }
@@ -205,14 +214,15 @@ static void cal_fast(void)
     int32_t n = (int32_t)(((int64_t)pos_max * 11 + 5) / 10);
     cal_stage = CAL_FAST;
     if (!cal_move(stepper3_position() - n, f_home))
-        raise(F07, true, "Calibrating: closing move refused at count %ld", (long)stepper3_position());
+        raise(F07, true, "Homing: closing move refused at count %ld (%s)", (long)stepper3_position(),
+              stepper3_refusal());
 }
 
 static void cal_creep(void)
 {
     cal_stage = CAL_CREEP;
     if (!cal_move(stepper3_position() - (n_backoff + CREEP_EXTRA), f_creep))
-        raise(F07, true, "Calibrating: creep move refused at count %ld", (long)stepper3_position());
+        raise(F07, true, "Homing: creep move refused at count %ld", (long)stepper3_position());
 }
 
 static bool cal_start(const char **err)
@@ -227,7 +237,7 @@ static bool cal_start(const char **err)
     mode = VALVE_CALIBRATING;
     cal_t0 = lv_tick_get();
     update_lock();
-    ev("REF", "Calibrating started at count %ld", (long)stepper3_position());
+    ev("REF", "Homing started at count %ld", (long)stepper3_position());
     if (limit_open_now()) {
         cal_stage = CAL_CLEAR;
         cal_move(stepper3_position() + n_clear, f_home);
@@ -247,14 +257,15 @@ static void cal_move_ended(stepper3_stop_t why)
         if (why != STEPPER3_STOP_DONE)
             cal_abort(stepper3_stop_name(why));
         else
-            cal_settle_from = lv_tick_get() | 1;   // then check the switch
+            cal_settle_from = lv_tick_get();   // then check the switch
+            cal_settling = true;
         break;
     case CAL_FAST:
         if (why == STEPPER3_STOP_LIMIT) {
             cal_stage = CAL_BACK;
             cal_move(stepper3_position() + n_backoff, f_home);
         } else if (why == STEPPER3_STOP_DONE) {
-            raise(F07, true, "Calibrating: switch not found within %ld steps",
+            raise(F07, true, "Homing: switch not found within %ld steps",
                   (long)(((int64_t)pos_max * 11 + 5) / 10));
         } else {
             cal_abort(stepper3_stop_name(why));
@@ -267,13 +278,14 @@ static void cal_move_ended(stepper3_stop_t why)
                 break;
             }
             calibrated = true;
-            cal_done_ms = lv_tick_get() | 1;
+            cal_done_ms = lv_tick_get();
+            cal_done = true;
             cal_took_s = lv_tick_elaps(cal_t0) / 1000;
             lv_strlcpy(cal_done_iso, rtclock_iso(), sizeof cal_done_iso);
-            ev("REF", "Calibrated in %lu s, position %ld", (unsigned long)cal_took_s, (long)n_offset);
+            ev("REF", "Homed in %lu s, position %ld", (unsigned long)cal_took_s, (long)n_offset);
             cal_end(VALVE_MANUAL);
         } else if (why == STEPPER3_STOP_DONE) {
-            raise(F07, true, "Calibrating: switch not found on the creep close");
+            raise(F07, true, "Homing: switch not found on the creep close");
         } else {
             cal_abort(stepper3_stop_name(why));
         }
@@ -285,7 +297,7 @@ static void cal_move_ended(stepper3_stop_t why)
 
 static void cal_settled(void)
 {
-    cal_settle_from = 0;
+    cal_settling = false;
     int32_t moved = cal_stage == CAL_CLEAR ? n_clear : n_backoff;
     if (limit_open_now()) {
         raise(F09, true, "Switch still active after %ld-step %s", (long)moved,
@@ -314,12 +326,14 @@ static void limit_hit(void)
 void valve_init(void)
 {
     seq_seen = stepper3_move_seq();
-    ev("F-14", "Power-up (event only), valve not calibrated");
+    stepper3_on_reference_change(valve_uncalibrate);
+    ev("F-14", "Power-up (event only), valve not homed");
     update_lock();
 }
 
 void valve_task(void)
 {
+    evt_dump_task();
     uint32_t seq = stepper3_move_seq();
     if (seq != seq_seen) {
         seq_seen = seq;
@@ -331,7 +345,7 @@ void valve_task(void)
         else if (why == STEPPER3_STOP_LIMIT)
             limit_hit();
     }
-    if (mode == VALVE_CALIBRATING && cal_settle_from && lv_tick_elaps(cal_settle_from) >= SETTLE_MS)
+    if (mode == VALVE_CALIBRATING && cal_settling && lv_tick_elaps(cal_settle_from) >= SETTLE_MS)
         cal_settled();
     bool open = limit_open_now();
     if (open && !switch_was_open)
@@ -369,7 +383,7 @@ void valve_uncalibrate(const char *why)
     calibrated = false;
     question = false;
     mode = VALVE_NOT_CAL;
-    ev("REF", "Calibration cleared (%s)", why);
+    ev("REF", "Homing cleared (%s)", why);
     update_lock();
 }
 
@@ -388,6 +402,18 @@ bool valve_restore(int32_t count, const char **why)
     return true;
 }
 
+bool valve_set_closed(const char **why)
+{
+    if (mode == VALVE_CALIBRATING) { *why = "homing, STOP to cancel"; return false; }
+    if (any_latched())              { *why = "fault latched, CTRL RESET first"; return false; }
+    if (stepper3_busy() || !stepper3_set_position(0)) { *why = "moving, wait for it to stop"; return false; }
+    calibrated = true;
+    mode = VALVE_MANUAL;
+    ev("REF", "Set as closed by the operator: count 0 (0 %%), not checked against the switch");
+    update_lock();
+    return true;
+}
+
 valve_mode_t valve_mode(void)   { return mode; }
 bool valve_calibrated(void)     { return calibrated; }
 int32_t valve_pos_max(void)     { return pos_max; }
@@ -397,7 +423,7 @@ bool valve_motion_blocked(void) { return any_latched(); }
 
 const char *valve_mode_name(void)
 {
-    return mode == VALVE_CALIBRATING ? "CALIBRATING" : mode == VALVE_MANUAL ? "MANUAL" : "NOT CALIBRATED";
+    return mode == VALVE_CALIBRATING ? "HOMING" : mode == VALVE_MANUAL ? "MANUAL" : "NOT HOMED";
 }
 
 static const char *cal_stage_name(void)
@@ -543,9 +569,34 @@ static void events_command(const char *a)
     uint32_t have = evt_count < EVT_N ? evt_count : EVT_N;
     if ((uint32_t)n > have)
         n = (long)have;
-    for (uint32_t i = evt_count - (uint32_t)n; i < evt_count; i++)
-        evt_print(&events[i % EVT_N]);
-    link_printf("OK %lu events since boot\r\n", (unsigned long)evt_count);
+    // Sent from valve_task() a line at a time, as the link has room, so a
+    // slow reader does not hold up the main loop (as TREND DUMP).
+    edump.next = evt_count - (uint32_t)n;
+    edump.end = evt_count;
+    edump.since = lv_tick_get();
+    edump.active = true;
+}
+
+static void evt_dump_task(void)
+{
+    if (!edump.active)
+        return;
+    for (int lines = 0; lines < 8; lines++) {      // a few per loop pass
+        if (link_tx_room() < EVT_LINE) {
+            if (lv_tick_elaps(edump.since) >= 2000)
+                edump.active = false;               // nobody reading: drop the rest
+            return;
+        }
+        edump.since = lv_tick_get();
+        if (edump.next >= edump.end) {
+            link_printf("OK %lu events since boot\r\n", (unsigned long)evt_count);
+            edump.active = false;
+            return;
+        }
+        uint32_t i = edump.next++;
+        if (evt_count - i <= EVT_N)                 // not yet written over
+            evt_print(&events[i % EVT_N]);
+    }
 }
 
 // "12.3" -> 123 (0.1 units), 0 to 1000.
@@ -660,7 +711,7 @@ bool valve_goto_pct100(int32_t pct100, const char **why)
     int32_t to = (int32_t)(((int64_t)pct100 * pos_max + 5000) / 10000);
     if (to < 0) to = 0;
     if (to > pos_max) to = pos_max;
-    if (!stepper3_goto(to))         { *why = "limit open, closing move refused"; return false; }
+    if (!stepper3_goto(to))         { *why = stepper3_refusal(); return false; }
     return true;
 }
 
@@ -669,7 +720,7 @@ bool valve_move_steps(int32_t steps, const char **why)
     if (mode == VALVE_CALIBRATING)  { *why = "calibrating, CTRL STOP to cancel"; return false; }
     if (any_latched())              { *why = "fault latched, CTRL RESET first"; return false; }
     int32_t from = stepper3_busy() ? stepper3_target() : stepper3_position();
-    if (!stepper3_goto(from + steps)) { *why = "limit open, closing move refused"; return false; }
+    if (!stepper3_goto(from + steps)) { *why = stepper3_refusal(); return false; }
     return true;
 }
 
@@ -789,7 +840,7 @@ const char *valve_last_cal_iso(void) { return cal_done_iso; }
 
 bool valve_last_cal(uint32_t *age_ms, uint32_t *took_s)
 {
-    if (!cal_done_ms)
+    if (!cal_done)
         return false;
     *age_ms = lv_tick_elaps(cal_done_ms);
     *took_s = cal_took_s;
@@ -822,6 +873,11 @@ bool valve_command(const char *line)
     } else if (strcmp(line, "VALVE CAL") == 0) {
         if (cal_start(&err))
             link_printf("OK calibrating, up to %lu s\r\n", (unsigned long)valve_cal_budget_s());
+        else
+            link_printf("ERR %s\r\n", err);
+    } else if (strcmp(line, "VALVE CLOSED") == 0) {
+        if (valve_set_closed(&err))
+            link_printf("OK closed, count 0\r\n");
         else
             link_printf("ERR %s\r\n", err);
     } else if (strncmp(line, "VALVE GOTO", 10) == 0) {

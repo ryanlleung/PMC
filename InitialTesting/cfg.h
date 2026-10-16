@@ -37,6 +37,8 @@
  *   CFG LOAD DEFAULTS            factory motor, valve and tuning settings
  *                                (sensors and their cals kept)
  *   CFG TEST CORRUPT             spoil the newest record's CRC (bench test)
+ *   CFG NAME <text> | CFG NAME?  the cryostat name in the header (up to 12
+ *                                characters; unsaved until CFG SAVE)
  *   CFG TEST ERASE               erase both sectors (bench test)
  * LOAD is refused while the valve moves or calibrates.
  */
@@ -54,6 +56,13 @@ bool cfg_command(const char *line);
  * For the Settings screens
  * ------------------------------------------------------------------------ */
 #define CFG_SENS_MAX 4
+#define CFG_NAME_LEN 12
+
+// Cryostat name, shown as "<name> pressure controller" on Home. Set live,
+// unsaved until the next save, like a sensor change.
+const char *cfg_name(void);
+bool cfg_name_ok(const char *n);
+bool cfg_set_name(const char *n, const char **why);
 
 // Settings with a field on the screens. CFG_KP to CFG_BAND stay in order.
 typedef enum {

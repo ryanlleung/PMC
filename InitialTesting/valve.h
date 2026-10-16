@@ -38,6 +38,7 @@
  *   VALVE CAL                    calibrate (MANUAL or NOT CALIBRATED, no fault)
  *   VALVE GOTO <0-100>           go to % open (one decimal), once calibrated
  *   VALVE SETZERO | VALVE SKIP   answer the switch-pressed question (or the screen)
+ *   VALVE CLOSED                 take the valve as closed (0 %) where it stands, homed
  *   VALVE POSMAX|FHOME|FCREEP|BACKOFF|CLEAR|OFFSET <n>   settings (idle)
  *   CTRL STOP                    stop now, cancel calibration (F-12 in AUTO)
  *   CTRL RESET                   clear latches whose cause has gone
@@ -76,6 +77,9 @@ bool valve_calibrate(const char **why);          // VALVE CAL
 void valve_uncalibrate(const char *why);         // e.g. motor direction changed
 // Takes a saved step count as the position (operator's choice at boot).
 bool valve_restore(int32_t count, const char **why);
+// Takes the valve as fully closed where it stands (0 %, homed without the
+// switch): the operator knows it is seated. VALVE CLOSED.
+bool valve_set_closed(const char **why);
 uint32_t valve_cal_budget_s(void);               // longest calibration, s
 uint32_t valve_cal_elapsed_s(void);              // into the calibration running, s; 0 if none
 int valve_cal_step(void);    // -1 not calibrating, 0 moving off the switch, 1-3 step

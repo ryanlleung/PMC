@@ -17,6 +17,9 @@ void link_init(void);
 void link_task(void);
 
 void link_printf(const char *fmt, ...);
+// Bytes link_printf can send now without dropping or waiting. Bulk replies
+// (TREND DUMP) send a line only when this is enough.
+size_t link_tx_room(void);
 
 // Non-blocking: true with one complete line (no CR/LF) in buf.
 bool link_getline(char *buf, size_t n);
