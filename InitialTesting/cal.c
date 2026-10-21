@@ -218,35 +218,6 @@ int cal_capture_left(void) { return cap.what ? CAPTURE_N - cap.n : 0; }
  * Commands
  * ------------------------------------------------------------------------ */
 
-// Parses a plain decimal ("-12.345") into an integer scaled by 10^dec.
-// Extra decimals are truncated. Advances *s past the number.
-static bool parse_fixed(const char **s, int dec, int64_t *out)
-{
-    const char *p = *s;
-    int64_t v = 0;
-    int neg = 0, digits = 0, frac = -1;
-
-    while (*p == ' ' || *p == '\t') p++;
-    if (*p == '-' || *p == '+') neg = (*p++ == '-');
-    for (; *p; p++) {
-        if (*p == '.' && frac < 0) { frac = 0; continue; }
-        if (*p < '0' || *p > '9') break;
-        if (frac >= 0) {
-            if (frac >= dec) { digits++; continue; }
-            frac++;
-        }
-        if (v > 100000000000LL) return false;    // 1e11: room for the 10^dec scaling
-        v = v * 10 + (*p - '0');
-        digits++;
-    }
-    if (!digits) return false;
-    if (*p && *p != ' ' && *p != '\t') return false;   // "1.2.3", "5x"
-    for (int k = frac < 0 ? 0 : frac; k < dec; k++) v *= 10;
-    *out = neg ? -v : v;
-    *s = p;
-    return true;
-}
-
 static void show(void)
 {
     char r[20], p[20];
@@ -293,13 +264,13 @@ static void capture_start(int what, const char *s)
 
     while (*s == ' ') s++;
     if ((*s || !vac) &&
-        (!parse_fixed(&s, 3, &p) || (vac ? p < 0 || p > 50000 : p < 500000 || p > 1100000))) {
+        (!fixed_parse(&s, 3, &p) || (vac ? p < 0 || p > 50000 : p < 500000 || p > 1100000))) {
         link_printf(vac ? "ERR expected: CAL VAC [mbar 0 to 50] [uncertainty mbar]\r\n"
                         : "ERR expected: CAL AIR <mbar 500 to 1100> [uncertainty mbar]\r\n");
         return;
     }
     while (*s == ' ') s++;
-    if (*s && (!parse_fixed(&s, 3, &u) || u <= 0 || u > 50000)) {
+    if (*s && (!fixed_parse(&s, 3, &u) || u <= 0 || u > 50000)) {
         link_printf("ERR uncertainty: 0.001 to 50 mbar\r\n");
         return;
     }
@@ -429,7 +400,7 @@ bool cal_command(const char *line)
         int64_t r, p;
         if (staging.magic != CAL_MAGIC) { link_printf("ERR CAL NEW first\r\n"); return true; }
         if (staging.npts >= CAL_MAX_POINTS) { link_printf("ERR table full (32)\r\n"); return true; }
-        if (!parse_fixed(&s, 6, &r) || !parse_fixed(&s, 3, &p) ||
+        if (!fixed_parse(&s, 6, &r) || !fixed_parse(&s, 3, &p) ||
             r < -50000000 || r > 50000000 || p < -10000000 || p > 100000000) {
             link_printf("ERR expected: CAL PT <mV/V> <mbar>\r\n");
             return true;

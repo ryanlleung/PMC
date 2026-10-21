@@ -30,17 +30,21 @@ LV_FONT_DECLARE(ui_font_40)
 extern lv_font_t ui_num_16, ui_num_26, ui_num_40;
 
 // Colour roles (STYLE-GUIDE.md section 3).
-#define UI_BG      lv_color_hex(0xDCE3EA)
+#define UI_BG      lv_color_hex(0xF8F8F8)
 #define UI_CARD    lv_color_hex(0xFFFFFF)
-#define UI_TEXT    lv_color_hex(0x1F2933)
-#define UI_MUTED   lv_color_hex(0x546374)
-#define UI_IDLE    lv_color_hex(0x969EA6)
-#define UI_FAULT   lv_color_hex(0xD63031)
-#define UI_BLUE    lv_color_hex(0x2D5877)
-#define UI_WARN    lv_color_hex(0x3F3F3F)
-#define UI_TRACK   lv_color_hex(0xE8EEF4)
-#define UI_FILL    lv_color_hex(0x7B8794)
-#define UI_TICK    lv_color_hex(0xA3AFBB)
+#define UI_TEXT    lv_color_hex(0x202020)
+#define UI_MUTED   lv_color_hex(0x505050)
+// ui_strip_set's dot drawn as the header's mode dot: filled grey in AUTO,
+// a grey ring otherwise (the status line, as Home's card).
+#define UI_DOT_MODE lv_color_hex(0x010203)
+#define UI_IDLE    lv_color_hex(0x808080)
+#define UI_FAULT   lv_color_hex(0xE04030)
+#define UI_BLUE    lv_color_hex(0x3070C8)
+#define UI_WARN    lv_color_hex(0x505050)
+#define UI_TRACK   lv_color_hex(0xE0E0E0)
+#define UI_FILL    lv_color_hex(0x48B848)   // HP-bar green
+#define UI_TICK    lv_color_hex(0xC0C0C0)
+#define UI_OK      lv_color_hex(0x48B848)   // AUTO status dot (simulator COL.ok)
 
 typedef enum { UI_SECONDARY, UI_PRIMARY, UI_NAV, UI_RED, UI_DARK } ui_btn_kind_t;
 
@@ -54,6 +58,8 @@ void ui_btn_enable(lv_obj_t *btn, bool on);
 bool ui_btn_disabled(lv_event_t *e);
 
 lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
+// A card's edge: the HUD bracket (left and bottom), or a full red frame on an alarm.
+void ui_card_alarm(lv_obj_t *card, bool on);
 lv_obj_t *ui_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, const lv_font_t *font,
                    lv_color_t color, lv_text_align_t align, const char *text);
 // Changes the text or colour only if different (no redraw otherwise).
@@ -143,6 +149,7 @@ void ui_overlay_close(void);
 extern const ui_screen_t ui_scr_home, ui_scr_menu;
 void ui_status_line(void);     // mode/move line and Reset fault, in a screen's refresh()
 void ui_calibrate_ask(void);   // the Calibrate valve confirm
+void ui_manual_ask(void);      // the Switch to MANUAL confirm (AUTO)
 int32_t ui_log_px(int32_t p_mmbar, int32_t w);   // 0.1-1000 mbar on a log scale, 0 to w px
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
 // Trend and the Home sparklines (ui_trend.c). A sparkline redraws when

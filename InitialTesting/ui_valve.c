@@ -20,6 +20,7 @@ static const char *why_no_steps(void)
 {
     if (valve_motion_blocked()) return "Reset the fault first";
     if (valve_mode() == VALVE_CALIBRATING) return "Homing: STOP to cancel";
+    if (valve_auto()) return "Switch to MANUAL first";
     return NULL;
 }
 
@@ -76,8 +77,9 @@ static void right(lv_obj_t *l)
  * Valve page
  * ------------------------------------------------------------------------ */
 static struct {
-    lv_obj_t *p, *v, *go, *fill, *pfill, *btn[8];
+    lv_obj_t *p, *v, *go, *go_card, *go_chev, *fill, *pfill, *btn[8];
     bool jog;                 // a Close or Open hold is moving the valve
+    int go_live;              // Go to card styled as live (1) or flat (0), -1 not yet
 } vp;
 
 static const char *const valve_help =
@@ -148,6 +150,10 @@ static bool goto_set(int32_t v100, const char **why)
 static void goto_cb(lv_event_t *e)
 {
     (void)e;
+    if (valve_auto() && !valve_motion_blocked()) {
+        ui_manual_ask();   // in AUTO a tap on Go to asks Switch to MANUAL
+        return;
+    }
     const char *why = why_not_manual();
     if (why) {
         ui_msg(why);
@@ -182,9 +188,13 @@ static lv_obj_t *thin_bar(lv_obj_t *card, int32_t y)
 {
     lv_obj_t *track = ui_card(card, 10, y, 128, 3);
     lv_obj_set_style_radius(track, 0, 0);
+    lv_obj_set_style_border_width(track, 0, 0);   // a bar, not a HUD card
+    lv_obj_set_style_pad_all(track, 0, 0);
     lv_obj_set_style_bg_color(track, UI_TRACK, 0);
     lv_obj_t *fill = ui_card(track, 0, 0, 0, 3);
     lv_obj_set_style_radius(fill, 0, 0);
+    lv_obj_set_style_border_width(fill, 0, 0);
+    lv_obj_set_style_pad_all(fill, 0, 0);
     lv_obj_set_style_bg_color(fill, UI_FILL, 0);
     return fill;
 }
@@ -195,11 +205,13 @@ static void bar_width(lv_obj_t *fill, int32_t w)
         lv_obj_set_width(fill, w);
 }
 
-// Reading card: caption, 26 px number right-aligned, optional bar.
-static lv_obj_t *reading(lv_obj_t *scr, int32_t x, int32_t h, const char *cap, lv_obj_t **fill)
+// Reading card: caption left and unit right as on the Home tiles (Ryan,
+// 21 Oct), 26 px number right-aligned, optional bar.
+static lv_obj_t *reading(lv_obj_t *scr, int32_t x, int32_t h, const char *cap, const char *unit, lv_obj_t **fill)
 {
     lv_obj_t *v = ui_info(scr, x, 48, 148, h, cap);
     lv_obj_t *card = lv_obj_get_parent(v);
+    ui_label(card, 10, 5, 128, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
     right(v);
     lv_obj_set_style_text_font(v, &ui_num_26, 0);
     lv_obj_set_y(v, 20);
@@ -218,24 +230,34 @@ static void hold_btn(lv_obj_t *b, bool open)
 static void valve_build(lv_obj_t *scr)
 {
     memset(&vp, 0, sizeof vp);
-    vp.p = reading(scr, 10, 64, "Pressure, mB", &vp.pfill);
-    vp.v = reading(scr, 166, 64, "Valve, %", &vp.fill);
-    vp.go = reading(scr, 322, 64, "Go to, %", NULL);
+    vp.go_live = -1;
+    vp.p = reading(scr, 10, 64, "Pressure", "mB", &vp.pfill);
+    vp.v = reading(scr, 166, 64, "Valve", "%", &vp.fill);
+    // Go to is the card itself: tinted with a blue underline and a chevron
+    // when a tap opens the keypad, as Home's boxes (Ryan, 21 Oct).
+    vp.go = reading(scr, 322, 64, "Go to", "%", NULL);
+    vp.go_card = lv_obj_get_parent(vp.go);
+    lv_obj_add_flag(vp.go_card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(vp.go_card, goto_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_width(vp.go, 110);
+    vp.go_chev = ui_label(vp.go_card, 126, 28, 0, &lv_font_montserrat_14, UI_BLUE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
 
-    static const char *const row2[4] = { "Close", "-5 %", "+5 %", "Open" };
+    // Row 1: hold to close or open, 1 % steps; row 2: fully close or open
+    // under them, 5 % steps.
+    static const char *const row1[4] = { "Close", "-1 %", "+1 %", "Open" };
     for (int i = 0; i < 4; i++) {
-        lv_obj_t *b = ui_btn(scr, 10 + i * 118, 120, 106, 40, UI_SECONDARY, row2[i],
-                             i == 1 || i == 2 ? step_cb : NULL, (void *)(intptr_t)(i == 1 ? -50 : 50));
+        lv_obj_t *b = ui_btn(scr, 10 + i * 118, 120, 106, 40, UI_SECONDARY, row1[i],
+                             i == 1 || i == 2 ? step_cb : NULL, (void *)(intptr_t)(i == 1 ? -10 : 10));
         if (i == 0 || i == 3) {
             hold_btn(b, i == 3);
-            ui_btn_text(b, row2[i], "hold");
+            ui_btn_text(b, row1[i], "hold");
         }
         vp.btn[i] = b;
     }
-    vp.btn[4] = ui_btn(scr, 10, 168, 106, 40, UI_PRIMARY, "Go to", goto_cb, NULL);
-    vp.btn[5] = ui_btn(scr, 128, 168, 106, 40, UI_SECONDARY, "Fully close", full_cb, NULL);
-    vp.btn[6] = ui_btn(scr, 246, 168, 106, 40, UI_SECONDARY, "Fully open", full_cb, (void *)1);
-    ui_btn(scr, 364, 168, 106, 40, UI_NAV, "Help", help_cb, (void *)valve_help);
+    vp.btn[4] = ui_btn(scr, 128, 168, 106, 40, UI_SECONDARY, "-5 %", step_cb, (void *)(intptr_t)-50);
+    vp.btn[5] = ui_btn(scr, 246, 168, 106, 40, UI_SECONDARY, "+5 %", step_cb, (void *)(intptr_t)50);
+    vp.btn[6] = ui_btn(scr, 10, 168, 106, 40, UI_SECONDARY, "Fully close", full_cb, NULL);
+    vp.btn[7] = ui_btn(scr, 364, 168, 106, 40, UI_SECONDARY, "Fully open", full_cb, (void *)1);
 }
 
 // Valve %, its bar and Go to, at 10 Hz.
@@ -251,9 +273,11 @@ static void valve_fast(void)
     // away from the button without a release: stop the hold.
     if (vp.jog && ui_overlay_open())
         stepper3_stop_ramped();
-    bool moving = cal && stepper3_busy() && !vp.jog;   // a Close or Open hold has no target
-    ui_set_text(vp.go, moving ? pct_text(buf, sizeof buf, valve_target_pct_milli()) : "--");
-    ui_set_color(vp.go, moving ? UI_TEXT : UI_IDLE);
+    // Where the valve is going (or last went); "--" during a hold, which
+    // has no target, and before homing; "auto" in AUTO.
+    bool have = cal && !(stepper3_busy() && vp.jog);
+    ui_set_text(vp.go, valve_auto() ? "auto" : have ? pct_text(buf, sizeof buf, valve_target_pct_milli()) : "--");
+    ui_set_color(vp.go, have && !valve_auto() && why_not_manual() == NULL ? UI_TEXT : UI_IDLE);
 }
 
 static void valve_refresh(void)
@@ -265,9 +289,21 @@ static void valve_refresh(void)
     bar_width(vp.pfill, ok ? ui_log_px(clicks_state()->p_mmbar, 128) : 0);   // log, 0.1 to 1000 mB
     valve_fast();
     bool on = why_not_manual() == NULL, steps = why_no_steps() == NULL;
-    for (int i = 0; i < 7; i++)
-        if (vp.btn[i])
-            ui_btn_enable(vp.btn[i], i < 4 ? steps : on);
+    for (int i = 0; i < 8; i++)
+        ui_btn_enable(vp.btn[i], i < 6 ? steps : on);
+    // The Go to card: live (tint, underline, chevron) when a tap opens the
+    // keypad; flat otherwise. In AUTO a tap asks Switch to MANUAL.
+    if (on != vp.go_live) {
+        vp.go_live = on;
+        lv_obj_set_style_bg_color(vp.go_card, lv_color_hex(on ? 0xF8F0B0 : 0xFFFFFF), 0);
+        // Pokemon: live = blue underline (as Home's boxes), else the HUD bracket.
+        lv_obj_set_style_border_side(vp.go_card, on ? LV_BORDER_SIDE_BOTTOM
+                                                    : LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_border_color(vp.go_card, on ? UI_BLUE : UI_TEXT, 0);
+        lv_obj_set_style_pad_left(vp.go_card, on ? 0 : -3, 0);
+        if (on) lv_obj_remove_flag(vp.go_chev, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(vp.go_chev, LV_OBJ_FLAG_HIDDEN);
+    }
     if (vp.jog && !stepper3_busy())
         vp.jog = false;
     ui_status_line();
@@ -298,6 +334,8 @@ static void start_cb(lv_event_t *e)
         ui_msg("Homing: STOP to cancel");
     else if (valve_motion_blocked())
         ui_msg("Reset the fault first");
+    else if (valve_auto())
+        ui_msg("Switch to MANUAL first");
     else
         ui_calibrate_ask();
 }
@@ -398,7 +436,7 @@ static void calib_refresh(void)
         ui_set_text(cp.last, "Not since power-up");
     }
     ui_btn_text(cp.start, calib ? "Homing" : "Start homing", NULL);
-    ui_btn_enable(cp.start, !calib && !valve_motion_blocked());
+    ui_btn_enable(cp.start, !calib && !valve_motion_blocked() && !valve_auto());
     ui_status_line();
 }
 
@@ -439,10 +477,26 @@ static const fault_help_t fault_help[] = {
       "Stopped. The valve is not homed.",
       "The switch is not stuck (ice) and its wire is not broken.",
       "Any time. Then home again." },
+    { "F-10", "The valve moved in AUTO but the pressure did not respond, 5 windows of 30 s.",
+      "Stopped the valve and holds it. MANUAL.",
+      "Drive slipping, motor unplugged, needle seized.",
+      "Any time. Check before starting AUTO." },
+    { "F-16", "The valve kept opening in AUTO while the pressure kept falling.",
+      "Stopped the valve and holds it. MANUAL.",
+      "Helium supply (bath empty, capillary blocked). On first use, Pressure response.",
+      "Any time. Check before starting AUTO." },
+    { "F-17", "The valve kept closing in AUTO while the pressure kept rising.",
+      "Stopped the valve and holds it. MANUAL.",
+      "Pump stopped, pumping valve shut, heat load. On first use, Pressure response.",
+      "Any time. Check before starting AUTO." },
     { "F-13", "A move took longer than its distance at the set rate, plus 2 s.",
       "Stopped the valve and holds it. Homing kept.",
       "The valve turns freely and the motor 12 V supply.",
       "Any time." },
+    { "F-02", "The pressure stayed above the sensor range for 5 s in AUTO.",
+      "Stopped the valve and holds it. MANUAL. The valve still moves.",
+      "Pumping line and pump; the sensor range.",
+      "The pressure is back in the range. Then start AUTO again." },
     { "F-12", "STOP was pressed in AUTO, or CTRL STOP sent.",
       "Stopped the valve and holds it, not closed.",
       "Why it was stopped.",
@@ -459,7 +513,13 @@ static const fault_help_t *help_for(const char *tag)
 
 static const char *mode_word(valve_mode_t m)
 {
-    return m == VALVE_CALIBRATING ? "HOMING" : m == VALVE_MANUAL ? "MANUAL" : "NOT HOMED";
+    switch (m) {
+    case VALVE_CALIBRATING: return "HOMING";
+    case VALVE_MANUAL:      return "MANUAL";
+    case VALVE_AUTO:        return "AUTO";
+    case VALVE_PAUSED:      return "AUTO PAUSED";
+    default:                return "NOT HOMED";
+    }
 }
 
 static void detail_fill(void)
@@ -593,7 +653,7 @@ static void faults_build(lv_obj_t *scr)
                             LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_CHAIN);
     lv_obj_set_scrollbar_mode(box, LV_SCROLLBAR_MODE_ON);
     lv_obj_set_style_width(box, 6, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(box, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(box, 0, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(box, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_color(box, UI_IDLE, LV_PART_SCROLLBAR);
     fp.box = box;

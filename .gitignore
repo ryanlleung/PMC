@@ -16,3 +16,4 @@ __pycache__/
 # Simulator test screenshots.
 simulator/tests/shots/
 tools/cfg-test/out/
+tools/ctrl-test/out/

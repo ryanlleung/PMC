@@ -10,6 +10,7 @@
 #include "motor_screen.h"
 #include "fixed.h"
 #include "cfg.h"
+#include "trend.h"
 #include "ui.h"
 
 /* --------------------------------------------------------------------------
@@ -46,11 +47,11 @@ static void num_font(lv_font_t *f, const lv_font_t *base)
 /* --------------------------------------------------------------------------
  * Styles (STYLE-GUIDE.md section 6)
  * ------------------------------------------------------------------------ */
-#define UI_EDGE    lv_color_hex(0xAEB9C4)
-#define UI_PRESS   lv_color_hex(0xE3E9EF)
-#define UI_DIS_BG  lv_color_hex(0xE9EEF2)
-#define UI_DIS_TX  lv_color_hex(0x9AA4AE)
-#define UI_CHEV    lv_color_hex(0x7B8794)
+#define UI_EDGE    lv_color_hex(0x202020)
+#define UI_PRESS   lv_color_hex(0xC0C0C0)
+#define UI_DIS_BG  lv_color_hex(0xE0E0E0)
+#define UI_DIS_TX  lv_color_hex(0x808080)
+#define UI_CHEV    lv_color_hex(0x808080)
 
 static lv_style_t st_btn, st_btn_pr, st_btn_dis, st_act, st_act_pr, st_act_small,
                   st_red, st_red_pr, st_dark, st_dark_pr, st_card, st_stop_op, st_stop_op_pr;
@@ -61,37 +62,40 @@ static void styles_init(void)
     lv_style_init(&st_btn);
     lv_style_set_bg_opa(&st_btn, LV_OPA_COVER);
     lv_style_set_bg_color(&st_btn, UI_CARD);
-    lv_style_set_radius(&st_btn, 6);
-    lv_style_set_border_side(&st_btn, LV_BORDER_SIDE_BOTTOM);   // the raised edge
+    // Pokemon menu box: rounded pixel corners and a double black frame.
+    lv_style_set_radius(&st_btn, 4);
+    lv_style_set_border_side(&st_btn, LV_BORDER_SIDE_FULL);
     lv_style_set_border_width(&st_btn, 2);
+    lv_style_set_border_color(&st_btn, UI_TEXT);
+    lv_style_set_outline_width(&st_btn, 1);
+    lv_style_set_outline_pad(&st_btn, 2);
+    lv_style_set_outline_color(&st_btn, UI_TEXT);
     lv_style_set_border_color(&st_btn, UI_EDGE);
     lv_style_set_text_color(&st_btn, UI_TEXT);
     lv_style_set_text_font(&st_btn, &ui_font_16);
 
     lv_style_init(&st_btn_pr);
     lv_style_set_bg_color(&st_btn_pr, UI_PRESS);
-    lv_style_set_border_width(&st_btn_pr, 0);
 
     lv_style_init(&st_btn_dis);
     lv_style_set_bg_color(&st_btn_dis, UI_DIS_BG);
     lv_style_set_text_color(&st_btn_dis, UI_DIS_TX);
-    lv_style_set_border_width(&st_btn_dis, 0);
+    lv_style_set_outline_color(&st_btn_dis, UI_DIS_TX);
+    lv_style_set_border_color(&st_btn_dis, UI_DIS_TX);
 
     lv_style_init(&st_act);
     lv_style_set_bg_color(&st_act, UI_BLUE);
     lv_style_set_text_color(&st_act, lv_color_white());
-    lv_style_set_border_width(&st_act, 0);
     lv_style_init(&st_act_pr);
-    lv_style_set_bg_color(&st_act_pr, lv_color_hex(0x24475F));
+    lv_style_set_bg_color(&st_act_pr, lv_color_hex(0x204890));
     lv_style_init(&st_act_small);
-    lv_style_set_text_color(&st_act_small, lv_color_hex(0xD5E2EC));
+    lv_style_set_text_color(&st_act_small, lv_color_hex(0xD0E0F8));
 
     lv_style_init(&st_red);
     lv_style_set_bg_color(&st_red, UI_FAULT);
     lv_style_set_text_color(&st_red, lv_color_white());
-    lv_style_set_border_width(&st_red, 0);
     lv_style_init(&st_red_pr);
-    lv_style_set_bg_color(&st_red_pr, lv_color_hex(0xAA1E1E));
+    lv_style_set_bg_color(&st_red_pr, lv_color_hex(0xA02818));
 
     // STOP outside AUTO (no latch): white with a red edge and red word.
     lv_style_init(&st_stop_op);
@@ -102,22 +106,43 @@ static void styles_init(void)
     lv_style_set_border_color(&st_stop_op, UI_FAULT);
     lv_style_set_pad_all(&st_stop_op, -3);      // the word keeps its place
     lv_style_init(&st_stop_op_pr);
-    lv_style_set_bg_color(&st_stop_op_pr, lv_color_hex(0xF6D5D5));
+    lv_style_set_bg_color(&st_stop_op_pr, lv_color_hex(0xF8D0C8));
 
     lv_style_init(&st_dark);
-    lv_style_set_bg_color(&st_dark, UI_TEXT);
-    lv_style_set_text_color(&st_dark, lv_color_white());
+    lv_style_set_bg_opa(&st_dark, LV_OPA_TRANSP);   // the header's rule shows under Back and Home
+    lv_style_set_bg_color(&st_dark, UI_BG);
+    lv_style_set_text_color(&st_dark, UI_TEXT);
     lv_style_set_radius(&st_dark, 0);
     lv_style_set_border_width(&st_dark, 0);
+    lv_style_set_outline_width(&st_dark, 0);
     lv_style_init(&st_dark_pr);
-    lv_style_set_bg_color(&st_dark_pr, lv_color_hex(0x3C4856));
+    lv_style_set_bg_opa(&st_dark_pr, LV_OPA_COVER);
+    lv_style_set_bg_color(&st_dark_pr, lv_color_hex(0xC0C0C0));
 
     lv_style_init(&st_card);
     lv_style_set_bg_opa(&st_card, LV_OPA_COVER);
     lv_style_set_bg_color(&st_card, UI_CARD);
-    lv_style_set_radius(&st_card, 6);
-    lv_style_set_border_color(&st_card, UI_FAULT);   // alarm edge, width 0 until set
-    lv_style_set_border_width(&st_card, 0);
+    lv_style_set_radius(&st_card, 0);
+    // Pokemon battle HUD bracket: black rule on the left and bottom. An
+    // alarm turns it red and full (card_edge); pad keeps children in place.
+    lv_style_set_border_side(&st_card, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_BOTTOM);
+    lv_style_set_border_color(&st_card, UI_TEXT);
+    lv_style_set_border_width(&st_card, 3);
+    lv_style_set_pad_left(&st_card, -3);
+    lv_style_set_pad_bottom(&st_card, -3);
+}
+
+void ui_card_alarm(lv_obj_t *o, bool on)
+{
+    lv_border_side_t side = on ? LV_BORDER_SIDE_FULL : LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_BOTTOM;
+    if (lv_obj_get_style_border_side(o, 0) == side && lv_obj_get_style_border_width(o, 0) == 3)
+        return;
+    lv_obj_set_style_border_width(o, 3, 0);
+    lv_obj_set_style_border_side(o, side, 0);
+    lv_obj_set_style_border_color(o, on ? UI_FAULT : UI_TEXT, 0);
+    lv_obj_set_style_pad_all(o, -3, 0);         // children keep their place
+    lv_obj_set_style_pad_top(o, on ? -3 : 0, 0);
+    lv_obj_set_style_pad_right(o, on ? -3 : 0, 0);
 }
 
 static lv_obj_t *plain(lv_obj_t *parent)
@@ -285,8 +310,8 @@ lv_obj_t *ui_btn(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
     if (kind == UI_NAV) {
         lv_obj_t *chev = lv_label_create(b);
         lv_obj_set_style_text_font(chev, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(chev, UI_CHEV, 0);
-        lv_label_set_text(chev, LV_SYMBOL_RIGHT);
+        lv_obj_set_style_text_color(chev, UI_TEXT, 0);
+        lv_label_set_text(chev, LV_SYMBOL_PLAY);   // the Pokemon menu cursor
         lv_obj_align(chev, LV_ALIGN_RIGHT_MID, -8, 0);
     }
     btn_layout(b);
@@ -339,7 +364,7 @@ bool ui_btn_disabled(lv_event_t *e)
  * ------------------------------------------------------------------------ */
 #define HDR_BTN_W 48  // Back and Home, icons only
 static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *mode_dot, *fault_rule;
-static lv_obj_t *strip, *strip_dot, *strip_icon, *strip_text, *strip_ok, *strip_act;
+static lv_obj_t *strip, *strip_dot, *strip_icon, *strip_text, *strip_ok, *strip_act, *strip_spark;
 static lv_obj_t *stop_btn;
 
 static lv_obj_t *home_scr, *cur_scr, *overlay;
@@ -420,7 +445,10 @@ static void build_frame(void)
     hdr = plain(frame);
     lv_obj_set_size(hdr, 480, 40);
     lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(hdr, UI_TEXT, 0);
+    lv_obj_set_style_bg_color(hdr, UI_BG, 0);
+    lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(hdr, 2, 0);
+    lv_obj_set_style_border_color(hdr, UI_TEXT, 0);
     lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);    // touches on the header stop here
     fault_rule = plain(hdr);
     lv_obj_set_pos(fault_rule, 0, 36);
@@ -445,17 +473,17 @@ static void build_frame(void)
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_center(l);
     }
-    pmc_lbl = ui_label(hdr, 10, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER,
+    pmc_lbl = ui_label(hdr, 10, 11, 280, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER,
                        "Pressure controller");
     lv_label_set_long_mode(pmc_lbl, LV_LABEL_LONG_DOT);
-    title_lbl = ui_label(hdr, 100, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
+    title_lbl = ui_label(hdr, 100, 11, 280, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
     lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_DOT);
-    mode_lbl = ui_label(hdr, 296, 11, 158, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_RIGHT, "");
+    mode_lbl = ui_label(hdr, 296, 11, 158, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "");
     mode_dot = plain(hdr);
     lv_obj_set_pos(mode_dot, 460, 15);
     lv_obj_set_size(mode_dot, 10, 10);
-    lv_obj_set_style_radius(mode_dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_color(mode_dot, lv_color_hex(0xC3CDD7), 0);
+    lv_obj_set_style_radius(mode_dot, 0, 0);
+    lv_obj_set_style_border_color(mode_dot, lv_color_hex(0xC0C0C0), 0);
     lv_obj_set_style_bg_color(mode_dot, UI_FAULT, 0);
 
     strip = plain(frame);
@@ -466,13 +494,17 @@ static void build_frame(void)
     strip_dot = plain(strip);
     lv_obj_set_pos(strip_dot, 12, 20);
     lv_obj_set_size(strip_dot, 8, 8);
-    lv_obj_set_style_radius(strip_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(strip_dot, 0, 0);
     lv_obj_set_style_bg_opa(strip_dot, LV_OPA_COVER, 0);
     strip_icon = ui_label(strip, 6, 15, 0, &lv_font_montserrat_14, lv_color_white(), LV_TEXT_ALIGN_LEFT,
                           LV_SYMBOL_WARNING);
     strip_text = ui_label(strip, 28, 0, 303, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_long_mode(strip_text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_line_space(strip_text, 4, 0);
+    // The pressure sparkline on the right whenever the strip shows the
+    // status line (Home and the operator screens; Ryan, 21 Oct).
+    strip_spark = ui_spark(strip, 192, 6, 139, 36, false);
+    lv_obj_add_flag(strip_spark, LV_OBJ_FLAG_HIDDEN);
     strip_ok = ui_btn(strip, 279, 4, 60, 40, UI_SECONDARY, "OK", ok_event, NULL);
     strip_act = ui_btn(strip, 239, 4, 100, 40, UI_PRIMARY, "", act_event, NULL);
 
@@ -518,7 +550,7 @@ void ui_strip_action(const char *text, const char *small, lv_event_cb_t cb)
 
 static void strip_draw(ui_strip_kind_t kind, lv_color_t dot, const char *text, bool ok, bool act)
 {
-    static const uint32_t bg[] = { 0xFFFFFF, 0xE0E0E0, 0x3F3F3F, 0x000000 };
+    static const uint32_t bg[] = { 0xFFFFFF, 0xC0C0C0, 0x505050, 0x202020 };
     // Under a popup: one fixed grey whatever the kind or what is behind it
     // (opacity let the dim of a pick list or confirm tint it blue).
     bool dim = overlay != NULL;
@@ -534,28 +566,40 @@ static void strip_draw(ui_strip_kind_t kind, lv_color_t dot, const char *text, b
     lv_color_t b = dim ? dis_bg : lv_color_hex(bg[kind]);   // as a greyed button
     if (!lv_color_eq(lv_obj_get_style_bg_color(strip, 0), b))
         lv_obj_set_style_bg_color(strip, b, 0);
-    int32_t bw = dim ? 0 : kind == UI_STRIP_FAULT ? 3 : kind == UI_STRIP_PROMPT ? 1 : 0;
-    lv_color_t bc = kind == UI_STRIP_FAULT ? UI_FAULT : UI_WARN;
-    if (lv_obj_get_style_border_width(strip, 0) != bw || !lv_color_eq(lv_obj_get_style_border_color(strip, 0), bc)) {
-        lv_obj_set_style_border_width(strip, bw, 0);
-        lv_obj_set_style_pad_all(strip, -bw, 0);    // children keep their place
-        lv_obj_set_style_border_color(strip, bc, 0);
-    }
+    ui_card_alarm(strip, !dim && kind == UI_STRIP_FAULT);   // HUD bracket, red frame on a fault
     show(strip_dot, kind == UI_STRIP_INFO);
+    bool ring = false, is_mode = lv_color_eq(dot, UI_DOT_MODE);
+    if (is_mode) {
+        ring = !valve_auto();
+        dot = lv_color_hex(0xC0C0C0);
+    }
     if (dim)
         dot = dis_tx;
-    if (kind == UI_STRIP_INFO && !lv_color_eq(lv_obj_get_style_bg_color(strip_dot, 0), dot))
+    if (kind == UI_STRIP_INFO && (!lv_color_eq(lv_obj_get_style_bg_color(strip_dot, 0), dot) ||
+                                  (lv_obj_get_style_border_width(strip_dot, 0) != 0) != ring)) {
         lv_obj_set_style_bg_color(strip_dot, dot, 0);
+        lv_obj_set_style_border_color(strip_dot, dot, 0);
+        lv_obj_set_style_border_width(strip_dot, ring ? 2 : 0, 0);
+        lv_obj_set_style_bg_opa(strip_dot, ring ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+    }
     show(strip_icon, kind >= UI_STRIP_WARN);
     ui_set_color(strip_icon, dim ? dis_tx : kind == UI_STRIP_FAULT ? UI_FAULT : lv_color_white());
     ui_set_color(strip_text, dim ? dis_tx : kind >= UI_STRIP_WARN ? lv_color_white()
                              : kind == UI_STRIP_PROMPT ? lv_color_black() : UI_TEXT);
+    bool spark = kind == UI_STRIP_INFO && is_mode && !dim && !ok && !act && strip_w >= 300;
     int32_t x = kind == UI_STRIP_PROMPT ? 12 : 28;
-    int32_t w = (act ? strip_w - 104 : ok ? strip_w - 64 : strip_w - 4) - x - 4;
+    int32_t w = (spark ? strip_w - 155 : act ? strip_w - 104 : ok ? strip_w - 64 : strip_w - 4) - x - 4;
     if (lv_obj_get_width(strip) != strip_w) {
         lv_obj_set_width(strip, strip_w);
         lv_obj_set_x(strip_ok, strip_w - 64);
         lv_obj_set_x(strip_act, strip_w - 104);
+        lv_obj_set_x(strip_spark, strip_w - 151);
+    }
+    show(strip_spark, spark);
+    static uint32_t seen = UINT32_MAX;
+    if (spark && trend_seconds() != seen) {   // a new sample: redraw it
+        seen = trend_seconds();
+        lv_obj_invalidate(strip_spark);
     }
     if (lv_obj_get_x(strip_text) != x || lv_obj_get_width(strip_text) != w) {
         lv_obj_set_x(strip_text, x);
@@ -645,12 +689,12 @@ static void frame_refresh(void)
     // colour, tells AUTO apart. (Before 0.10.5 the ring never drew: its
     // border was only set on a change of fill, and the first was none.)
     static int dot_kind = -1;
-    bool in_auto = false;      // AUTO comes in stage 8
+    bool in_auto = valve_auto();
     int kind = nf ? 2 : in_auto ? 1 : 0;
     if (kind != dot_kind) {
         dot_kind = kind;
         lv_obj_set_style_bg_opa(mode_dot, kind ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_bg_color(mode_dot, kind == 2 ? UI_FAULT : lv_color_hex(0xC3CDD7), 0);
+        lv_obj_set_style_bg_color(mode_dot, kind == 2 ? UI_FAULT : lv_color_hex(0xC0C0C0), 0);
         lv_obj_set_style_border_width(mode_dot, kind ? 0 : 2, 0);
     }
 
@@ -740,6 +784,8 @@ static lv_obj_t *new_screen(void)
 
 void ui_open(const ui_screen_t *s)
 {
+    if (cur == s)   // e.g. the strip's sparkline tapped on Trend
+        return;
     if (cur != &ui_scr_home && cur != s && !service && back_n < (int)(sizeof back_stack / sizeof back_stack[0]))
         back_stack[back_n++] = cur;
     open_screen(s);
@@ -1050,7 +1096,7 @@ void ui_pick(const char *title, const char *const *items, int n, int sel, void (
         lv_obj_set_size(it, i / rows ? 343 - iw : iw, PICK_ROW);
         lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_bg_opa(it, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(it, i == sel ? lv_color_hex(0x3E4C59) : UI_CARD, 0);
+        lv_obj_set_style_bg_color(it, i == sel ? lv_color_hex(0x202020) : UI_CARD, 0);
         lv_obj_set_style_bg_color(it, UI_TRACK, LV_STATE_PRESSED);
         lv_obj_set_style_border_side(it, i / rows ? LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT : LV_BORDER_SIDE_TOP, 0);
         lv_obj_set_style_border_width(it, 1, 0);
@@ -1090,7 +1136,7 @@ void ui_ask3(const char *text, const char *cancel, void (*on_cancel)(void), cons
     confirm_cancel = on_cancel;
     confirm_mid = on_mid;
     lv_obj_t *box = ui_card(o, 70, 0, 340, 100);
-    lv_obj_set_style_radius(box, 8, 0);
+    lv_obj_set_style_radius(box, 0, 0);
     lv_obj_t *t = ui_label(box, 16, 14, 308, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, text);
     lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
     lv_obj_update_layout(t);
@@ -1168,7 +1214,7 @@ void ui_text_view(const char *title, const char *text)
     lv_obj_set_scroll_dir(c, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_ON);
     lv_obj_set_style_width(c, 6, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(c, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(c, 0, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_color(c, UI_IDLE, LV_PART_SCROLLBAR);
     lv_obj_set_style_pad_right(c, 4, LV_PART_SCROLLBAR);
@@ -1260,6 +1306,8 @@ void ui_init(void)
     num_font(&ui_num_26, &ui_font_26);
     num_font(&ui_num_40, &ui_font_40);
     styles_init();
+    // 8-bit: no antialiasing, so lines, arcs and edges stay on whole pixels.
+    lv_display_set_antialiasing(lv_display_get_default(), false);
     home_scr = new_screen();
     cur_scr = home_scr;
     ui_scr_home.build(home_scr);

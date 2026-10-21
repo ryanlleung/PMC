@@ -1,6 +1,7 @@
 #ifndef _FIXED_H_
 #define _FIXED_H_
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -18,6 +19,11 @@ const char *fixed_fmt(char *buf, size_t n, int64_t v, int dec);
 // fixed_round(12345, 1) = 1235, fixed_round(-12345, 1) = -1235.
 // (Plain v / 10^drop truncates instead.)
 int64_t fixed_round(int64_t v, int drop);
+
+// Parses a plain decimal ("-12.345") into an integer scaled by 10^dec.
+// Extra decimals are truncated. Advances *s past the number (stops at a
+// space or the end; anything else is refused).
+bool fixed_parse(const char **s, int dec, int64_t *out);
 
 // Integer square root, rounded down.
 uint32_t isqrt64(uint64_t v);

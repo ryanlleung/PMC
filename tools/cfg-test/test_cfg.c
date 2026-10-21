@@ -119,6 +119,10 @@ const char *valve_settings_check(const int32_t v[VALVE_N_SETTINGS])
 }
 bool valve_set_settings(const int32_t v[VALVE_N_SETTINGS]) { memcpy(v_set, v, sizeof v_set); return true; }
 valve_mode_t valve_mode(void) { return v_mode; }
+static bool v_auto;            // test_auto(): AUTO on
+static int32_t v_sp = 5000;
+bool valve_auto(void) { return v_auto; }
+bool valve_target(int32_t *mmbar) { *mmbar = v_sp; return true; }
 int32_t valve_pct_milli(void) { return 34240; }
 size_t link_tx_room(void) { return 4096; }
 bool valve_calibrated(void) { return v_cal; }
@@ -540,6 +544,46 @@ static void test_trend(void)
     CHECK(trend_fine(4, &o) && o.p == 5000);
 }
 
+// Stage 8: in AUTO only the tuning changes (screens and PID); the trend
+// carries the target.
+static void test_auto(void)
+{
+    int32_t v[CFG_N] = { 0 };
+    bool set[CFG_N] = { false };
+    const char *why;
+    uint32_t rev0, rev;
+    const char *at;
+    cfg_rev(CFG_FROM_SAVED, &rev0, &at);
+    uint32_t rate = m_rate;
+    v_auto = true;
+    v[CFG_KP] = 300; set[CFG_KP] = true;
+    v[CFG_RATE] = (int32_t)rate; set[CFG_RATE] = true;          // unchanged: allowed
+    CHECK(cfg_save_with(v, set, &why));
+    CHECK(cfg_tune(CFG_KP) == 300 && m_rate == rate && cfg_unsaved() == 0);
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == rev0 + 1);
+    v[CFG_RATE] = (int32_t)rate + 50;                             // changed: refused
+    v[CFG_KP] = 320;
+    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "MANUAL"));
+    CHECK(cfg_tune(CFG_KP) == 300 && m_rate == rate);
+    CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "MANUAL"));
+    CHECK(cfg_command("PID KP 3.5") && cfg_tune(CFG_KP) == 350 && cfg_unsaved() == 1);
+    CHECK(cfg_command("PID TI 0.4") && cfg_tune(CFG_TI) == 40);
+    CHECK(cfg_command("PID OUTMIN 0") && cfg_tune(CFG_OUTMIN) == 0);
+    CHECK(cfg_command("PID BAND 0.05") && cfg_tune(CFG_BAND) == 10);   // below 0.10: refused, kept
+    CHECK(cfg_command("PID KDIR 0") && cfg_tune(CFG_KDIR) == 1);
+    CHECK(cfg_command("PID KDIR -1") && cfg_tune(CFG_KDIR) == -1);
+    CHECK(cfg_command("PID KDIR +1") && cfg_tune(CFG_KDIR) == 1);
+    CHECK(cfg_command("PID TS 2") && cfg_command("PID?"));
+    CHECK(cfg_command("PID DB 8x") && cfg_tune(CFG_DB) == 8);
+    clicks_state_t q = { .pm_found = true, .reading_ok = true, .p_mmbar = 5100 };
+    trend_pt_t o;
+    lv_tick_inc(1000); trend_second(&q);
+    CHECK(trend_fine(0, &o) && o.sp == 5000);
+    v_auto = false;
+    lv_tick_inc(1000); trend_second(&q);
+    CHECK(trend_fine(0, &o) && o.sp == TREND_NONE);
+}
+
 int main(int argc, char **argv)
 {
     quiet = !(argc > 1 && strcmp(argv[1], "-v") == 0);
@@ -551,6 +595,7 @@ int main(int argc, char **argv)
     test_name();
     test_valvepos();
     test_trend();
+    test_auto();
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
 }

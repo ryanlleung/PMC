@@ -2,6 +2,7 @@
 
 #include "lvgl.h"
 #include "motor_screen.h"
+#include "ui.h"
 #include "stepper3.h"
 #include "link.h"
 #include "limit.h"
@@ -20,17 +21,17 @@
  * Buttons act on press, as the main screen tabs do. Each action is echoed on
  * the link as "MOT screen: ..." so a terminal log shows what was done.
  */
-#define COL_HEADER   lv_color_make(31, 41, 51)
-#define COL_BG       lv_color_make(232, 238, 244)
+#define COL_HEADER   lv_color_hex(0x202020)
+#define COL_BG       lv_color_hex(0xF8F8F8)
 #define COL_CARD     lv_color_white()
-#define COL_TEXT     lv_color_make(31, 41, 51)
-#define COL_MUTED    lv_color_make(84, 99, 116)
-#define COL_BTN      lv_color_make(235, 240, 245)
-#define COL_BTN_DOWN lv_color_make(218, 225, 232)
-#define COL_OK       lv_color_make(46, 160, 67)
-#define COL_FAULT    lv_color_make(214, 48, 49)
-#define COL_WARN     lv_color_make(214, 130, 0)
-#define COL_IDLE     lv_color_make(150, 158, 166)
+#define COL_TEXT     lv_color_hex(0x202020)
+#define COL_MUTED    lv_color_hex(0x505050)
+#define COL_BTN      lv_color_hex(0xFFFFFF)
+#define COL_BTN_DOWN lv_color_hex(0xC0C0C0)
+#define COL_OK       lv_color_hex(0x48B848)
+#define COL_FAULT    lv_color_hex(0xE04030)
+#define COL_WARN     lv_color_hex(0xF08020)
+#define COL_IDLE     lv_color_hex(0x808080)
 
 static lv_obj_t *screen;
 static lv_timer_t *refresh_timer;
@@ -95,8 +96,9 @@ static lv_obj_t *make_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, in
     lv_obj_set_pos(c, x, y);
     lv_obj_set_size(c, w, h);
     lv_obj_set_style_bg_color(c, COL_CARD, 0);
-    lv_obj_set_style_border_width(c, 0, 0);
-    lv_obj_set_style_radius(c, 6, 0);
+    lv_obj_set_style_border_width(c, 2, 0);       // 8-bit: black pixel edge
+    lv_obj_set_style_border_color(c, COL_TEXT, 0);
+    lv_obj_set_style_radius(c, 0, 0);
     lv_obj_set_style_pad_all(c, 0, 0);
     return c;
 }
@@ -112,7 +114,7 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t col)
 static lv_obj_t *make_caption(lv_obj_t *parent, int32_t x, int32_t y, const char *text)
 {
     lv_obj_t *l = make_label(parent, text, COL_MUTED);
-    lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(l, &ui_font_12, 0);
     lv_obj_set_pos(l, x, y);
     return l;
 }
@@ -126,12 +128,13 @@ static lv_obj_t *make_button(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, 
     lv_obj_set_pos(b, x, y);
     lv_obj_set_size(b, w, h);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(b, 4, 0);
+    lv_obj_set_style_radius(b, 0, 0);
     lv_obj_set_style_bg_color(b, COL_BTN, 0);
     lv_obj_set_style_text_color(b, COL_TEXT, 0);
     lv_obj_set_style_border_width(b, 2, 0);
-    lv_obj_set_style_border_color(b, COL_BTN, 0);
-    lv_obj_set_style_border_color(b, COL_HEADER, LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(b, COL_TEXT, 0);   // 8-bit: black edge, inverted when checked
+    lv_obj_set_style_bg_color(b, COL_HEADER, LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(b, COL_CARD, LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(b, COL_BTN_DOWN, LV_STATE_PRESSED);
     lv_obj_set_style_text_color(b, COL_IDLE, LV_STATE_DISABLED);
     lv_obj_t *l = lv_label_create(b);
@@ -410,24 +413,27 @@ void motor_screen_init(void (*go_back)(void))
     screen = lv_obj_create(NULL);
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(screen, COL_BG, 0);
+    lv_obj_set_style_text_font(screen, &ui_font_16, 0);   // 8-bit: unscii for every label
 
     // Header.
     lv_obj_t *hdr = lv_obj_create(screen);
     lv_obj_remove_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(hdr, 0, 0);
     lv_obj_set_size(hdr, 480, 30);
-    lv_obj_set_style_bg_color(hdr, COL_HEADER, 0);
+    lv_obj_set_style_bg_color(hdr, COL_BG, 0);    // white with a black rule, as the other screens
     lv_obj_set_style_radius(hdr, 0, 0);
-    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_border_width(hdr, 2, 0);
+    lv_obj_set_style_border_side(hdr, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(hdr, COL_TEXT, 0);
     lv_obj_set_style_pad_all(hdr, 0, 0);
     // Close (a cross, Ryan 16 Oct): back to Settings.
     lv_obj_t *back = make_button(hdr, 0, 0, 48, 30, LV_SYMBOL_CLOSE, back_event, 0);
     lv_obj_set_style_radius(back, 0, 0);
-    lv_obj_set_style_bg_color(back, COL_HEADER, 0);
-    lv_obj_set_style_border_color(back, COL_HEADER, 0);
-    lv_obj_set_style_bg_color(back, lv_color_make(60, 72, 86), LV_STATE_PRESSED);
-    lv_obj_set_style_text_color(back, lv_color_white(), 0);
-    lv_obj_t *title = make_label(hdr, "Motor, engineering", lv_color_white());
+    lv_obj_set_style_bg_color(back, COL_BG, 0);
+    lv_obj_set_style_border_width(back, 0, 0);
+    lv_obj_set_style_bg_color(back, COL_BTN_DOWN, LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(back, COL_TEXT, 0);
+    lv_obj_t *title = make_label(hdr, "Motor, engineering", COL_TEXT);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 60, 0);
     state_label = make_label(hdr, "", COL_IDLE);
     lv_obj_align(state_label, LV_ALIGN_RIGHT_MID, -10, 0);
@@ -436,7 +442,7 @@ void motor_screen_init(void (*go_back)(void))
     lv_obj_t *pc = make_card(screen, 10, 38, 222, 80);
     make_caption(pc, 8, 4, "Position, steps (+ open)");
     pos_label = make_label(pc, "0", COL_TEXT);
-    lv_obj_set_style_text_font(pos_label, &lv_font_montserrat_48, 0);
+    lv_obj_set_style_text_font(pos_label, &ui_font_40, 0);
     lv_obj_set_width(pos_label, 206);
     lv_obj_set_style_text_align(pos_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_pos(pos_label, 8, 12);
@@ -453,7 +459,7 @@ void motor_screen_init(void (*go_back)(void))
     lv_obj_t *stop = make_button(mc, 8, 92, 206, 32, "STOP", stop_event, 0);
     lv_obj_set_style_bg_color(stop, COL_FAULT, 0);
     lv_obj_set_style_border_color(stop, COL_FAULT, 0);
-    lv_obj_set_style_bg_color(stop, lv_color_make(170, 30, 30), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(stop, lv_color_hex(0xA02818), LV_STATE_PRESSED);
     lv_obj_set_style_text_color(stop, lv_color_white(), 0);
 
     // Right: settings.
@@ -473,7 +479,7 @@ void motor_screen_init(void (*go_back)(void))
 
     // Limit switch state and whether closing is allowed.
     limit_label = make_label(screen, "", COL_IDLE);
-    lv_obj_set_style_text_font(limit_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(limit_label, &ui_font_12, 0);
     lv_obj_set_width(limit_label, 456);
     lv_label_set_long_mode(limit_label, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(limit_label, 12, 256);

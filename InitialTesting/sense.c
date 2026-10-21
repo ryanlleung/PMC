@@ -68,9 +68,11 @@ static void print_changed_lines(void)
     // The Power Monitor and Druck lines carry live readings and change every
     // second, so DATA OFF holds them back too.
     const bool live[STATUS_LINES] = { false, false, false, true, true, false };
+    // In AUTO the motor line changes every second: the AUTO line says it better.
+    bool in_auto = valve_auto();
 
     for (int i = 0; i < STATUS_LINES; i++) {
-        if (!line[i][0] || (live[i] && !data_on))
+        if (!line[i][0] || (live[i] && !data_on) || (i == 1 && in_auto))
             continue;
         if (resend || last_line[i] == NULL || strcmp(line_copy[i], line[i]) != 0) {
             lv_strlcpy(line_copy[i], line[i], sizeof line_copy[i]);
@@ -90,6 +92,8 @@ void sense_second(void)
     cal_update(s);
     valve_sense(s);
     trend_second(s);
+    if (valve_auto())
+        link_printf("%s\r\n", valve_auto_line());   // one readable line a second in AUTO
     if (s->pm_found && data_on && !s->pm_diag)
         print_data_line(s);
 }

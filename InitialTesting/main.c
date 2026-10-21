@@ -84,6 +84,7 @@ static const char *const help_top[] = {
     "  HELP CFG     save and load settings",
     "  HELP CAL     pressure calibration",
     "  HELP VALVE   valve calibration, % position, STOP, faults, events",
+    "  HELP AUTO    AUTO, target and PID tuning",
     "  HELP MOT     valve motor and limit switch (engineering)",
 };
 static const char *const help_valve[] = {
@@ -95,9 +96,19 @@ static const char *const help_valve[] = {
     "  VALVE SETZERO | VALVE SKIP answer 'closed switch pressed': this is 0 % / keep the count",
     "  VALVE SAVED? | VALVE RESTORE  position saved at the last standstill / use it (at start-up only)",
     "  VALVE POSMAX|FHOME|FCREEP|BACKOFF|CLEAR|OFFSET <n>   settings (CFG SAVE keeps)",
-    "  CTRL STOP                  stop now, latch F-12",
+    "  CTRL STOP                  stop now (latches F-12 in AUTO)",
     "  CTRL RESET | CTRL?         clear latches whose cause has gone / list them",
     "  EVT? [1-200]               last events (default 20)",
+};
+static const char *const help_auto[] = {
+    "AUTO (pressure control; the valve homed, no fault, a target set):",
+    "  CTRL SP <mbar>             target, 0.1 mbar, 0 to the sensor range",
+    "  CTRL AUTO                  start or resume AUTO, bumpless",
+    "  CTRL MAN [<0-100>]         to MANUAL, valve ramps down and holds [then goes to %]",
+    "  PID?                       all control parameters",
+    "  PID KP|TI|OUTMIN|DB|BAND <v>  %/mbar, min (0 off), %, steps, mbar (live; CFG SAVE keeps)",
+    "  PID KDIR +1|-1             +1 opening raises the pressure",
+    "In AUTO: F-02 above range 5 s, F-10 no response, F-16/F-17 wrong way, W-02 pauses after 1800 s",
 };
 static const char *const help_sys[] = {
     "System:",
@@ -166,10 +177,12 @@ static bool help_command(const char *line)
         HELP_PRINT(help_cal);
     else if (strcmp(line, "HELP VALVE") == 0 || strcmp(line, "HELP CTRL") == 0)
         HELP_PRINT(help_valve);
+    else if (strcmp(line, "HELP AUTO") == 0 || strcmp(line, "HELP PID") == 0)
+        HELP_PRINT(help_auto);
     else if (strcmp(line, "HELP MOT") == 0 || strcmp(line, "HELP LIM") == 0)
         HELP_PRINT(help_mot);
     else if (strncmp(line, "HELP ", 5) == 0)
-        link_printf("ERR expected: HELP, HELP SYS, HELP CFG, HELP CAL, HELP VALVE or HELP MOT\r\n");
+        link_printf("ERR expected: HELP, HELP SYS, HELP CFG, HELP CAL, HELP VALVE, HELP AUTO or HELP MOT\r\n");
     else
         return false;
     return true;

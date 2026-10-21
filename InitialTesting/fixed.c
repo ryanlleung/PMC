@@ -33,3 +33,32 @@ uint32_t isqrt64(uint64_t v)
     }
     return (uint32_t)r;
 }
+
+// Parses a plain decimal ("-12.345") into an integer scaled by 10^dec.
+// Extra decimals are truncated. Advances *s past the number.
+bool fixed_parse(const char **s, int dec, int64_t *out)
+{
+    const char *p = *s;
+    int64_t v = 0;
+    int neg = 0, digits = 0, frac = -1;
+
+    while (*p == ' ' || *p == '\t') p++;
+    if (*p == '-' || *p == '+') neg = (*p++ == '-');
+    for (; *p; p++) {
+        if (*p == '.' && frac < 0) { frac = 0; continue; }
+        if (*p < '0' || *p > '9') break;
+        if (frac >= 0) {
+            if (frac >= dec) { digits++; continue; }
+            frac++;
+        }
+        if (v > 100000000000LL) return false;    // 1e11: room for the 10^dec scaling
+        v = v * 10 + (*p - '0');
+        digits++;
+    }
+    if (!digits) return false;
+    if (*p && *p != ' ' && *p != '\t') return false;   // "1.2.3", "5x"
+    for (int k = frac < 0 ? 0 : frac; k < dec; k++) v *= 10;
+    *out = neg ? -v : v;
+    *s = p;
+    return true;
+}

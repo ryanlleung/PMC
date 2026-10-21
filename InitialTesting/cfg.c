@@ -8,6 +8,8 @@
 #include "stepper3.h"
 #include "valve.h"
 #include "rtclock.h"
+#include "fixed.h"
+#include "ctrl.h"
 #include "cfg.h"
 
 /* --------------------------------------------------------------------------
@@ -424,10 +426,16 @@ static void sync_cal_saved(void)
     cal_set_saved(newest >= 0 ? o && sens_same(&scratch.sens[active_sens], o) : cal_saved());
 }
 
-static bool busy(void)
+// Why the settings cannot change now, or NULL. In AUTO only the tuning can
+// (cfg_save_with, PID).
+static const char *busy_why(void)
 {
-    return valve_mode() == VALVE_CALIBRATING || stepper3_busy();
+    if (valve_auto()) return "Switch to MANUAL first";
+    if (valve_mode() == VALVE_CALIBRATING || stepper3_busy()) return "wait for the valve to stop";
+    return NULL;
 }
+
+static bool busy(void) { return busy_why() != NULL; }
 
 // All or nothing: checked first, applied only when idle. False if not applied.
 static bool apply(const cfg_rec_t *r, bool with_sensors)
@@ -663,11 +671,21 @@ static cfg_rec_t cand;   // cfg_save_with, cfg_sensor_use and cfg_load_live (nev
 
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
 {
-    if (busy()) { *why = "wait for the valve to stop"; return false; }
+    // In AUTO only the tuning may change (the loop picks it up at its next
+    // step); anything else waits for MANUAL.
+    bool tune_only = valve_auto();
+    if (!tune_only && (*why = busy_why()) != NULL) return false;
     capture(&cand);
     for (int k = 0; k < CFG_N; k++) {
         if (!set[k])
             continue;
+        if (tune_only && (k < CFG_KP || k > CFG_BAND)) {
+            // cand holds the live values here (only tuning keys are written).
+            bool same = k == CFG_SENSOR ? (uint32_t)v[k] == cand.sens[cand.active].serial
+                                        : v[k] == *key_ref(&cand, (cfg_key_t)k);
+            if (!same) { *why = "Switch to MANUAL first"; return false; }
+            continue;
+        }
         if (k == CFG_SENSOR) {
             const cfg_sens_t *q = find_sens(&cand, (uint32_t)v[k]);
             if (!q) {
@@ -697,6 +715,11 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     scratch = cand;
     if (!write_scratch(why))
         return false;
+    if (tune_only) {
+        memcpy(tune, cand.tune, sizeof tune);
+        sync_cal_saved();
+        return true;
+    }
     if (!apply(&cand, true)) {
         // Not reached in practice: busy() was checked above and nothing ran since.
         valve_event("CFG", "Saved but not put in use (busy)");
@@ -710,7 +733,7 @@ bool cfg_load_live(cfg_from_t from, const char **why)
 {
     const cfg_rec_t *r = source(from);
     if (!r || from == CFG_FROM_LIVE) { *why = "no such save"; return false; }
-    if (busy()) { *why = "wait for the valve to stop"; return false; }
+    if ((*why = busy_why()) != NULL) return false;
     if (from == CFG_FROM_DEFAULTS) {
         cfg_rec_t *d = &cand;   // shared, saves a record's worth of RAM
         capture(d);   // keep the sensors and their cals
@@ -797,7 +820,7 @@ bool cfg_sensor_remove(uint32_t serial, const char **why)
 
 bool cfg_sensor_use(uint32_t serial, const char **why)
 {
-    if (busy()) { *why = "wait for the valve to stop"; return false; }
+    if ((*why = busy_why()) != NULL) return false;
     capture(&cand);
     const cfg_sens_t *q = find_sens(&cand, serial);
     if (!q) { *why = "that sensor is not on the board"; return false; }
@@ -921,8 +944,78 @@ bool cfg_set_name(const char *n, const char **why)
     return true;
 }
 
+/* PID? and PID <name> <value>: the simulator's console names. The six
+ * tuning values are set live (AUTO picks them up at its next step) and
+ * kept by CFG SAVE; the rest are fixed in ctrl.h. */
+static const int tune_dec[T_N] = { 2, 2, 1, 0, 0, 2 };
+
+static const char *tune_text(char *buf, size_t n, int i)
+{
+    if (i == T_KDIR)
+        return tune[i] > 0 ? "+1" : "-1";
+    return fixed_fmt(buf, n, tune[i], tune_dec[i]);
+}
+
+static void pid_show(void)
+{
+    char a[6][16];
+    for (int i = 0; i < T_N; i++)
+        tune_text(a[i], sizeof a[i], i);
+    link_printf("PID KP %s %%/mbar, TI %s min, KD 0, DB %s steps, TS %d s, KDIR %s\r\n", a[T_KP], a[T_TI],
+                a[T_DB], CTRL_TS_S, a[T_KDIR]);
+    link_printf("PID BAND %s mbar, STABLE %d s, OUTMIN %s %%\r\n", a[T_BAND], CTRL_STABLE_S, a[T_OUTMIN]);
+    link_printf("PID TCHECK %d s, NRESP %d, DPMIN 0.05 mbar, TCONV %d s, CHECKMIN %d steps\r\n", CTRL_TCHECK_S,
+                CTRL_NRESP, CTRL_TCONV_S, CTRL_CHECKMIN);
+    link_printf("PID LEAD %d steps, TLAG %d s\r\n", CTRL_LEAD_MAX, CTRL_TLAG_S);
+    link_printf("OK KP TI OUTMIN DB KDIR BAND can be set; KD TS STABLE TCHECK NRESP DPMIN TCONV CHECKMIN LEAD TLAG are fixed\r\n");
+}
+
+static void pid_set(const char *a)
+{
+    static const char *const fixed_names[] = { "KD", "TS", "STABLE", "TCHECK", "NRESP", "DPMIN", "TCONV",
+                                               "CHECKMIN", "LEAD", "TLAG", "PMIN", "PMAX" };
+    for (int i = 0; i < T_N; i++) {
+        size_t len = strlen(tune_name[i]);
+        if (strncmp(a, tune_name[i], len) != 0 || a[len] != ' ')
+            continue;
+        const char *s = a + len;
+        int64_t v;
+        char lo[16], hi[16], t[16];
+        if (!fixed_parse(&s, tune_dec[i], &v) || *s || v < tune_lo[i] || v > tune_hi[i] ||
+            (i == T_KDIR && v == 0)) {
+            if (i == T_KDIR)
+                link_printf("ERR expected: PID KDIR +1|-1\r\n");
+            else
+                link_printf("ERR expected: PID %s <%s-%s>\r\n", tune_name[i],
+                            fixed_fmt(lo, sizeof lo, tune_lo[i], tune_dec[i]),
+                            fixed_fmt(hi, sizeof hi, tune_hi[i], tune_dec[i]));
+            return;
+        }
+        tune[i] = (int32_t)v;
+        valve_event("CFG", "PID %s set to %s, not saved", tune_name[i], tune_text(t, sizeof t, i));
+        link_printf("OK PID %s %s (unsaved until CFG SAVE)\r\n", tune_name[i], t);
+        return;
+    }
+    for (size_t i = 0; i < sizeof fixed_names / sizeof fixed_names[0]; i++) {
+        size_t len = strlen(fixed_names[i]);
+        if (strncmp(a, fixed_names[i], len) == 0 && (a[len] == ' ' || a[len] == '\0')) {
+            link_printf("ERR PID %s is fixed in this firmware (PID? lists them)\r\n", fixed_names[i]);
+            return;
+        }
+    }
+    link_printf("ERR expected: PID KP|TI|OUTMIN|DB|KDIR|BAND <value>\r\n");
+}
+
 bool cfg_command(const char *line)
 {
+    if (strcmp(line, "PID?") == 0) {
+        pid_show();
+        return true;
+    }
+    if (strncmp(line, "PID ", 4) == 0) {
+        pid_set(line + 4);
+        return true;
+    }
     if (strncmp(line, "CFG", 3) != 0 || (line[3] != ' ' && line[3] != '?' && line[3] != '\0'))
         return false;
     const char *a = line + 3;

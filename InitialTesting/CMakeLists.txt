@@ -53,6 +53,8 @@ add_executable(InitialTesting
     valvepos.c
     trend.h
     trend.c
+    ctrl.h
+    ctrl.c
     sense.h
     sense.c
     extflash.h

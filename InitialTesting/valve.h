@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "clicks.h"
+#include "ctrl.h"
 
 /**
  * @brief Valve layer over stepper3.c: calibration to the closed switch,
@@ -14,7 +15,17 @@
  * by CFG SAVE (cfg.c, stage 3).
  *
  * Modes: NOT CALIBRATED (boot, watchdog reset, after F-07/F-09 or an
- * aborted calibration), CALIBRATING, MANUAL. Nothing moves at boot.
+ * aborted calibration), CALIBRATING, MANUAL, AUTO and AUTO PAUSED (stage 8,
+ * ctrl.c). Nothing moves at boot.
+ *
+ * AUTO (from MANUAL, or PAUSED) after the entry checks (ctrl_check), with
+ * the target set; bumpless from where the valve is going. Every second,
+ * after the pressure read, ctrl_step works out the valve command and the
+ * checks. A fault stops the valve and drops to MANUAL, holding where it
+ * stopped (sensor faults too). W-02 (not settling) stops it and pauses:
+ * Resume AUTO or Switch to MANUAL. Leaving AUTO ramps the valve down and
+ * MANUAL holds where it stops. MANUAL moves, homing and the valve settings
+ * are refused in AUTO ("Switch to MANUAL first").
  *
  * Calibration (Control Logic 4): if the switch is pressed, an N_clear
  * clearance move off it first (F-09 if still pressed); a fast close at
@@ -30,7 +41,10 @@
  * which clears only the latches whose cause has gone:
  *   F-01 no Druck signal, F-03 excitation outside 9.5-10.5 V or tripped,
  *   F-07 switch not found while calibrating, F-09 switch still pressed
- *   after moving off it, F-13 motion timeout, F-12 STOP in AUTO (CTRL STOP).
+ *   after moving off it, F-13 motion timeout, F-12 STOP in AUTO (CTRL STOP);
+ *   in AUTO only: F-02 above the sensor range for 5 s, F-10 no pressure
+ *   response, F-16 opening with the pressure falling, F-17 closing with the
+ *   pressure rising. F-01, F-03 and F-02 do not block manual moves.
  * Outside AUTO, STOP stops and holds the valve without a latch (STOP event).
  *
  * Commands:
@@ -40,6 +54,9 @@
  *   VALVE SETZERO | VALVE SKIP   answer the switch-pressed question (or the screen)
  *   VALVE CLOSED                 take the valve as closed (0 %) where it stands, homed
  *   VALVE POSMAX|FHOME|FCREEP|BACKOFF|CLEAR|OFFSET <n>   settings (idle)
+ *   CTRL AUTO                    start (or resume) AUTO, after the entry checks
+ *   CTRL MAN [<0-100>]           to MANUAL (ramped stop), then optionally go to %
+ *   CTRL SP <mbar>               target, 0.1 mbar, 0 to the sensor range
  *   CTRL STOP                    stop now, cancel calibration (F-12 in AUTO)
  *   CTRL RESET                   clear latches whose cause has gone
  *   CTRL?                        latched faults, highest priority first
@@ -47,7 +64,7 @@
  * Each event is also sent when it happens as "EVT <s> <tag> <text>".
  */
 
-typedef enum { VALVE_NOT_CAL, VALVE_CALIBRATING, VALVE_MANUAL } valve_mode_t;
+typedef enum { VALVE_NOT_CAL, VALVE_CALIBRATING, VALVE_MANUAL, VALVE_AUTO, VALVE_PAUSED } valve_mode_t;
 
 void valve_init(void);           // after stepper3_init(); logs F-14 power-up
 void valve_task(void);           // every main-loop pass: calibration, limit hits
@@ -62,6 +79,20 @@ int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
 bool valve_fault_latched(void);
 bool valve_motion_blocked(void); // a latched fault that stops the motor (not F-01, F-03)
 const char *valve_status(void);  // one status line
+
+// AUTO (stage 8). valve_auto(): AUTO or AUTO PAUSED.
+bool valve_auto(void);
+bool valve_start_auto(const char **why);         // CTRL AUTO, Start / Resume AUTO
+bool valve_to_manual(const char **why);          // CTRL MAN, Switch to MANUAL
+// Target in 0.001 mbar, kept to 0.1 mbar; refused outside 0 to the range.
+bool valve_set_target(int32_t mmbar, const char **why);
+bool valve_target(int32_t *mmbar);               // false: no target set yet
+int32_t valve_range_mmbar(void);                 // sensor in use, full scale
+int32_t valve_band_mmbar(void);                  // target band (BAND)
+ctrl_reg_t valve_regulation(void);               // status words, in AUTO
+// "AUTO 4.62 mB, target 4.8, valve 14.20 % to 14.35 %, In band": sent once a
+// second in AUTO (sense.c), in place of the motor and valve status lines.
+const char *valve_auto_line(void);
 
 // Settings, in the order POSMAX FHOME FCREEP BACKOFF CLEAR OFFSET (cfg.c).
 #define VALVE_N_SETTINGS 6

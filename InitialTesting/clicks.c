@@ -12,6 +12,7 @@
 #include "drv_i2c_master.h"
 #include "stepper3.h"
 #include "link.h"
+#include "valve.h"
 #include "pmc_config.h"
 
 #define STATUS_LEN 192
@@ -672,6 +673,8 @@ bool clicks_command(const char *line)
         return false;
     if (pmdiag_step >= 0) {
         link_printf("ERR PM DIAG already running\r\n");
+    } else if (valve_auto()) {
+        link_printf("ERR in AUTO, CTRL MAN first (PM DIAG freezes the reading)\r\n");
     } else if (pm_addr == 0) {
         link_printf("ERR Power Monitor not found\r\n");
     } else {

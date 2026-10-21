@@ -72,7 +72,8 @@ void trend_second(const clicks_state_t *s)
     // PM DIAG freezes the readings: no-data samples while it runs.
     bool ok = !s->pm_diag && s->pm_found && s->reading_ok && !s->boost_tripped;
     q.p = ok ? s->p_mmbar : TREND_NONE;
-    q.sp = TREND_NONE;   // AUTO comes in stage 8
+    int32_t sp;
+    q.sp = valve_auto() && valve_target(&sp) ? sp : TREND_NONE;   // the target, in AUTO only
     if (valve_calibrated() && valve_mode() != VALVE_CALIBRATING) {
         int32_t v = (valve_pct_milli() + 5) / 10;
         q.v = v < 0 ? 0 : v > 10000 ? 10000 : v;

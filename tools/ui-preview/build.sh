@@ -29,7 +29,8 @@ for s in notcal manual calib moving nodruck stop neg menu keypad confirm \
          valve valvenc limithit calpage calpage2 faults detail diag help help3 back bootask \
          set-main set-sensor set-pick set-add set-addask set-addcal set-caldetail set-valve set-valve2 set-valve3 set-valvepos \
          set-tune set-tunekp set-tunedraft set-saveask set-saved set-review set-load set-override motor set-name set-named \
-         overon calsensor calvac trend trend1h trend1m notrend; do
+         overon calsensor calvac trend trend1h trend1m notrend \
+         auto autostable autoreg autofirst autoask autosp automan autovalve paused f16 trendauto; do
   "$OUT/ui_new" "$s" "$OUT/new-$s.raw"
   python3 "$HERE/render.py" "$OUT/new-$s.raw" "$OUT/new-$s.png"
   rm "$OUT/new-$s.raw"

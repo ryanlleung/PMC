@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +9,8 @@
 #include "limit.h"
 #include "stepper3.h"
 #include "fixed.h"
+#include "cfg.h"
+#include "ctrl.h"
 #include "valve.h"
 
 /* --------------------------------------------------------------------------
@@ -87,17 +90,20 @@ void valve_event(const char *tag, const char *fmt, ...)
 /* --------------------------------------------------------------------------
  * Faults, in the simulator's FAULT_ORDER (highest priority first).
  * ------------------------------------------------------------------------ */
-typedef enum { F01, F03, F07, F09, F13, F12, F_N } fault_t;
+typedef enum { F01, F03, F07, F09, F10, F16, F17, F13, F02, F12, F_N } fault_t;
 
-static const char *const fault_tag[F_N]   = { "F-01", "F-03", "F-07", "F-09", "F-13", "F-12" };
+static const char *const fault_tag[F_N]   = { "F-01", "F-03", "F-07", "F-09", "F-10", "F-16",
+                                              "F-17", "F-13", "F-02", "F-12" };
 static const char *const fault_short[F_N] = {
     "No Druck signal", "Excitation out of window", "Limit not found while calibrating",
-    "Limit still active after clearance", "Motion timeout", "Operator STOP" };
+    "Limit still active after clearance", "No pressure response", "Pressure falling, valve opening",
+    "Pressure rising, valve closing", "Motion timeout", "Pressure out of range", "Operator STOP" };
 
 static bool latched[F_N];
 static uint32_t latched_ms[F_N];    // when each latched
 static valve_mode_t latched_mode[F_N];
 static bool cause_f01, cause_f03;   // from the last sensor read
+static bool cause_f02;              // the last good reading above the sensor range
 static bool sensed;                 // at least one sensor read since boot
 
 /* --------------------------------------------------------------------------
@@ -126,20 +132,30 @@ static bool switch_was_open;
 
 static char status_text[160];
 
+// AUTO (ctrl.c): the loop's state and the last reading it used.
+static ctrl_t ctl;
+static bool pv_ok;
+static float pv_mbar;
+
 static int32_t pct10_of(int32_t pos)
 {
     return (int32_t)(((int64_t)pos * 1000 + (pos >= 0 ? pos_max / 2 : -pos_max / 2)) / pos_max);
 }
+
+static int32_t milli_of(int32_t pos);
 
 static const char *pct_text(char *buf, size_t n, int32_t pos)
 {
     return fixed_fmt(buf, n, pct10_of(pos), 1);
 }
 
-// The sensor faults (F-01 no Druck, F-03 excitation) do not stop or block
-// the motor: manual moves and calibrating use the step count and the limit
-// switch, not the pressure (Ryan 16 Oct). AUTO will need the reading.
-static bool sensor_fault(fault_t f) { return f == F01 || f == F03; }
+// The pressure faults (F-01 no Druck, F-03 excitation, F-02 above the
+// range) do not block the motor: manual moves and calibrating use the step
+// count and the limit switch, not the pressure (Ryan 16 Oct). In AUTO they
+// stop the valve and drop to MANUAL like any other fault.
+static bool sensor_fault(fault_t f) { return f == F01 || f == F03 || f == F02; }
+
+static bool is_auto(void) { return mode == VALVE_AUTO || mode == VALVE_PAUSED; }
 
 static bool any_latched(void)
 {
@@ -152,7 +168,8 @@ static bool any_latched(void)
 static void update_lock(void)
 {
     stepper3_lock(mode == VALVE_CALIBRATING ? "calibrating, CTRL STOP to cancel"
-                  : any_latched() ? "fault latched, CTRL RESET first" : NULL);
+                  : any_latched() ? "fault latched, CTRL RESET first"
+                  : is_auto() ? "in AUTO, CTRL MAN first" : NULL);
 }
 
 static void cal_end(valve_mode_t m)
@@ -191,7 +208,14 @@ static void raise(fault_t f, bool uncalibrate, const char *fmt, ...)
     latched_ms[f] = lv_tick_get();
     latched_mode[f] = mode;
     ev(fault_tag[f], "%s", text);
-    if (!sensor_fault(f)) {
+    if (is_auto()) {
+        // Any fault in AUTO: stop, MANUAL holds where the valve stopped.
+        stepper3_stop();
+        mode = VALVE_MANUAL;
+        char p[16];
+        ev("MODE", "Manual after %s, valve held at %s %%", fault_tag[f],
+           pct_text(p, sizeof p, stepper3_position()));
+    } else if (!sensor_fault(f)) {
         stepper3_stop();
         cal_abort(fault_tag[f]);
     }
@@ -228,6 +252,7 @@ static void cal_creep(void)
 static bool cal_start(const char **err)
 {
     if (mode == VALVE_CALIBRATING) { *err = "already calibrating"; return false; }
+    if (is_auto())                 { *err = "Switch to MANUAL first"; return false; }
     if (any_latched())             { *err = "fault latched, CTRL RESET first"; return false; }
     stepper3_stop();
     stepper3_override_cancel();
@@ -325,6 +350,7 @@ static void limit_hit(void)
  * ------------------------------------------------------------------------ */
 void valve_init(void)
 {
+    ctrl_init(&ctl);
     seq_seen = stepper3_move_seq();
     stepper3_on_reference_change(valve_uncalibrate);
     ev("F-14", "Power-up (event only), valve not homed");
@@ -353,6 +379,168 @@ void valve_task(void)
     switch_was_open = open;
 }
 
+/* --------------------------------------------------------------------------
+ * AUTO (stage 8): ctrl.c works out the command, this runs it.
+ * ------------------------------------------------------------------------ */
+// The tuning from cfg.c (CFG TUNE units: 0.01 %/mbar, 0.01 min, 0.1 %,
+// steps, +-1, 0.01 mbar).
+static ctrl_tune_t tune_now(void)
+{
+    ctrl_tune_t k;
+    k.kp = (float)cfg_tune(CFG_KP) / 100.0f;
+    k.ti = (float)cfg_tune(CFG_TI) / 100.0f;
+    k.outmin = (float)cfg_tune(CFG_OUTMIN) / 10.0f;
+    k.db = cfg_tune(CFG_DB);
+    k.kdir = (int)cfg_tune(CFG_KDIR);
+    k.band = (float)cfg_tune(CFG_BAND) / 100.0f;
+    k.pos_max = pos_max;
+    return k;
+}
+
+int32_t valve_range_mmbar(void)
+{
+    cfg_sensor_t sn;
+    if (cfg_sensor(cfg_sensor_active(), &sn) && sn.fs_mmbar > 0)
+        return sn.fs_mmbar;
+    return cfg_psi10_mmbar(150);
+}
+
+static float range_mbar(void) { return (float)valve_range_mmbar() / 1000.0f; }
+
+static const char *mbar_text(char *buf, size_t n, float mbar, int dec)
+{
+    int64_t scale = dec == 2 ? 100 : 10;
+    return fixed_fmt(buf, n, (int64_t)(mbar * (float)scale + (mbar >= 0 ? 0.5f : -0.5f)), dec);
+}
+
+// Once a second, after the faults of this read.
+static void auto_step(void)
+{
+    ctrl_track(&ctl, stepper3_position(), calibrated && mode != VALVE_CALIBRATING);
+    if (mode != VALVE_AUTO || !pv_ok) {
+        ctrl_idle(&ctl);
+        return;
+    }
+    ctrl_tune_t k = tune_now();
+    ctrl_in_t in = { lv_tick_get(), pv_mbar, stepper3_position(), stepper3_busy(), limit_open_now(), range_mbar() };
+    char a[16], b[16];
+    switch (ctrl_step(&ctl, &k, &in)) {
+    case CTRL_RUN:
+        // The closed switch blocks closing from rest (stepper3 refuses it);
+        // ctrl.c holds the integral meanwhile.
+        if (ctl.move && stepper3_goto(ctl.move_to))
+            ctrl_sent(&ctl);
+        break;
+    case CTRL_W02:
+        stepper3_stop();
+        mode = VALVE_PAUSED;
+        ev("W-02", "Convergence timeout after %d s, auto paused", CTRL_TCONV_S);
+        update_lock();
+        break;
+    case CTRL_F02:
+        raise(F02, false, "Pressure %s above the sensor range %s mB", mbar_text(a, sizeof a, pv_mbar, 2),
+              mbar_text(b, sizeof b, range_mbar(), 1));
+        break;
+    case CTRL_F10:
+        raise(F10, false, "No pressure response in %d windows: drive slipping, motor unplugged or needle seized",
+              CTRL_NRESP);
+        break;
+    case CTRL_F16:
+        raise(F16, false, "Pressure falling, valve opening, 2 windows: helium supply lost? First use: KDIR");
+        break;
+    case CTRL_F17:
+        raise(F17, false, "Pressure rising, valve closing, 2 windows: pot not pumped? First use: KDIR");
+        break;
+    }
+}
+
+bool valve_auto(void) { return is_auto(); }
+
+const char *valve_auto_line(void)
+{
+    static char line[128];
+    static const char *const reg[] = { "no reading", "Regulating", "In band", "Stable" };
+    char p[16], sp[16], v[16], to[16];
+    mbar_text(p, sizeof p, pv_mbar, 2);
+    mbar_text(sp, sizeof sp, ctl.sp, 1);
+    fixed_fmt(v, sizeof v, fixed_round(milli_of(stepper3_position()), 1), 2);
+    fixed_fmt(to, sizeof to, fixed_round(milli_of(stepper3_target()), 1), 2);
+    lv_snprintf(line, sizeof line, "%s %s mB, target %s, valve %s %%%s%s%s, %s", valve_mode_name(),
+                pv_ok ? p : "----", sp, v, stepper3_busy() ? " to " : "", stepper3_busy() ? to : "",
+                stepper3_busy() ? " %" : "",
+                mode == VALVE_PAUSED ? "W-02 not settling, valve held" : reg[valve_regulation()]);
+    return line;
+}
+
+bool valve_start_auto(const char **why)
+{
+    if (mode == VALVE_AUTO) return true;
+    if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
+    ctrl_tune_t k = tune_now();
+    *why = ctrl_check(&ctl, &k, calibrated, valve_fault_count() > 0, pv_ok, pv_mbar, range_mbar());
+    if (*why)
+        return false;
+    // Bumpless from where the valve is going (a manual move still running
+    // carries on to its end under AUTO).
+    int32_t now = stepper3_target();
+    bool resumed = mode == VALVE_PAUSED;
+    ctrl_start(&ctl, &k, lv_tick_get(), pv_mbar, now);
+    mode = VALVE_AUTO;
+    update_lock();
+    char a[16], p[16];
+    ev("MODE", "%s at target %s mB, valve %s %%", resumed ? "Auto resumed" : "Auto",
+       mbar_text(a, sizeof a, ctl.sp, 1), pct_text(p, sizeof p, now));
+    return true;
+}
+
+bool valve_to_manual(const char **why)
+{
+    if (mode == VALVE_MANUAL) return true;
+    if (!is_auto()) { *why = "Not in AUTO"; return false; }
+    // A move under way ramps down at the normal deceleration; MANUAL then
+    // holds where it stops.
+    if (stepper3_busy())
+        stepper3_stop_ramped();
+    mode = VALVE_MANUAL;
+    update_lock();
+    char p[16];
+    ev("MODE", "Manual, valve stops at its present position (%s %%)", pct_text(p, sizeof p, stepper3_position()));
+    return true;
+}
+
+bool valve_set_target(int32_t mmbar, const char **why)
+{
+    int32_t fs = valve_range_mmbar();
+    char a[16], b[16];
+    if (mmbar < 0 || mmbar > fs) {
+        ev("W-03", "Setpoint %s rejected, allowed 0 to %s mB", fixed_fmt(a, sizeof a, fixed_round(mmbar, 2), 1),
+           fixed_fmt(b, sizeof b, fixed_round(fs, 2), 1));
+        *why = "Target outside the sensor range";
+        return false;
+    }
+    int32_t v = (int32_t)fixed_round(mmbar, 2);   // 0.1 mbar
+    ctrl_set_sp(&ctl, (float)v / 10.0f, range_mbar(), lv_tick_get());
+    ev("TARGET", "Set to %s mB", fixed_fmt(a, sizeof a, v, 1));
+    return true;
+}
+
+bool valve_target(int32_t *mmbar)
+{
+    if (mmbar)
+        *mmbar = (int32_t)lroundf(ctl.sp * 10.0f) * 100;
+    return ctl.sp_set;
+}
+
+int32_t valve_band_mmbar(void) { return cfg_tune(CFG_BAND) * 10; }
+
+ctrl_reg_t valve_regulation(void)
+{
+    if (mode != VALVE_AUTO)
+        return CTRL_REG_NONE;
+    ctrl_tune_t k = tune_now();
+    return ctrl_regulation(&ctl, &k, lv_tick_get(), pv_ok, pv_mbar);
+}
+
 void valve_sense(const clicks_state_t *s)
 {
     if (s->pm_diag)
@@ -370,6 +558,11 @@ void valve_sense(const clicks_state_t *s)
         else
             raise(F03, false, "Excitation %ld mV, outside 9500-10500 mV", (long)s->bus_mv);
     }
+    pv_ok = s->pm_found && s->reading_ok && !s->boost_tripped && !cause_f01 && !cause_f03;
+    pv_mbar = (float)s->p_mmbar / 1000.0f;
+    if (pv_ok)
+        cause_f02 = s->p_mmbar > valve_range_mmbar();
+    auto_step();
 }
 
 void valve_uncalibrate(const char *why)
@@ -380,6 +573,8 @@ void valve_uncalibrate(const char *why)
     }
     if (!calibrated)
         return;
+    if (is_auto())
+        stepper3_stop();
     calibrated = false;
     question = false;
     mode = VALVE_NOT_CAL;
@@ -390,6 +585,7 @@ void valve_uncalibrate(const char *why)
 bool valve_restore(int32_t count, const char **why)
 {
     if (mode == VALVE_CALIBRATING) { *why = "calibrating"; return false; }
+    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
     if (calibrated)                 { *why = "already calibrated"; return false; }
     if (any_latched())              { *why = "fault latched, CTRL RESET first"; return false; }
     if (stepper3_busy() || !stepper3_set_position(count)) { *why = "motor busy"; return false; }
@@ -405,6 +601,7 @@ bool valve_restore(int32_t count, const char **why)
 bool valve_set_closed(const char **why)
 {
     if (mode == VALVE_CALIBRATING) { *why = "homing, STOP to cancel"; return false; }
+    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
     if (any_latched())              { *why = "fault latched, CTRL RESET first"; return false; }
     if (stepper3_busy() || !stepper3_set_position(0)) { *why = "moving, wait for it to stop"; return false; }
     calibrated = true;
@@ -423,7 +620,13 @@ bool valve_motion_blocked(void) { return any_latched(); }
 
 const char *valve_mode_name(void)
 {
-    return mode == VALVE_CALIBRATING ? "HOMING" : mode == VALVE_MANUAL ? "MANUAL" : "NOT HOMED";
+    switch (mode) {
+    case VALVE_CALIBRATING: return "HOMING";
+    case VALVE_MANUAL:      return "MANUAL";
+    case VALVE_AUTO:        return "AUTO";
+    case VALVE_PAUSED:      return "AUTO PAUSED";
+    default:                return "NOT HOMED";
+    }
 }
 
 static const char *cal_stage_name(void)
@@ -448,7 +651,13 @@ const char *valve_status(void)
 {
     char p[16], f[40];
     faults_text(f, sizeof f);
-    if (calibrated)
+    if (is_auto()) {
+        // No position here: it changes every second in AUTO, and the AUTO
+        // line (valve_auto_line) carries it; this one prints on a change of state.
+        char a[16];
+        lv_snprintf(status_text, sizeof status_text, "Valve: %s at %s mB%s%s", valve_mode_name(),
+                    mbar_text(a, sizeof a, ctl.sp, 1), f[0] ? ", faults " : "", f);
+    } else if (calibrated)
         lv_snprintf(status_text, sizeof status_text, "Valve: %s, calibrated, %s %% (count %ld of %ld)%s%s%s",
                     valve_mode_name(), pct_text(p, sizeof p, stepper3_position()),
                     (long)stepper3_position(), (long)pos_max, f[0] ? ", faults " : "", f,
@@ -467,12 +676,13 @@ static bool can_reset(fault_t f)
 {
     if (f == F01) return sensed && !cause_f01;
     if (f == F03) return sensed && !cause_f03;
+    if (f == F02) return sensed && pv_ok && !cause_f02;
     return true;
 }
 
 bool valve_stop_latches(void)
 {
-    return false;    // only in AUTO (stage 8); MANUAL has no AUTO to hold off
+    return is_auto();   // in AUTO it holds AUTO off until a reset; outside, a plain stop
 }
 
 void valve_stop(void)
@@ -644,6 +854,14 @@ static void show(void)
     link_printf("VALVE POSMAX %ld, FHOME %ld, FCREEP %ld, BACKOFF %ld, CLEAR %ld, OFFSET %ld\r\n",
                 (long)pos_max, (long)f_home, (long)f_creep, (long)n_backoff, (long)n_clear, (long)n_offset);
     link_printf("VALVE faults %s, limit %s\r\n", f[0] ? f : "none", limit_text());
+    if (ctl.sp_set) {
+        static const char *const reg[] = { "", ", regulating", ", in band", ", stable" };
+        char a[16], b[16];
+        link_printf("VALVE target %s mB, band %s mB%s\r\n", mbar_text(a, sizeof a, ctl.sp, 1),
+                    fixed_fmt(b, sizeof b, cfg_tune(CFG_BAND), 2), reg[valve_regulation()]);
+    } else {
+        link_printf("VALVE target not set (CTRL SP)\r\n");
+    }
     if (question)
         link_printf("VALVE question: limit switch pressed at count %ld (%s %%), VALVE SETZERO or VALVE SKIP\r\n",
                     (long)question_at, pct_text(p, sizeof p, question_at));
@@ -663,6 +881,8 @@ static void setting_command(const char *a)
         if (end == a + len || *end || v < settings[i].lo || v > settings[i].hi)
             link_printf("ERR expected: VALVE %s <%ld-%ld>\r\n", settings[i].name,
                         (long)settings[i].lo, (long)settings[i].hi);
+        else if (is_auto())
+            link_printf("ERR in AUTO, CTRL MAN first\r\n");
         else if (mode == VALVE_CALIBRATING || stepper3_busy())
             link_printf("ERR busy, CTRL STOP first\r\n");
         else {
@@ -696,7 +916,7 @@ const char *valve_settings_check(const int32_t v[VALVE_N_SETTINGS])
 
 bool valve_set_settings(const int32_t v[VALVE_N_SETTINGS])
 {
-    if (valve_settings_check(v) || mode == VALVE_CALIBRATING || stepper3_busy())
+    if (valve_settings_check(v) || mode == VALVE_CALIBRATING || is_auto() || stepper3_busy())
         return false;
     for (size_t i = 0; i < N_SETTINGS; i++)
         *settings[i].v = v[i];
@@ -712,6 +932,7 @@ bool valve_goto_pct100(int32_t pct100, const char **why)
 {
     if (mode == VALVE_CALIBRATING)  { *why = "calibrating, CTRL STOP to cancel"; return false; }
     if (any_latched())              { *why = "fault latched, CTRL RESET first"; return false; }
+    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
     if (!calibrated)                { *why = "valve not calibrated, VALVE CAL first"; return false; }
     int32_t to = (int32_t)(((int64_t)pct100 * pos_max + 5000) / 10000);
     if (to < 0) to = 0;
@@ -724,6 +945,7 @@ bool valve_move_steps(int32_t steps, const char **why)
 {
     if (mode == VALVE_CALIBRATING)  { *why = "calibrating, CTRL STOP to cancel"; return false; }
     if (any_latched())              { *why = "fault latched, CTRL RESET first"; return false; }
+    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
     int32_t from = stepper3_busy() ? stepper3_target() : stepper3_position();
     if (!stepper3_goto(from + steps)) { *why = stepper3_refusal(); return false; }
     return true;
@@ -796,6 +1018,7 @@ bool valve_question(int32_t *pct10)
 bool valve_answer(bool set_zero, const char **why)
 {
     if (!question)          { *why = "no switch question waiting"; return false; }
+    if (set_zero && is_auto())       { *why = "Switch to MANUAL first"; return false; }
     if (set_zero && stepper3_busy()) { *why = "moving, wait for it to stop"; return false; }
     question = false;
     if (set_zero) {
@@ -867,6 +1090,30 @@ bool valve_command(const char *line)
 
     if (strcmp(line, "CTRL STOP") == 0) {
         stop_command();
+    } else if (strcmp(line, "CTRL AUTO") == 0) {
+        if (valve_start_auto(&err))
+            link_printf("OK AUTO at %s mB\r\n", mbar_text(p, sizeof p, ctl.sp, 1));
+        else
+            link_printf("ERR %s\r\n", err);
+    } else if (strncmp(line, "CTRL MAN", 8) == 0 && (line[8] == ' ' || line[8] == '\0')) {
+        int32_t pct10 = -1;
+        if (line[8] && !parse_pct10(line + 8, &pct10))
+            link_printf("ERR expected: CTRL MAN [<0-100>], one decimal\r\n");
+        else if (!valve_to_manual(&err))
+            link_printf("ERR %s\r\n", err);
+        else if (pct10 >= 0 && !valve_goto_pct10(pct10, &err))
+            link_printf("ERR MANUAL, %s\r\n", err);
+        else
+            link_printf("OK MANUAL%s\r\n", pct10 >= 0 ? ", moving" : "");
+    } else if (strncmp(line, "CTRL SP ", 8) == 0) {
+        const char *s = line + 8;
+        int64_t v;
+        if (!fixed_parse(&s, 3, &v) || *s || v < INT32_MIN || v > INT32_MAX)
+            link_printf("ERR expected: CTRL SP <mbar>\r\n");
+        else if (!valve_set_target((int32_t)v, &err))
+            link_printf("ERR %s\r\n", err);
+        else
+            link_printf("OK target %s mB\r\n", mbar_text(p, sizeof p, ctl.sp, 1));
     } else if (strcmp(line, "CTRL RESET") == 0) {
         reset_command();
     } else if (strcmp(line, "CTRL?") == 0) {

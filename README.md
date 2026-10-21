@@ -36,11 +36,10 @@ The simulator is being ported to the firmware in stages, one version and one pul
 | 4 | 0.7.x | Screen framework (header, strip, STOP) and Home | Merged |
 | 5 | 0.8.x | MANUAL operator screens | Merged |
 | 6 | 0.9.x | Settings screens, Calibrate sensor, saved valve position | Merged (#13) |
-| 7 | 0.10.x | Trend and the Home sparkline | PR #14, bench test due |
-| 8 | 0.11.0 | AUTO (pressure control loop) | Not started |
+| 7 | 0.10.x | Trend and the Home sparkline | Merged (#14) |
+| 8 | 0.11.x | AUTO (pressure control loop) | Draft PR, bench test due |
 | 9 | 0.12.0 | Annunciation (blink, acknowledge, buzzer) | Not started |
 
-AUTO is not built yet: Start AUTO is greyed, Target reads "Not set", and the control tuning can be set and saved but is not used.
 
 ## Hardware as assembled
 
@@ -78,7 +77,8 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | `sense.c` | The once-a-second read, DATA and status lines |
 | `limit.c` | Limit switch input: a trip counts at once, the release is debounced (20 ms) |
 | `stepper3.c` | Step sequences (wave, full, half), ramps, absolute moves with retarget, the limit stop, F-13 timeout |
-| `valve.c` | Modes (NOT HOMED, HOMING, MANUAL), homing, % position, STOP, fault latches, the event log (200 kept) |
+| `valve.c` | Modes (NOT HOMED, HOMING, MANUAL, AUTO, AUTO PAUSED), homing, % position, STOP, fault latches, the event log (200 kept), runs AUTO |
+| `ctrl.c` | AUTO control step, ported from the simulator: PI, anti-windup, deadband, response monitor, F-02 and W-02 checks (no hardware calls; `tools/ctrl-test` runs it on a PC) |
 | `valvepos.c` | Saves the step count at standstill so a restart can offer it |
 | `cfg.c` | Settings record in serial flash, two sectors in turn, CRC32, read back before it counts |
 | `trend.c` | Trend rings in RAM (11.5 KB): 600 one-second samples and 360 ten-second means, on fixed one-second slots; slots the loop missed go in as no-data samples. `TREND DUMP` is sent a line at a time as the link has room |
@@ -92,27 +92,29 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | `ui_trend.c` | Trend page and the Home sparkline (drawn on a draw event, no lv_chart) |
 | `motor_screen.c` | The 0.6.0 engineering motor screen, opened from Settings > Motor override; built on open and freed on leave |
 | `driver/` | Display and touch ports for LVGL; `display_px.c` is the pixel loop |
-| `fixed.c` | Fixed-point text (lv_snprintf has no float) |
+| `fixed.c` | Fixed-point text and parsing (lv_snprintf has no float) |
 
 ## Operation
 
 - **Nothing moves at power-up.** The valve is NOT HOMED until it is homed, or until the operator accepts the position saved before the restart ("Use saved X % / Home"). The saved position is never used on its own.
 - **Homing** (Home valve, or `VALVE CAL`): if the switch is pressed, move off it first (F-09 if it stays pressed); 1 fast close to the switch (F-07 if not found within 1.1 x full travel); 2 back off; 3 slow close onto the switch. The switch point is 0 %. STOP cancels it and keeps the earlier homing.
-- **MANUAL**: Go to a %, Fully open or close, step buttons on the Valve page. Position is in % of POS_MAX steps (66048, 4 turns, by default).
+- **MANUAL**: on the Valve page, tap the Go to box to type a %; hold Close or Open; 1 % and 5 % steps; Fully close and Fully open. In AUTO the Go to box reads auto and a tap asks to switch to MANUAL. Position is in % of POS_MAX steps (66048, 4 turns, by default).
 - **Limit switch** is the closing stop, read in firmware before every closing step; there is no hardware interlock (decided). A trip during a normal move stops it and asks "Set as 0 % / Skip" (W-01); the count is never zeroed on its own. Limit override lets one move close past an open switch.
 - **Motor settings**: changing the step mode, direction or coil order, or zeroing the motor count (`MOT ZERO`, the motor screen, a loaded record), clears the homing; the valve must be homed again.
 - **Saved position**: written 2 s after the valve stops, and withdrawn (read back and checked, one retry) before the next move starts, so a power cut mid-move leaves nothing to offer. If it cannot be withdrawn the move is refused. At start-up every slot of the log is read, so an entry after a failed write is still found.
-- **STOP** outside AUTO stops and holds the valve with no latch. In AUTO it will latch F-12.
-- **Faults** latch until Reset fault (or `CTRL RESET`), which clears only those whose cause has gone: F-01 no Druck signal, F-03 excitation outside 9.5 to 10.5 V, F-07 switch not found while homing, F-09 switch still pressed after moving off it, F-13 motion timeout, F-12 STOP in AUTO. F-07, F-09, F-13 and F-12 stop the motor; F-01 and F-03 do not block moves.
+- **AUTO** (Start AUTO, or `CTRL AUTO`): needs the valve homed, no fault, a valid reading and a target. The first Start AUTO asks for the target and Set starts AUTO; later ones confirm the target kept or offer New target. The target changes from the Target box (over 5 mbar asks first). Once a second, after the reading, `ctrl.c` works out the valve command: PI in position form (D on the measurement, off), bumpless entry from where the valve is going, no integration past 100 % or Auto min, while the switch blocks closing, or while the valve is more than 3000 steps short of the last command, and commands inside the deadband held. The status line reads Regulating to X, In band (within the band) and Stable (60 s in the band). Switch to MANUAL ramps the valve down and holds it where it stops.
+- **AUTO checks**: F-02 pressure above the sensor range for 5 s; a response monitor over 30 s windows (the valve position through a 40 s lag, moves under 1000 steps not judged): F-10 after 5 windows with no pressure response, F-16 opening while the pressure falls and F-17 closing while it rises, two windows in a row. W-02 after 1800 s outside the band stops the valve and pauses AUTO (Resume AUTO or Switch to MANUAL). Any fault in AUTO stops the valve and drops to MANUAL, holding where it stopped.
+- **STOP** outside AUTO stops and holds the valve with no latch. In AUTO it latches F-12 and drops to MANUAL.
+- **Faults** latch until Reset fault (or `CTRL RESET`), which clears only those whose cause has gone: F-01 no Druck signal, F-03 excitation outside 9.5 to 10.5 V, F-07 switch not found while homing, F-09 switch still pressed after moving off it, F-10, F-16, F-17 and F-02 (AUTO, above), F-13 motion timeout, F-12 STOP in AUTO. F-07, F-09, F-10, F-16, F-17, F-13 and F-12 block moves until reset; F-01, F-03 and F-02 do not.
 
 ## Screens
 
-480x272, after the simulator (`simulator/`, ISA-101 style: grey for normal, colour only for abnormal states). Every screen has a header (Back and Home buttons, the title centred, the mode word on the right with its dot: a grey ring, filled grey in AUTO, red with a fault; a red rule under the header with a fault), a status strip and STOP on the bottom row. Under a popup the strip stays, updating and greyed. On Home the strip shows only when it has something to say (a prompt, a fault, a message, a move), and otherwise the 10 min pressure sparkline is in its place.
+480x272, after the simulator (`simulator/`, ISA-101 style: grey for normal, colour only for abnormal states). Every screen has a header (Back and Home buttons, the title centred, the mode word on the right with its dot: a grey ring, filled grey in AUTO, red with a fault; a red rule under the header with a fault), a status strip and STOP on the bottom row. Under a popup the strip stays, updating and greyed. On Home and the operator screens the strip shows the status line (the mode dot and Valve at X %, Moving to X %, or in AUTO Regulating to / In band / Stable at the target) with the 5 min pressure sparkline on its right; prompts, faults and messages take the whole strip. Sparklines and Trend draw each time slot through its first sample, the two either side of its largest change and its last, so a step shows upright.
 
-- **Home** (title "<cryostat name> pressure controller", for example "CF-11 pressure controller", on the left): Pressure tile (40 px reading in mbar, log bar labelled 0.1, 1, 10, 100 and 1k with the end lines the same distance in from each end, Target box) and Valve tile (40 px reading in %, bar, Go to box), the mode button (Home valve / Start AUTO), Valve, Menu, the pressure sparkline (a tap opens Trend).
+- **Home** (title "<cryostat name> pressure controller", for example "CF-11 pressure controller", on the left): Pressure tile (40 px reading in mbar, log bar labelled 0.1, 1, 10, 100 and 1k with the end lines the same distance in from each end, Target box) and Valve tile (40 px reading in %, bar, Go to box), the mode button (Home valve / Start AUTO / Switch to MANUAL / Resume AUTO), Valve, Menu, the pressure card (a tap on the sparkline opens Trend).
 - **Menu**: Records (Trend, Faults and log), Calibrate (Valve homing, Sensor), System (Diagnostics, Settings).
 - **Valve**: manual moves and the valve's state. **Home valve**: homing state, motor step count, limit switch, the three steps and the time taken. **Faults and log**: latched faults (tap for detail and help) and the event log. **Diagnostics**: readings and hardware state.
-- **Trend**: pressure (left axis) and valve (right axis, 0 to 100 %) over 1, 2, 5, 10, 30 min or 1 hour. Each point is the mean of a fixed slot of time counted from start-up, so the line keeps its shape as it scrolls.
+- **Trend**: pressure (left axis), the target while in AUTO (dashed), and valve (right axis, 0 to 100 %) over 1, 2, 5, 10, 30 min or 1 hour. Each point is the mean of a fixed slot of time counted from start-up, so the line keeps its shape as it scrolls.
 - **Settings**: Cryostat name (a keyboard; up to 12 characters, in use at once and unsaved until Save settings), Choose sensor (up to four Druck sensors, each with its own cal; one in use), Valve setup (travel, direction; homing speeds and back-off; drive rates), Control tuning (for AUTO), Review and save, Load settings (last save, previous save, factory), Limit override (while armed the strip says so on every screen, with Cancel), Motor override (the 0.6.0 motor screen; its cross closes it). Edits are drafts until Save settings, which checks them together and saves all or nothing.
 - **Calibrate sensor**: the bench two-point cal from the screen (vacuum, then air at a barometer reading).
 
@@ -201,12 +203,18 @@ Valve (homing, position, STOP, faults). Nothing moves at power-up; the valve is 
 | `VALVE SAVED?` | The valve position saved at the last standstill, and whether it is on offer |
 | `VALVE RESTORE` | Take the saved position as the count (at start-up only, before anything moves). The screen asks the same: "Use saved X % / Home". It is never used without the operator |
 | `VALVE POSMAX\|FHOME\|FCREEP\|BACKOFF\|CLEAR\|OFFSET <n>` | Settings: POS_MAX (66048, 4 turns), homing speeds (400, 25 steps/s), back-off (400), clearance (800), switch count (0). `CFG SAVE` keeps them |
-| `CTRL STOP` | Stop now and latch F-12; cancels homing |
+| `CTRL SP <mbar>` | Target, kept to 0.1 mbar, 0 to the sensor range (not saved: none at start-up) |
+| `CTRL AUTO` | Start or resume AUTO after the entry checks. While in AUTO one line a second reads `AUTO 4.62 mB, target 4.8, valve 14.20 % to 14.35 %, In band`, in place of the motor status line |
+| `CTRL MAN [<0-100>]` | To MANUAL: the valve ramps down and holds where it stops, then goes to % if given |
+| `PID?` | The control parameters: KP, TI, OUTMIN, DB, KDIR and BAND can be set, the rest are fixed in `ctrl.h` |
+| `PID KP\|TI\|OUTMIN\|DB\|BAND <v>` | Gain (%/mbar, 4.00), integral time (min, 0.25; 0 off), Auto min (%, 14.0), deadband (steps, 8), target band (mbar, 0.10). Live, AUTO included; `CFG SAVE` keeps them |
+| `PID KDIR +1\|-1` | Pressure response: +1 when opening the valve raises the pressure |
+| `CTRL STOP` | Stop now; in AUTO it latches F-12. Cancels homing |
 | `CTRL RESET` | Clear the latched faults whose cause has gone |
 | `CTRL?` | Latched faults, highest priority first |
 | `EVT? [1-200]` | The last events (default 20), sent a line at a time as the link has room. Each event is also sent as it happens: `EVT <s> <tag> <text>` |
 
-Faults latch until `CTRL RESET`: F-01 no Druck signal, F-03 excitation outside 9.5 to 10.5 V, F-07 switch not found while homing, F-09 switch still pressed after moving off it, F-13 motion timeout, F-12 STOP. F-07, F-09, F-13 and F-12 stop the motor and refuse VALVE and MOT moves; from 0.9.10 the sensor faults F-01 and F-03 do not, so the valve can be moved and homed with no Druck connected (AUTO will need the reading). F-01 and F-03 only reset once the cause has gone.
+Faults latch until `CTRL RESET`: F-01 no Druck signal, F-03 excitation outside 9.5 to 10.5 V, F-07 switch not found while homing, F-09 switch still pressed after moving off it, F-10 no pressure response, F-16 and F-17 pressure moving the wrong way, F-02 above the sensor range (AUTO only), F-13 motion timeout, F-12 STOP in AUTO. All but F-01, F-03 and F-02 stop the motor and refuse VALVE and MOT moves; from 0.9.10 the sensor faults do not, so the valve can be moved and homed with no Druck connected. F-01, F-03 and F-02 only reset once the cause has gone. In AUTO, VALVE and MOT moves, homing and the valve settings answer "Switch to MANUAL first" (`CTRL MAN`).
 
 Valve motor (Stepper 3, engineering; refused while homing or with a fault latched, except `MOT STOP` and `MOT OFF`):
 
@@ -237,6 +245,7 @@ The settings commands (`RATE` to `ORDER`, and `ZERO`) answer `ERR busy, MOT STOP
 - `tools/logger/log_druck.py <IP or COM>` logs the once-a-second DATA lines to CSV and reconnects on its own.
 - `tools/cal/druck_cal.py <IP or COM> show|zs|load|erase` manages the Druck calibration table in serial flash.
 - `tools/ui-preview/build.sh` renders the screens (Home, Menu, keypad, dialogs, the stage 5 and 6 pages) to PNG on a PC (`out/new-*.png`), with the real settings store over a flash held in RAM, and checks the LVGL heap returns after opening and leaving screens.
+- `tools/ctrl-test/run.sh` runs `ctrl.c` on a PC against a C port of the simulator's flow line (helium pot, needle valve, pump, the motor ramp and the closed switch) and checks it against the simulator's own results: closed to 5 mbar, 5 to 4.5 and 4.5 to 10 mbar, targets 5, 7, 3 and 5 with no false trip, helium off (F-16), pump off (F-17), a slipping drive (F-10) and the entry refusals.
 - `tools/cfg-test/run.sh` tests the settings store and the saved valve position on a PC against a flash held in RAM (version 1 record loading, saves, Previous save, refused combinations, sensors, sensor calibration, the position log wrapping).
 - `tools/xbuild/build.sh [Release|Debug]` cross-builds the firmware on Linux (cmake, ninja, Ubuntu `gcc-arm-none-eabi` and `libnewlib-arm-none-eabi`) with the mikroSDK libraries in `.meproject` and prints flash and RAM use. For size checks only; the flashed build is NECTO's.
 

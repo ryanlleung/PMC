@@ -41,7 +41,7 @@ static uint8_t draw_buf[W * H * 2] __attribute__((aligned(4)));
 
 /* Fake valve layer ------------------------------------------------------- */
 static valve_mode_t v_mode = VALVE_NOT_CAL;
-static bool v_cal, v_f01, v_f12;
+static bool v_cal, v_f01, v_f12, v_f16;
 static int v_step = -1;
 static int32_t v_pct10, v_target10;
 static bool moving;
@@ -49,8 +49,27 @@ static bool moving;
 valve_mode_t valve_mode(void) { return v_mode; }
 const char *valve_mode_name(void)
 {
-    return v_mode == VALVE_CALIBRATING ? "HOMING" : v_mode == VALVE_MANUAL ? "MANUAL" : "NOT HOMED";
+    return v_mode == VALVE_CALIBRATING ? "HOMING" : v_mode == VALVE_MANUAL ? "MANUAL"
+         : v_mode == VALVE_AUTO ? "AUTO" : v_mode == VALVE_PAUSED ? "AUTO PAUSED" : "NOT HOMED";
 }
+// AUTO (stage 8).
+static bool v_sp_set;
+static int32_t v_sp = 5000;
+static ctrl_reg_t v_reg = CTRL_REG_BAND;
+bool valve_auto(void) { return v_mode == VALVE_AUTO || v_mode == VALVE_PAUSED; }
+int valve_fault_count(void);
+bool valve_start_auto(const char **why)
+{
+    if (valve_fault_count()) { *why = "Reset the fault first"; return false; }
+    v_mode = VALVE_AUTO;
+    return true;
+}
+bool valve_to_manual(const char **why) { (void)why; v_mode = VALVE_MANUAL; return true; }
+bool valve_set_target(int32_t m, const char **why) { (void)why; v_sp = m / 100 * 100; v_sp_set = true; return true; }
+bool valve_target(int32_t *m) { if (m) *m = v_sp; return v_sp_set; }
+int32_t valve_range_mmbar(void) { return 1034214; }
+int32_t valve_band_mmbar(void) { return 100; }
+ctrl_reg_t valve_regulation(void) { return v_mode == VALVE_AUTO ? v_reg : CTRL_REG_NONE; }
 bool valve_calibrated(void) { return v_cal; }
 int32_t valve_pct10(void) { return v_pct10; }
 int32_t valve_target_pct10(void) { return moving ? v_target10 : v_pct10; }
@@ -65,32 +84,35 @@ bool valve_goto_pct10(int32_t p, const char **why) { (void)why; v_target10 = p; 
 bool valve_goto_pct100(int32_t p, const char **why) { return valve_goto_pct10(p / 10, why); }
 bool valve_move_steps(int32_t steps, const char **why) { (void)steps; (void)why; return true; }
 void valve_stop(void) { moving = false; }
-bool valve_stop_latches(void) { return false; }
-int valve_fault_count(void) { return v_f01 + v_f12; }
-bool valve_motion_blocked(void) { return v_f12; }
+bool valve_stop_latches(void) { return valve_auto(); }
+int valve_fault_count(void) { return v_f01 + v_f16 + v_f12; }
+bool valve_motion_blocked(void) { return v_f12 || v_f16; }
 bool valve_fault_first(const char **tag, const char **text)
 {
     if (v_f01) { *tag = "F-01"; *text = "No Druck signal"; return true; }
+    if (v_f16) { *tag = "F-16"; *text = "Pressure falling, valve opening"; return true; }
     if (v_f12) { *tag = "F-12"; *text = "Operator STOP"; return true; }
     return false;
 }
 bool valve_fault_is(const char *tag)
 {
-    return (v_f01 && !strcmp(tag, "F-01")) || (v_f12 && !strcmp(tag, "F-12"));
+    return (v_f01 && !strcmp(tag, "F-01")) || (v_f12 && !strcmp(tag, "F-12")) || (v_f16 && !strcmp(tag, "F-16"));
 }
-int valve_reset(char *left, size_t n) { int a = valve_fault_count(); v_f12 = false; if (n) strcpy(left, v_f01 ? "F-01" : ""); return a; }
+int valve_reset(char *left, size_t n) { int a = valve_fault_count(); v_f12 = v_f16 = false; if (n) strcpy(left, v_f01 ? "F-01" : ""); return a; }
 static bool v_q;
 bool valve_question(int32_t *p) { if (v_q && p) *p = 187; return v_q; }
 bool valve_answer(bool z, const char **why) { (void)z; (void)why; v_q = false; return true; }
 bool valve_fault_get(int i, valve_fault_t *f)
 {
-    const char *tags[2] = { "F-01", "F-12" }, *texts[2] = { "No Druck signal", "Operator STOP" };
+    const char *tags[3] = { "F-01", "F-16", "F-12" },
+               *texts[3] = { "No Druck signal", "Pressure falling, valve opening", "Operator STOP" };
+    bool on[3] = { v_f01, v_f16, v_f12 };
     int k = 0;
-    for (int j = 0; j < 2; j++) {
-        if (!(j ? v_f12 : v_f01)) continue;
+    for (int j = 0; j < 3; j++) {
+        if (!on[j]) continue;
         if (k++ != i) continue;
         f->tag = tags[j]; f->text = texts[j]; f->age_ms = j ? 64000 : 312000;
-        f->mode = VALVE_MANUAL; f->can_reset = j == 1;
+        f->mode = j == 1 ? VALVE_AUTO : VALVE_MANUAL; f->can_reset = j != 0;
         return true;
     }
     return false;
@@ -256,6 +278,15 @@ int main(int argc, char **argv)
     if (!strcmp(st, "moving")) { extern bool fake_busy; fake_busy = moving = true; v_target10 = 500; }
     if (!strcmp(st, "calib") || !strcmp(st, "calpage2")) { v_mode = VALVE_CALIBRATING; v_step = 2; }
     if (!strcmp(st, "nodruck")) v_f01 = true;
+    // AUTO (stage 8).
+    bool aut = !strncmp(st, "auto", 4) || !strcmp(st, "paused") || !strcmp(st, "f16") || !strcmp(st, "trendauto");
+    if (aut) { v_mode = VALVE_MANUAL; v_cal = true; v_pct10 = 342; v_sp_set = strcmp(st, "autofirst") != 0; }
+    if (!strcmp(st, "auto") || !strcmp(st, "autostable") || !strcmp(st, "autoreg") || !strcmp(st, "autosp") ||
+        !strcmp(st, "automan") || !strcmp(st, "autovalve")) v_mode = VALVE_AUTO;
+    if (!strcmp(st, "autostable")) v_reg = CTRL_REG_STABLE;
+    if (!strcmp(st, "autoreg")) { extern bool fake_busy; fake_busy = moving = true; v_target10 = 356; v_reg = CTRL_REG_REGULATING; }
+    if (!strcmp(st, "paused")) v_mode = VALVE_PAUSED;
+    if (!strcmp(st, "f16")) v_f16 = true;
     if (!strcmp(st, "faults") || !strcmp(st, "detail")) { v_f01 = true; v_f12 = true; }
 
     lv_init();
@@ -271,6 +302,8 @@ int main(int argc, char **argv)
             p += 0.15 * sin(tt / 23.0) + 0.05 * sin(tt / 3.1);
             s.p_mmbar = (int32_t)(p * 1000);
             v_pct10 = i < 900 ? 342 : i > 3300 ? 300 : i > 2700 ? 380 : 342;
+            if (!strcmp(st, "trendauto"))   // AUTO at 5.0 then 5.8 mB for the middle of the hour
+                v_mode = i >= 1500 && i < 3300 ? VALVE_AUTO : VALVE_MANUAL, v_sp = i < 2700 ? 5000 : 5800;
             trend_second(&s);
             lv_tick_inc(1000);   // one sample per second of real time (trend.c slots, 0.10.10)
         }
@@ -340,6 +373,9 @@ int main(int argc, char **argv)
     if (!strcmp(st, "menu")) tap(415, 184);
     if (!strcmp(st, "keypad")) { tap(300, 184); tap(41, 184); tap(111, 240); tap(251, 240); tap(111, 184); tap(111, 184); }
     if (!strcmp(st, "confirm")) tap(415, 72);
+    if (!strcmp(st, "autofirst") || !strcmp(st, "autoask") || !strcmp(st, "automan") || !strcmp(st, "paused2")) tap(415, 72);
+    if (!strcmp(st, "autosp")) { tap(115, 184); tap(41, 240); tap(111, 240); tap(321, 184); }   // Target 12: asks
+    if (!strcmp(st, "autovalve")) tap(415, 128);
     if (!strcmp(st, "valve") || !strcmp(st, "valvenc") || !strcmp(st, "limithit")) tap(415, 128);
     if (!strcmp(st, "limithit")) v_q = true;
     if (!strcmp(st, "svc")) {
