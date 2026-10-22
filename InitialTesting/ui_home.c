@@ -1,3 +1,6 @@
+#ifndef MODE_OPT
+#define MODE_OPT 0
+#endif
 #include <string.h>
 
 #include "lvgl.h"
@@ -24,6 +27,8 @@ typedef struct {
     lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev;
     int32_t fill;             // bar fill to here, px; -1 no value (no marker)
     bool log;                 // pressure: decade lines; valve: 0/50/100
+    bool alarm, ctrl;
+    lv_obj_t *band, *cap, *unit;
 } tile_t;
 
 static tile_t pt, vt;
@@ -161,8 +166,35 @@ static void box_set(tile_t *t, bool active, const char *text)
     ui_set_text(t->box_text, text);
 }
 
+static void frame_tile(tile_t *t)
+{
+    int32_t w = t->alarm ? 3 : t->ctrl ? 3 : 0;
+    lv_obj_set_style_border_color(t->tile, t->alarm ? UI_FAULT : UI_TEXT, 0);
+    if (lv_obj_get_style_border_width(t->tile, 0) != w) {
+        lv_obj_set_style_border_width(t->tile, w, 0);
+        lv_obj_set_style_pad_all(t->tile, -w, 0);
+    }
+}
+
+static void ctrl_set(tile_t *t, bool on, const char *tag)
+{
+#if MODE_OPT == 2 || MODE_OPT == 4
+    t->ctrl = on;
+    if (on) lv_obj_remove_flag(t->band, LV_OBJ_FLAG_HIDDEN);
+    else    lv_obj_add_flag(t->band, LV_OBJ_FLAG_HIDDEN);
+    ui_set_color(t->cap, on ? lv_color_white() : UI_MUTED);
+    ui_set_color(t->unit, on ? lv_color_white() : UI_MUTED);
+    frame_tile(t);
+#endif
+}
+
 static void alarm_set(tile_t *t, bool on)
 {
+#if MODE_OPT == 2 || MODE_OPT == 4
+    t->alarm = on;
+    frame_tile(t);
+    return;
+#endif
     int32_t w = on ? 3 : 0;
     if (lv_obj_get_style_border_width(t->tile, 0) != w) {
         lv_obj_set_style_border_width(t->tile, w, 0);
@@ -177,8 +209,15 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
     t->fill = -1;
     t->tile = ui_card(scr, x, 48, TILE_W, TILE_H);
     // Caption and unit 16 px (Ryan, 21 Oct: 12 px was too small).
-    ui_label(t->tile, 12, 6, 90, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
-    ui_label(t->tile, 75, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
+    t->band = lv_obj_create(t->tile);
+    lv_obj_remove_style_all(t->band);
+    lv_obj_set_pos(t->band, 0, 0);
+    lv_obj_set_size(t->band, TILE_W, 30);
+    lv_obj_set_style_bg_opa(t->band, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(t->band, UI_TEXT, 0);
+    lv_obj_add_flag(t->band, LV_OBJ_FLAG_HIDDEN);
+    t->cap = ui_label(t->tile, 12, 6, 90, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
+    t->unit = ui_label(t->tile, 75, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
     // The reading, 40 px (Ryan 16 Oct: bigger once the sparklines left the
     // tiles); "1013.2" just fits, right edge on the bar's.
     t->reading = ui_label(t->tile, 0, 34, 12 + BAR_W, &ui_num_40, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "----");
@@ -484,7 +523,10 @@ static void home_refresh(void)
     alarm_set(&vt, valve_fault_is("F-07") || valve_fault_is("F-09") || valve_fault_is("F-10") ||
                    valve_fault_is("F-13") || valve_fault_is("F-16") || valve_fault_is("F-17"));
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
-    box_set(&vt, manual, manual ? ui_fmt2(buf, sizeof buf, valve_target_pct_milli()) : auto_on ? "auto" : "");
+    box_set(&vt, manual, manual ? ui_fmt2(buf, sizeof buf, valve_target_pct_milli()) : auto_on ? "AUTO" : "");
+
+    ctrl_set(&pt, auto_on, "AUTO");
+    ctrl_set(&vt, manual, "MANUAL");
 
     // Mode button.
     int step = valve_cal_step();

@@ -274,7 +274,7 @@ static void valve_fast(void)
     // Where the valve is going (or last went); "--" during a hold, which
     // has no target, and before homing; "auto" in AUTO.
     bool have = cal && !(stepper3_busy() && vp.jog);
-    ui_set_text(vp.go, valve_auto() ? "auto" : have ? pct_text(buf, sizeof buf, valve_target_pct_milli()) : "--");
+    ui_set_text(vp.go, valve_auto() ? "AUTO" : have ? pct_text(buf, sizeof buf, valve_target_pct_milli()) : "--");
     ui_set_color(vp.go, have && !valve_auto() && why_not_manual() == NULL ? UI_TEXT : UI_IDLE);
 }
 

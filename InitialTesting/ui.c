@@ -1,3 +1,6 @@
+#ifndef MODE_OPT
+#define MODE_OPT 0
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -340,6 +343,7 @@ bool ui_btn_disabled(lv_event_t *e)
  * ------------------------------------------------------------------------ */
 #define HDR_BTN_W 48  // Back and Home, icons only
 static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *mode_dot, *fault_rule;
+static lv_obj_t *strip_mode;
 static lv_obj_t *strip, *strip_dot, *strip_icon, *strip_text, *strip_ok, *strip_act, *strip_spark;
 static lv_obj_t *stop_btn;
 
@@ -458,6 +462,21 @@ static void build_frame(void)
     lv_obj_set_style_radius(mode_dot, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_color(mode_dot, lv_color_hex(0xC3CDD7), 0);
     lv_obj_set_style_bg_color(mode_dot, UI_FAULT, 0);
+#if MODE_OPT == 1 || MODE_OPT == 4
+    // As wide as the button column under it (x 361, 109 px; Ryan 22 Oct).
+    lv_obj_set_pos(mode_lbl, 361, 5);
+    lv_obj_set_width(mode_lbl, 109);
+    lv_obj_set_style_text_align(mode_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_ver(mode_lbl, 4, 0);
+    lv_obj_set_style_radius(mode_lbl, 4, 0);
+    lv_obj_set_style_border_width(mode_lbl, 2, 0);
+    lv_obj_set_style_border_color(mode_lbl, lv_color_white(), 0);
+    lv_obj_add_flag(mode_dot, LV_OBJ_FLAG_HIDDEN);
+#endif
+#if MODE_OPT == 3
+    lv_obj_add_flag(mode_dot, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_x(mode_lbl, 312);
+#endif
 
     strip = plain(frame);
     lv_obj_set_pos(strip, 10, 216);
@@ -471,6 +490,12 @@ static void build_frame(void)
     lv_obj_set_style_bg_opa(strip_dot, LV_OPA_COVER, 0);
     strip_icon = ui_label(strip, 6, 15, 0, &lv_font_montserrat_14, lv_color_white(), LV_TEXT_ALIGN_LEFT,
                           LV_SYMBOL_WARNING);
+    strip_mode = ui_label(strip, 8, 9, 84, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
+    lv_obj_set_style_pad_ver(strip_mode, 5, 0);
+    lv_obj_set_style_radius(strip_mode, 4, 0);
+    lv_obj_set_style_border_width(strip_mode, 2, 0);
+    lv_obj_set_style_border_color(strip_mode, UI_TEXT, 0);
+    lv_obj_add_flag(strip_mode, LV_OBJ_FLAG_HIDDEN);
     strip_text = ui_label(strip, 28, 0, 303, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_long_mode(strip_text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_line_space(strip_text, 4, 0);
@@ -546,8 +571,21 @@ static void strip_draw(ui_strip_kind_t kind, lv_color_t dot, const char *text, b
         lv_obj_set_style_pad_all(strip, -bw, 0);    // children keep their place
         lv_obj_set_style_border_color(strip, bc, 0);
     }
-    show(strip_dot, kind == UI_STRIP_INFO);
     bool ring = false, is_mode = lv_color_eq(dot, UI_DOT_MODE);
+#if MODE_OPT == 3
+    bool blk = kind == UI_STRIP_INFO && is_mode;
+    show(strip_dot, kind == UI_STRIP_INFO && !blk);
+    show(strip_mode, blk);
+    if (blk) {
+        bool a = valve_auto();
+        ui_set_text(strip_mode, a ? "AUTO" : valve_mode() == VALVE_MANUAL ? "MANUAL" : valve_mode_name());
+        lv_obj_set_style_bg_opa(strip_mode, a ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_color(strip_mode, UI_TEXT, 0);
+        ui_set_color(strip_mode, dim ? dis_tx : a ? lv_color_white() : UI_TEXT);
+    }
+#else
+    show(strip_dot, kind == UI_STRIP_INFO);
+#endif
     if (is_mode) {
         ring = !valve_auto();
         dot = lv_color_hex(0xC3CDD7);
@@ -567,13 +605,20 @@ static void strip_draw(ui_strip_kind_t kind, lv_color_t dot, const char *text, b
                              : kind == UI_STRIP_PROMPT ? lv_color_black() : UI_TEXT);
     bool spark = kind == UI_STRIP_INFO && is_mode && !dim && !ok && !act && strip_w >= 300;
     int32_t x = kind == UI_STRIP_PROMPT ? 12 : 28;
-    int32_t w = (spark ? strip_w - 155 : act ? strip_w - 104 : ok ? strip_w - 64 : strip_w - 4) - x - 4;
+#if MODE_OPT == 3
+    if (blk) x = 100;
+#endif
+    int32_t w = (spark ? strip_w - (MODE_OPT == 3 ? 116 : 155) : act ? strip_w - 104 : ok ? strip_w - 64 : strip_w - 4) - x - 4;
     if (lv_obj_get_width(strip) != strip_w) {
         lv_obj_set_width(strip, strip_w);
         lv_obj_set_x(strip_ok, strip_w - 64);
         lv_obj_set_x(strip_act, strip_w - 104);
         lv_obj_set_x(strip_spark, strip_w - 151);
     }
+#if MODE_OPT == 3
+    lv_obj_set_width(strip_spark, 100);
+    lv_obj_set_x(strip_spark, strip_w - 112);
+#endif
     show(strip_spark, spark);
     static uint32_t seen = UINT32_MAX;
     if (spark && trend_seconds() != seen) {   // a new sample: redraw it
@@ -604,7 +649,12 @@ static int32_t text_w(const char *t)
 // and the mode word, and cut it with dots only if it is wider than the gap.
 static void title_fit(lv_obj_t *l, const char *text, const char *mode_txt, int32_t left)
 {
+#if MODE_OPT == 1 || MODE_OPT == 4
+    int32_t right = 353;   // the mode badge starts at 361
+    (void)mode_txt;
+#else
     int32_t right = 454 - text_w(mode_txt) - 8;
+#endif
     int32_t w = text_w(text);
     int32_t x = 240 - w / 2;
     if (w > right - left)
@@ -631,6 +681,11 @@ static void frame_refresh(void)
     show(pmc_lbl, home && !overlay);
     show(title_lbl, !home);
     const char *mode_txt = f12 ? "STOPPED" : nf ? "FAULT" : valve_mode_name();
+#if MODE_OPT == 1 || MODE_OPT == 4
+    // "AUTO PAUSED" is wider than the badge; the filled badge already says AUTO.
+    if (m == VALVE_PAUSED && !f12 && !nf)
+        mode_txt = "PAUSED";
+#endif
     static const char *fit_mode, *fit_title;
     // Home's title: "<cryostat> pressure controller" (Settings > Cryostat name).
     static char home_title[CFG_NAME_LEN + 24], fit_name[CFG_NAME_LEN + 1] = "\x01";
@@ -654,7 +709,11 @@ static void frame_refresh(void)
         // Home's title sits on the left (Ryan, 16 Oct: centred left the
         // top left empty); it is centred in the gap only if it is too long.
         title_fit(pmc_lbl, home_title, mode_txt, 10);
+#if MODE_OPT == 1 || MODE_OPT == 4
+        if (text_w(home_title) < 353 - 12)
+#else
         if (text_w(home_title) < 454 - text_w(mode_txt) - 8 - 12)
+#endif
             lv_obj_set_x(pmc_lbl, 12);
     }
     show(fault_rule, nf > 0);
@@ -675,6 +734,12 @@ static void frame_refresh(void)
         lv_obj_set_style_bg_opa(mode_dot, kind ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_bg_color(mode_dot, kind == 2 ? UI_FAULT : lv_color_hex(0xC3CDD7), 0);
         lv_obj_set_style_border_width(mode_dot, kind ? 0 : 2, 0);
+#if MODE_OPT == 1 || MODE_OPT == 4
+        lv_obj_set_style_bg_opa(mode_lbl, kind ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : lv_color_white(), 0);
+        lv_obj_set_style_border_color(mode_lbl, kind == 2 ? UI_FAULT : lv_color_white(), 0);
+        ui_set_color(mode_lbl, kind == 1 ? UI_TEXT : lv_color_white());
+#endif
     }
 
     question_check();
