@@ -175,7 +175,7 @@ static void guarded(const char *what, void (*act)(void))
 
 static void mode_event(lv_event_t *e)
 {
-    if (stepper3_busy())
+    if (stepper3_busy() || stepper3_locked())
         return;
     stepper3_mode_t md = (stepper3_mode_t)event_arg(e);
     if (stepper3_set_mode(md))
@@ -469,7 +469,7 @@ static void motor_fast(void)
     for (int i = 0; i < 6; i++)
         seg_show(m.size[i], i == size_sel, true);
     for (int i = 0; i < 3; i++)
-        seg_show(m.mode[i], (int)stepper3_mode() == i, !busy);
+        seg_show(m.mode[i], (int)stepper3_mode() == i, !busy && !stepper3_locked());
     // Close is refused while the limit stop reads open, unless the override
     // is armed; Open always works. The button driving a hold move stays lit.
     bool ov = stepper3_override();

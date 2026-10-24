@@ -361,7 +361,7 @@ static void set_closed(void)
     if (!valve_set_closed(&why))
         ui_msg(valve_motion_blocked() ? "Reset the fault first" : why);
     else
-        ui_msg("Valve set as closed, 0 %, switch not checked");
+        ui_msg("Position set to closed (0 %). Not verified by homing.");
 }
 
 static bool set_position(int32_t v100, const char **why)
@@ -370,8 +370,8 @@ static bool set_position(int32_t v100, const char **why)
         if (valve_motion_blocked()) *why = "Reset the fault first";
         return false;
     }
-    char v[16], t[48];
-    lv_snprintf(t, sizeof t, "Valve set as %s %%, switch not checked", ui_fmt2(v, sizeof v, (int64_t)v100 * 10));
+    char v[16], t[64];
+    lv_snprintf(t, sizeof t, "Position set to %s %%. Not verified by homing.", ui_fmt2(v, sizeof v, (int64_t)v100 * 10));
     ui_msg(t);
     return true;
 }
@@ -379,7 +379,7 @@ static bool set_position(int32_t v100, const char **why)
 /* Home and Set position are two jobs, kept apart on every screen (Ryan,
  * 23 Oct): Home finds 0 % on the limit switch; Set position takes the
  * position from the operator (closed, a typed %, or the saved position),
- * not checked against the switch. */
+ * not verified by homing. */
 static void set_position_ask(void)
 {
     ui_keypad("Set position, %", "0 closed, 100 open", 0, 10000, NULL, NULL, set_position);
@@ -387,7 +387,7 @@ static void set_position_ask(void)
 
 static void set_closed_ask(void)
 {
-    ui_confirm("Set as closed, 0 %? Only if the valve is seated. Not checked against the switch.",
+    ui_confirm("Set the valve as closed (0 %)? Use only if the valve is known to be seated. Not verified by homing.",
                "Set as closed", set_closed);
 }
 
@@ -419,13 +419,13 @@ void ui_set_position_ask(void)
         char v[16];
         int32_t pm = valve_pos_max();
         ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
-        lv_snprintf(saved, sizeof saved, "Saved, %s %%", v);
+        lv_snprintf(saved, sizeof saved, "Last saved, %s %%", v);
         n = 3;
     }
-    ui_pick("Set position (not checked against the switch)", items, n, -1, ui_set_position_pick);
+    ui_pick("Set position (not verified by homing)", items, n, -1, ui_set_position_pick);
 }
 
-static char home_q[96];
+static char home_q[128];
 
 static const char *home_minutes(void)
 {
@@ -446,7 +446,7 @@ void ui_home_ask(void)
 // Home's mode button while not homed: the two jobs side by side.
 void ui_position_ask(void)
 {
-    lv_snprintf(home_q, sizeof home_q, "Valve position not known. Home it on the switch (%s), or set it?",
+    lv_snprintf(home_q, sizeof home_q, "Valve position unknown. Home the valve on the limit switch (%s), or set the position?",
                 home_minutes());
     ui_ask3(home_q, "Cancel", NULL, "Set\nposition", ui_set_position_ask, "Home", calibrate);
 }
@@ -478,7 +478,11 @@ static void mode_event(lv_event_t *e)
 
 static void valve_event_cb(lv_event_t *e)
 {
-    (void)e;
+    // Greyed and not opened until the valve is homed or set (Ryan, 24 Oct).
+    if (ui_btn_disabled(e)) {
+        ui_msg("Home the valve or set its position first");
+        return;
+    }
     ui_open(&ui_scr_valve);
 }
 
@@ -532,6 +536,7 @@ static void home_fast(void)
 
 static void home_refresh(void)
 {
+    ui_btn_enable(valve_btn, valve_mode() != VALVE_NOT_CAL);
     const clicks_state_t *s = clicks_state();
     valve_mode_t m = valve_mode();
     char buf[32];
@@ -618,7 +623,7 @@ void ui_status_line(void)
         valve_ref_t how = valve_reference();
         ui_fmt2(v, sizeof v, valve_pct_milli());
         if (how == VALVE_REF_HAND || how == VALVE_REF_SAVED)
-            lv_snprintf(t, sizeof t, "%s %%, %s", v, how == VALVE_REF_HAND ? "set by hand" : "from saved");
+            lv_snprintf(t, sizeof t, "%s %%, %s", v, how == VALVE_REF_HAND ? "entered" : "last saved");
         else
             lv_snprintf(t, sizeof t, "Valve at %s %%", v);
         ui_strip_set(UI_STRIP_INFO, UI_ICON_MODE, t);

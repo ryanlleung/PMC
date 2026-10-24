@@ -40,7 +40,7 @@
  *
  * Faults latch, stop the motor and lock out MOT moves until CTRL RESET,
  * which clears only the latches whose cause has gone:
- *   F-01 no Druck signal, F-02 excitation outside 9.5-10.5 V or tripped,
+ *   F-01 no pressure signal, F-02 excitation outside 9.5-10.5 V or tripped,
  *   F-03 switch not found while calibrating, F-04 switch still pressed
  *   after moving off it, F-05 motion timeout; in AUTO only: F-06 no
  *   pressure response. F-01 and F-02 do not block manual moves. STOP

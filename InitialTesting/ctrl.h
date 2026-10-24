@@ -13,7 +13,8 @@
  *
  * Once per Ts (1 s), straight after the pressure read:
  *   - PI in position form, D on the measurement (Kd 0, off), output in steps.
- *     Bumpless entry: the first output is the position in force.
+ *     Bumpless entry: the first output is the position in force. A KP or
+ *     KDIR change in AUTO re-bases the integral the same way (0.11.38).
  *   - Anti-windup: no integration past POS_MAX or AUTO min in the direction
  *     of the error, while the closed switch blocks closing, or while the valve
  *     is still more than CTRL_LEAD_MAX steps short of the last command.
@@ -82,6 +83,8 @@ typedef struct {
     uint32_t in_band_ms;
     bool move;         // ctrl_step asks for a move to move_to
     int32_t move_to;
+    float kp_used;     // gain (steps per mbar) and response sign of the last
+    int kdir_used;     // step: a change in AUTO re-bases the integral
 } ctrl_t;
 
 void ctrl_init(ctrl_t *c);

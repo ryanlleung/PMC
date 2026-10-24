@@ -109,7 +109,7 @@ typedef enum { F01, F02, F03, F04, F05, F06, F_N } fault_t;   // priority order 
 
 static const char *const fault_tag[F_N]   = { "F-01", "F-02", "F-03", "F-04", "F-05", "F-06" };
 static const char *const fault_short[F_N] = {
-    "No Druck signal", "Excitation out of window", "Limit not found while calibrating",
+    "No pressure signal", "Excitation out of window", "Limit not found while calibrating",
     "Limit still active after clearance", "Motion timeout", "No pressure response" };
 
 static bool latched[F_N];
@@ -271,6 +271,7 @@ static bool cal_start(const char **err)
     stepper3_stop();
     stepper3_override_cancel();
     question = false;
+    cal_settling = false;
     cal_was = calibrated;
     calibrated = false;
     mode = VALVE_CALIBRATING;
@@ -295,9 +296,10 @@ static void cal_move_ended(stepper3_stop_t why)
     case CAL_BACK:
         if (why != STEPPER3_STOP_DONE)
             cal_abort(stepper3_stop_name(why));
-        else
+        else {
             cal_settle_from = lv_tick_get();   // then check the switch
             cal_settling = true;
+        }
         break;
     case CAL_FAST:
         if (why == STEPPER3_STOP_LIMIT) {
@@ -548,7 +550,7 @@ bool valve_set_target(int32_t mmbar, const char **why)
     int32_t fs = valve_range_mmbar();
     char a[16], b[16];
     if (mmbar < 0 || mmbar > fs) {
-        ev("W-03", "Setpoint %s rejected, allowed 0 to %s mB", fixed_fmt(a, sizeof a, fixed_round(mmbar, 2), 1),
+        ev("TARGET", "Setpoint %s rejected, allowed 0 to %s mB", fixed_fmt(a, sizeof a, fixed_round(mmbar, 2), 1),
            fixed_fmt(b, sizeof b, fixed_round(fs, 2), 1));
         *why = "Target outside the sensor range";
         return false;
@@ -583,7 +585,7 @@ void valve_sense(const clicks_state_t *s)
     cause_f01 = !s->pm_found || (!exc_bad && !s->reading_ok);
     sensed = true;
     if (cause_f01)
-        raise(F01, false, s->pm_found ? "No Druck signal (%s)" : "No Druck signal (Power Monitor not answering)%s",
+        raise(F01, false, s->pm_found ? "No pressure signal (%s)" : "No pressure signal (Power Monitor not answering)%s",
               s->pm_found ? (s->druck_absent ? "outside 0.005-11 mV/V" : "no valid reading") : "");
     if (cause_f02) {
         if (s->boost_tripped)
@@ -624,7 +626,7 @@ bool valve_restore(int32_t count, const char **why)
     ref_how = VALVE_REF_SAVED;
     mode = VALVE_MANUAL;
     char p[16];
-    ev("REF", "Saved position used: count %ld (%s %%), not checked against the switch",
+    ev("REF", "Last saved position restored: count %ld (%s %%), not verified by homing",
        (long)count, pct_text(p, sizeof p, count));
     update_lock();
     return true;
@@ -647,9 +649,9 @@ bool valve_set_position(int32_t pct100, const char **why)
     ref_how = VALVE_REF_HAND;
     mode = VALVE_MANUAL;
     if (c == 0)
-        ev("REF", "Set as closed by the operator: count 0 (0 %%), not checked against the switch");
+        ev("REF", "Set as closed by the operator: count 0 (0 %%), not verified by homing");
     else
-        ev("REF", "Position set by the operator: count %ld (%ld.%02ld %%), not checked against the switch",
+        ev("REF", "Position set by the operator: count %ld (%ld.%02ld %%), not verified by homing",
            (long)c, (long)(pct100 / 100), (long)(pct100 % 100));
     update_lock();
     return true;

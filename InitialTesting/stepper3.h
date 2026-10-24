@@ -98,6 +98,7 @@ int32_t stepper3_position(void);
 void stepper3_zero(void);
 // Motor counts per full step: 2 in HALF, else 1.
 int32_t stepper3_scale(void);
+#define STEPPER3_STEPS_PER_TURN 16512   // full steps per output turn: 48 x 344 (bench, 22 Oct)
 // Called when the step count stops matching the valve's homing: MOT ZERO,
 // a change of direction or coil order (from the link, the motor
 // screen or a loaded record). The valve layer clears its homing.

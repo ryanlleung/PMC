@@ -951,8 +951,10 @@ static const int tune_dec[T_N] = { 2, 2, 1, 0, 0, 2 };
 
 static const char *tune_text(char *buf, size_t n, int i)
 {
-    if (i == T_KDIR)
-        return tune[i] > 0 ? "+1" : "-1";
+    if (i == T_KDIR) {
+        lv_snprintf(buf, n, "%s", tune[i] > 0 ? "+1" : "-1");
+        return buf;
+    }
     return fixed_fmt(buf, n, tune[i], tune_dec[i]);
 }
 

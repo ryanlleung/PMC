@@ -330,6 +330,8 @@ void ui_btn_enable(lv_obj_t *b, bool on)
         return;
     if (on) lv_obj_remove_state(b, ST_DIS);
     else    lv_obj_add_state(b, ST_DIS);
+    if (lv_obj_has_flag(b, BTN_NAV))   // the chevron has its own colour
+        lv_obj_set_style_text_color(lv_obj_get_child(b, 1), on ? UI_CHEV : UI_IDLE, 0);
 }
 
 bool ui_btn_disabled(lv_event_t *e)
@@ -1333,9 +1335,9 @@ static void question_check(void)
             char e[16];
             int64_t m = ((int64_t)off * 100000 + pm - 1) / pm;   // 0.001 %, rounded up to 0.1
             ui_fmt1(e, sizeof e, (m + 99) / 100 * 100);
-            lv_snprintf(t, sizeof t, "Valve position not known.\nSaved %s %%, may be out by %s %%.", v, e);
+            lv_snprintf(t, sizeof t, "Valve position unknown.\nLast saved %s %%, accurate to within %s %%.", v, e);
         } else {
-            lv_snprintf(t, sizeof t, "Valve position not known.\nSaved position %s %%.", v);
+            lv_snprintf(t, sizeof t, "Valve position unknown.\nLast saved position %s %%.", v);
         }
         // Home, Set position (the list, the saved one in it), or the saved
         // position at once (Ryan, 23 Oct: the two jobs apart).

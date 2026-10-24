@@ -10,6 +10,7 @@
 
 #include "ctrl.h"
 #include "model.h"
+#include <stdlib.h>
 
 static bool verbose;
 static int fails;
@@ -235,6 +236,38 @@ int main(int argc, char **argv)
     CHECK(fault == CTRL_RUN && mode == AUTO && M.pos <= K.pos_max / 100,
           "AUTO min 0, target 0: closes to %ld steps (%.2f mB), no fault", (long)M.pos, M.pv);
     K.outmin = outmin;
+
+    // A live KP or KDIR change in AUTO keeps the output where it is (0.11.38).
+    fresh();
+    model_start_move(33000);
+    run(120, 0);
+    set_sp(5);
+    to_auto();
+    run(5, 5);
+    {
+        const ctrl_tune_t kk = K;
+        int32_t before = C.pos_cmd;
+        K.kp *= 2;
+        ctrl_tick();
+        int32_t d_kp = C.pos_cmd - before;
+        before = C.pos_cmd;
+        K.kdir = -K.kdir;
+        ctrl_tick();
+        int32_t d_dir = C.pos_cmd - before;
+        CHECK(labs(d_kp) < 60 && labs(d_dir) < 60,
+              "KP doubled and KDIR flipped in AUTO: command moves %ld and %ld steps (no jump)", (long)d_kp, (long)d_dir);
+        K = kk;
+    }
+
+    // A target far above the pressure opens the valve fully (0.11.39). One
+    // step of ki x e alone overshoots the top, which used to freeze the
+    // integral and leave the valve where AUTO started.
+    fresh();
+    set_sp(500);
+    to_auto();
+    run(30, 500);
+    CHECK(C.pos_cmd == K.pos_max && fault == CTRL_RUN,
+          "Target 500 mB from %.1f mB: command %ld of %ld steps (fully open)", M.pv, (long)C.pos_cmd, (long)K.pos_max);
 
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails ? 1 : 0;

@@ -57,6 +57,8 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
     c->noresp = 0;
     c->conv_ms = t_ms;
     c->move = false;
+    c->kp_used = kp_steps(k);
+    c->kdir_used = k->kdir;
 }
 
 bool ctrl_set_sp(ctrl_t *c, float sp, float fs, uint32_t t_ms)
@@ -98,12 +100,23 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     const float kp = kp_steps(k), ki = k->ti > 0 ? kp / (60.0f * k->ti) : 0;
     const float d = -(CTRL_KD / 100.0f * pos_max) * (float)k->kdir * (pv - c->prev_pv) / CTRL_TS_S;
     c->prev_pv = pv;
-    const float i_new = c->i + ki * e * CTRL_TS_S;
+    if (kp != c->kp_used || k->kdir != c->kdir_used) {
+        // Tuning changed in AUTO: keep the output where it is, as on entry,
+        // rather than stepping by the change in KP x e.
+        c->i = (float)c->pos_cmd - kp * e - d;
+        c->kp_used = kp;
+        c->kdir_used = k->kdir;
+    }
+    float i_new = c->i + ki * e * CTRL_TS_S;
     const float raw = kp * e + i_new + d;
     const float lo = k->outmin / 100.0f * pos_max;   // AUTO min
     bool integrate = true;
-    if (raw > pos_max && e > 0) integrate = false;
-    if (raw < lo && e < 0) integrate = false;
+    // Saturation anti-windup: hold the integral where the output just
+    // reaches the limit, never past it and never back from it. Skipping the
+    // step instead froze i at its start value when one step of ki x e alone
+    // overshoots (a large error: CTRL SP 500 from 0.8 mbar).
+    if (raw > pos_max && e > 0) i_new = fmaxf(c->i, pos_max - kp * e - d);
+    if (raw < lo && e < 0) i_new = fminf(c->i, lo - kp * e - d);
     if (in->limit && raw < (float)c->pos_cmd) integrate = false;   // closing blocked by the switch
     const float lead = (float)(c->pos_cmd - in->pos);   // valve still travelling to the last command
     if (CTRL_LEAD_MAX > 0 && fabsf(lead) > CTRL_LEAD_MAX && sgnf(ki * e) == sgnf(lead))

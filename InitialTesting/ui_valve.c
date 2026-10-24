@@ -9,6 +9,7 @@
 #include "valvepos.h"
 #include "supply.h"
 #include "ui.h"
+#include "fixed.h"
 
 /* --------------------------------------------------------------------------
  * Operator screens for MANUAL (stage 5, simulator v63): Valve, Calibrate
@@ -16,35 +17,15 @@
  * ui.c, on every screen.
  * ------------------------------------------------------------------------ */
 
-// Close, Open, -5 % and +5 % work before a calibration too (by steps);
-// Go to, Fully close and Fully open need the zero.
-static const char *why_no_steps(void)
+// Every move needs the valve homed or its position set (Ryan, 24 Oct:
+// moves before homing were unclear). Motor override still moves it.
+static const char *why_not_manual(void)
 {
     if (valve_motion_blocked()) return "Reset the fault first";
     if (valve_mode() == VALVE_CALIBRATING) return "Homing: STOP to cancel";
     if (valve_auto()) return "Switch to MANUAL first";
+    if (valve_mode() != VALVE_MANUAL) return "Home the valve or set its position first";
     return NULL;
-}
-
-static const char *why_not_manual(void)
-{
-    const char *why = why_no_steps();
-    if (why) return why;
-    if (valve_mode() != VALVE_MANUAL) return "Home the valve first";
-    return NULL;
-}
-
-// Before a calibration: a move by steps (d in 0.1 % of the travel).
-static bool vp_steps(int32_t d)
-{
-    const char *why = why_no_steps();
-    if (!why && d < 0 && limit_open_now())
-        why = "Limit switch pressed, cannot close";
-    if (!why && !valve_move_steps((int32_t)((int64_t)d * valve_pos_max() / 1000), &why))
-        why = "Limit switch pressed, cannot close";
-    if (why)
-        ui_msg(why);
-    return why == NULL;
 }
 
 static void reset_cb(lv_event_t *e)
@@ -89,8 +70,8 @@ static const char *const valve_help =
     "-5 %, +5 %: step from where the valve is going.\n"
     "Go to: 0 closed to 100 open.\n"
     "Fully close, Fully open: to 0 % or 100 %.\n\n"
-    "Moves only with no fault. Before homing Close, Open, -5 % and +5 % still move, by steps "
-    "(5 % of the travel setting); Go to, Fully close and Fully open need the valve homed.\n"
+    "Moves only with no fault, and only once the valve is homed or its position is set. "
+    "Before that the screen is greyed: home the valve or set its position from Home or Valve homing.\n"
     "The limit switch stops any closing move.\n"
     "STOP holds the valve where it is.";
 
@@ -110,10 +91,7 @@ static bool vp_goto(int32_t pct10)
 static void jog_press(lv_event_t *e)
 {
     bool open = lv_event_get_user_data(e) != NULL;
-    if (valve_mode() == VALVE_NOT_CAL)
-        vp.jog = vp_steps(open ? 1000 : -1000);   // a full travel; let go to stop
-    else
-        vp.jog = vp_goto(open ? 1000 : 0);
+    vp.jog = vp_goto(open ? 1000 : 0);
 }
 
 // The hold stays marked until the ramp-down ends (valve_refresh clears it):
@@ -130,11 +108,8 @@ static void step_cb(lv_event_t *e)
     int32_t d = (int32_t)(intptr_t)lv_event_get_user_data(e);
     bool jog = vp.jog;
     vp.jog = false;   // a new move has its own target
-    if (valve_mode() == VALVE_NOT_CAL)
-        vp_steps(d);
-    else
-        // From where a move will end; a hold's end (0 or 100 %) is not one.
-        vp_goto((stepper3_busy() && !jog ? valve_target_pct10() : valve_pct10()) + d);
+    // From where a move will end; a hold's end (0 or 100 %) is not one.
+    vp_goto((stepper3_busy() && !jog ? valve_target_pct10() : valve_pct10()) + d);
 }
 
 static bool goto_set(int32_t v100, const char **why)
@@ -289,9 +264,9 @@ static void valve_refresh(void)
     ui_set_color(vp.p, ok ? UI_TEXT : UI_FAULT);
     bar_width(vp.pfill, ok ? ui_log_px(clicks_state()->p_mmbar, 128) : 0);   // log, 0.1 to 1000 mB
     valve_fast();
-    bool on = why_not_manual() == NULL, steps = why_no_steps() == NULL;
+    bool on = why_not_manual() == NULL;
     for (int i = 0; i < 8; i++)
-        ui_btn_enable(vp.btn[i], i < 6 ? steps : on);
+        ui_btn_enable(vp.btn[i], on);
     // The Go to card: live (underline, chevron) when a tap opens the
     // keypad; flat otherwise. In AUTO a tap asks Switch to MANUAL.
     if (on != vp.go_live) {
@@ -311,35 +286,23 @@ const ui_screen_t ui_scr_valve = { "Valve", valve_build, valve_refresh, valve_fa
  * Calibrate valve
  * ------------------------------------------------------------------------ */
 static struct {
-    lv_obj_t *seg[2], *page[2];
-    lv_obj_t *state, *v, *seat, *start;
-    lv_obj_t *tile[3], *tcap[3], *tval[3], *time;
-    lv_obj_t *closed, *enter, *saved, *how;
+    lv_obj_t *state, *turns, *start, *closed, *enter, *saved;
 } cp;
-static int cp_tab;
 
-/* Two tabs (Ryan, 23 Oct: homing and setting the position from what you
- * know are two jobs). Top row on both: the tabs, Motor steps, Help.
- *   Home          Homing state, Limit switch, Start homing; the three
- *                 steps, Time
- *   Set position  Set as closed, Enter %; Use saved, how the position
- *                 was last set */
+/* One page (Ryan, 24 Oct: no tabs, less homing detail). Row 1 the valve's
+ * state, turns and Help; then Home valve and the three ways to set the
+ * position. */
 static const char *const calib_help =
-    "Home finds 0 % at the limit switch in three steps: 1 fast close to the switch, "
-    "2 back off it, 3 slow close onto it. The step running is filled dark; "
-    "Motor, steps counts the motor as it moves; Time counts up, then shows how long it took.\n"
-    "Takes up to a few minutes. STOP cancels it.\n\n"
+    "Home valve finds 0 % on the limit switch: a fast close to the switch, a back-off, "
+    "then a slow close onto it. Takes up to a few minutes. STOP cancels it.\n\n"
+    "Set as 0 %, Set as other % and Use last saved record a position without moving the valve. "
+    "They are not verified against the limit switch.\n"
+    "Set as 0 %: use only when the valve is known to be seated.\n"
+    "Set as other %: use when the position is known, for example from the previous run.\n"
+    "Use last saved: the position stored before power was lost. Available after start-up "
+    "until the valve moves or is homed.\n\n"
     "F-03 switch not found, F-04 switch stuck: check the switch and its wire, "
     "reset the fault, home again.";
-
-static const char *const setpos_help =
-    "Set position takes the position from you, without moving the valve and without "
-    "checking it against the limit switch.\n"
-    "Set as closed: the valve is known to be seated.\n"
-    "Enter %: you know where it is, for example from the last run.\n"
-    "Use saved: the position saved before power was lost, offered after start-up "
-    "until the valve moves or is homed.\n"
-    "Home the valve when you can: only homing checks the position.";
 
 static void start_cb(lv_event_t *e)
 {
@@ -357,10 +320,10 @@ static void start_cb(lv_event_t *e)
 static void calib_help_cb(lv_event_t *e)
 {
     (void)e;
-    ui_text_view(cp_tab ? "Set position" : "Valve homing", cp_tab ? setpos_help : calib_help);
+    ui_text_view("Valve homing", calib_help);
 }
 
-// Set position: the same guards as Start homing, then the list's actions.
+// Set position: the same guards as Home valve, then the list's actions.
 static const char *setpos_why(void)
 {
     if (valve_mode() == VALVE_CALIBRATING) return "Homing: STOP to cancel";
@@ -380,174 +343,63 @@ static void setpos_cb(lv_event_t *e)
     ui_set_position_pick((int)(intptr_t)lv_event_get_user_data(e));
 }
 
-// Limit switch at 50 Hz, as on Diagnostics.
-static void calib_switch(lv_timer_t *t)
-{
-    (void)t;
-    ui_set_text(cp.seat, limit_open_now() ? "Pressed" : "Released");
-}
-
 static void timer_deleted(lv_event_t *e)
 {
     lv_timer_delete(lv_event_get_user_data(e));
 }
 
-static void tab_draw(void)
-{
-    for (int i = 0; i < 2; i++) {
-        bool on = i == cp_tab;
-        lv_obj_set_style_bg_opa(cp.seg[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        ui_set_color(lv_obj_get_child(cp.seg[i], 0), on ? UI_TEXT : UI_MUTED);
-        if (on)
-            lv_obj_remove_flag(cp.page[i], LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_add_flag(cp.page[i], LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
-static void tab_cb(lv_event_t *e)
-{
-    cp_tab = (int)(intptr_t)lv_event_get_user_data(e);
-    tab_draw();
-}
-
-// A tab's page: rows 2 and 3, clear of the header and the top row.
-static lv_obj_t *calib_page(lv_obj_t *scr)
-{
-    lv_obj_t *pg = lv_obj_create(scr);
-    lv_obj_remove_style_all(pg);
-    lv_obj_remove_flag(pg, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(pg, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(pg, 0, 104);
-    lv_obj_set_size(pg, 480, 104);
-    return pg;
-}
-
 static void calib_build(lv_obj_t *scr)
 {
     memset(&cp, 0, sizeof cp);
-    // Opens on Set position when the valve was set rather than homed.
-    valve_ref_t how = valve_reference();
-    cp_tab = how == VALVE_REF_HAND || how == VALVE_REF_SAVED;
-
-    // Top row: tabs as Valve setup's, Motor steps, Help.
-    static const char *const tabs[2] = { "Home", "Set position" };
-    lv_obj_t *t = ui_card(scr, 10, 48, 226, 48);
-    lv_obj_set_style_bg_color(t, lv_color_hex(0xC3CDD7), 0);
-    lv_obj_set_style_border_width(t, 0, 0);
-    lv_obj_set_style_radius(t, 6, 0);
-    for (int i = 0; i < 2; i++) {
-        lv_obj_t *b = ui_card(t, 4 + i * 109, 4, 109, 40);
-        lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_radius(b, 4, 0);
-        lv_obj_set_style_border_width(b, 0, 0);
-        lv_obj_set_style_shadow_width(b, 0, 0);
-        lv_obj_t *l = ui_label(b, 0, 0, 109, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, tabs[i]);
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_add_event_cb(b, tab_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-        cp.seg[i] = b;
-    }
-    cp.v = ui_info(scr, 244, 48, 109, 48, "Motor, steps");
-    right(cp.v);
+    cp.state = ui_info(scr, 10, 48, 226, 48, "Valve");
+    cp.turns = ui_info(scr, 244, 48, 109, 48, "Turns");
+    right(cp.turns);
     ui_btn(scr, 361, 48, 109, 48, UI_NAV, "Help", calib_help_cb, NULL);
-
-    // Home.
-    lv_obj_t *p = cp.page[0] = calib_page(scr);
-    cp.state = ui_info(p, 10, 0, 226, 48, "Homing");
-    cp.seat = ui_info(p, 244, 0, 109, 48, "Limit switch");
-    cp.start = ui_btn(p, 361, 0, 109, 48, UI_PRIMARY, "Start homing", start_cb, NULL);
-    // The three steps as one card split in three, the one running filled
-    // dark (Ryan, 16 Oct: the row should read as one sequence).
-    static const char *const cap[3] = { "1 Fast close", "2 Back off", "3 Slow close" };
-    lv_obj_t *steps = ui_card(p, 10, 56, 343, 48);
-    lv_obj_set_style_clip_corner(steps, true, 0);
-    for (int i = 0; i < 3; i++) {
-        cp.tval[i] = ui_info(steps, i * 114 + (i > 1), 0, i == 1 ? 115 : 114, 48, cap[i]);
-        cp.tile[i] = lv_obj_get_parent(cp.tval[i]);
-        cp.tcap[i] = lv_obj_get_child(cp.tile[i], 0);
-        lv_obj_set_style_radius(cp.tile[i], 0, 0);
-        if (i) {
-            lv_obj_set_style_border_side(cp.tile[i], LV_BORDER_SIDE_LEFT, 0);
-            lv_obj_set_style_border_width(cp.tile[i], 1, 0);
-            lv_obj_set_style_border_color(cp.tile[i], UI_TICK, 0);
-        }
-    }
-    // Time into the homing, then how long the last one took.
-    cp.time = ui_info(p, 361, 56, 109, 48, "Time taken");
-
-    // Set position: no move, not checked against the switch.
-    p = cp.page[1] = calib_page(scr);
-    cp.closed = ui_btn(p, 10, 0, 226, 48, UI_SECONDARY, "Set as closed", setpos_cb, (void *)(intptr_t)0);
-    cp.enter = ui_btn(p, 244, 0, 226, 48, UI_SECONDARY, "Enter %", setpos_cb, (void *)(intptr_t)1);
-    cp.saved = ui_btn(p, 10, 56, 226, 48, UI_SECONDARY, "Use saved", setpos_cb, (void *)(intptr_t)2);
-    cp.how = ui_info(p, 244, 56, 226, 48, "Position from");
-
-    lv_timer_t *tm = lv_timer_create(calib_switch, 20, NULL);
-    lv_obj_add_event_cb(scr, timer_deleted, LV_EVENT_DELETE, tm);
-    calib_switch(tm);
-    tab_draw();
+    // Ryan, 24 Oct: set positions on the left, Home valve and Use last
+    // saved on the right.
+    cp.closed = ui_btn(scr, 10, 104, 226, 48, UI_SECONDARY, "Set as 0 %", setpos_cb, (void *)(intptr_t)0);
+    cp.start = ui_btn(scr, 244, 104, 226, 48, UI_PRIMARY, "Home valve", start_cb, NULL);
+    cp.enter = ui_btn(scr, 10, 160, 226, 48, UI_SECONDARY, "Set as other %", setpos_cb, (void *)(intptr_t)1);
+    cp.saved = ui_btn(scr, 244, 160, 226, 48, UI_SECONDARY, "Use last saved", setpos_cb, (void *)(intptr_t)2);
 }
 
-// Step count at 10 Hz: it moves in every step, where the valve % cannot.
+// Motor turns from closed at 10 Hz (Ryan, 24 Oct: turns read more
+// plainly than steps); counts through every homing stage.
 static void calib_fast(void)
 {
     char buf[16];
-    lv_snprintf(buf, sizeof buf, "%ld", (long)stepper3_position());
-    ui_set_text(cp.v, buf);
-}
-
-static void tile_set(int i, int state)   // 0 waiting, 1 running, 2 done
-{
-    static const char *const word[3] = { "--", "Moving", "Done" };
-    lv_color_t bg = state == 1 ? UI_TEXT : UI_CARD;
-    ui_set_text(cp.tval[i], word[state]);
-    if (!lv_color_eq(lv_obj_get_style_bg_color(cp.tile[i], 0), bg)) {
-        lv_obj_set_style_bg_color(cp.tile[i], bg, 0);
-        lv_obj_set_style_text_color(cp.tcap[i], state == 1 ? lv_color_white() : UI_MUTED, 0);
-        lv_obj_set_style_text_color(cp.tval[i], state == 1 ? lv_color_white() : UI_TEXT, 0);
-    }
+    int64_t full = (int64_t)stepper3_position() / stepper3_scale();
+    ui_set_text(cp.turns, fixed_fmt(buf, sizeof buf, fixed_round(full * 1000 / STEPPER3_STEPS_PER_TURN, 1), 2));
 }
 
 static void calib_refresh(void)
 {
-    char w[24], d[20];
+    char w[24], d[20], st[48];
     bool calib = valve_mode() == VALVE_CALIBRATING;
     int step = valve_cal_step();
     valve_ref_t how = valve_reference();
-    static const char *const doing[4] = { "Moving off the switch", "Fast close to switch",
-                                          "Backing off switch", "Slow close to switch" };
-    // Homing: what runs, else when it was last homed (this power-up).
+    static const char *const doing[4] = { "Homing: off the switch", "Homing 1/3: fast close",
+                                          "Homing 2/3: backing off", "Homing 3/3: slow close" };
     uint32_t age = 0, took = 0;
     bool ran = valve_last_cal(&age, &took);
     const char *iso = valve_last_cal_iso();
     const char *when = !ran ? NULL : iso[0] ? ui_date(d, sizeof d, iso) : ui_when(w, sizeof w, age);
-    char st[40];
     if (calib)
-        lv_strlcpy(st, doing[step < 0 ? 0 : step], sizeof st);
+        lv_strlcpy(st, doing[step < 0 ? 0 : step > 3 ? 3 : step], sizeof st);
     else if (how == VALVE_REF_HOMED && when)
         lv_snprintf(st, sizeof st, "Homed %s", when);
-    else if (how == VALVE_REF_HAND || how == VALVE_REF_SAVED)
-        lv_strlcpy(st, "Not homed, position set", sizeof st);
+    else if (how == VALVE_REF_HAND)
+        lv_strlcpy(st, "Not homed, entered", sizeof st);
+    else if (how == VALVE_REF_SAVED)
+        lv_strlcpy(st, "Not homed, last saved", sizeof st);
     else
         lv_strlcpy(st, "Not homed", sizeof st);
     ui_set_text(cp.state, st);
-    for (int i = 0; i < 3; i++)
-        tile_set(i, calib ? (step > i + 1 ? 2 : step == i + 1 ? 1 : 0) : how == VALVE_REF_HOMED && ran ? 2 : 0);
-    char tm[16];
-    uint32_t s = calib ? valve_cal_elapsed_s() : took;
-    if (calib || (ran && how == VALVE_REF_HOMED))
-        lv_snprintf(tm, sizeof tm, "%lu:%02lu", (unsigned long)(s / 60), (unsigned long)(s % 60));
-    else
-        lv_strlcpy(tm, "--", sizeof tm);
-    ui_set_text(cp.time, tm);
     calib_fast();
-    ui_btn_text(cp.start, calib ? "Homing" : "Start homing", NULL);
+    ui_btn_text(cp.start, calib ? "Homing" : "Home valve", NULL);
     ui_btn_enable(cp.start, !calib && !valve_motion_blocked() && !valve_auto());
 
-    // Set position.
     bool can = !setpos_why();
-    ui_btn_text(cp.closed, "Set as closed", "0 %, valve seated");
-    ui_btn_text(cp.enter, "Enter %", "Type where it is");
     int32_t q;
     bool offer = valvepos_offer(&q);
     char v[16], sv[32];
@@ -556,12 +408,10 @@ static void calib_refresh(void)
         ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
         lv_snprintf(sv, sizeof sv, "%s %%", v);
     }
-    ui_btn_text(cp.saved, "Use saved", offer ? sv : "None on offer");
+    ui_btn_text(cp.saved, "Use last saved", offer ? sv : NULL);
     ui_btn_enable(cp.closed, can);
     ui_btn_enable(cp.enter, can);
     ui_btn_enable(cp.saved, can && offer);
-    static const char *const from[4] = { "Not set", "Homing", "You, not checked", "Saved, not checked" };
-    ui_set_text(cp.how, calib ? "Homing" : from[how]);
     ui_status_line();
 }
 
