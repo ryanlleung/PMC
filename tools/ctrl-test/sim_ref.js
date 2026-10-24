@@ -1,4 +1,5 @@
-// The reference numbers in test_ctrl.c, from the simulator itself: node sim_ref.js (Playwright,
+// The reference numbers in test_ctrl.c, from the JavaScript simulator v62/v63 (from 0.11.38
+// simulator/index.html is the firmware build: run this against git show 3345851:simulator/index.html): node sim_ref.js (Playwright,
 // seeded Math.random as simulator/tests). The first block of numbers came from the same cases run in
 // sequence (closed to 5, 4.5, 10, then 5 7 3 5, then helium off).
 const { chromium } = require('playwright');

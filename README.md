@@ -15,7 +15,7 @@ Two hardware options are being built and compared; neither is final:
 - **Option C (this repository):** a MikroE Mikromedia 4 (STM32F407) touchscreen board with Click boards for the stepper driver, the Druck excitation and the Druck reading. All control and the screens are in this firmware.
 - **Option A:** a Eurotherm EPC3008 controller with an Applied Motion STF06-R stepper drive in Modbus position mode. The EPC runs the PID and writes the valve target to the drive over RS-485. Not in this repository.
 
-`simulator/` holds the screen simulator (HTML) the firmware screens are ported from.
+`simulator/` holds the simulator: this firmware compiled to WebAssembly, run in a browser over a simulated bench (`simulator/README.md`).
 
 ## This repository
 
@@ -251,5 +251,5 @@ The settings commands (`RATE` to `ORDER`, and `ZERO`) answer `ERR busy, MOT STOP
 
 ## Related documents
 
-- `simulator/README.md`: the screen simulator and its history.
+- `simulator/README.md`: the simulator (the firmware in a browser), how to rebuild it, and the history of the JavaScript simulator the screens were designed in.
 - Project documents (outside the repository): Control Logic, MM4 Design Description, Firmware Porting Plan, Firmware Guide, and the bench-test notes for each stage (`notes/stageN-bench-test.md` in the project files).
