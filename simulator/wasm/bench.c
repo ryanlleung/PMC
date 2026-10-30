@@ -214,14 +214,6 @@ void bench_read(int32_t *raw_shunt, int32_t *raw_bus, int16_t *raw_temp)
     *raw_temp = (int16_t)lround((B.die_c + gauss() * 0.05) / 0.0078125);
 }
 
-int bench_supply_adc(void)
-{
-    // PA3 through the 30k/7.5k divider, VDDA 3.3 V, 12 bit.
-    double v = B.supply_v / 5.0 + gauss() * 0.0005;
-    int raw = (int)lround(v / 3.3 * 4095);
-    return raw < 0 ? 0 : raw > 4095 ? 4095 : raw;
-}
-
 /* ---- set-up and time ------------------------------------------------------ */
 void bench_init(void)
 {
@@ -239,6 +231,8 @@ void bench_init(void)
     B.he = B.pump = B.coupled = B.druck = B.pm = true;
     B.exc_v = 10.051;
     B.room_mbar = 1013.2;
+    B.baro = true;
+    B.baro_err = 0;
     B.supply_v = 12.1;
     B.die_c = 31.0;
     B.early_half = 2 * 600;

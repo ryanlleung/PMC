@@ -29,7 +29,8 @@
  *   CAL?                       show the active calibration
  *   CAL VAC [mbar]             vacuum point: average the live ratio over 5
  *                              readings; pressure 0 unless given
- *   CAL AIR <mbar>             air point, same, at the given room pressure
+ *   CAL AIR [mbar]             air point, same, at the given room pressure
+ *                              (the Pressure 21 reading if none, 0.14.0)
  *                              (once both are held the table is applied,
  *                              RAM only; either can be redone alone)
  *   CAL NEW <id text>          start an entered table (id up to 23 chars)
@@ -102,7 +103,9 @@ int cal_capture_left(void);
 // The running capture: 0 none, 1 vacuum, 2 air.
 int cal_capturing(void);
 // Starts a bench capture (1 vacuum, 2 air) at p_mmbar, as CAL VAC / CAL AIR.
-// False with *why if refused.
+// An air point at CAL_P_BARO takes the Pressure 21's reading, averaged
+// over the same readings (0.14.0). False with *why if refused.
+#define CAL_P_BARO (-1)
 bool cal_capture(int what, int32_t p_mmbar, const char **why);
 typedef struct { bool have; int32_t r_ppb, p_mmbar; } cal_point_t;
 // The bench points held for the sensor in use (captured, or from its table).

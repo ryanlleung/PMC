@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /**
- * @brief Needle-valve stepper on the Stepper 3 Click (S1, ULN2003, unipolar).
+ * @brief Needle-valve stepper on the Stepper 3 Click (S2, ULN2003, unipolar).
  *
  * The ULN2003 only switches the four coil ends to ground; the step sequence
  * comes from here. Steps are timed by TIM7 (interrupt per step), so the
@@ -17,7 +17,7 @@
  *
  * Direction convention: positive steps open the valve, negative close it.
  * MOT DIR flips the sequence if the wiring turns the other way. Before every
- * closing step the limit input is read (NC contact on PD13, open = stop):
+ * closing step the limit input is read (NC contact on PD5, open = stop):
  * it is the closing stop (limit.c, PMC_LIMIT_STOP).
  *
  * Commands over the link, one per line, replies end with OK or ERR:

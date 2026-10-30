@@ -1497,8 +1497,9 @@ static const char *cs_help(void)
            "is inside it.\n"
            "Capture vacuum: pump the sensor down, then Capture. Nothing to type: the point is 0 mB (Not 0 mB "
            "if a gauge reads more).\n"
-           "Capture air: vent the sensor to the room, then type the lab barometer reading in mB, for example "
-           "1013.2.\n"
+           "Capture air: vent the sensor to the room, then Capture. The room pressure comes from the room "
+           "sensor (Pressure 21) when it is fitted; Enter value takes a lab barometer reading in mB instead, "
+           "for example 1013.2.\n"
            "Each capture averages 5 readings. Either point can be redone on its own; the other is kept.\n"
            "Signal: the Druck output over its excitation, in mV/V.\n"
            "Saved cal: the pressure from the saved calibration. Captured: the pressure from the points "
@@ -1563,16 +1564,34 @@ static bool cs_air_set(int32_t v10, const char **why)
     return true;
 }
 
+static void cs_air_typed(void)
+{
+    ui_kp_t k = { .title = "Barometer reading, mB", .info = "Vent sensor to room air first", .dec = 1,
+                  .min = 5000, .max = 11000, .live_label = "Now, mB", .live_milli = now_milli, .live_dec = 1,
+                  .on_set = cs_air_set };
+    ui_keypad_ex(&k);
+}
+
+static void cs_air_baro(void) { cs_start(2, CAL_P_BARO); }
+
 static void air_cb(lv_event_t *e)
 {
     if (ui_btn_disabled(e)) {
         ui_msg(cal_capturing() ? "A capture is running" : "No pressure signal");
         return;
     }
-    ui_kp_t k = { .title = "Barometer reading, mB", .info = "Vent sensor to room air first", .dec = 1,
-                  .min = 5000, .max = 11000, .live_label = "Now, mB", .live_milli = now_milli, .live_dec = 1,
-                  .on_set = cs_air_set };
-    ui_keypad_ex(&k);
+    // With the Pressure 21 fitted the room pressure is read, not typed
+    // (0.14.0); Enter value keeps the lab barometer possible.
+    const clicks_state_t *s = clicks_state();
+    if (!s->baro_ok) {
+        cs_air_typed();
+        return;
+    }
+    static char q[96];
+    char v[16];
+    lv_snprintf(q, sizeof q, "Sensor open to room air? Capture uses the room sensor, now %s mB.",
+                ui_fmt1(v, sizeof v, s->baro_mmbar));
+    ui_ask(q, "Enter value", cs_air_typed, "Capture", cs_air_baro);
 }
 
 static void cs_build(lv_obj_t *scr)

@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /**
- * @brief Room pressure from a Pressure 21 Click (Bosch BMP581) in S2, on
+ * @brief Room pressure from a Pressure 21 Click (Bosch BMP581) in S1, on
  * the shared I2C2 with the Power Monitor (PMC_BARO in pmc_config.h).
  *
  * Probed at start-up at 0x46 (the Click default, 0x47 with its ADDR jumper

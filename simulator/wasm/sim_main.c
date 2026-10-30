@@ -172,13 +172,13 @@ bool touch_second(int32_t *x, int32_t *y)
     return true;
 }
 
-// No Pressure 21 in the simulator (baro.c is not built): BARO STATUS? as
-// on a board without the Click (BARO? replies BARO NONE).
+// The Pressure 21 is simulated in sim_clicks.c (baro.c is not built; from
+// 0.14.0, before that not fitted): BARO STATUS? as on the board.
 bool baro_command(const char *line)
 {
     if (strcmp(line, "BARO STATUS?") != 0)
         return false;
-    link_printf("S2 Pressure 21: not fitted (simulator)\r\nOK\r\n");
+    link_printf("S1 Pressure 21: %s (simulator)\r\nOK\r\n", B.baro ? "BMP581 found" : "not fitted");
     return true;
 }
 
@@ -198,8 +198,8 @@ static uint32_t tim_cnt, tim_arr_active;
 // Pin state from the last BSRR write on each of the four Stepper 3 outputs.
 static void coils_from_pins(void)
 {
-    static GPIO_TypeDef *const port[4] = { &sim_gpio[0], &sim_gpio[2], &sim_gpio[1], &sim_gpio[3] };
-    static const uint8_t pin[4] = { 4, 2, 12, 12 };
+    static GPIO_TypeDef *const port[4] = { &sim_gpio[1], &sim_gpio[2], &sim_gpio[0], &sim_gpio[3] };
+    static const uint8_t pin[4] = { 0, 3, 15, 13 };   // S2 (0.14.2)
     uint8_t out = 0;
     for (int i = 0; i < 4; i++) {
         uint32_t bsrr = port[i]->BSRR;
@@ -219,15 +219,16 @@ static void coils_from_pins(void)
 
 static void inputs_update(void)
 {
-    if (bench_limit_pin_high()) sim_gpio[3].IDR |= 1UL << 13;
-    else sim_gpio[3].IDR &= ~(1UL << 13);
+    if (bench_limit_pin_high()) sim_gpio[3].IDR |= 1UL << 5;   // PD5, S1 TX (0.14.6)
+    else sim_gpio[3].IDR &= ~(1UL << 5);
 }
 
-// ADC1: IN3 is the motor supply, IN17 VREFINT; a conversion is done at once.
+// ADC1: only IN17 VREFINT (the motor supply on IN3 went in 0.14.3); a
+// conversion is done at once.
 ADC_TypeDef *sim_adc1_access(void)
 {
     sim_adc1.SR |= ADC_SR_EOC;
-    sim_adc1.DR = sim_adc1.SQR3 == 17 ? sim_vrefint_cal : (uint32_t)bench_supply_adc();
+    sim_adc1.DR = sim_adc1.SQR3 == 17 ? sim_vrefint_cal : 0;
     return &sim_adc1;
 }
 
@@ -341,6 +342,8 @@ EXPORT(sim_get) double sim_get(int id)
     case 17: return B.stalled;
     case 18: return B.early_half;
     case 19: return B.room_mbar;
+    case 20: return B.baro;
+    case 21: return B.baro_err;
     case 30: return stepper3_position();
     case 31: return valve_pct_milli();
     default: return 0;
@@ -362,6 +365,8 @@ EXPORT(sim_set) void sim_set(int id, double v)
     case 13: B.die_c = v; break;
     case 18: B.early_half = (int32_t)v; break;
     case 19: B.room_mbar = v; break;
+    case 20: B.baro = v != 0; break;
+    case 21: B.baro_err = v; break;
     case 40: B.P = v; break;
     case 41: B.T = v; break;
     case 42: B.mL = v; break;
@@ -405,7 +410,6 @@ EXPORT(sim_run) void sim_run(int ms)
         touch_poll();
         rtclock_poll();
         limit_poll();
-        supply_poll();
         stepper3_poll();
         valve_task();
         valvepos_task();

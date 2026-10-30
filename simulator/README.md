@@ -10,7 +10,7 @@ From 0.11.38 the simulator runs the mm4 firmware itself. `pmc-wasm.js` is the fi
 | Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so MOT MODE, DIR and ORDER act as on the bench |
 | Needle valve, limit switch | flow-line needle, 16512 steps a turn, seats 30 steps past the switch; switch faults: broken wire, stuck, trips early |
 | Druck through the INA228 | the cryostat flow line (the v63 model, as `tools/ctrl-test/model.c`) read through the 5 % input loading; open to room air for calibration |
-| Boost 10, motor 12 V sense on PA3, INA228 die temperature | bench controls (excitation, supply volts, controller temperature) |
+| Boost 10, motor 12 V supply (the motor stalls without it; the firmware does not sense it from 0.14.3), INA228 die temperature | bench controls (excitation, supply volts, controller temperature) |
 | Serial flash (settings, saved position) | 8 MB in memory, kept in the browser between visits |
 | USB COM port / port 8888 | the console under the screen (the page shows each line sent; the board does not echo) |
 | RTC | the computer's clock at power-up |
@@ -19,7 +19,7 @@ The bench panel switches the helium supply and the rotary pump, unplugs the Druc
 
 ## Building
 
-`wasm/build.sh` rebuilds `pmc-wasm.js` from `InitialTesting/` after a firmware change. It needs zig 0.13 for its WebAssembly C library (`pip install ziglang==0.13.0`; any OS) and a shell. The firmware sources are used as they are, except two sed lines for fixed hardware addresses in `stepper3.c` (NVIC, PRIMASK) and `supply.c` (the VREFINT factory value); the script stops if those lines change. `main.c` is compiled in whole and `sim_run()` repeats its loop body (`wasm/sim_main.c`).
+`wasm/build.sh` rebuilds `pmc-wasm.js` from `InitialTesting/` after a firmware change. It needs zig 0.13 for its WebAssembly C library (`pip install ziglang==0.13.0`; any OS) and a shell. The firmware sources are used as they are, except sed lines for fixed hardware addresses in `stepper3.c` (NVIC, PRIMASK); the script stops if those lines change. `main.c` is compiled in whole and `sim_run()` repeats its loop body (`wasm/sim_main.c`).
 
 The stand-ins are in `wasm/`: `include/` (register structs for GPIO, RCC, TIM7, ADC1, RTC; LVGL configuration = the firmware's heavy `lv_conf.h` without the CCM section), `sim_main.c` (registers, timer, flash, USB serial, display, touch, the page's calls), `sim_clicks.c` (`clicks.c` with readings from the bench), `bench.c` (flow line, motor, switch, Druck, supply).
 

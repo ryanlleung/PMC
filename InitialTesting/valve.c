@@ -8,7 +8,6 @@
 #include "rtclock.h"
 #include "limit.h"
 #include "stepper3.h"
-#include "supply.h"
 #include "pmc_config.h"
 #include "fixed.h"
 #include "cfg.h"
@@ -401,31 +400,6 @@ void valve_init(void)
     update_lock();
 }
 
-/* Motor supply (supply.h). Lost during a move: the count ran on without
- * the valve, so the move stops and the homing is cleared. Off in AUTO,
- * idle: MANUAL (AUTO could not move it); the homing stays. */
-static void supply_check(void)
-{
-    static bool was_off;
-    bool off = supply_off();
-    if (off && !was_off) {
-        bool moving = stepper3_busy() || mode == VALVE_CALIBRATING;
-        if (stepper3_busy())
-            stepper3_stop();
-        ev("SUP", "Motor supply off (%ld mV)%s", (long)supply_mv(), moving ? " during a move" : "");
-        if (moving && (calibrated || mode == VALVE_CALIBRATING))
-            valve_uncalibrate("motor supply lost during a move");
-        if (is_auto()) {
-            mode = VALVE_MANUAL;
-            update_lock();
-            ev("MODE", "Manual: motor supply off");
-        }
-    } else if (!off && was_off) {
-        ev("SUP", "Motor supply on (%ld mV)", (long)supply_mv());
-    }
-    was_off = off;
-}
-
 void valve_task(void)
 {
     evt_dump_task();
@@ -442,7 +416,6 @@ void valve_task(void)
     }
     if (mode == VALVE_CALIBRATING && cal_settling && lv_tick_elaps(cal_settle_from) >= SETTLE_MS)
         cal_settled();
-    supply_check();
 }
 
 /* --------------------------------------------------------------------------
@@ -602,8 +575,6 @@ static void tune_tick(void)
         tune_end("fault latched", false);
     else if (!pv_ok)
         tune_end("no pressure reading", false);
-    else if (supply_off())
-        tune_end("motor supply off", false);
     else if (stepper3_target() != tun_target)
         tune_end("valve moved by another command", false);
     if (!tune_running(&tun))
@@ -630,7 +601,6 @@ static bool tune_begin(float step_pct, const char **why)
     if (!calibrated)                { *why = "Home the valve first"; return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
     if (!pv_ok)                     { *why = "No pressure reading"; return false; }
-    if (supply_off())               { *why = "Motor supply off"; return false; }
     if (tune_running(&tun))         { *why = "Step test running: STOP first"; return false; }
     int32_t at = stepper3_busy() ? stepper3_target() : stepper3_position();
     *why = tune_start(&tun, at, pm(), step_pct, pv_mbar);
@@ -755,8 +725,6 @@ bool valve_start_auto(const char **why)
     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
     ctrl_tune_t k = tune_now();
     *why = ctrl_check(&ctl, &k, calibrated, valve_fault_count() > 0, pv_ok, pv_mbar, range_mbar());
-    if (!*why && supply_off())
-        *why = "Motor supply off";
     if (!*why && switch_far())
         *why = "Limit switch pressed away from the seat";
     if (*why)

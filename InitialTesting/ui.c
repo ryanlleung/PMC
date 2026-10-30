@@ -7,7 +7,6 @@
 #include "stepper3.h"
 #include "valve.h"
 #include "valvepos.h"
-#include "supply.h"
 #include "sense.h"
 #include "motor_screen.h"
 #include "fixed.h"
@@ -910,10 +909,9 @@ static void frame_refresh(void)
     }
     nf_seen = nf;
     // The keypad uses the strip's row; an empty line (Home, idle) hides it.
-    supply_state_t sup = supply_state();
     int32_t die_mc;
     bool hot = sense_hot(&die_mc);
-    bool quiet = !msg_until && !nf && !stepper3_override() && sup == SUPPLY_OK && !hot && !line_text[0];
+    bool quiet = !msg_until && !nf && !stepper3_override() && !hot && !line_text[0];
     show(strip, (!overlay || !kp_open) && !quiet);
     char buf[96];
     if (msg_until) {
@@ -935,16 +933,6 @@ static void frame_refresh(void)
         strip_draw(UI_STRIP_WARN, NULL, stepper3_busy() ? "Limit override: closing past the switch"
                                                         : "Limit override armed: the next close ignores the switch",
                    false, false);
-    } else if (sup != SUPPLY_OK) {
-        // On every screen while it lasts (supply.h); OFF blocks moves.
-        char v[16];
-        int32_t mv = supply_mv();
-        ui_fmt1(v, sizeof v, mv < 0 ? 0 : mv);
-        if (sup == SUPPLY_OFF)
-            lv_snprintf(buf, sizeof buf, "Motor supply off (%s V): moves blocked", v);
-        else
-            lv_snprintf(buf, sizeof buf, "Motor supply %s, %s V", sup == SUPPLY_LOW ? "low" : "high", v);
-        strip_draw(UI_STRIP_WARN, NULL, buf, false, false);
     } else if (hot) {
         char v[16];
         lv_snprintf(buf, sizeof buf, "W-3 Controller hot, %s \xC2\xB0" "C", ui_fmt1(v, sizeof v, die_mc));

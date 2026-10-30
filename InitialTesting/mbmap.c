@@ -9,7 +9,6 @@
 #include "modbus.h"
 #include "sense.h"
 #include "stepper3.h"
-#include "supply.h"
 #include "valve.h"
 
 /* --------------------------------------------------------------------------
@@ -92,7 +91,7 @@ void mbmap_begin(void)
     if (w || hot || valve_question(NULL))      st |= 1u << ST_WARNING;
     if (sp_set)                                st |= 1u << ST_TARGET_SET;
     if (mbmap_writes_allowed())                st |= 1u << ST_WRITES;
-    if (!supply_off())                         st |= 1u << ST_MOTOR_SUPPLY;
+    st |= 1u << ST_MOTOR_SUPPLY;   // no supply sense from 0.14.3: kept at 1 so the map does not change
 
     static const char *const ftag[] = { "F-1", "F-2", "F-3", "F-4", "F-5", "F-6" };
     uint16_t f = 0;

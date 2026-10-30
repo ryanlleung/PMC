@@ -54,7 +54,6 @@ int32_t valve_pct_milli(void) { return pos_milli; }
 int32_t valve_target_pct_milli(void) { return goto_milli; }
 bool stepper3_busy(void) { return busy; }
 bool stepper3_limit_open(void) { return limit_open; }
-bool supply_off(void) { return false; }
 bool cfg_remote(void) { return remote; }
 bool sense_hot(int32_t *d) { *d = cs.die_mc; return cs.die_mc >= 55000; }
 uint32_t lv_tick_get(void) { return 123456789u; }   // 123456 s up

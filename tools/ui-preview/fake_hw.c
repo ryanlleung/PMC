@@ -196,18 +196,6 @@ void fake_hw_rise(int t)
     fixed_fmt(value, sizeof value, fixed_round(st.p_mmbar, 1), 2);
 }
 
-// Motor supply (supply.h): 12.1 V unless a scenario sets it.
-#include "supply.h"
-int32_t fake_sup_mv = 12100;
-int32_t supply_mv(void) { return fake_sup_mv; }
-supply_state_t supply_state(void)
-{
-    return fake_sup_mv < SUPPLY_OFF_MV ? SUPPLY_OFF : fake_sup_mv < SUPPLY_LOW_MV ? SUPPLY_LOW
-         : fake_sup_mv > SUPPLY_HIGH_MV ? SUPPLY_HIGH : SUPPLY_OK;
-}
-bool supply_off(void) { return supply_state() == SUPPLY_OFF; }
-bool supply_fitted(void) { return true; }
-
 // W-3 (sense.h): set by the "hot" scenario.
 bool fake_hot;
 bool sense_hot(int32_t *die_mc) { *die_mc = 57300; return fake_hot; }

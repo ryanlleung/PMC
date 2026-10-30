@@ -1,5 +1,4 @@
 #include <string.h>
-#include "supply.h"
 
 #include "lvgl.h"
 #include "clicks.h"
@@ -572,7 +571,7 @@ static void home_refresh(void)
         // Greyed while it would be refused (HMI review H1, 28 Oct); a press
         // still says why.
         ui_btn_text(mode_btn, "Start AUTO", NULL);
-        ui_btn_enable(mode_btn, !valve_fault_count() && !supply_off());
+        ui_btn_enable(mode_btn, !valve_fault_count());
         ui_btn_outline(mode_btn, false);
         ui_btn_primary(mode_btn, true);
     } else if (m == VALVE_AUTO) {
@@ -596,7 +595,6 @@ static void home_refresh(void)
 // (with Reset fault, on every screen from 0.13.19) and messages over it.
 void ui_status_line(void)
 {
-    char buf[32];
     valve_mode_t m = valve_mode();
     int step = valve_cal_step();
     int nf = valve_fault_count();

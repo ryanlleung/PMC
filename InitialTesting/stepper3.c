@@ -8,13 +8,14 @@
 #include "link.h"
 #include "pmc_config.h"
 #include "limit.h"
-#include "supply.h"
 #include "stepper3.h"
 
 /* --------------------------------------------------------------------------
  * Hardware
  *
- * Stepper 3 in socket S1: AN PA4, RST PC2, CS PB12, PWM PD12.
+ * Stepper 3 in socket S2 (S1 to 0.14.1): AN PB0, RST PC3, CS PA15, PWM PD13.
+ * PA15 is JTDI at reset; set as an output it is a plain GPIO (flashing is
+ * over the USB bootloader, not JTAG).
  * These drive ULN2003 inputs 1-4 (high = that output pulls its coil end to ground). The motor centre
  * taps go to the COM terminal, which J1 connects to the external supply
  * (VCC-EXT, 12 V for the Portescap motors).
@@ -33,12 +34,12 @@ typedef struct {
 } out_pin_t;
 
 static const out_pin_t out_pins[4] = {
-    { GPIOA, 4 },    // MIKROBUS_1_AN  -> ULN2003 IN1
-    { GPIOC, 2 },    // MIKROBUS_1_RST -> IN2
-    { GPIOB, 12 },   // MIKROBUS_1_CS  -> IN3
-    { GPIOD, 12 },   // MIKROBUS_1_PWM -> IN4
+    { GPIOB, 0 },    // MIKROBUS_2_AN  -> ULN2003 IN1
+    { GPIOC, 3 },    // MIKROBUS_2_RST -> IN2
+    { GPIOA, 15 },   // MIKROBUS_2_CS  -> IN3
+    { GPIOD, 13 },   // MIKROBUS_2_PWM -> IN4
 };
-#define SOCKET_PINS { MIKROBUS_1_AN, MIKROBUS_1_RST, MIKROBUS_1_CS, MIKROBUS_1_PWM }
+#define SOCKET_PINS { MIKROBUS_2_AN, MIKROBUS_2_RST, MIKROBUS_2_CS, MIKROBUS_2_PWM }
 
 static digital_out_t sdk_pins[4];
 
@@ -390,11 +391,6 @@ from_rest:
         refusal = "limit open, closing move refused";
         return false;
     }
-    // No motor supply: the count would run on with the valve still.
-    if (supply_off()) {
-        refusal = "Motor supply off";
-        return false;
-    }
     // The saved position is withdrawn before anything moves; if it cannot
     // be, nothing moves (a restart would offer a stale count).
     const char *why = NULL;
@@ -544,7 +540,7 @@ const char *stepper3_status(void)
     if (run_state == ST_MOVING)
         lv_snprintf(to, sizeof to, " to %ld", (long)target);
     lv_snprintf(status_text, sizeof status_text,
-                "S1 Stepper 3: %s, pos %ld%s, %s %lu sps, limit %s",
+                "S2 Stepper 3: %s, pos %ld%s, %s %lu sps, limit %s",
                 st, (long)position, to, stepper3_mode_name(mode),
                 (unsigned long)(run_state == ST_MOVING ? move_rate : rate_run),
                 !LIMIT_FITTED ? "stop off (PMC_LIMIT_STOP 0)"

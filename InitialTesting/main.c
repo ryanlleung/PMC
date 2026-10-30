@@ -30,7 +30,6 @@
 #include "cfg.h"
 #include "ui.h"
 #include "limit.h"
-#include "supply.h"
 #include "sense.h"
 #include "valvepos.h"
 #include "trend.h"
@@ -140,7 +139,6 @@ void application_init()
     // when the valve is moved (screen or link).
     clicks_init();
     limit_init();
-    supply_init();   // motor 12 V on PA3
     valve_init();   // NOT HOMED: nothing moves until homed or moved on the screen
     ui_splash_step(40);
     splash_wait(500);
@@ -218,7 +216,6 @@ int main(void)
         touch_poll();
         rtclock_poll();
         limit_poll();
-        supply_poll();
         stepper3_poll();
         valve_task();
         valvepos_task();

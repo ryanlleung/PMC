@@ -7,10 +7,14 @@
 #include "pmc_config.h"
 
 /*
- * Valve limit switch: one dry NC contact between PD13 (S2 PWM) and GND,
- * read with the MCU's internal pull-up. Contact closed pulls the pin low
- * (healthy, valve away from the limit); open (at the limit, or a broken
- * wire) lets it float high. PMC_LIMIT_OPEN_LEVEL flips this for an
+ * Valve limit switch: one dry NC contact between PD5 (S1 TX; 0.14.6, Ryan
+ * 30 Oct) and GND. On the Adapter Click that is IDC10 pad 8, printed RX:
+ * the Adapter names its UART pads from the Click's side, so its RX pad is
+ * the socket's TX (PD5) and its TX pad (pad 7) is the socket's RX (PA3,
+ * read in 0.14.3 to 0.14.5). USART2 is never enabled, so PD5 is a plain
+ * GPIO here. GND is pad 10. Read with the MCU's internal pull-up. Contact closed
+ * pulls the pin low (healthy, valve away from the limit); open (at the
+ * limit, or a broken wire) lets it float high. PMC_LIMIT_OPEN_LEVEL flips this for an
  * inverting interface such as an Opto 2 Click.
  *
  * Treated as the closing stop (fail-safe):
@@ -26,8 +30,8 @@
  * this reports open; with 0 the same state is only displayed.
  */
 #define PMC_LIMIT_PORT      GPIOD
-#define PMC_LIMIT_PIN       13
-#define PMC_LIMIT_PIN_NAME  "PD13 (S2 PWM)"
+#define PMC_LIMIT_PIN       5
+#define PMC_LIMIT_PIN_NAME  "PD5 (S1 TX)"
 
 #define SAMPLE_MS   5
 #define STABLE_N    4          // 20 ms of closed samples before a release counts
@@ -45,7 +49,9 @@ static bool read_open(void)
 
 void limit_init(void)
 {
-    if (PMC_LIMIT_PORT == GPIOD)
+    if (PMC_LIMIT_PORT == GPIOA)
+        RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
+    else if (PMC_LIMIT_PORT == GPIOD)
         RCC->AHB1ENR |= RCC_AHB1ENR_GPIODEN;
     else if (PMC_LIMIT_PORT == GPIOG)
         RCC->AHB1ENR |= RCC_AHB1ENR_GPIOGEN;

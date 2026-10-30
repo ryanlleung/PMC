@@ -57,6 +57,8 @@ static struct {
     int n;
     int64_t sum, sq;                   // ppb, ppb^2 about the first reading
     int32_t first;
+    bool baro;                         // air pressure from the Pressure 21 (0.14.0)
+    int64_t baro_sum;                  // 0.001 mbar
 } cap;
 
 static uint32_t crc32(const void *data, size_t len)
@@ -251,8 +253,9 @@ static void show(void)
  * Bench two-point cal, through the INA228 as wired:
  *   CAL VAC [mbar]   pump the sensor down; pressure taken as 0 unless given
  *                    (0 to 50 mbar)
- *   CAL AIR <mbar>   vent to the room and give the room pressure (500 to
- *                    1100 mbar)
+ *   CAL AIR [mbar]   vent to the room and give the room pressure (500 to
+ *                    1100 mbar); without one, the Pressure 21's reading
+ *                    averaged over the same readings (0.14.0)
  * A number after the pressure (the uncertainty, to 0.11.36) is ignored.
  * Each averages the live ratio over CAPTURE_N readings, then logs a CAL
  * event (the command itself is answered at the start). Once
@@ -266,12 +269,14 @@ static void capture_start(int what, const char *s)
     bool vac = what == 1;
 
     while (*s == ' ') s++;
-    if ((*s || !vac) &&
-        (!fixed_parse(&s, 3, &p) || (vac ? p < 0 || p > 50000 : p < 500000 || p > 1100000))) {
+    bool given = *s;
+    if (given && (!fixed_parse(&s, 3, &p) || (vac ? p < 0 || p > 50000 : p < 500000 || p > 1100000))) {
         link_printf(vac ? "ERR Expected: CAL VAC [mbar 0 to 50]\r\n"
-                        : "ERR Expected: CAL AIR <mbar 500 to 1100>\r\n");
+                        : "ERR Expected: CAL AIR [mbar 500 to 1100]\r\n");
         return;
     }
+    if (!given && !vac)
+        p = CAL_P_BARO;   // the room pressure from the Pressure 21
     const char *why;
     if (!cal_capture(what, (int32_t)p, &why)) {
         link_err(why);
@@ -295,9 +300,12 @@ bool cal_capture(int what, int32_t p_mmbar, const char **why)
     int64_t air_ppb = 1013250LL * 10000000 / cal_default.p_mmbar[1];
     if (what == 1 && s->r_ppb > 500000)              { *why = "not a vacuum: pump the sensor down first"; return false; }
     if (what == 2 && s->r_ppb < air_ppb * 4 / 10)    { *why = "not room air: vent the sensor first"; return false; }
+    bool baro = what == 2 && p_mmbar == CAL_P_BARO;
+    if (baro && !s->baro_ok) { *why = "no room pressure sensor: give the pressure"; return false; }
     memset(&cap, 0, sizeof cap);
     cap.what = what;
     cap.p = p_mmbar;
+    cap.baro = baro;
     return true;
 }
 
@@ -339,6 +347,13 @@ void cal_update(const clicks_state_t *s)
         cap.what = 0;
         return;
     }
+    if (cap.baro && !s->baro_ok) {
+        valve_event("CAL", "Capture stopped: room pressure sensor reading lost");
+        cap.what = 0;
+        return;
+    }
+    if (cap.baro)
+        cap.baro_sum += s->baro_mmbar;
     if (cap.n == 0)
         cap.first = s->r_ppb;
     int64_t d = (int64_t)s->r_ppb - cap.first;
@@ -350,6 +365,8 @@ void cal_update(const clicks_state_t *s)
     int64_t mean = cap.sum / CAPTURE_N;
     int64_t var = (cap.sq - cap.sum * mean) / (CAPTURE_N - 1);
     int32_t r = (int32_t)(cap.first + mean);
+    if (cap.baro)
+        cap.p = (int32_t)((cap.baro_sum + CAPTURE_N / 2) / CAPTURE_N);
     char a[20], b[20];
     fixed_fmt(a, sizeof a, r, 6);
     fixed_fmt(b, sizeof b, isqrt64((uint64_t)(var > 0 ? var : 0)), 6);
@@ -360,7 +377,12 @@ void cal_update(const clicks_state_t *s)
     // The command was answered when the capture started: the result is an
     // EVT line, so nothing late reads as the reply to the next command.
     bool both = bench.have_vac && bench.have_air;
-    valve_event("CAL", "%s point %s mV/V (sd %s over %d readings)%s", vac ? "Vacuum" : "Air", a, b,
+    char rp[40] = "";
+    if (cap.baro) {
+        char m[20];
+        lv_snprintf(rp, sizeof rp, " at %s mbar from the room sensor", fixed_fmt(m, sizeof m, fixed_round(cap.p, 1), 2));
+    }
+    valve_event("CAL", "%s point %s mV/V%s (sd %s over %d readings)%s", vac ? "Vacuum" : "Air", a, rp, b,
                 CAPTURE_N, both ? "" : vac ? ", CAL AIR next" : ", CAL VAC next");
     if (both)
         bench_apply();

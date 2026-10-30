@@ -15,7 +15,7 @@ check('boot sends nothing unasked', s.out === '', s.out);
 
 const screenOnly = ['HELP', '?', 'VALVE?', 'VALVE CAL', 'VALVE CLOSED', 'VALVE SETZERO', 'VALVE POSMAX 70000', 'CTRL?',
   'TUNE STEP', 'TUNE?', 'PID?', 'PID KP 3', 'CAL?', 'CAL VAC', 'CAL PT 1 2', 'CFG?', 'CFG SAVE', 'NET?', 'NET IP DEFAULT',
-  'MOT?', 'MOT MOVE 100', 'MOT OFF', 'LIM?', 'SUP?', 'SENSE?', 'DATA?', 'BARO STATUS?', 'TREND?', 'TREND DUMP 3', 'VER?',
+  'MOT?', 'MOT MOVE 100', 'MOT OFF', 'LIM?', 'SENSE?', 'DATA?', 'BARO STATUS?', 'TREND?', 'TREND DUMP 3', 'VER?',
   'TOUCH?', 'PERF?', 'VALVE SAVED?', 'VALVE RESTORE'];
 const bad = screenOnly.map(c => [c, s.cmd(c, 500)]).filter(([, r]) => r !== 'ERR 100 Unknown command\r\n')
   .map(([c, r]) => c + ' -> ' + JSON.stringify(r));

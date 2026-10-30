@@ -60,7 +60,7 @@ Reading past address 25 answers exception 2, so read 0 to 25 (26 registers) in o
 | 6 | 22 | A warning is showing (W-1 to W-6) |
 | 7 | 23 | Target set |
 | 8 | 24 | Remote writes on (`PMC_MODBUS_WRITE 1` and Remote control On, 0.13.4) |
-| 9 | 25 | Motor 12 V supply on (always 1 without the supply sense) |
+| 9 | 25 | Motor 12 V supply on: always 1 (the supply sense was removed in 0.14.3) |
 
 ### Faults and warnings (registers 5 and 6)
 
