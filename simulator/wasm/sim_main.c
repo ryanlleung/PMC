@@ -177,25 +177,6 @@ bool touch_second(int32_t *x, int32_t *y)
     return true;
 }
 
-// The Pressure 21 is simulated in sim_clicks.c (baro.c is not built; from
-// 0.14.0, before that not fitted): BARO STATUS? as on the board.
-bool baro_command(const char *line)
-{
-    if (strcmp(line, "BARO STATUS?") != 0)
-        return false;
-    link_printf("S1 Pressure 21: %s (simulator)\r\nOK\r\n", B.baro ? "BMP581 found" : "not fitted");
-    return true;
-}
-
-bool touch_command(const char *line)
-{
-    if (strcmp(line, "TOUCH?") != 0)
-        return false;
-    link_printf("TOUCH reads=0 errors=0 last_err=0 presses=%lu now=%s last=%d,%d\r\nOK\r\n",
-                (unsigned long)touch_presses, touch_down ? "pressed" : "released", touch_x, touch_y);
-    return true;
-}
-
 /* ---- the step timer, the coils and the limit and supply inputs ------------ */
 void TIM7_IRQHandler(void);
 static uint32_t tim_cnt, tim_arr_active;
@@ -418,7 +399,6 @@ EXPORT(sim_run) void sim_run(int ms)
         stepper3_poll();
         valve_task();
         valvepos_task();
-        trend_task();
         if (lv_tick_elaps(sense_ms) >= 1000) {
             sense_ms += 1000;
             if (lv_tick_elaps(sense_ms) >= 1000)
@@ -437,3 +417,40 @@ EXPORT(sim_run) void sim_run(int ms)
 EXPORT(sim_version) const char *sim_version(void) { return PMC_FW_VERSION; }
 // The Remote control switch, for tests (the screen's Settings > System).
 EXPORT(sim_remote) void sim_remote(int on) { cfg_set_remote(on != 0); }
+
+/* ---- Test hooks for tests/run.js: what the screens do, called directly.
+ * The board's text port takes the remote command set only, so homing,
+ * calibration and settings reach the firmware here, not as commands. */
+static const char *hook_why = "";
+static int hook(bool ok, const char *why) { hook_why = ok || !why ? "" : why; return ok; }
+EXPORT(sim_why) const char *sim_why(void) { return hook_why; }
+// Home valve (Home on the screen).
+EXPORT(sim_home) int sim_home(void) { const char *w = NULL; return hook(valve_calibrate(&w), w); }
+// Valve position > Set position > Closed.
+EXPORT(sim_set_closed) int sim_set_closed(void) { const char *w = NULL; return hook(valve_set_closed(&w), w); }
+// Calibrate transducer: what 1 vacuum, 2 air; mbar < 0 takes the room sensor.
+EXPORT(sim_cal) int sim_cal(int what, double mbar)
+{
+    const char *w = NULL;
+    return hook(cal_capture(what, mbar < 0 ? CAL_P_BARO : (int32_t)(mbar * 1000.0 + 0.5), &w), w);
+}
+// Save settings with one value changed (key < 0: none), as Review and save.
+EXPORT(sim_save) int sim_save(int key, int value)
+{
+    int32_t v[CFG_N] = {0};
+    bool set[CFG_N] = {0};
+    if (key >= 0 && key < CFG_N) { v[key] = value; set[key] = true; }
+    const char *w = NULL;
+    return hook(cfg_save_with(v, set, &w), w);
+}
+// A live setting (cfg_key_t), INT32_MIN if none.
+EXPORT(sim_setting) int sim_setting(int key)
+{
+    int32_t v;
+    return cfg_value(CFG_FROM_LIVE, (cfg_key_t)key, &v) ? v : INT32_MIN;
+}
+EXPORT(sim_reg) int sim_reg(void) { return (int)valve_regulation(); }   // ctrl_reg_t
+// The saved position offered at start-up, INT32_MIN if none.
+EXPORT(sim_offer) int sim_offer(void) { int32_t c; return valvepos_offer(&c) ? c : INT32_MIN; }
+EXPORT(sim_busy) int sim_busy(void) { return stepper3_busy(); }
+EXPORT(sim_override) int sim_override(void) { return stepper3_override(); }

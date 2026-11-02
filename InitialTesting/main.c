@@ -45,9 +45,6 @@
  */
 extern uint32_t disp_flush_ms, disp_flush_px;
 static uint32_t perf_loops, perf_gap_max, perf_handler_max, perf_last_end;
-#if PMC_ENG_COMMANDS
-static uint32_t perf_since;
-#endif
 
 static void perf_note(uint32_t t0)
 {
@@ -59,31 +56,6 @@ static void perf_note(uint32_t t0)
     perf_loops++;
 }
 
-#if PMC_ENG_COMMANDS
-// PERF? (engineering, remote.c).
-bool perf_command(const char *line)
-{
-    if (strcmp(line, "PERF?") != 0)
-        return false;
-    uint32_t span = lv_tick_elaps(perf_since);
-    lv_mem_monitor_t mem;
-    lv_mem_monitor(&mem);
-    link_printf("PERF over %lu ms: loops=%lu longest_loop_ms=%lu longest_lvgl_ms=%lu "
-                "flush_ms=%lu flush_px=%lu\r\n",
-                (unsigned long)span, (unsigned long)perf_loops, (unsigned long)perf_gap_max,
-                (unsigned long)perf_handler_max, (unsigned long)disp_flush_ms,
-                (unsigned long)disp_flush_px);
-    // LVGL heap: peak is the most ever used since boot, not since the last PERF?.
-    link_printf("HEAP total=%lu used=%lu peak=%lu biggest_free=%lu frag_pct=%u\r\nOK\r\n",
-                (unsigned long)mem.total_size, (unsigned long)(mem.total_size - mem.free_size),
-                (unsigned long)mem.max_used, (unsigned long)mem.free_biggest_size,
-                (unsigned)mem.frag_pct);
-    perf_since = lv_tick_get();
-    perf_loops = perf_gap_max = perf_handler_max = 0;
-    disp_flush_ms = disp_flush_px = 0;
-    return true;
-}
-#endif
 
 /**
  * @brief Initializes board peripherals for display, touch, and LVGL timing.
@@ -218,12 +190,10 @@ int main(void)
     {
         link_task();
 #if PMC_LINK_ETHERNET
-        // A new client does not get the last one's dump: stopped before
-        // valve_task and trend_task write their next lines this pass.
-        if (ethlink_take_new_client()) {
+        // A new client does not get the last one's EVNT? lines: stopped
+        // before valve_task writes its next lines this pass.
+        if (ethlink_take_new_client())
             valve_events_stop();
-            trend_dump_stop();
-        }
 #endif
         touch_poll();
         rtclock_poll();
@@ -231,7 +201,6 @@ int main(void)
         stepper3_poll();
         valve_task();
         valvepos_task();
-        trend_task();
         if (lv_tick_elaps(sense_ms) >= 1000) {
             sense_ms += 1000;
             if (lv_tick_elaps(sense_ms) >= 1000)   // fell behind: no catch-up burst
@@ -239,10 +208,10 @@ int main(void)
             sense_second();
         }
         // The remote command set (remote.c): no echo, one reply line. While
-        // an EVNT? or TREND DUMP is going out a few lines a pass, the next
-        // line waits, so its reply does not land among the dump's lines; for
-        // 0.5 s at most, so a STOP is not held longer than that.
-        bool dumping = valve_events_sending() || trend_dumping();
+        // an EVNT? reply is going out a few lines a pass, the next line
+        // waits, so its reply does not land among those lines; for 0.5 s at
+        // most, so a STOP is not held longer than that.
+        bool dumping = valve_events_sending();
         if (!dumping)
             held_from = lv_tick_get();
         if ((!dumping || lv_tick_elaps(held_from) >= 500) && link_getline(line, sizeof line))

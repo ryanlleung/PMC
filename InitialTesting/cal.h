@@ -24,27 +24,17 @@
  * is used and cal_is_default() is true. An old record from before 0.3.30
  * (versions 1 to 3, CAL ATM era) is not loaded: redo the bench cal.
  *
- * Engineering commands (PMC_ENG_COMMANDS, a bench build); otherwise all of
- * this is on the Calibration screen:
- *   CAL?                       show the active calibration
- *   CAL VAC [mbar]             vacuum point: average the live ratio over 5
- *                              readings; pressure 0 unless given
- *   CAL AIR [mbar]             air point, same, at the given room pressure
- *                              (the Pressure 21 reading if none, 0.14.0)
- *                              (once both are held the table is applied,
- *                              RAM only; either can be redone alone)
- *   CAL NEW <id text>          start an entered table (id up to 23 chars)
- *   CAL PT <mV/V> <mbar>       add a point, ratio ascending
- *   CAL APPLY                  check the entered table and use it (RAM only)
- *   CAL SAVE                   same as CFG SAVE: save all settings, cal included
- *   CAL ERASE                  erase the old record, use nominal and CFG SAVE
- * Replies start with OK or ERR.
+ * The calibration is taken on the Calibrate transducer screen: a vacuum
+ * point and an air point, each the live ratio averaged over 5 readings;
+ * the air point at the Pressure 21 room reading or a typed barometer
+ * reading. Once both are held the table is applied (RAM only, until Save
+ * settings); either can be redone alone.
  */
 
 #define CAL_MAX_POINTS 32
 #define CAL_ID_LEN     24
 
-#define CAL_KIND_TABLE 0   // entered with CAL NEW / PT / APPLY, or nominal
+#define CAL_KIND_TABLE 0   // a table (the nominal one)
 #define CAL_KIND_BENCH 1   // CAL VAC + CAL AIR
 
 #define CAL_CAPTURE_N       5      // readings per bench capture point, one a second (Ryan, 22 Oct: was 10)
@@ -116,7 +106,5 @@ void cal_set_sensor(const char *serial, int32_t fs_mmbar);
 // Pressure for a ratio with a given table (the saved one, for comparison).
 int64_t cal_pressure_with(const cal_rec_t *c, int64_t r_ppb);
 
-// Handles one command line from COM3. Returns false if it is not a CAL command.
-bool cal_command(const char *line);
 
 #endif // _CAL_H_

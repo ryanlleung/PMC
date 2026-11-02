@@ -1,6 +1,6 @@
 // Loads simulator/pmc.wasm in node: the same calls the page makes.
 const fs = require('fs'), path = require('path');
-// file: a .wasm built by wasm/build.sh (out/pmc-op.wasm); else pmc-wasm.js.
+// file: a .wasm built by wasm/build.sh (out/pmc.wasm); else pmc-wasm.js.
 function wasmBytes(file) {
   if (file) return fs.readFileSync(file);
   const js = fs.readFileSync(path.join(__dirname, '..', 'pmc-wasm.js'), 'utf8');
@@ -53,8 +53,22 @@ function load(file) {
       fs.unlinkSync(file + '.raw');
     },
     get: id => x.sim_get(id), set: (id, v) => x.sim_set(id, v),
+    // Test hooks (sim_main.c): what the screens do. The text port takes the
+    // remote command set only, so these reach the firmware directly.
+    why: () => cstr(x.sim_why()),
+    home(ms = 120000) { const ok = x.sim_home(); sim.run(ms); return ok; },
+    setClosed() { const ok = x.sim_set_closed(); sim.run(300); return ok; },
+    cal(what, mbar, ms = 15000) { const ok = x.sim_cal(what, mbar); sim.run(ms); return ok; },   // 1 vacuum, 2 air; mbar < 0: room sensor
+    save(key = -1, value = 0) { const ok = x.sim_save(key, value); sim.run(1000); return ok; },
+    setting: key => x.sim_setting(key),
+    reg: () => x.sim_reg(),            // 0 none, 1 regulating, 2 in band, 3 stable
+    offer: () => x.sim_offer(),        // saved position offered at start-up, or -2147483648
+    busy: () => !!x.sim_busy(), override: () => !!x.sim_override(),
     flash: () => new Uint8Array(x.memory.buffer, x.sim_flash(), x.sim_flash_size()).slice(),
   };
   return sim;
 }
-module.exports = { load };
+// cfg_key_t (InitialTesting/cfg.h), for save() and setting().
+const CFG = { POSMAX: 0, REVERSE: 1, BACKOFF: 2, RETURN: 3, FHOME: 4, FCREEP: 5, RATE: 6, START: 7, ACCEL: 8,
+  KP: 9, TI: 10, OUTMIN: 11, DB: 12, KDIR: 13, BAND: 14, SENSOR: 15 };
+module.exports = { load, CFG };

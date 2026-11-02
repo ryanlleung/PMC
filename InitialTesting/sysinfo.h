@@ -32,7 +32,5 @@ void sysinfo_restart(void);
 // The chip's unique ID, 24 hex digits (the serial in *IDN?).
 const char *sysinfo_chip_id(void);
 
-// Handles "VER?" (engineering). Returns false if the line is not VER?.
-bool sysinfo_command(const char *line);
 
 #endif // _SYSINFO_H_

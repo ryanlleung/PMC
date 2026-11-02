@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision A, 27 October 2026. Firmware 0.12.17.
+Revision B, 2 November 2026. Firmware 0.14.8 (sections not touched by revision B still describe 0.12.17).
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.12.17: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat and for bench users. Engineering commands that bypass the valve's checks are listed but not described step by step.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.12.17: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -213,7 +213,7 @@ From the screen (Menu > Calibrate > Transducer):
 
 Either point can be redone on its own; the other is kept.
 
-The cryostat firmware takes the calibration on the screen only. A bench build (with the engineering commands) can also do it over the text link: CAL VAC (with an optional gauge reading in mbar), CAL AIR followed by the barometer reading (or CAL AIR alone to use the room sensor), CAL? to check, then CAL SAVE. CAL ERASE goes back to nominal and saves. A calibration table of up to 32 points can also be typed in with CAL NEW, CAL PT and CAL APPLY.
+The calibration is taken on the screen only; the text link cannot change it.
 
 Up to four sensors can be kept on one board, each with its own calibration, under Settings > Choose sensor. Add a sensor with its serial number and range in psi, then calibrate it. Only the sensor in use is read.
 
@@ -252,7 +252,7 @@ The event log (Menu > Records > Faults and log) keeps the last 100 events with a
 
 ## 10. Settings
 
-Settings are commissioning items, not daily operation. Edits on the screen are drafts until Save settings, which checks them together and saves all or nothing. The text link does not change settings in the cryostat firmware (a bench build's engineering commands do, live at once and unsaved until CFG SAVE). In AUTO only the control tuning can be saved; anything else answers "Switch to MANUAL first". The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
+Settings are commissioning items, not daily operation. Edits on the screen are drafts until Save settings, which checks them together and saves all or nothing. The text link does not change settings. In AUTO only the control tuning can be saved; anything else answers "Switch to MANUAL first". The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
 
 | Page | Settings | Notes |
 | --- | --- | --- |
@@ -267,7 +267,6 @@ Settings are commissioning items, not daily operation. Edits on the screen are d
 
 Factory defaults for the valve and the loop are for the PK22 344:1 stepper on the Oxford Instruments needle valve. The CF-11 on the bench ran at about 1.6 K with 3 to 8 mbar, the valve around 34 % open, on the Mercury iTC's P 20 % and I 0.1 min. The mm4's equivalent gain and integral time for each cryostat are set at commissioning.
 
-The step test (TUNE STEP, an engineering command of a bench build) moves the valve in MANUAL, records the pressure response and suggests a gain and integral time. It applies nothing. It has not been run on a cryostat (not benched).
 
 ## 11. Remote access
 
@@ -277,7 +276,7 @@ The Ethernet build (the one for the cryostat) runs two servers on one cable and 
 
 The controller asks for an address by DHCP. If no DHCP server answers within 10 s it uses the fallback address: the one saved under Settings > System setup, or the build's default 169.254.10.50/16. The header shows the address in use, or NO CABLE, DHCP..., NET NO CLK or NET NO PHY while it has none. Diagnostics shows the link and the address. The hostname is pmc.
 
-To set the fallback address, type it and the mask on the System page (or NET IP over USB in a bench build), then Save settings and restart. NET IP is refused over the network so a remote user cannot cut off their own link. On a laptop with a fixed address, put the laptop and the fallback address on the same subnet.
+To set the fallback address, type it and the mask on the System page then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. On a laptop with a fixed address, put the laptop and the fallback address on the same subnet.
 
 Ethernet and Modbus were proven on the bench on 26 October 2026 with the laptop on a fixed address.
 
@@ -290,9 +289,9 @@ Port 8888 takes the remote command set in plain text, one command per line (uppe
 | Reading | PRES? the pressure. PRES SP? the target. MODE? MANUAL, AUTO, HOMING or NOT HOMED. VALV? the position; VALV MOVING? 1 while moving or homing. ALRM? the latched faults and the warnings. EVNT? followed by a number, the last events (on a line of its own). BARO? the room pressure. NETW? the address in use. TIME? the clock. *IDN? the identity and firmware version |
 | Control | PRES SP followed by the target in mbar (does not start AUTO). MODE AUTO starts AUTO with the same checks as the screen; MODE MANUAL ends it, the valve stays where it is. VALV SET followed by a % moves the valve in MANUAL. STOP stops the valve and ends AUTO; it is the only stop. ALRM RESET clears the faults whose cause has gone; ALRM OK acknowledges a strip warning. TIME SET 2026-10-27 09:00:00 sets the clock |
 
-Set commands need Remote control On (Settings > System setup); with it Off they answer ERR 211, STOP included. After a STOP on the screen, VALV SET and MODE AUTO answer ERR 212 until Allow is tapped on the strip. Homing, calibration, settings, tuning and the motor are on the touchscreen only. In AUTO, VALV SET answers "Switch to MANUAL first". The error codes and the full table are in the README. A bench build (with the engineering commands) also takes the older commands (VALVE?, CAL VAC, CFG SAVE, MOT, TUNE and others, listed by HELP); the cryostat firmware answers them ERR 100.
+Set commands need Remote control On (Settings > System setup); with it Off they answer ERR 211, STOP included. After a STOP on the screen, VALV SET and MODE AUTO answer ERR 212 until Allow is tapped on the strip. Homing, calibration, settings, tuning and the motor are on the touchscreen only. In AUTO, VALV SET answers "Switch to MANUAL first". The error codes and the full table are in the README. Any other command answers ERR 100.
 
-Tools in the repository: tools/logger/log_druck.py polls the pressure, target, valve, mode and alarms once a second and logs them to CSV, from an IP address or a COM port, and reconnects on its own. tools/cal/druck_cal.py manages the calibration table.
+Tools in the repository: tools/logger/log_druck.py polls the pressure, target, valve, mode and alarms once a second and logs them to CSV, from an IP address or a COM port, and reconnects on its own.
 
 ### Port 502: Modbus TCP
 
@@ -337,7 +336,7 @@ The Modbus read test passed on the bench on 26 October 2026. The write test has 
 
 The controller has no fuse, battery or filter to replace. The real-time clock runs from the board supply; a cell in the BAT1 holder keeps it through a power-off.
 
-If the controller stops responding, the independent watchdog restarts it within about 4 s. The reset cause is shown in red on Diagnostics after a watchdog or brown-out reset (a bench build's VER? reports every cause). The valve does not move after the restart until it is homed or its position is set, and a position saved before the reset is offered.
+If the controller stops responding, the independent watchdog restarts it within about 4 s. The reset cause is shown in red on Diagnostics after a watchdog or brown-out reset. The valve does not move after the restart until it is homed or its position is set, and a position saved before the reset is offered.
 
 ## 13. Items not yet benched
 
@@ -346,9 +345,7 @@ The firmware is a prototype. The items below are in the firmware or the design b
 | Item | State |
 | --- | --- |
 | Pressure 21 Click (room pressure, BARO?) and the air calibration reference from it | Driver built in 0.11.47. Click ordered 15 October, not arrived |
-| Step test (TUNE STEP) | Built in 0.12.7 and 0.12.10 and run on a PC model. Not run on a cryostat |
 | Modbus writes (target, valve going to, coils 0 to 3) | On since 0.12.6. The read test passed 26 October; the write test has not been run |
-| VALVE STOP as the only stop command (CTRL STOP removed), MOT STOP and MOT OFF ending AUTO, CFG SAVE refused in AUTO, CTRL OK | Firmware 0.12.16 and 0.12.17, built 26 October. Passed the simulator tests; not yet flashed and checked on the board |
 | AUTO on a cryostat with the production gain and integral time | AUTO has run on the bench rig against a manual vent valve, and its motion was compared with the Mercury iTC on 26 October. Tuning for each cryostat is still to be set |
 | W-5 Over range and W-6 Driven the wrong way | Checked on the PC control-loop test, not provoked on the bench |
 | Loss of polling from the supervisory system | No behaviour defined yet. Waiting on the owner of that system |
@@ -359,3 +356,4 @@ The firmware is a prototype. The items below are in the firmware or the design b
 | Revision | Date | Change |
 | --- | --- | --- |
 | A | 27 October 2026 | First issue, from firmware 0.12.17 and the design documents listed in the reference block |
+| B | 2 November 2026 | Firmware 0.14.8: the text link takes the remote command set only (engineering commands, the step test and the typed calibration table removed) |

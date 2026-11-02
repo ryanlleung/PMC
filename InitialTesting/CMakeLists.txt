@@ -57,7 +57,6 @@ add_executable(InitialTesting
     trend.c
     ctrl.h
     ctrl.c
-    tune.c
     sense.h
     sense.c
     remote.h

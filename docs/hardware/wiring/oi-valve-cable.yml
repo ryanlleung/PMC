@@ -1,0 +1,57 @@
+# OI needle valve motor cable, existing: valve Fischer 7-pin to Mercury iTC aux I/O 15-way D.
+# Sources: UMC0005 Iss 3 s2.5.2 p.8 (pin pairs), UMC0071 Iss 15 s12.2.3 p.136 (Mercury pin functions).
+# Render: wireviz oi-valve-cable.yml
+
+metadata:
+  title: OI needle valve cable, Fischer 7-pin to Mercury 15-way D
+  pn: PMC-W01
+
+options:
+  fontname: arial
+  bgcolor: WH
+  color_mode: SHORT
+
+connectors:
+  X1:
+    type: Fischer 7-pin, cable end
+    subtype: mates with valve receptacle
+    pinlabels: [COIL, COIL, COIL, COIL, +12V COM, SW, SW]
+    notes: >-
+      Series and gender not given by OI. 102 A056 inferred.<br/>
+      Face: 1 centre, 2 at key, 3-7 round ring.
+  X2:
+    type: D-sub 15 (DA-15)
+    subtype: male plug (Mercury aux I/O is a socket)
+    pinlabels:
+      - OUT BIT0
+      - OUT BIT1
+      - not used
+      - PWM out (not used)
+      - IN K4 GFS sense
+      - IN K6 spare
+      - +5 V
+      - 0 V
+      - OUT BIT2
+      - OUT BIT3
+      - not used
+      - not used
+      - IN K5 spare
+      - IN K7 over-temp
+      - +12 V unreg
+    notes: Pin functions from Mercury UMC0071 p.136.
+
+cables:
+  W1:
+    wirecount: 7
+    wirelabels: [Coil ph 2, Coil ph 1, Coil ph 4, Coil ph 3, +12 V COM, Microswitch, Microswitch]
+    shield: true
+    notes: >-
+      Core colours, gauge and screen termination not documented; check on the lead (screen drawn unterminated).<br/>
+      Coil outputs are open collector: each phase sinks to 0 V, current enters on D15 via the joined centre taps.<br/>
+      Microswitch is NC: D5 (K4 sense) shorted to D7 (+5 V) when off the closed stop.
+
+connections:
+  -
+    - X1: [1, 2, 3, 4, 5, 6, 7]
+    - W1: [1, 2, 3, 4, 5, 6, 7]
+    - X2: [2, 1, 10, 9, 15, 5, 7]

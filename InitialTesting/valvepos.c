@@ -311,32 +311,4 @@ void valvepos_decline(void)
     offer = false;
 }
 
-#if PMC_ENG_COMMANDS
-bool valvepos_command(const char *line)
-{
-    const char *why;
-    if (strcmp(line, "VALVE SAVED?") == 0) {
-        if (!ok)
-            link_printf("VALVE SAVED serial flash not found\r\n");
-        else if (!last.seq)
-            link_printf("VALVE SAVED none\r\n");
-        else
-            link_printf("VALVE SAVED count %ld, %s, entry %lu of sector %lu, %lu writes since boot%s\r\n",
-                        (long)last.count, state_of(&last) == VP_SAFE ? "safe (at standstill)" :
-                        state_of(&last) == VP_MOVING ? "saved while moving" :
-                        state_of(&last) == VP_UNSAFE ? "unsafe (not calibrated)" : "saved under another direction or coil order",
-                        (unsigned long)at, (unsigned long)sector, (unsigned long)writes,
-                        offer ? ", on offer: VALVE RESTORE to use" : "");
-        link_printf("OK\r\n");
-    } else if (strcmp(line, "VALVE RESTORE") == 0) {
-        if (valvepos_use(&why))
-            link_printf("OK position %ld from the saved count\r\n", (long)boot_count);
-        else
-            link_err(why);
-    } else {
-        return false;
-    }
-    return true;
-}
-#endif
 

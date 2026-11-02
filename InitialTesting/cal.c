@@ -31,9 +31,6 @@ static cal_rec_t cal_default = {
 static char sensor_serial[12] = PMC_DRUCK_SERIAL;
 
 static cal_rec_t active;
-#if PMC_ENG_COMMANDS
-static cal_rec_t staging;   // CAL NEW / CAL PT / CAL APPLY
-#endif
 static bool active_is_default = true;
 static bool active_saved;          // active matches what is in flash
 static bool flash_ok;
@@ -209,33 +206,6 @@ int cal_capture_left(void) { return cap.what ? CAPTURE_N - cap.n : 0; }
  * Commands
  * ------------------------------------------------------------------------ */
 
-#if PMC_ENG_COMMANDS   // CAL? and the CAL commands (engineering)
-static void show(void)
-{
-    char r[20], p[20];
-    link_printf("CAL source=%s id=%s points=%lu flash=%s\r\n",
-                      active_is_default ? "default" : active_saved ? "flash" : "ram", active.id,
-                      (unsigned long)active.npts, flash_ok ? "ok" : "missing");
-    if (old_version)
-        link_printf("CAL old v%lu record in flash (CAL ATM era) not loaded: redo the bench cal on the screen\r\n",
-                    (unsigned long)old_version);
-    if (!active_is_default && active.kind == CAL_KIND_BENCH) {
-        fixed_fmt(p, sizeof p, active.p_mmbar[0], 3);
-        link_printf("CAL bench vacuum point %s mbar\r\n", p);
-        fixed_fmt(p, sizeof p, active.p_mmbar[1], 3);
-        link_printf("CAL bench air point %s mbar\r\n", p);
-    } else if (bench.have_vac != bench.have_air) {
-        link_printf("CAL bench %s point captured, %s point still to do\r\n",
-                    bench.have_vac ? "vacuum" : "air", bench.have_vac ? "air" : "vacuum");
-    }
-    for (uint32_t i = 0; i < active.npts; i++) {
-        fixed_fmt(r, sizeof r, active.r_ppb[i], 6);
-        fixed_fmt(p, sizeof p, active.p_mmbar[i], 3);
-        link_printf("CAL point %s mV/V %s mbar\r\n", r, p);
-    }
-    link_printf("OK\r\n");
-}
-#endif
 
 /*
  * Bench two-point cal, through the INA228 as wired:
@@ -250,30 +220,6 @@ static void show(void)
  * both points are held the two-point table is applied (RAM only, then CAL
  * SAVE). Either point can be redone alone; the other is kept.
  */
-#if PMC_ENG_COMMANDS
-static void capture_start(int what, const char *s)
-{
-    int64_t p = 0;
-    bool vac = what == 1;
-
-    while (*s == ' ') s++;
-    bool given = *s;
-    if (given && (!fixed_parse(&s, 3, &p) || (vac ? p < 0 || p > 50000 : p < 500000 || p > 1100000))) {
-        link_printf(vac ? "ERR Expected: CAL VAC [mbar 0 to 50]\r\n"
-                        : "ERR Expected: CAL AIR [mbar 500 to 1100]\r\n");
-        return;
-    }
-    if (!given && !vac)
-        p = CAL_P_BARO;   // the room pressure from the Pressure 21
-    const char *why;
-    if (!cal_capture(what, (int32_t)p, &why)) {
-        link_err(why);
-        return;
-    }
-    link_printf("OK capturing %s point, %d readings, keep the pressure steady\r\n",
-                vac ? "vacuum" : "air", CAPTURE_N);
-}
-#endif
 
 bool cal_capture(int what, int32_t p_mmbar, const char **why)
 {
@@ -376,74 +322,3 @@ void cal_update(const clicks_state_t *s)
         bench_apply();
 }
 
-#if PMC_ENG_COMMANDS
-// Back to nominal: erase the old record too, then save the settings so
-// neither comes back at the next start-up.
-static void erase(void)
-{
-    if (!flash_ok) { link_printf("ERR Serial flash not found\r\n"); return; }
-    if (!extflash_erase_4k(CAL_FLASH_ADDR)) { link_printf("ERR Erase timed out\r\n"); return; }
-    cal_set_default(false);
-    old_version = 0;
-    from_old = false;
-    link_printf("CAL old record erased, using nominal\r\n");
-    cfg_save();
-}
-
-bool cal_command(const char *line)
-{
-    if (strncmp(line, "CAL", 3) != 0)
-        return false;
-    const char *a = line + 3;
-
-    if (strcmp(a, "?") == 0) {
-        show();
-        return true;
-    }
-    if (valve_auto()) {
-        link_printf("ERR Switch to MANUAL first\r\n");   // a cal change moves the reading AUTO uses
-    } else if (strncmp(a, " NEW", 4) == 0) {
-        const char *id = a + 4;
-        while (*id == ' ') id++;
-        memset(&staging, 0, sizeof staging);
-        staging.magic = CAL_MAGIC;
-        staging.version = CAL_VERSION;
-        staging.kind = CAL_KIND_TABLE;
-        lv_strlcpy(staging.id, *id ? id : "unnamed", CAL_ID_LEN);
-        link_printf("OK new %s\r\n", staging.id);
-    } else if (strncmp(a, " PT ", 4) == 0) {
-        const char *s = a + 4;
-        int64_t r, p;
-        if (staging.magic != CAL_MAGIC) { link_printf("ERR CAL NEW first\r\n"); return true; }
-        if (staging.npts >= CAL_MAX_POINTS) { link_printf("ERR Table full (32)\r\n"); return true; }
-        if (!fixed_parse(&s, 6, &r) || !fixed_parse(&s, 3, &p) ||
-            r < -50000000 || r > 50000000 || p < -10000000 || p > 100000000) {
-            link_printf("ERR Expected: CAL PT <mV/V> <mbar>\r\n");
-            return true;
-        }
-        staging.r_ppb[staging.npts] = (int32_t)r;
-        staging.p_mmbar[staging.npts] = (int32_t)p;
-        staging.npts++;
-        link_printf("OK pt %lu\r\n", (unsigned long)staging.npts);
-    } else if (strcmp(a, " APPLY") == 0) {
-        const char *why = rec_check(&staging);
-        if (why) { link_err(why); return true; }
-        active = staging;
-        active_is_default = false;
-        active_saved = false;
-        memset(&bench, 0, sizeof bench);
-        link_printf("OK applied %s, unsaved\r\n", active.id);
-    } else if (strcmp(a, " VAC") == 0 || strncmp(a, " VAC ", 5) == 0) {
-        capture_start(1, a + 4);
-    } else if (strcmp(a, " AIR") == 0 || strncmp(a, " AIR ", 5) == 0) {
-        capture_start(2, a + 4);
-    } else if (strcmp(a, " SAVE") == 0) {
-        cfg_save();   // the whole settings record, cal included
-    } else if (strcmp(a, " ERASE") == 0) {
-        erase();
-    } else {
-        link_printf("ERR Unknown CAL command\r\n");
-    }
-    return true;
-}
-#endif

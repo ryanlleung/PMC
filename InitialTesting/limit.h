@@ -26,6 +26,5 @@ bool limit_open_now(void);
 // steps of it itself, so one glitch (held 20 ms by limit_poll) is not a press.
 bool limit_pin_open(void);
 const char *limit_text(void);    // "closed", "OPEN" or "unknown"
-bool limit_command(const char *line);
 
 #endif // _LIMIT_H_

@@ -35,6 +35,5 @@ bool valvepos_offer(int32_t *count);
 bool valvepos_offer_moving(int32_t *steps);
 bool valvepos_use(const char **why);   // VALVE RESTORE
 void valvepos_decline(void);           // the operator chose Calibrate
-bool valvepos_command(const char *line);
 
 #endif // _VALVEPOS_H_

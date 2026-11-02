@@ -19,32 +19,13 @@ void link_init(void);
 void link_task(void);
 
 /*
- * Output (0.13.0). The board never sends a line by itself: the remote
- * command set (remote.c) sends its reply lines with link_write. link_printf
- * is for the engineering commands of a bench build (PMC_ENG_COMMANDS 1) and
- * sends only while one of them runs (link_eng_open); in the normal build it
- * sends nothing, so status changes, events and saves from the screen never
- * reach the link (the event log keeps them, EVNT?).
+ * Output. The board never sends a line by itself: the remote command set
+ * (remote.c) sends its reply lines with link_write. Status changes, events
+ * and saves from the screen go to the event log (EVNT?), not the link.
  */
 void link_write(const char *s);
-void link_printf(const char *fmt, ...);
-#if PMC_ENG_COMMANDS
-void link_eng_open(bool open);
-#endif
 
-// "ERR <why>" with the first letter in upper case: the refusal texts are
-// shared with the screen, and the link's ERR lines are in sentence case.
-static inline void link_err(const char *why)
-{
-    if (!why || !why[0]) {
-        link_printf("ERR\r\n");
-        return;
-    }
-    char c = why[0] >= 'a' && why[0] <= 'z' ? (char)(why[0] - 'a' + 'A') : why[0];
-    link_printf("ERR %c%s\r\n", c, why + 1);
-}
-// Bytes link_printf can send now without dropping or waiting. Bulk replies
-// (TREND DUMP) send a line only when this is enough.
+// Bytes link_write can send now without dropping or waiting.
 size_t link_tx_room(void);
 
 // Non-blocking: true with one complete line (no CR/LF) in buf.

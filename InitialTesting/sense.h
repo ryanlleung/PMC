@@ -14,8 +14,5 @@ void sense_second(void);
 #define SENSE_COOL_MC  50000
 bool sense_hot(int32_t *die_mc);
 
-// Engineering (PMC_ENG_COMMANDS): DATA?, DATA HDR?, SENSE? (the live Power
-// Monitor and Druck lines). Returns false if the line is none of these.
-bool sense_data_command(const char *line);
 
 #endif // _SENSE_H_

@@ -107,15 +107,6 @@ const char *sysinfo_reset_reason(void) { return fake_wdt ? "watchdog" : "power-o
 bool sysinfo_reset_abnormal(void) { return fake_wdt; }
 const char *sysinfo_line(void) { return "PMC firmware 0.3.0 (preview), last reset: power-on"; }
 void sysinfo_restart(void) {}
-// Link output goes to stderr so the DATA line format can be checked.
-size_t link_tx_room(void) { return 4096; }
-void link_printf(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-}
 void link_write(const char *s) { fputs(s, stderr); }   // TREND DUMP (trend.c)
 bool rtclock_valid(void) { return !st.cal_nominal; }
 const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "08 Oct  12:34"; }

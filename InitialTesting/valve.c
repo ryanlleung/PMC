@@ -12,7 +12,6 @@
 #include "fixed.h"
 #include "cfg.h"
 #include "ctrl.h"
-#include "tune.h"
 #include "cal.h"
 #include "valve.h"
 
@@ -548,187 +547,6 @@ static void warn_checks(void)
     }
 }
 
-/* --------------------------------------------------------------------------
- * TUNE STEP (0.12.7): the step test in tune.c, in MANUAL. It moves the
- * valve itself and suggests KP and TI; nothing is applied. Anything else
- * that moves the valve, changes the mode or latches a fault ends it.
- * ------------------------------------------------------------------------ */
-static tune_t tun;
-static int32_t tun_target;   // where the test last sent the valve
-
-static const char *pct_f(char *buf, size_t n, float pct, int dec)
-{
-    return fixed_fmt(buf, n, (int64_t)lroundf(pct * (dec == 2 ? 100.0f : 10.0f)), dec);
-}
-
-static float tun_pct(int32_t steps) { return 100.0f * (float)steps / (float)pm(); }
-
-// Ends a running test; back: the valve returns to where the test started.
-static void tune_end(const char *why, bool back)
-{
-    if (!tune_running(&tun))
-        return;
-    tune_fail(&tun, why);
-    char p[16];
-    ev("TUNE", "Stopped: %s", why);
-    if (back && stepper3_goto(tun.pos0))
-        ev("TUNE", "Valve back to %s %%", pct_text(p, sizeof p, tun.pos0));
-}
-
-static void tune_send(void)
-{
-    char a[16], b[16];
-    if (!tun.move)
-        return;
-    tun.move = false;
-    if (!stepper3_goto(tun.move_to)) {
-        if (tune_running(&tun))
-            tune_end(stepper3_refusal(), false);
-        else   // the return after a result or a failure
-            ev("TUNE", "Valve not moved back: %s", stepper3_refusal());
-        return;
-    }
-    tun_target = tun.move_to;
-    if (!tune_running(&tun)) {
-        ev("TUNE", "Valve back to %s %%", pct_text(b, sizeof b, tun.move_to));
-        return;
-    }
-    if (tun.phase == TUNE_WAIT)
-        ev("TUNE", "Taking up the slack: to %s %%", pct_text(b, sizeof b, tun.move_to));
-    else if (tune_running(&tun))
-        ev("TUNE", "Step %s%s %% from %s %%", tun.step > 0 ? "+" : "", pct_f(a, sizeof a, tun_pct(tun.step), 1),
-           pct_text(b, sizeof b, tun.from));
-}
-
-static void tune_result_event(void)
-{
-    char k[16], th[16], ta[16], kp[16], ti[16];
-    float kk = (tun.fit[0].k + tun.fit[1].k) / 2;
-    bool wrong = (kk > 0) != (cfg_tune(CFG_KDIR) > 0);
-    // Two events: the log holds 89 characters of text each.
-    ev("TUNE", "Fit K %s mbar/%%, dead time %s s, time constant %s s",
-       fixed_fmt(k, sizeof k, (int64_t)lroundf(kk * 1000.0f), 3),
-       fixed_fmt(th, sizeof th, (int64_t)lroundf((tun.fit[0].theta + tun.fit[1].theta) * 5.0f), 1),
-       fixed_fmt(ta, sizeof ta, (int64_t)lroundf((tun.fit[0].tau + tun.fit[1].tau) * 5.0f), 1));
-    ev("TUNE", "Suggest KP %s %%/mbar, TI %s min (not applied)%s",
-       fixed_fmt(kp, sizeof kp, (int64_t)lroundf(tun.kp * 100.0f), 2),
-       fixed_fmt(ti, sizeof ti, (int64_t)lroundf(tun.ti * 100.0f), 2),
-       wrong ? kk > 0 ? "; opening raises the pressure: KDIR +1" : "; opening lowers the pressure: KDIR -1" : "");
-}
-
-// Once a second, outside AUTO.
-static void tune_tick(void)
-{
-    if (!tune_running(&tun))
-        return;
-    if (mode != VALVE_MANUAL)
-        tune_end(mode == VALVE_AUTO ? "AUTO started" : "valve not in MANUAL", false);
-    else if (any_latched())
-        tune_end("fault latched", false);
-    else if (!pv_ok)
-        tune_end("no pressure reading", false);
-    else if (stepper3_target() != tun_target)
-        tune_end("valve moved by another command", false);
-    if (!tune_running(&tun))
-        return;
-    tune_phase_t was = tun.phase;
-    tune_step(&tun, pv_mbar, stepper3_position(), stepper3_busy());
-    char p[16];
-    if (tun.phase == TUNE_FAILED) {
-        ev("TUNE", "Stopped: %s", tun.why);   // the move back is logged by tune_send
-    } else if (tun.phase == TUNE_DONE)
-        tune_result_event();
-    else if (was == TUNE_WAIT && tun.phase == TUNE_OUT)
-        ev("TUNE", "Pressure steady at %s mbar", mbar_text(p, sizeof p, tun.y0, 2));
-    tune_send();
-}
-
-#if PMC_ENG_COMMANDS
-static bool tune_begin(float step_pct, const char **why)
-{
-    if (mode == VALVE_CALIBRATING)  { *why = "Homing: STOP to cancel"; return false; }
-    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
-    if (!calibrated)                { *why = "Home the valve first"; return false; }
-    if (any_latched())              { *why = "Reset the fault first"; return false; }
-    if (!pv_ok)                     { *why = "No pressure reading"; return false; }
-    if (tune_running(&tun))         { *why = "Step test running: STOP first"; return false; }
-    int32_t at = stepper3_busy() ? stepper3_target() : stepper3_position();
-    *why = tune_start(&tun, at, pm(), step_pct, pv_mbar);
-    if (*why)
-        return false;
-    tun_target = stepper3_target();
-    char a[16], p[16];
-    ev("TUNE", "Step test started at %s %%, first step %s%s %%", pct_text(p, sizeof p, at), step_pct > 0 ? "+" : "",
-       pct_f(a, sizeof a, step_pct, 1));
-    tune_send();
-    if (!tune_running(&tun)) {   // the take-up move was refused
-        *why = tun.why;
-        return false;
-    }
-    return true;
-}
-
-static void tune_show(void)
-{
-    static const char *const phase[] = { "idle", "waiting for a steady pressure", "first step", "second step", "done",
-                                         "stopped" };
-    char a[16], b[16], c[16];
-    link_printf("TUNE %s", phase[tun.phase]);
-    if (tun.phase == TUNE_WAIT)
-        link_printf(", %d s", tune_elapsed(&tun));
-    else if (tune_running(&tun))
-        link_printf(", %d s, step %s%s %%", tune_elapsed(&tun), tun.step > 0 ? "+" : "",
-                    pct_f(a, sizeof a, tun_pct(tun.step), 1));
-    if (tun.phase == TUNE_FAILED)
-        link_printf(": %s", tun.why);
-    link_printf("\r\n");
-    for (int i = 0; i < 2; i++)
-        if (tun.phase == TUNE_DONE || (tun.phase >= TUNE_AGAIN && i == 0 && tun.fit[0].tau > 0))
-            link_printf("TUNE %s: K %s mbar/%%, dead time %s s, time constant %s s\r\n", i ? "second" : "first",
-                        fixed_fmt(a, sizeof a, (int64_t)lroundf(tun.fit[i].k * 1000.0f), 3),
-                        fixed_fmt(b, sizeof b, (int64_t)lroundf(tun.fit[i].theta * 10.0f), 1),
-                        fixed_fmt(c, sizeof c, (int64_t)lroundf(tun.fit[i].tau * 10.0f), 1));
-    if (tun.phase == TUNE_DONE)
-        link_printf("TUNE suggest KP %s %%/mbar, TI %s min (PID KP, PID TI, then CFG SAVE to use them)\r\n",
-                    fixed_fmt(a, sizeof a, (int64_t)lroundf(tun.kp * 100.0f), 2),
-                    fixed_fmt(b, sizeof b, (int64_t)lroundf(tun.ti * 100.0f), 2));
-    link_printf("OK\r\n");
-}
-
-static void tune_command(const char *a)
-{
-    const char *err;
-    if (strcmp(a, "?") == 0) {
-        tune_show();
-    } else if (strcmp(a, " STOP") == 0) {
-        if (!tune_running(&tun)) {
-            link_printf("ERR No step test running\r\n");
-            return;
-        }
-        tune_end("TUNE STOP", true);
-        link_printf("OK step test stopped\r\n");
-    } else if (strncmp(a, " STEP", 5) == 0 && (a[5] == ' ' || a[5] == '\0')) {
-        int64_t v = 10;   // 1.0 %
-        const char *s = a + 5;
-        while (*s == ' ')
-            s++;
-        bool neg = *s == '-';
-        if (neg || *s == '+')
-            s++;
-        if (*s && (!fixed_parse(&s, 1, &v) || *s)) {
-            link_printf("ERR Expected: TUNE STEP [<+-0.1 to 20.0>], %% of travel\r\n");
-            return;
-        }
-        if (!tune_begin((neg ? -1.0f : 1.0f) * (float)v / 10.0f, &err))
-            link_err(err);
-        else
-            link_printf("OK step test started, TUNE? for progress\r\n");
-    } else {
-        link_printf("ERR Expected: TUNE STEP [<%%>] | TUNE STOP | TUNE?\r\n");
-    }
-}
-#endif
-
 // Once a second, after the faults of this read.
 static void auto_step(void)
 {
@@ -737,7 +555,6 @@ static void auto_step(void)
     ctrl_track(&ctl, stepper3_position(), calibrated && mode != VALVE_CALIBRATING);
     if (mode != VALVE_AUTO || !pv_ok) {
         ctrl_idle(&ctl);
-        tune_tick();
         return;
     }
     ctrl_tune_t k = tune_now();
@@ -808,8 +625,6 @@ bool valve_start_auto(const char **why)
     if ((*why = auto_why()) != NULL)
         return false;
     ctrl_tune_t k = tune_now();
-    // A step test ends here: tune_tick() does not run in AUTO.
-    tune_end("AUTO started", false);
     auto_said = NULL;
     // Bumpless from where the valve is going (a manual move still running
     // carries on to its end under AUTO).
@@ -1095,7 +910,6 @@ void valve_stop(void)
     // An operating stop: stop and hold, nothing latched. In AUTO it also
     // drops to MANUAL (no fault since 0.11.20, Ryan 22 Oct).
     bool was_auto = is_auto();
-    tune_end("STOP", false);
     seq_check();   // a move that ended just before (at the switch: W-1) is not this stop's
     stepper3_stop();
     seq_seen = stepper3_move_seq();
@@ -1129,23 +943,6 @@ int valve_reset(char *left, size_t n)
     return any;
 }
 
-#if PMC_ENG_COMMANDS
-// CTRL? (engineering): the latched faults, highest priority first.
-static void faults_command(void)
-{
-    bool any = false;
-    for (int i = 0; i < F_N; i++) {
-        if (!latched[i])
-            continue;
-        any = true;
-        link_printf("CTRL %s %s, %s\r\n", fault_tag[i], fault_short[i],
-                    can_reset((fault_t)i) ? "can reset" : "cause still present");
-    }
-    if (!any)
-        link_printf("CTRL no faults\r\n");
-    link_printf("OK\r\n");
-}
-#endif
 
 // EVNT? <n> (remote.c): "EVNT <count>" now, then the newest count events,
 // newest first, as "<age s>,<tag>,<text>", a line at a time from
@@ -1191,62 +988,6 @@ static void evt_dump_task(void)
     }
 }
 
-#if PMC_ENG_COMMANDS
-static void show(void)
-{
-    char p[16], f[40];
-    faults_text(f, sizeof f);
-    char to[32] = "";
-    if (stepper3_busy())
-        lv_snprintf(to, sizeof to, ", going to count %ld", (long)stepper3_target());
-    link_printf("VALVE mode %s%s%s, position %s, count %ld (%s %%)%s\r\n",
-                valve_mode_name(), cal_stage ? ", " : "", cal_stage_name(), calibrated ? "set" : "not set",
-                (long)stepper3_position(), pct_text(p, sizeof p, stepper3_position()), to);
-    link_printf("VALVE POSMAX %ld, FHOME %ld, FCREEP %ld, BACKOFF %ld, RETURN %ld, CLEAR %ld\r\n",
-                (long)pos_max, (long)f_home, (long)f_creep, (long)n_backoff, (long)n_return, (long)n_clear);
-    link_printf("VALVE faults %s, switch %s\r\n", f[0] ? f : "none", limit_text());
-    if (ctl.sp_set) {
-        static const char *const reg[] = { "", ", regulating", ", in band", ", stable" };
-        char a[16], b[16];
-        link_printf("VALVE target %s mbar, band %s mbar%s\r\n", mbar_text(a, sizeof a, ctl.sp, 1),
-                    fixed_fmt(b, sizeof b, cfg_tune(CFG_BAND), 2), reg[valve_regulation()]);
-    } else {
-        link_printf("VALVE target not set (SP)\r\n");
-    }
-    if (question)
-        link_printf("VALVE question: limit switch pressed at count %ld (%s %%), answer on the screen\r\n",
-                    (long)q_count(), pct_text(p, sizeof p, q_count()));
-    link_printf("OK\r\n");
-}
-
-static void setting_command(const char *a)
-{
-    for (size_t i = 0; i < N_SETTINGS; i++) {
-        size_t len = strlen(settings[i].name);
-        if (!len || strncmp(a, settings[i].name, len) != 0 || (a[len] != ' ' && a[len] != '\0'))
-            continue;   // (the empty name is the removed zero offset's slot)
-        char *end;
-        long v = strtol(a + len, &end, 10);
-        while (*end == ' ')
-            end++;
-        if (end == a + len || *end || v < settings[i].lo || v > settings[i].hi)
-            link_printf("ERR Expected: VALVE %s <%ld-%ld>\r\n", settings[i].name,
-                        (long)settings[i].lo, (long)settings[i].hi);
-        else if (is_auto())
-            link_printf("ERR Switch to MANUAL first\r\n");
-        else if (mode == VALVE_CALIBRATING || stepper3_busy())
-            link_printf("ERR Busy, STOP first\r\n");
-        else {
-            *settings[i].v = (int32_t)v;
-            ev("CFG", "VALVE %s set to %ld", settings[i].name, v);
-            link_printf("OK VALVE %s %ld %s, unsaved\r\n", settings[i].name, v,
-                        settings[i].v == &f_home || settings[i].v == &f_creep ? "steps/s" : "steps");
-        }
-        return;
-    }
-    link_printf("ERR Unknown VALVE command\r\n");
-}
-#endif
 
 const char *valve_setting_name(int i)
 {
@@ -1434,56 +1175,3 @@ bool valve_last_cal(uint32_t *age_ms, uint32_t *took_s)
 }
 
 
-#if PMC_ENG_COMMANDS
-/*
- * Engineering commands (bench build, simulator; old names): homing, the
- * switch answers, the valve settings, the AUTO end on MOT STOP, TUNE, and
- * the VALVE? and CTRL? reports. The remote set is in remote.c.
- */
-bool valve_command(const char *line)
-{
-    const char *err;
-
-    if (is_auto() && (strcmp(line, "MOT STOP") == 0 || strcmp(line, "MOT STOP RAMP") == 0 ||
-                      strcmp(line, "MOT OFF") == 0)) {
-        // In AUTO the motor commands end AUTO first, as the screen STOP does;
-        // otherwise the loop would move the valve again at its next step.
-        bool off = line[4] == 'O';
-        valve_stop();
-        if (off)
-            stepper3_off();
-        link_printf("OK stopped at %ld%s, AUTO ended, MANUAL\r\n", (long)stepper3_position(),
-                    off ? ", coils off" : "");
-    } else if (strncmp(line, "TUNE", 4) == 0) {
-        tune_command(line + 4);
-    } else if (strcmp(line, "CTRL?") == 0) {
-        faults_command();
-    } else if (strcmp(line, "VALVE?") == 0) {
-        show();
-    } else if (strcmp(line, "VALVE CAL") == 0) {
-        if (cal_start(&err))
-            link_printf("OK homing, up to %lu s\r\n", (unsigned long)valve_cal_budget_s());
-        else
-            link_err(err);
-    } else if (strcmp(line, "VALVE CLOSED") == 0) {
-        if (valve_set_closed(&err))
-            link_printf("OK seated, count %ld\r\n", (long)stepper3_position());
-        else
-            link_err(err);
-    } else if (strcmp(line, "VALVE SETZERO") == 0 || strcmp(line, "VALVE SKIP") == 0) {
-        bool zero = line[6] == 'S' && line[7] == 'E';
-        if (!valve_answer(zero, &err))
-            link_err(err);
-        else if (zero)
-            link_printf("OK count %ld\r\n", (long)stepper3_position());
-        else
-            link_printf("OK count kept\r\n");
-    } else if (strncmp(line, "VALVE ", 6) == 0 && strcmp(line, "VALVE SAVED?") != 0 &&
-               strcmp(line, "VALVE RESTORE") != 0) {
-        setting_command(line + 6);   // SAVED? and RESTORE: valvepos.c
-    } else {
-        return false;
-    }
-    return true;
-}
-#endif

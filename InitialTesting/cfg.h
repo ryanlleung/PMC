@@ -50,8 +50,6 @@ bool cfg_save(void);
 // Number of settings differing from the newest saved record (or, with none
 // saved, from the start-up values).
 int cfg_unsaved(void);
-// Engineering (PMC_ENG_COMMANDS): PID?, PID, NET?, NET IP, CFG ...
-bool cfg_command(const char *line);
 
 /* --------------------------------------------------------------------------
  * For the Settings screens

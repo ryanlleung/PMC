@@ -166,14 +166,3 @@ static const char status[] = "S1 Pressure 21: off in this build (PMC_BARO 0)";
 
 const char *baro_status(void) { return status; }
 
-#if PMC_ENG_COMMANDS
-// BARO STATUS? (engineering): the Click's status line. BARO? (the reading)
-// is in the remote set (remote.c).
-bool baro_command(const char *line)
-{
-    if (strcmp(line, "BARO STATUS?") != 0)
-        return false;
-    link_printf("%s\r\nOK\r\n", status);
-    return true;
-}
-#endif

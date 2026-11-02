@@ -234,17 +234,4 @@ static void touchpad_read(lv_indev_t * indev, lv_indev_data_t * data)
     data->point.y = touch_y;
 }
 
-#if PMC_ENG_COMMANDS
-bool touch_command(const char *line)
-{
-    if(strcmp(line, "TOUCH?") != 0)
-        return false;
-    link_printf("TOUCH reads=%lu errors=%lu last_err=%d presses=%lu multi=%lu now=%s last=%d,%d\r\nOK\r\n",
-                (unsigned long)touch_reads, (unsigned long)touch_errors, (int)touch_last_err,
-                (unsigned long)touch_presses, (unsigned long)touch_multi,
-                touch_was_pressed ? "pressed" : "released",
-                (int)tp.touch.point[0].coord_x, (int)tp.touch.point[0].coord_y);
-    return true;
-}
-#endif
 

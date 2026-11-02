@@ -147,14 +147,10 @@ static void move_event(lv_event_t *e)
             m.held = lv_event_get_target_obj(e);
             m.held_to = stepper3_target();
             valve_hold(true);
-            link_printf("MOT screen: hold move %s\r\n", steps > 0 ? "open" : "close");
-        } else {
-            link_printf("MOT screen: move %ld\r\n", (long)steps);
         }
     } else {
         if (!why)
             why = stepper3_refusal();
-        link_printf("MOT screen: move refused, %s\r\n", why);
         ui_msg(why);
     }
     motor_fast();
@@ -169,7 +165,6 @@ static void hold_end(void)
     valve_hold(false);
     if (stepper3_busy() && stepper3_target() == m.held_to) {   // its own move, not a later one
         stepper3_stop_ramped();
-        link_printf("MOT screen: hold move released\r\n");
     }
 }
 
@@ -199,8 +194,7 @@ static void mode_event(lv_event_t *e)
     if (stepper3_busy() || stepper3_locked())
         return;
     stepper3_mode_t md = (stepper3_mode_t)event_arg(e);
-    if (stepper3_set_mode(md))
-        link_printf("MOT screen: mode %s\r\n", stepper3_mode_name(md));
+    (void)stepper3_set_mode(md);
     motor_fast();
 }
 
@@ -215,20 +209,17 @@ static void adjust_event(lv_event_t *e)
     switch (a >> 1) {
     case SET_RATE: {
         uint32_t v = step_list(rates, (sizeof rates / sizeof rates[0]), stepper3_rate(), dir);
-        if (stepper3_set_rate(v))
-            link_printf("MOT screen: rate %lu\r\n", (unsigned long)v);
+        (void)stepper3_set_rate(v);
         break;
     }
     case SET_START: {
         uint32_t v = step_list(rates, (sizeof rates / sizeof rates[0]), stepper3_start_rate(), dir);
-        if (stepper3_set_start(v))
-            link_printf("MOT screen: start %lu\r\n", (unsigned long)v);
+        (void)stepper3_set_start(v);
         break;
     }
     default: {
         uint32_t v = step_list(accels, (sizeof accels / sizeof accels[0]), stepper3_accel(), dir);
-        if (stepper3_set_accel(v))
-            link_printf("MOT screen: accel %lu\r\n", (unsigned long)v);
+        (void)stepper3_set_accel(v);
         break;
     }
     }
@@ -251,9 +242,8 @@ static void do_order(void)
     int i = (order_index() + 1) % 3;
     if (ref_locked())
         return;
-    if (!stepper3_busy() && stepper3_set_order(orders[i]))
-        link_printf("MOT screen: order %d%d%d%d\r\n",
-                    orders[i][0], orders[i][1], orders[i][2], orders[i][3]);
+    if (!stepper3_busy())
+        (void)stepper3_set_order(orders[i]);
     motor_fast();
 }
 
@@ -268,8 +258,8 @@ static void do_dir(void)
 {
     if (ref_locked())
         return;
-    if (!stepper3_busy() && stepper3_set_reverse(!stepper3_reverse()))
-        link_printf("MOT screen: dir %d\r\n", stepper3_reverse() ? 1 : 0);
+    if (!stepper3_busy())
+        (void)stepper3_set_reverse(!stepper3_reverse());
     motor_fast();
 }
 
@@ -284,8 +274,7 @@ static void hold_event(lv_event_t *e)
 {
     if (ui_btn_disabled(e))
         return;
-    if (stepper3_set_hold(!stepper3_hold()))
-        link_printf("MOT screen: hold %d\r\n", stepper3_hold() ? 1 : 0);
+    (void)stepper3_set_hold(!stepper3_hold());
     motor_fast();
 }
 
@@ -293,7 +282,6 @@ static void do_zero(void)
 {
     if (!stepper3_busy() && !stepper3_locked()) {
         stepper3_zero();
-        link_printf("MOT screen: zero\r\n");
     }
     motor_fast();
 }
@@ -313,7 +301,6 @@ static void off_event(lv_event_t *e)
     if (valve_auto())
         valve_stop();
     stepper3_off();
-    link_printf("MOT screen: coils off at %ld\r\n", (long)stepper3_position());
     motor_fast();
 }
 
@@ -331,7 +318,6 @@ static void override_event(lv_event_t *e)
         return;
     const char *why = stepper3_locked();
     if (why) {
-        link_printf("MOT screen: override refused, %s\r\n", why);
         ui_msg(why);
         return;
     }
@@ -363,7 +349,6 @@ static void two_end(void)
         valve_event("LIM", "Limit override move ended (screen)%s", stopped ? ", valve stopped" : "");
     } else if (stepper3_busy() && stepper3_target() == m.held2_to) {   // its own move, not a later one
         stepper3_stop_ramped();
-        link_printf("MOT screen: override move released\r\n");
     }
 }
 
@@ -392,7 +377,6 @@ static bool two_start(lv_obj_t *b)
             stepper3_override_cancel();
         why = stepper3_refusal();
     }
-    link_printf("MOT screen: override move refused, %s\r\n", why);
     ui_msg(why);
     return true;
 }
