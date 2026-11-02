@@ -32,18 +32,12 @@
 #define PMC_REMOTE_SWITCH PMC_LINK_ETHERNET
 #endif
 
-// The text link takes the remote command set only (0.13.0, Ryan 27 Oct):
-// what an operator can use and judge away from the system (remote.h).
-// Homing, calibration, settings, tuning, saving and the motor are on the
-// touch screen. 1: also the engineering commands under their old names
-// (VALVE CAL, CAL VAC, PID KP, CFG SAVE, MOT ..., TUNE ...), for a bench
-// build and the simulator's tests; never for the cryostat.
-#ifndef PMC_ENG_COMMANDS
-#define PMC_ENG_COMMANDS  0
-#endif
+// The text link takes the remote command set only: what an operator can
+// use and judge away from the system (remote.h). Homing, calibration,
+// settings, tuning, saving and the motor are on the touch screen.
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.14.7"
+#define PMC_FW_VERSION    "0.14.8"
 
 // Valve limit switch: one NC dry contact to GND on S1 TX, PD5 (Adapter Click
 // IDC10 pad 8, printed RX: the Adapter labels from the Click's side; 0.14.6).

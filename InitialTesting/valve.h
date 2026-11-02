@@ -48,9 +48,7 @@
  * Outside AUTO, STOP stops and holds the valve without a latch (STOP event).
  *
  * The remote commands are in remote.c (PRES SP, MODE, VALV SET, STOP, ALRM,
- * EVNT?); they call the functions below. Engineering commands
- * (PMC_ENG_COMMANDS): VALVE?, CTRL?, VALVE CAL, VALVE CLOSED, VALVE SETZERO |
- * SKIP, VALVE POSMAX|FHOME|FCREEP|BACKOFF|RETURN|CLEAR <n>, TUNE.
+ * EVNT?); they call the functions below, as the screens do.
  * Events go to the log only; nothing is sent unasked.
  */
 
@@ -59,7 +57,6 @@ typedef enum { VALVE_NOT_CAL, VALVE_CALIBRATING, VALVE_MANUAL, VALVE_AUTO } valv
 void valve_init(void);           // after stepper3_init(); logs BOOT power-up
 void valve_task(void);           // every main-loop pass: calibration, limit hits
 void valve_sense(const clicks_state_t *s);   // after each 1 s pressure read
-bool valve_command(const char *line);
 
 valve_mode_t valve_mode(void);
 const char *valve_mode_name(void);

@@ -156,7 +156,5 @@ const char *stepper3_stop_name(stepper3_stop_t stop);
 // Short status line for the screen and the link.
 const char *stepper3_status(void);
 
-// Handles one MOT command line. Returns false if it is not a MOT command.
-bool stepper3_command(const char *line);
 
 #endif // _STEPPER3_H_

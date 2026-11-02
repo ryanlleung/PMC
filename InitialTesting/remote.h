@@ -20,10 +20,6 @@
  * come back on one line joined by ';', and the first refusal ends the line.
  * EVNT? is the only multi-line reply ("EVNT <count>", then that many lines)
  * and must be on a line of its own.
- *
- * With PMC_ENG_COMMANDS 1 (a bench build, the simulator) a command the
- * remote set does not know goes on to the engineering commands, which reply
- * in their own style (several lines, OK or ERR).
  */
 
 // One command line from the link (no CR or LF). LINK_LINE_LONG is a line

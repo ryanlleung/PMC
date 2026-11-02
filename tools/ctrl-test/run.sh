@@ -9,7 +9,3 @@ mkdir -p "$HERE/out"
 gcc -O2 -g -Wall -Wextra -I"$PROJ" -I"$HERE" -o "$HERE/out/test_ctrl" \
   "$HERE/test_ctrl.c" "$HERE/model.c" "$PROJ/ctrl.c" -lm
 "$HERE/out/test_ctrl" "$@"
-# TUNE STEP (tune.c) on a synthetic process and on the same model.
-gcc -O2 -g -Wall -Wextra -I"$PROJ" -I"$HERE" -o "$HERE/out/test_tune" \
-  "$HERE/test_tune.c" "$HERE/model.c" "$PROJ/ctrl.c" "$PROJ/tune.c" -lm
-"$HERE/out/test_tune"

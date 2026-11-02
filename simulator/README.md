@@ -2,7 +2,7 @@
 
 Open `index.html` in a browser (from a file or a web server; no build needed to use it).
 
-From 0.11.38 the simulator runs the mm4 firmware itself. `pmc-wasm.js` is the firmware in `InitialTesting/` (screens, valve and homing, AUTO, settings store, calibration, faults, event log, trend and every text command, the bench build's engineering commands included) compiled to WebAssembly, so the screens, messages, fault numbers, settings and behaviour are the board's, not a copy of them. Only the hardware underneath is simulated:
+From 0.11.38 the simulator runs the mm4 firmware itself. `pmc-wasm.js` is the firmware in `InitialTesting/` (screens, valve and homing, AUTO, settings store, calibration, faults, event log, trend and the text port's command set) compiled to WebAssembly, so the screens, messages, fault numbers, settings and behaviour are the board's, not a copy of them. Only the hardware underneath is simulated:
 
 | On the board | In the simulator |
 |---|---|
@@ -26,9 +26,8 @@ The stand-ins are in `wasm/`: `include/` (register structs for GPIO, RCC, TIM7, 
 ## Tests
 
 - `node simulator/tests/run.js [--png dir]`: bench scenarios against the build, in node, about 3 s: boot, homing from the screen, Set position, a MANUAL move, supply off, F-1 to F-6 (except F-5), W-2, W-3, settings and saved position over a power cycle, and the remote command set's reply rules and error codes (0.13.0).
-- `PMC_ENG_COMMANDS=0 sh simulator/wasm/build.sh && node simulator/tests/remote-only.js`: the cryostat firmware's command set (no engineering commands): every screen-only command answers ERR 100, homing on the screen, then the valve and AUTO from the link.
+- `node simulator/tests/remote-only.js`: the text port's command set: every other command answers ERR 100, homing on the screen, then the valve and AUTO from the link.
 - `node simulator/tests/tcp-board.js [port] [speed] [--remote-off]`: the simulated board on a TCP port (8888 by default) in real time, homed and at 5 %, with Remote control On (`--remote-off` leaves it Off, as a new board), for a driver or the logger to talk to. The Frappy driver's tests pass against it, apart from the room pressure (the simulator has no Pressure 21).
-- `node simulator/tests/explore.js`, `explore2.js`, `auto-commands.js`: exploratory runs from the 0.11.43 bug hunt (findings in the project notes); FIND lines are suspected bugs, not failures. At 0.11.44 the only FIND is MOT RATE and HOLD being accepted in AUTO, left for Ryan to decide.
 - `node simulator/tests/page.js [shot.png]`: the page in Chromium (Playwright): taps, homing, a console command, settings kept over a reload.
 
 ## Not simulated

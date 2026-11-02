@@ -1,10 +1,10 @@
 // Bench scenarios against the firmware build (pmc-wasm.js), in node:
 //   node simulator/tests/run.js [--png <dir>]
-// Each case boots a new board and checks the firmware's replies. From 0.13.0
-// the board sends nothing unasked, so a case reads the event log (EVNT?).
-// The simulator builds with the engineering commands (VALVE CAL, PID, ...);
-// remote-only.js checks the operator build without them.
-const { load } = require('./sim-node.js');
+// Each case boots a new board and checks the firmware's replies. The board
+// sends nothing unasked, so a case reads the event log (EVNT?). The text
+// port takes the remote command set only; homing, calibration and settings
+// go through the simulator's test hooks (sim-node.js), as the screens do.
+const { load, CFG } = require('./sim-node.js');
 const pngDir = process.argv.includes('--png') ? process.argv[process.argv.indexOf('--png') + 1] : null;
 let failed = 0;
 function check(name, ok, detail) {
@@ -13,10 +13,9 @@ function check(name, ok, detail) {
 }
 // The last n events, newest last.
 const events = (s, n = 100) => s.cmd('EVNT? ' + n, 2000);
-// VALVE CAL is an engineering command (the simulator builds with them).
 function homed(s) {
   s.boot(); s.set(5, 40000); s.run(2000);
-  s.cmd('VALVE CAL', 120000);
+  s.home();
   const ev = events(s, 10);
   if (!/Homed in/.test(ev)) throw new Error('homing failed:\n' + ev.slice(-800));
   return s;
@@ -41,10 +40,10 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   check('home from the screen', /Homed in/.test(s.out) && [0, 400].includes(s.get(5) / 2) && [0, 400].includes(off), s.out.slice(-400));
   shot(s, 'homed');
 }
-{ // Set position (no homing): VALVE CLOSED takes the count as 0 % where it stands.
+{ // Set position (no homing): Closed takes the count as the seat where it stands.
   const s = load(); s.boot(); s.run(2000);
-  const out = s.cmd('VALVE CLOSED', 1000);
-  check('set position by hand', /OK/.test(out) && !/ERR/.test(out), out);
+  const ok = s.setClosed(), st = s.cmd('MODE?');
+  check('set position by hand', ok && st === 'MODE MANUAL\r\n', s.why() + ' ' + st);
 }
 { // MANUAL go-to and the needle follows the coils.
   const s = homed(load());
@@ -66,13 +65,13 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
 }
 { // F-3: the switch never trips during homing.
   const s = load(); s.boot(); s.set(5, 40000); s.set(7, 2); s.run(2000);
-  s.cmd('VALVE CAL', 400000);
+  s.home(400000);
   const out = events(s, 5);
   check('F-3 limit not found', /F-3/.test(out), out.slice(-600));
 }
 { // F-4: homing from the switch, which stays pressed after the clearance move.
   const s = homed(load()); s.set(7, 1);
-  s.cmd('VALVE CAL', 60000);
+  s.home(60000);
   const out = events(s, 5);
   check('F-4 limit stuck', /F-4/.test(out), out.slice(-600));
 }
@@ -80,8 +79,8 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   const s = homed(load());
   s.cmd('PRES SP 5'); s.cmd('MODE AUTO');
   s.run(400000);
-  const v = s.cmd('VALVE?'), d = s.cmd('PRES?;PRES SP?;MODE?;VALV?;ALRM?');
-  check('AUTO 5 mbar stable', /target 5\.0 mbar, band [0-9.]+ mbar, stable/.test(v), v);
+  const d = s.cmd('PRES?;PRES SP?;MODE?;VALV?;ALRM?');
+  check('AUTO 5 mbar stable', s.reg() === 3, 'regulation ' + s.reg());
   check('poll in AUTO', /^PRES [45]\.\d{3} mbar;PRES SP 5\.0 mbar;MODE AUTO;VALV \d+\.\d\d %;ALRM NONE\r\n$/.test(d), d);
   shot(s, 'auto');
 }
@@ -111,12 +110,11 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
 }
 { // Settings and the saved position survive a power cycle (serial flash).
   const s = homed(load());
-  s.cmd('VALV SET 10', 20000); s.cmd('PID KP 3'); s.cmd('CFG SAVE', 1000); s.run(5000);
+  s.cmd('VALV SET 10', 20000); const saved = s.save(CFG.KP, 300); s.run(5000);
   const flash = s.flash(), needle = s.get(5);
   const t = load(); t.x.sim_bench_init(); t.boot(flash); t.set(5, needle); t.run(3000);
-  const pid = t.cmd('PID?'), vp = t.cmd('VALVE SAVED?');
-  check('settings kept over a power cycle', /KP 3/.test(pid) || /3\.0+ %\/mbar/.test(pid), pid);
-  check('valve position offered after a power cycle', /10\.0|6604|6605/.test(vp), vp);
+  check('settings kept over a power cycle', saved && t.setting(CFG.KP) === 300, s.why() + ' KP ' + t.setting(CFG.KP));
+  check('valve position offered after a power cycle', Math.abs(t.offer() - 6605) <= 1, 'offer ' + t.offer());
 }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
@@ -127,14 +125,14 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
   const over = (d) => s.x.sim_touch(64, 184, d), second = (px, d) => s.x.sim_touch2(px, 184, d);
   over(1); s.run(2000); const alone = s.get(30);
-  check('limit override alone does nothing', blocked && alone === c0 && !/Closing|Opening/.test(s.cmd('MOT?')), 'count ' + alone);
+  check('limit override alone does nothing', blocked && alone === c0 && !s.busy(), 'count ' + alone);
   second(415, 1); s.run(1000); second(415, 0); s.run(200);              // second finger on Set zero
   check('second finger elsewhere does nothing', s.get(30) === c0, 'count ' + s.get(30));
   second(186, 1); s.run(3000); const held = s.get(30);
   check('override + Close closes past the switch', held < -500, 'count ' + held);
   shot(s, 'override');
   second(186, 0); s.run(300); const rel = s.get(30); s.run(1000);
-  check('lifting the second finger stops at once', s.get(30) === rel && !/override/.test(s.cmd('MOT?')), s.get(30) + ' vs ' + rel);
+  check('lifting the second finger stops at once', s.get(30) === rel && !s.override(), s.get(30) + ' vs ' + rel);
   second(186, 1); s.run(2000); const again = s.get(30);
   over(0); s.run(300); const rel2 = s.get(30); s.run(1000);
   check('lifting the override finger stops the close', again < rel - 300 && s.get(30) === rel2, again + ' ' + rel2 + ' ' + s.get(30));
@@ -145,20 +143,20 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   second(298, 0); over(0); s.run(2000);
   check('override + Open opens', opened > rel2 + 300, opened + ' vs ' + rel2);
 }
-{ // Pressure 21 (0.14.0): CAL AIR without a number takes the room sensor.
+{ // Pressure 21: the air point at the room sensor's reading.
   const s = load(); s.boot(); s.run(3000);
-  s.set(11, 0); s.run(3000); s.cmd('CAL VAC', 15000);
+  s.set(11, 0); s.run(3000); s.cal(1, 0);
   s.set(11, 1); s.set(19, 1008.4); s.run(3000);
-  const a = s.cmd('CAL AIR', 15000), ev = events(s, 4);
-  check('CAL AIR from the room sensor', !/ERR/.test(a) && /Air point [\d.]+ mV\/V at 1008\.40 mbar from the room sensor/.test(ev), a + ev.slice(-400));
-  // No room sensor: CAL AIR needs a number, BARO? says NONE.
+  const a = s.cal(2, -1), ev = events(s, 4);
+  check('air point from the room sensor', a && /Air point [\d.]+ mV\/V at 1008\.40 mbar from the room sensor/.test(ev), s.why() + ev.slice(-400));
+  // No room sensor: the air point needs a typed reading, BARO? says NONE.
   const u = load(); u.boot(); u.set(20, 0); u.run(3000); u.set(11, 1); u.run(3000);
   check('BARO NONE without the sensor', u.cmd('BARO?', 1000) === 'BARO NONE\r\n', u.cmd('BARO?', 1000));
-  const r = u.cmd('CAL AIR', 2000);
-  check('CAL AIR refused without the sensor', /no room pressure sensor: give the pressure/i.test(r), r);
-  { const r2 = u.cmd('CAL AIR 1013', 15000); check('CAL AIR 1013 still works', !/ERR/.test(r2), r2); }
+  const r = u.cal(2, -1, 2000);
+  check('room air point refused without the sensor', !r && /no room pressure sensor/i.test(u.why()), u.why());
+  check('typed air point still works', u.cal(2, 1013), u.why());
 }
-{ // The remote set (0.13.0): the reply rules of the handover page.
+{ // The remote set: the reply rules of the handover page.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
   // R1, R2, R5: no echo; a query gives one line starting with its own words.
@@ -197,7 +195,7 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   s.run(30000);
   check('STOP in AUTO ends AUTO', (one('MODE AUTO'), one('STOP;MODE?')) === 'MODE MANUAL\r\n');
   // 201 while homing, 204 not homed, 206 no target, 210 cause present.
-  s.cmd('VALVE CAL', 200);
+  s.home(200);
   check('MODE HOMING, moving', one('MODE?;VALV MOVING?') === 'MODE HOMING;VALV MOVING 1\r\n', one('MODE?'));
   check('ERR 201 while homing', one('VALV SET 10') === 'ERR 201 Homing, STOP to cancel\r\n', one('VALV SET 10'));
   one('STOP');
@@ -214,7 +212,7 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   check('ALRM RESET clears it', t.cmd('ALRM RESET;ALRM?') === 'ALRM NONE\r\n', t.cmd('ALRM?'));
   check('nothing sent unasked over a run', (t.cmd('PRES SP 5;MODE AUTO', 60000), t.out === ''), t.out);
 }
-{ // Remote control switch (0.13.4): On by default (0.13.7); Off, the link takes queries only; On from the screen, it takes sets.
+{ // Remote control switch: On by default; Off, the link takes queries only; On from the screen, it takes sets.
   const d = load(); d.boot(); d.run(1000);   // boot() leaves the switch as the firmware starts it
   check('switch On by default', d.cmd('PRES SP 5;PRES SP?') === 'PRES SP 5.0 mbar\r\n', d.cmd('PRES SP?'));
   const s = load(); s.boot(undefined, { remote: false }); s.set(5, 40000); s.run(2000);
@@ -228,10 +226,10 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   s.tap(357, 184);
   check('switch Off again: refused', s.cmd('PRES SP 6') === 'ERR 211 Read only over the network\r\n');
 }
-{ // Homing return (0.13.6): its own setting, the step 4 move off the switch; 0 % is there.
+{ // Homing return: its own setting, the step 4 move off the switch; 0 % is there.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  check('VALVE RETURN 150', /^OK VALVE RETURN 150 steps/.test(s.cmd('VALVE RETURN 150')), s.cmd('VALVE?'));
-  s.cmd('VALVE CAL', 120000);
+  check('return set to 150', s.save(CFG.RETURN, 150) && s.setting(CFG.RETURN) === 150, s.why());
+  s.home();
   const ev = events(s, 3);
   check('homed with the switch 150 steps below 0 %', /Homed in \d+ s, switch at -150, 0 % at 0/.test(ev) && s.get(5) === 300, ev + ' needle ' + s.get(5));
 }

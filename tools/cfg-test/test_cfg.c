@@ -48,17 +48,8 @@ bool extflash_write(uint32_t a, const void *b, size_t n)
     return true;
 }
 
-/* Link, clock */
+/* Clock; -v prints the events */
 static int quiet = 1;
-void link_printf(const char *fmt, ...)
-{
-    va_list a;
-    if (quiet) return;
-    va_start(a, fmt);
-    vprintf(fmt, a);
-    va_end(a);
-}
-void link_write(const char *s) { link_printf("%s", s); }   // TREND DUMP (trend.c)
 const char *rtclock_iso(void) { return "2026-10-16 08:15:00"; }
 
 /* Druck reading */
@@ -138,7 +129,6 @@ static int32_t v_sp = 5000;
 bool valve_auto(void) { return v_auto; }
 bool valve_target(int32_t *mmbar) { *mmbar = v_sp; return true; }
 int32_t valve_pct_milli(void) { return 34240; }
-size_t link_tx_room(void) { return 4096; }
 bool valve_calibrated(void) { return v_cal; }
 int32_t valve_pos_max(void) { return v_set[0]; }
 void valve_uncalibrate(const char *why) { (void)why; uncal_calls++; v_cal = false; v_mode = VALVE_NOT_CAL; }
@@ -237,6 +227,21 @@ static void reboot(void)
     v_cal = false; v_mode = VALVE_NOT_CAL;
     cal_init();
     cfg_init();
+}
+
+// Spoils the newest settings record's CRC, so the other one loads.
+static void corrupt_newest(void)
+{
+    uint32_t best = 0;
+    int sl = -1;
+    for (int i = 0; i < 2; i++) {
+        uint32_t r, ver;
+        memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+        memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+        if (ver != 0xFFFFFFFFUL && (sl < 0 || r > best)) { best = r; sl = i; }
+    }
+    if (sl >= 0)
+        flash[0x7FD000 + sl * 0x1000 + 12] ^= 0x5A;   // the rev: the CRC no longer matches
 }
 
 static int32_t val(cfg_from_t f, cfg_key_t k)
@@ -368,7 +373,7 @@ static void test_cfg(void)
     // Spoil the newest: the other one loads at the next start-up.
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at));
     uint32_t newest = rev;
-    cfg_command("CFG TEST CORRUPT");
+    corrupt_newest();
     reboot();
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == newest - 1);
     CHECK(!m_rev);
@@ -476,7 +481,7 @@ static void test_net(void)
     CHECK(strcmp(a, "169.254.10.50") == 0 && strcmp(m, "255.255.0.0") == 0 && !cfg_net_restart_due());
     int u0 = cfg_unsaved();
     CHECK(!cfg_set_net(0xC0A80100UL, 0xFFFFFF00UL, &why) && cfg_unsaved() == u0);
-    CHECK(cfg_command("NET IP 192.168.1.50 255.255.255.0") && cfg_unsaved() == u0 + 1 && cfg_net_restart_due());
+    CHECK(cfg_set_net(0xC0A80132UL, 0xFFFFFF00UL, &why) && cfg_unsaved() == u0 + 1 && cfg_net_restart_due());
     cfg_net_boot(a, m);
     CHECK(strcmp(a, "169.254.10.50") == 0);   // not until a restart
     CHECK(cfg_save_with(v, set, &why) && cfg_unsaved() == 0);
@@ -516,7 +521,7 @@ static void test_net(void)
         CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a4 && ip == 0 && mask == 0 &&
               strcmp(a, "169.254.10.50") == 0 && strcmp(cfg_name(), "CF-11") == 0);
     }
-    CHECK(cfg_command("NET IP DEFAULT") && cfg_command("NET?"));
+    CHECK(cfg_set_net(0, 0, &why));   // back to the build default
 
     // Remote control (0.13.4): On by default (0.13.7), live at once and
     // unsaved, Off kept by a save, On again from a version 4 record.
@@ -830,15 +835,6 @@ static void test_auto(void)
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "MANUAL"));
     CHECK(cfg_tune(CFG_KP) == 300 && m_rate == rate);
     CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "MANUAL"));
-    CHECK(cfg_command("PID KP 3.5") && cfg_tune(CFG_KP) == 350 && cfg_unsaved() == 1);
-    CHECK(cfg_command("PID TI 0.4") && cfg_tune(CFG_TI) == 40);
-    CHECK(cfg_command("PID OUTMIN 0") && cfg_tune(CFG_OUTMIN) == 0);
-    CHECK(cfg_command("PID BAND 0.05") && cfg_tune(CFG_BAND) == 10);   // below 0.10: refused, kept
-    CHECK(cfg_command("PID KDIR 0") && cfg_tune(CFG_KDIR) == 1);
-    CHECK(cfg_command("PID KDIR -1") && cfg_tune(CFG_KDIR) == -1);
-    CHECK(cfg_command("PID KDIR +1") && cfg_tune(CFG_KDIR) == 1);
-    CHECK(cfg_command("PID TS 2") && cfg_command("PID?"));
-    CHECK(cfg_command("PID DB 8x") && cfg_tune(CFG_DB) == 8);
     clicks_state_t q = { .pm_found = true, .reading_ok = true, .p_mmbar = 5100 };
     trend_pt_t o;
     lv_tick_inc(1000); trend_second(&q);

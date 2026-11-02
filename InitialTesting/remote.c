@@ -16,15 +16,6 @@
 #if PMC_LINK_ETHERNET
 #include "ethlink.h"
 #endif
-#if PMC_ENG_COMMANDS
-#include "cal.h"
-#include "limit.h"
-#include "trend.h"
-#include "valvepos.h"
-#include "baro.h"
-#include "lv_port_indev.h"
-bool perf_command(const char *line);   // main.c
-#endif
 
 /* --------------------------------------------------------------------------
  * The reply line: query replies and at most one refusal, joined by ';'.
@@ -80,8 +71,7 @@ static void refuse(int err, const char *fmt, ...)
  *                                 210 not reset, cause still present
  *                                 211 read only over the network
  *                                 212 the valve cannot move now (the
- *                                     switch, a move or the step test
- *                                     running), or the
+ *                                     switch, a move running), or the
  *                                     clock is not running
  */
 static const struct { const char *head; int num; const char *text; } why_codes[] = {
@@ -298,43 +288,6 @@ static bool set(const char *c)
     return true;
 }
 
-#if PMC_ENG_COMMANDS
-// HELP in a bench build: the engineering commands (the remote set is in
-// remote.h and README.md).
-static bool remote_help(const char *c)
-{
-    static const char *const lines[] = {
-        "Engineering commands (bench build only; old names, replies end in OK or ERR):",
-        "  VALVE? | VALVE CAL | VALVE CLOSED | VALVE SETZERO | VALVE SKIP | VALVE SAVED? | VALVE RESTORE",
-        "  VALVE POSMAX|FHOME|FCREEP|BACKOFF|RETURN|CLEAR <n> | CTRL? | TUNE STEP [<+-%>] | TUNE? | TUNE STOP",
-        "  PID? | PID KP|TI|OUTMIN|DB|BAND <v> | PID KDIR +1|-1 | CAL? | CAL VAC [mbar] | CAL AIR [mbar]",
-        "  CAL SAVE | CAL ERASE | CAL NEW [id] | CAL PT <mV/V> <mbar> | CAL APPLY",
-        "  CFG? | CFG DIFF? | CFG SAVE | CFG LOAD LAST|PREVIOUS|DEFAULTS | CFG NAME? | CFG NAME <text>",
-        "  CFG TEST CORRUPT|ERASE | NET? | NET IP <address> <mask> | NET IP DEFAULT (USB build)",
-        "  MOT? | MOT GOTO <pos> [sps] | MOT MOVE <steps> | MOT STOP [RAMP] | MOT OFF | MOT ZERO",
-        "  MOT OVERRIDE [OFF] | MOT RATE|START|ACCEL <n> | MOT MODE WAVE|FULL|HALF | MOT HOLD|DIR 0|1",
-        "  MOT ORDER <abcd> | LIM? | SENSE? | BARO STATUS? | TREND? | TREND DUMP <n> | VER? | TOUCH?",
-    };
-    if (strcmp(c, "HELP") != 0)
-        return false;
-    for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++)
-        link_printf("%s\r\n", lines[i]);
-    link_printf("OK\r\n");
-    return true;
-}
-
-// The engineering commands (bench build, simulator): old names, own replies.
-static bool eng(const char *c)
-{
-    link_eng_open(true);
-    bool done = valve_command(c) || cfg_command(c) || cal_command(c) || sysinfo_command(c) ||
-                baro_command(c) || trend_command(c) || limit_command(c) || sense_data_command(c) ||
-                touch_command(c) || perf_command(c) || valvepos_command(c) || stepper3_command(c) ||
-                remote_help(c);
-    link_eng_open(false);
-    return done;
-}
-#endif
 
 /* --------------------------------------------------------------------------
  * A line: the parts in order, one reply line.
@@ -365,10 +318,6 @@ static void part(const char *c, bool chained)
     }
     if (set(c))
         return;
-#if PMC_ENG_COMMANDS
-    if (eng(c))
-        return;
-#endif
     refuse(100, "Unknown command");
 }
 

@@ -44,30 +44,10 @@ bool link_line_idle(link_line_t *l, uint32_t idle_ms, char *out, size_t n)
     return l->len > 0 && lv_tick_elaps(l->last_ms) >= idle_ms && line_take(l, out, n);
 }
 
-#if PMC_ENG_COMMANDS
-static bool eng_open;
-void link_eng_open(bool open) { eng_open = open; }
-#endif
 
 static void link_send(const char *s);
 
 void link_write(const char *s) { link_send(s); }
-
-void link_printf(const char *fmt, ...)
-{
-#if PMC_ENG_COMMANDS
-    char buf[256];
-    va_list args;
-    if (!eng_open)
-        return;
-    va_start(args, fmt);
-    lv_vsnprintf(buf, sizeof buf, fmt, args);
-    va_end(args);
-    link_send(buf);
-#else
-    (void)fmt;
-#endif
-}
 
 #if PMC_LINK_ETHERNET
 

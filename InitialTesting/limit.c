@@ -106,17 +106,3 @@ const char *limit_text(void)
     }
 }
 
-#if PMC_ENG_COMMANDS
-// LIM? (engineering).
-bool limit_command(const char *line)
-{
-    if (strcmp(line, "LIM?") != 0)
-        return false;
-    bool high = (PMC_LIMIT_PORT->IDR >> PMC_LIMIT_PIN) & 1u;
-    link_printf("LIM %s, pin %s %s, changes %lu, %s\r\nOK\r\n",
-                limit_text(), PMC_LIMIT_PIN_NAME, high ? "high" : "low",
-                (unsigned long)changes,
-                PMC_LIMIT_STOP ? "closing moves blocked while pressed" : "display only (PMC_LIMIT_STOP 0)");
-    return true;
-}
-#endif
