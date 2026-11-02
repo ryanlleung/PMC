@@ -42,14 +42,14 @@ Off-board parts: the Druck UNIK 5000 transducer (PDCR50G1, 15 psia absolute, 10 
 
 | From | To | Pins |
 | --- | --- | --- |
-| Druck M12 pin 1, +Supply | Boost 10 VOUT and Power Monitor VBUS | |
-| Druck M12 pin 2, +Out | Power Monitor IN+ | |
-| Druck M12 pin 4, -Out | Power Monitor IN- | |
+| Druck M12 pin 1, +Supply | Boost 10 Click VOUT and Power Monitor Click VBUS | |
+| Druck M12 pin 2, +Out | Power Monitor Click IN+ | |
+| Druck M12 pin 4, -Out | Power Monitor Click IN- | |
 | Druck M12 pin 3, -Supply | Common 0 V | |
-| Valve Fischer pins 1 to 4, coils | Stepper 3 outputs A to D | Coil order is set on the screen (Settings > Motor override > Coils) |
-| Valve Fischer pin 5, coil centre taps | Stepper 3 COM, the 12 V motor supply | Stepper 3 J1 set to external supply |
-| Valve Fischer pins 6 and 7, limit switch | Adapter Click IDC10 pad 8 and pad 10 (GND) | Pad 8 is printed RX but is the socket's TX pin, PD5, read with an internal pull-up. The Adapter labels its UART pads from the Click's side |
-| PoE splitter 12 V | Mikromedia 4 12 V terminal and Stepper 3 COM | Regulated 12 V. The Stepper 3 Click has no current limit |
+| Valve Fischer pins 1 to 4, coils | Stepper 3 Click outputs A to D | Coil order is set on the screen (Settings > Motor override > Coils) |
+| Valve Fischer pin 5, coil centre taps | Stepper 3 Click COM, the 12 V motor supply | Stepper 3 Click J1 set to external supply |
+| Valve Fischer pins 6 and 7, limit switch | Adapter Click IDC10 pad 8 and pad 10 (GND) | Pad 8 is printed RX but is the socket's TX pin, PD5, read with an internal pull-up. The Adapter Click labels its UART pads from the plugged-in Click's side |
+| PoE splitter 12 V | Mikromedia 4 12 V terminal and Stepper 3 Click COM | Regulated 12 V. The Stepper 3 Click has no current limit |
 | PoE splitter data | Shield RJ45 | Ethernet |
 | Board 0 V | Chassis earth | One bond at one point. Without it the floating board picks up noise on the Druck reading |
 
@@ -57,10 +57,10 @@ Socket pins used by the firmware:
 
 | Socket | Board | Signals |
 | --- | --- | --- |
-| S1 | Adapter Click + Pressure 21 | Pressure 21 on I2C2 (PF1 SCL, PF0 SDA), address 0x46. Limit switch on PD5 (socket TX) |
-| S2 | Stepper 3 | AN PB0, RST PC3, CS PA15, PWM PD13: the four coil outputs |
-| S3 | Boost 10 | SPI1 (PA5 SCK, PA6 MISO, PB5 MOSI), CS PF8, power good PG2 |
-| S4 | Power Monitor | I2C2 (PF1, PF0), address 0x4A |
+| S1 | Adapter Click + Pressure 21 Click | Pressure 21 Click on I2C2 (PF1 SCL, PF0 SDA), address 0x46. Limit switch on PD5 (socket TX) |
+| S2 | Stepper 3 Click | AN PB0, RST PC3, CS PA15, PWM PD13: the four coil outputs |
+| S3 | Boost 10 Click | SPI1 (PA5 SCK, PA6 MISO, PB5 MOSI), CS PF8, power good PG2 |
+| S4 | Power Monitor Click | I2C2 (PF1, PF0), address 0x4A |
 
 On-board: serial flash on SPI2 (CS PB11, SCK PB13, MISO PB14, MOSI PB15), display on a 16-bit 8080 bus on GPIOE (WR PF11), Ethernet PHY on RMII.
 
@@ -76,7 +76,7 @@ On-board: serial flash on SPI2 (CS PB11, SCK PB13, MISO PB14, MOSI PB15), displa
 `main.c` initialises everything (version and reset cause, clock, LVGL and display, calibration, Clicks, limit switch, valve, settings, saved position, screens, links), shows the start-up screen, starts the independent watchdog (about 3 to 4 s), then runs one loop with no RTOS:
 
 1. Links, touch (every 5 ms), clock, limit switch, stepper and valve tasks, saved position.
-2. Once a second: `sense_second()` reads the INA228 and the Pressure 21, converts to pressure, updates the faults, the trend and AUTO.
+2. Once a second: `sense_second()` reads the Power Monitor Click and the Pressure 21 Click, converts to pressure, updates the faults, the trend and AUTO.
 3. One command line from the text port, if any.
 4. `lv_timer_handler()` (screens refresh at 2 Hz, the fast parts at 10 Hz), the watchdog kick, 1 ms delay.
 
@@ -85,8 +85,8 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | File | What it does |
 | --- | --- |
 | `pmc_config.h` | Build options: link, write access, limit input polarity, network ports and fallback address, version |
-| `clicks.c` | Boost 10 excitation set-up and 11.5 V trip, INA228 reads, Druck plausibility, pressure from the calibration |
-| `baro.c` | Pressure 21 (BMP581) room pressure: start-up, reads, plausibility window, retry when lost |
+| `clicks.c` | Boost 10 Click excitation set-up and 11.5 V trip, Power Monitor Click reads, Druck plausibility, pressure from the calibration |
+| `baro.c` | Pressure 21 Click room pressure: start-up, reads, plausibility window, retry when lost |
 | `cal.c` | Druck calibration table: ratio (mV/V) against pressure, linear between points; two-point calibration (vacuum and air) |
 | `sense.c` | The once-a-second read and the controller temperature warning |
 | `limit.c` | Limit switch input: a trip counts at once, the release is debounced (20 ms) |
@@ -135,13 +135,13 @@ At power-up the MercShore iPC logo shows on white with a bar that fills as the b
 - **Valve**: manual moves and the valve's state. **Valve position**: homing state, motor step count, limit switch, the homing steps and the time taken. **Faults and log**: latched faults (tap for detail and help) and the event log. **Diagnostics**: raw readings in three rows: pressure sensor (signal, before calibration, room pressure), valve motor (steps, limit switch, last move), controller (board temperature, excitation, how long the last move took).
 - **Trend**: pressure (left axis), the setpoint in AUTO (dashed) and valve (right axis) over 1, 2, 5, 10, 30 min or 1 hour.
 - **Settings**: System setup (cryostat name, fallback address, Remote control switch, the address in use, MAC, firmware version and build date), Choose sensor (up to four Druck sensors, each with its own calibration), Valve setup (travel, direction, homing back-off, return and speeds, drive rates), Control tuning, Review and save, Load settings (last save, previous save, factory), Restart, and Motor override (Move, Speed and Coils tabs). Edits are drafts until Save settings, which checks them together and saves all or nothing.
-- **Calibrate transducer**: two-point calibration on the screen: vacuum, then air at the Pressure 21 room reading or a typed barometer reading.
+- **Calibrate transducer**: two-point calibration on the screen: vacuum, then air at the Pressure 21 Click room reading or a typed barometer reading.
 
 Display formats: pressure 1 decimal, valve % and keypad 2 decimals, dates DD/MM/YY. Fonts are Montserrat Medium 12, 16 and 26 px, and 40 px digits for the Home readings. The display is driven over the SSD1963's 16-bit 8080 bus, bit-banged on GPIOE (WR on PF11). LVGL heap: 64 KB in CCM plus a 24 KB pool in main RAM.
 
 ## Pressure measurement
 
-The Druck output is ratiometric, so the firmware uses the ratio of signal to excitation (mV/V), read by the INA228 with 128 averages over 600 ms (30 cycles of 50 Hz mains), once a second. `cal.c` turns the ratio into pressure with a two-point calibration: a pumped-down vacuum point and an air point at the room pressure from the Pressure 21 (or a typed barometer reading). Both points are read live through the INA228 as wired, so its loading of the Druck output and its gain and offset sit inside the calibration. With no calibration saved, the nominal 0 to 100 mV at 10 V is used and the screen says so. The display shows 0.1 mbar; accuracy is set by the Druck (±0.04 % FS, ±0.41 mbar) and the calibration points.
+The Druck output is ratiometric, so the firmware uses the ratio of signal to excitation (mV/V), read by the Power Monitor Click with 128 averages over 600 ms (30 cycles of 50 Hz mains), once a second. `cal.c` turns the ratio into pressure with a two-point calibration: a pumped-down vacuum point and an air point at the room pressure from the Pressure 21 Click (or a typed barometer reading). Both points are read live through the Power Monitor Click as wired, so its loading of the Druck output and its gain and offset sit inside the calibration. With no calibration saved, the nominal 0 to 100 mV at 10 V is used and the screen says so. The display shows 0.1 mbar; accuracy is set by the Druck (±0.04 % FS, ±0.41 mbar) and the calibration points.
 
 ## Storage
 
@@ -187,7 +187,7 @@ Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in
 | `PRES SP?` | `PRES SP 5.0 mbar` or `PRES SP NONE` |
 | `MODE?` | `MODE MANUAL`, `MODE AUTO`, `MODE HOMING` or `MODE NOT HOMED` |
 | `VALV?` / `VALV MOVING?` | `VALV 34.12 %` or `VALV NONE` / `VALV MOVING 1` while moving or homing, else 0 |
-| `BARO?` | `BARO 1013.25 mbar` or `BARO NONE` (Pressure 21 not fitted or not reading) |
+| `BARO?` | `BARO 1013.25 mbar` or `BARO NONE` (Pressure 21 Click not fitted or not reading) |
 | `ALRM?` | `ALRM NONE`, or the active alarms joined by `\|`, faults first: `<tag>,<0\|1>,<text>`. For a fault, 1 when `ALRM RESET` clears it now; for a warning, 1 when `ALRM OK` clears it |
 | `EVNT? [<n>]` | `EVNT <n>`, then n lines `<age s>,<tag>,<text>`, newest first; default 1, at most 100 |
 | `NETW?` | `NETW DHCP\|FALLBACK,<address>,<mask>,<MAC>`; `NETW NONE` in the USB build |
@@ -203,7 +203,7 @@ Error codes: 100 unknown command (anything not in the table above), 101 expected
 - `tools/ctrl-test/run.sh` runs `ctrl.c` on a PC against a model of the flow line (helium pot, needle valve, pump, motor ramp, closed switch): setpoint steps, helium off (F-6), pump off (W-2), a slipping drive (F-6), and the entry refusals.
 - `tools/cfg-test/run.sh` tests the settings store and the saved valve position against a flash held in RAM.
 - `tools/modbus-test/run.sh` tests the Modbus server and register map on a PC; `mb.sh` reads and writes registers from Git Bash.
-- `tools/baro-test/run.sh` tests the Pressure 21 conversion and plausibility window.
+- `tools/baro-test/run.sh` tests the Pressure 21 Click conversion and plausibility window.
 - `tools/images/mkimg.py` makes the start-up logo (`ui_img_logo.c`) from `mercshore-ipc-logo.png`.
 - `tools/xbuild/build.sh [Release|Debug]` cross-builds the firmware on Linux (cmake, ninja, `gcc-arm-none-eabi`) with the mikroSDK libraries in `.meproject` and prints flash and RAM use. For size checks only; the flashed build is NECTO's.
 - `simulator/wasm/build.sh` rebuilds the simulator; `node simulator/tests/run.js` runs its tests, and `simulator/tests/tcp-board.js` serves the simulated board on port 8888 for trying a driver without hardware.
