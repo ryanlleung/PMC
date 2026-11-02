@@ -28,4 +28,8 @@ bool fixed_parse(const char **s, int dec, int64_t *out);
 // Integer square root, rounded down.
 uint32_t isqrt64(uint64_t v);
 
+// CRC-32 (IEEE 802.3, reflected 0xEDB88320, as zlib): the check on the
+// settings, calibration and saved valve position records in serial flash.
+uint32_t crc32_ieee(const void *data, size_t len);
+
 #endif // _FIXED_H_

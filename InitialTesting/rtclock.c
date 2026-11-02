@@ -128,6 +128,10 @@ const char *rtclock_set_text(const char *p)
         return "Expected: TIME SET <YYYY-MM-DD> <HH:MM:SS>";
     if (y < 2000 || y > 2099)
         return "Outside 2000 to 2099";
+    // The RTC takes any day 1-31; 31 Feb would stand and roll over oddly.
+    static const int mdays[12] = { 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (d > mdays[mo - 1] || (mo == 2 && d == 29 && y % 4 != 0))   // 2000-2099: every 4th year
+        return "Expected: TIME SET <YYYY-MM-DD> <HH:MM:SS>";
     if (!lse_ok || !set_time(y, mo, d, h, mi, s))
         return "Clock not running";
     return NULL;

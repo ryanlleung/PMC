@@ -18,6 +18,11 @@
  * the crc field. One per 4 KB sector, two sectors used in turn, the higher
  * rev is the newest. Below the old cal record at 0x7FF000.
  *
+ * valve[5] was the zero offset (OFFSET, "count at 0 %"); removed in
+ * 0.13.31, as % was always worked out from count 0 (a non-zero offset put
+ * 0 % below the seat). The slot stays so records keep their layout; it is
+ * written 0, and a saved value is dropped when read (an event says so).
+ *
  * Version 6 (0.13.6) adds the homing return (valve[6], RETURN: steps off
  * the switch after the slow close); older records load it as their
  * back-off, which homing used for that step until then.
@@ -189,6 +194,7 @@ static cfg_rec_t slot[2];        // as read from each sector (version 1 converte
 static const char *slot_why[2];  // NULL if valid, else why not
 static uint32_t slot_ver[2];     // version found in each sector
 static int newest = -1;          // slot with the newest valid record, -1 none
+static int32_t slot_offset[2];   // the removed zero offset each record held (dropped on read)
 static int loaded = -1;          // slot loaded at start-up, -1 none
 static uint32_t loaded_rev;
 static cfg_rec_t factory;        // start-up values before any record is loaded
@@ -197,21 +203,9 @@ static bool flash_ok;
 
 static const char *const EMPTY = "empty";
 
-static uint32_t crc32(const void *data, size_t len)
-{
-    const uint8_t *p = data;
-    uint32_t c = 0xFFFFFFFFUL;
-    while (len--) {
-        c ^= *p++;
-        for (int k = 0; k < 8; k++)
-            c = (c >> 1) ^ (0xEDB88320UL & (0UL - (c & 1)));
-    }
-    return ~c;
-}
-
 static uint32_t rec_crc(const cfg_rec_t *r)
 {
-    return crc32(r, offsetof(cfg_rec_t, crc));
+    return crc32_ieee(r, offsetof(cfg_rec_t, crc));
 }
 
 static char slot_letter(int i) { return i == 0 ? 'A' : 'B'; }
@@ -384,28 +378,28 @@ static const char *read_slot(int i)
         return EMPTY;
     if (r->magic == CFG_MAGIC && r->version == 1 && r->size == sizeof old.v1) {
         memcpy(&old.v1, r, sizeof old.v1);
-        if (old.v1.crc != crc32(&old.v1, offsetof(cfg_rec_v1_t, crc)))
+        if (old.v1.crc != crc32_ieee(&old.v1, offsetof(cfg_rec_v1_t, crc)))
             return "CRC mismatch";
         from_v1(&old.v1, r);
     } else if (r->magic == CFG_MAGIC && r->version == 2 && r->size == sizeof old.v2) {
         memcpy(&old.v2, r, sizeof old.v2);
-        if (old.v2.crc != crc32(&old.v2, offsetof(cfg_rec_v2_t, crc)))
+        if (old.v2.crc != crc32_ieee(&old.v2, offsetof(cfg_rec_v2_t, crc)))
             return "CRC mismatch";
         FROM_OLD(cfg_rec_v2_t, &old.v2, r);
         lv_strlcpy(r->name, FACTORY_NAME, sizeof r->name);   // no name before version 3
     } else if (r->magic == CFG_MAGIC && r->version == 3 && r->size == sizeof old.v3) {
         memcpy(&old.v3, r, sizeof old.v3);
-        if (old.v3.crc != crc32(&old.v3, offsetof(cfg_rec_v3_t, crc)))
+        if (old.v3.crc != crc32_ieee(&old.v3, offsetof(cfg_rec_v3_t, crc)))
             return "CRC mismatch";
         FROM_OLD(cfg_rec_v3_t, &old.v3, r);
     } else if (r->magic == CFG_MAGIC && r->version == 4 && r->size == sizeof old.v4) {
         memcpy(&old.v4, r, sizeof old.v4);
-        if (old.v4.crc != crc32(&old.v4, offsetof(cfg_rec_v4_t, crc)))
+        if (old.v4.crc != crc32_ieee(&old.v4, offsetof(cfg_rec_v4_t, crc)))
             return "CRC mismatch";
         FROM_OLD(cfg_rec_v4_t, &old.v4, r);
     } else if (r->magic == CFG_MAGIC && r->version == 5 && r->size == sizeof old.v5) {
         memcpy(&old.v5, r, sizeof old.v5);
-        if (old.v5.crc != crc32(&old.v5, offsetof(cfg_rec_v5_t, crc)))
+        if (old.v5.crc != crc32_ieee(&old.v5, offsetof(cfg_rec_v5_t, crc)))
             return "CRC mismatch";
         FROM_OLD(cfg_rec_v5_t, &old.v5, r);
     } else if (r->magic != CFG_MAGIC || r->version != CFG_VERSION || r->size != sizeof *r) {
@@ -413,6 +407,8 @@ static const char *read_slot(int i)
     } else if (r->crc != rec_crc(r)) {
         return "CRC mismatch";
     }
+    slot_offset[i] = r->valve[5];   // the zero offset, removed in 0.13.31
+    r->valve[5] = 0;
     if (values_why(r))
         return "value out of range";
     return NULL;
@@ -580,13 +576,19 @@ static const char *busy_why(void)
 
 static bool busy(void) { return busy_why() != NULL; }
 
+// Why r's step mode cannot be put in use now, or NULL: stepper3_set_mode()
+// refuses while the valve layer locks the motor (a latched fault).
+static const char *mode_why(const cfg_rec_t *r)
+{
+    return r->mot[M_MODE] != (int32_t)stepper3_mode() ? stepper3_locked() : NULL;
+}
+
 // All or nothing: checked first, applied only when idle. False if not applied.
 static bool apply(const cfg_rec_t *r, bool with_sensors)
 {
     uint8_t o[4];
-    if (values_why(r) || busy())
+    if (values_why(r) || busy() || mode_why(r))
         return false;
-    bool rev_changed = (r->mot[M_DIR] != 0) != stepper3_reverse();
     stepper3_set_rate((uint32_t)r->mot[M_RATE]);
     stepper3_set_start((uint32_t)r->mot[M_START]);
     stepper3_set_accel((uint32_t)r->mot[M_ACCEL]);
@@ -615,8 +617,6 @@ static bool apply(const cfg_rec_t *r, bool with_sensors)
         else
             cal_set_default(false);
     }
-    if (rev_changed)
-        valve_uncalibrate("motor direction changed");
     sync_cal_saved();
     return true;
 }
@@ -673,6 +673,9 @@ void cfg_init(void)
     loaded_rev = slot[newest].rev;
     valve_event("CFG", "Settings saved %s loaded from %c%s", when(&slot[newest]),
                 slot_letter(newest), slot_ver[newest] == 1 ? " (version 1 record)" : "");
+    if (slot_offset[newest])
+        valve_event("CFG", "Zero offset %ld dropped (removed in 0.13.31): 0 %% is the return above the switch",
+                    (long)slot_offset[newest]);
 }
 
 // Saves the live settings as the next rev. why is for the screens.
@@ -744,7 +747,6 @@ static int32_t *key_ref(cfg_rec_t *r, cfg_key_t k)
     case CFG_FHOME:   return &r->valve[1];
     case CFG_FCREEP:  return &r->valve[2];
     case CFG_BACKOFF: return &r->valve[3];
-    case CFG_OFFSET:  return &r->valve[5];
     case CFG_RETURN:  return &r->valve[6];
     case CFG_REVERSE: return &r->mot[M_DIR];
     case CFG_RATE:    return &r->mot[M_RATE];
@@ -799,7 +801,8 @@ bool cfg_rev(cfg_from_t from, uint32_t *rev, const char **saved_at)
 
 void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
 {
-    static const int32_t vlo[] = { 1000, 16, 16, 10, 10, 0, 10 }, vhi[] = { 300000, 1000, 1000, 5000, 10000, 5000, 5000 };
+    // [5] was the zero offset (removed): 0 only.
+    static const int32_t vlo[] = { 1000, 16, 16, 10, 10, 0, 10 }, vhi[] = { 300000, 1000, 1000, 5000, 10000, 0, 5000 };
     _Static_assert(sizeof vlo / sizeof vlo[0] == VALVE_N_SETTINGS, "valve ranges");
     *lo = 0; *hi = 0;
     if (k >= CFG_KP && k <= CFG_BAND) {
@@ -811,8 +814,7 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
     } else if (k == CFG_REVERSE) {
         *hi = 1;
     } else if (k != CFG_SENSOR) {
-        int i = k == CFG_POSMAX ? 0 : k == CFG_FHOME ? 1 : k == CFG_FCREEP ? 2 : k == CFG_BACKOFF ? 3 :
-                k == CFG_RETURN ? 6 : 5;
+        int i = k == CFG_POSMAX ? 0 : k == CFG_FHOME ? 1 : k == CFG_FCREEP ? 2 : k == CFG_BACKOFF ? 3 : 6;
         *lo = vlo[i]; *hi = vhi[i];   // the indices key_ref() uses
     }
 }
@@ -865,6 +867,7 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     }
     if (cand.mot[M_START] > cand.mot[M_RATE]) { *why = "Start speed must not exceed Run speed"; return false; }
     if (values_why(&cand)) { *why = "a value is out of range, nothing saved"; return false; }
+    if (!tune_only && (*why = mode_why(&cand)) != NULL) return false;
     // Written first, then put in use: a failed write changes nothing, so
     // "Not saved" also means "not in use" (review of 0.10.11). The active cal
     // was captured into cand; a switch of sensor applies the new one.
@@ -890,6 +893,16 @@ bool cfg_load_live(cfg_from_t from, const char **why)
     const cfg_rec_t *r = source(from);
     if (!r || from == CFG_FROM_LIVE) { *why = "no such save"; return false; }
     if ((*why = busy_why()) != NULL) return false;
+    // Records before version 4 (saved by 0.12.12 or earlier) span two unit
+    // changes, 0.11.19 (the Direction bit's meaning flipped) and 0.11.33
+    // (HALF settings in full steps), and cannot tell which side they are
+    // from. The one the board started on is how it has been running; any
+    // other is not loaded, so the motor cannot turn the other way.
+    int i = r == &slot[0] ? 0 : r == &slot[1] ? 1 : -1;
+    if (i >= 0 && slot_ver[i] < 4 && !(i == loaded && slot[i].rev == loaded_rev)) {
+        *why = "saved before 0.12.13, its Direction cannot be read";
+        return false;
+    }
     if (from == CFG_FROM_DEFAULTS) {
         cfg_rec_t *d = &cand;   // shared, saves a record's worth of RAM
         capture(d);   // keep the sensors and their cals
@@ -898,6 +911,7 @@ bool cfg_load_live(cfg_from_t from, const char **why)
         memcpy(d->tune, factory.tune, sizeof d->tune);
         r = d;
     }
+    if ((*why = mode_why(r)) != NULL) return false;
     if (!apply(r, true)) { *why = "record not applied"; return false; }
     return true;
 }

@@ -9,7 +9,7 @@
 
 /**
  * @brief Settings store (stage 3 of the porting plan): the motor settings
- * (MOT RATE ... ORDER), the valve settings (VALVE POSMAX ... OFFSET) and the
+ * (MOT RATE ... ORDER), the valve settings (VALVE POSMAX ... RETURN) and the
  * Druck calibration in one record with a revision number and a CRC32, in the
  * on-board serial flash (extflash.c).
  *
@@ -87,7 +87,6 @@ void cfg_set_remote(bool on);
 typedef enum {
     CFG_POSMAX,    // steps for 100 %
     CFG_REVERSE,   // motor direction, 0 / 1 (a change clears the calibration)
-    CFG_OFFSET,    // count at 0 %, the back-off above the switch, steps
     CFG_BACKOFF,   // steps
     CFG_RETURN,    // steps off the switch after the slow close, homing step 4 (0.13.6)
     CFG_FHOME,     // reference speed, steps/s

@@ -54,7 +54,6 @@ int32_t valve_pct_milli(void) { return pos_milli; }
 int32_t valve_target_pct_milli(void) { return goto_milli; }
 bool stepper3_busy(void) { return busy; }
 bool stepper3_limit_open(void) { return limit_open; }
-bool supply_off(void) { return false; }
 bool cfg_remote(void) { return remote; }
 bool sense_hot(int32_t *d) { *d = cs.die_mc; return cs.die_mc >= 55000; }
 uint32_t lv_tick_get(void) { return 123456789u; }   // 123456 s up
@@ -93,6 +92,8 @@ bool valve_start_auto(const char **why)
 }
 bool valve_to_manual(const char **why) { (void)why; mode = VALVE_MANUAL; return true; }
 void valve_stop(void) { stops++; if (mode == VALVE_AUTO) mode = VALVE_MANUAL; }
+static bool held;   // valve.c's hold after a STOP on the screen
+bool valve_remote_held(void) { return held; }
 int valve_reset(char *left, size_t n) { resets++; fault_f5 = false; if (n) left[0] = 0; return 1; }
 void valve_event(const char *tag, const char *fmt, ...)
 {
@@ -218,6 +219,12 @@ static void tests(void)
     // STOP drops to MANUAL; STOP 0 does nothing.
     REQ(0x05, 0, 1, 0, 0);   CHECK(rlen == 12 && stops == 0);
     REQ(0x05, 0, 1, 0xFF, 0); CHECK(stops == 1 && mode == VALVE_MANUAL);
+    // After a STOP on the screen, the network's moves wait for Allow there:
+    // a master writing every scan cannot start the valve or AUTO again.
+    held = true;
+    req(sizeof v, v);         CHECK(is_ex(0x10, MODBUS_EX_REFUSED) && strstr(last_event, "Allow"));
+    REQ(0x05, 0, 0, 0xFF, 0); CHECK(is_ex(0x05, MODBUS_EX_REFUSED) && mode == VALVE_MANUAL);
+    held = false;
     // RESET, and a target refused while a fault is latched.
     fault_f5 = true;
     REQ(0x03, 0, 5, 0, 1);   CHECK(r16(0) == 1u << 4);

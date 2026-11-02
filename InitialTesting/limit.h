@@ -22,6 +22,9 @@ limit_state_t limit_state(void);
 // True unless the contact is known closed and still reads closed now.
 // Reads the pin directly; safe from the step interrupt.
 bool limit_open_now(void);
+// The pin alone, no debounce: the step interrupt's opening check counts
+// steps of it itself, so one glitch (held 20 ms by limit_poll) is not a press.
+bool limit_pin_open(void);
 const char *limit_text(void);    // "closed", "OPEN" or "unknown"
 bool limit_command(const char *line);
 

@@ -9,7 +9,6 @@
 #include "modbus.h"
 #include "sense.h"
 #include "stepper3.h"
-#include "supply.h"
 #include "valve.h"
 
 /* --------------------------------------------------------------------------
@@ -88,11 +87,11 @@ void mbmap_begin(void)
     if (valve_reference() == VALVE_REF_HOMED)  st |= 1u << ST_HOMED;
     if (stepper3_busy())                       st |= 1u << ST_MOVING;
     if (stepper3_limit_open())                 st |= 1u << ST_SWITCH;
-    if (valve_fault_latched())                 st |= 1u << ST_FAULT;
+    if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 and F-2 too
     if (w || hot || valve_question(NULL))      st |= 1u << ST_WARNING;
     if (sp_set)                                st |= 1u << ST_TARGET_SET;
     if (mbmap_writes_allowed())                st |= 1u << ST_WRITES;
-    if (!supply_off())                         st |= 1u << ST_MOTOR_SUPPLY;
+    st |= 1u << ST_MOTOR_SUPPLY;   // no supply sense from 0.14.3: kept at 1 so the map does not change
 
     static const char *const ftag[] = { "F-1", "F-2", "F-3", "F-4", "F-5", "F-6" };
     uint16_t f = 0;
@@ -146,7 +145,7 @@ bool mbmap_read_coil(uint16_t addr, bool *v)
             return false;
         switch (addr) {
         case CO_AUTO:  *v = valve_auto(); break;
-        case CO_RESET: *v = valve_fault_latched(); break;
+        case CO_RESET: *v = valve_fault_count() > 0; break;
         case CO_ACK:   *v = valve_warning() != NULL; break;
         default:       *v = false; break;
         }
@@ -158,9 +157,18 @@ bool mbmap_read_coil(uint16_t addr, bool *v)
     return true;
 }
 
+// A master that writes every scan would fill the event log with the same
+// refusal: the same one is logged again only after 60 s.
 static uint8_t refused(const char *what, const char *why)
 {
-    valve_event("NET", "Modbus %s: %s refused, %s", peer, what, why ? why : "refused");
+    static const char *last_what, *last_why;
+    static uint32_t last_ms;
+    if (what != last_what || why != last_why || lv_tick_get() - last_ms >= 60000) {
+        valve_event("NET", "Modbus %s: %s refused, %s", peer, what, why ? why : "refused");
+        last_what = what;
+        last_why = why;
+        last_ms = lv_tick_get();
+    }
     return MODBUS_EX_REFUSED;
 }
 
@@ -182,7 +190,11 @@ uint8_t mbmap_write_regs(uint16_t addr, uint16_t n, const uint16_t *v)
         if (a == HR_TARGET) {
             if (f < 0.0f || f > valve_range_mmbar() / 1000.0f)
                 return MODBUS_EX_VALUE;
-            int32_t mm = (int32_t)lroundf(f * 1000.0f);
+            int32_t mm = (int32_t)lroundf(f * 1000.0f), now;
+            // The same target again (a master writing every scan) changes
+            // nothing: no event, and the W-2 and Stable timers run on.
+            if (valve_target(&now) && now == (int32_t)fixed_round(mm, 2) * 100)
+                continue;
             fixed_fmt(t, sizeof t, fixed_round(mm, 2), 1);
             if (!valve_set_target(mm, &why))
                 return refused("target", why);
@@ -192,6 +204,8 @@ uint8_t mbmap_write_regs(uint16_t addr, uint16_t n, const uint16_t *v)
                 return MODBUS_EX_VALUE;
             int32_t p = (int32_t)lroundf(f * 100.0f);
             fixed_fmt(t, sizeof t, p, 2);
+            if (valve_remote_held())
+                return refused("valve %", VALVE_REMOTE_HELD_WHY);
             if (!valve_goto_pct100(p, &why))
                 return refused("valve %", why);
             valve_event("NET", "Modbus %s: valve to %s %%", peer, t);
@@ -209,6 +223,8 @@ uint8_t mbmap_write_coil(uint16_t addr, bool on)
     case CO_AUTO:
         if (on == valve_auto())
             return 0;
+        if (on && valve_remote_held())
+            return refused("AUTO", VALVE_REMOTE_HELD_WHY);
         if (on ? !valve_start_auto(&why) : !valve_to_manual(&why))
             return refused(on ? "AUTO" : "MANUAL", why);
         valve_event("NET", "Modbus %s: %s", peer, on ? "AUTO" : "MANUAL");

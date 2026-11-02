@@ -116,6 +116,7 @@ void link_printf(const char *fmt, ...)
     vfprintf(stderr, fmt, ap);
     va_end(ap);
 }
+void link_write(const char *s) { fputs(s, stderr); }   // TREND DUMP (trend.c)
 bool rtclock_valid(void) { return !st.cal_nominal; }
 const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "08 Oct  12:34"; }
 
@@ -196,21 +197,11 @@ void fake_hw_rise(int t)
     fixed_fmt(value, sizeof value, fixed_round(st.p_mmbar, 1), 2);
 }
 
-// Motor supply (supply.h): 12.1 V unless a scenario sets it.
-#include "supply.h"
-int32_t fake_sup_mv = 12100;
-int32_t supply_mv(void) { return fake_sup_mv; }
-supply_state_t supply_state(void)
-{
-    return fake_sup_mv < SUPPLY_OFF_MV ? SUPPLY_OFF : fake_sup_mv < SUPPLY_LOW_MV ? SUPPLY_LOW
-         : fake_sup_mv > SUPPLY_HIGH_MV ? SUPPLY_HIGH : SUPPLY_OK;
-}
-bool supply_off(void) { return supply_state() == SUPPLY_OFF; }
-bool supply_fitted(void) { return true; }
-
 // W-3 (sense.h): set by the "hot" scenario.
 bool fake_hot;
 bool sense_hot(int32_t *die_mc) { *die_mc = 57300; return fake_hot; }
 
 // No second finger in the previews.
 bool touch_second(int32_t *x, int32_t *y) { (void)x; (void)y; return false; }
+void touch_watch(int32_t x1, int32_t y1, int32_t x2, int32_t y2) { (void)x1; (void)y1; (void)x2; (void)y2; }
+bool touch_watch_take(void) { return false; }

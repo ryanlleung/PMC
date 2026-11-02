@@ -62,3 +62,15 @@ bool fixed_parse(const char **s, int dec, int64_t *out)
     *s = p;
     return true;
 }
+
+uint32_t crc32_ieee(const void *data, size_t len)
+{
+    const uint8_t *p = data;
+    uint32_t c = 0xFFFFFFFFUL;
+    while (len--) {
+        c ^= *p++;
+        for (int k = 0; k < 8; k++)
+            c = (c >> 1) ^ (0xEDB88320UL & (0UL - (c & 1)));
+    }
+    return ~c;
+}

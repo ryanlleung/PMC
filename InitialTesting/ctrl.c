@@ -131,8 +131,10 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     if (raw > pos_max && e > 0) i_new = fmaxf(c->i, pos_max - kp * e - d);
     if (raw < lo && e < 0) i_new = fminf(c->i, lo - kp * e - d);
     if (in->limit && raw < (float)c->pos_cmd) integrate = false;   // closing blocked by the switch
+    // The step constants are full steps; the counts are half steps in HALF.
+    const int32_t fs = k->steps > 1 ? k->steps : 1;
     const float lead = (float)(c->pos_cmd - in->pos);   // valve still travelling to the last command
-    if (CTRL_LEAD_MAX > 0 && fabsf(lead) > CTRL_LEAD_MAX && sgnf(ki * e) == sgnf(lead))
+    if (CTRL_LEAD_MAX > 0 && fabsf(lead) > (float)(CTRL_LEAD_MAX * fs) && sgnf(ki * e) == sgnf(lead))
         integrate = false;   // travel anti-windup
     if (integrate)
         c->i = i_new;
@@ -167,7 +169,7 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         const bool pin_open = err > 0 && AT(p, pos_max) && AT(c->pos_f, pos_max) && AT(c->win_pos, pos_max);
         const bool pin_min = err < 0 && AT(p, lo) && AT(c->pos_f, lo) && AT(c->win_pos, lo);
 #undef AT
-        const float judge = (float)(k->db > CTRL_CHECKMIN ? k->db : CTRL_CHECKMIN);
+        const float judge = (float)(k->db > CTRL_CHECKMIN * fs ? k->db : CTRL_CHECKMIN * fs);
         const bool judged = fabsf(moved) >= judge;
         const int way = judged ? sgnf(moved) : !in->moving && pin_open ? 1 : !in->moving && pin_min ? -1 : 0;
         if (way) {

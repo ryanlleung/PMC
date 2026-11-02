@@ -15,6 +15,8 @@ Map version 1, firmware 0.12.0 (writes on from 0.12.6). Ethernet build only (`PM
 
 With writes on, the writable registers and command coils go through the same calls as the screen buttons, so the same checks and refusals apply. A write the controller refuses answers exception 4 and logs a NET event with the reason ("Switch to MANUAL first", "No target set", ...). Each accepted write is logged as a NET event with the client's IP address.
 
+Rewriting the target with the value it already has changes nothing (no event; the W-2 and Stable timers run on), and a refused write is logged once a minute at most. A STOP on the screen holds the network's moves (0.13.31): valve % writes and AUTO coil = 1 answer exception 4 ("Stopped on the screen: Allow remote moves there") until the operator taps Allow on the screen's strip, so a master that writes every scan cannot start the valve or AUTO again. STOP, RESET, OK, AUTO = 0 and the target are not held. A STOP from the network (coil 1, or STOP on port 8888) does not hold.
+
 | Exception | Meaning |
 | --- | --- |
 | 1 | Function code not supported, or writes are off |
@@ -60,7 +62,7 @@ Reading past address 25 answers exception 2, so read 0 to 25 (26 registers) in o
 | 6 | 22 | A warning is showing (W-1 to W-6) |
 | 7 | 23 | Target set |
 | 8 | 24 | Remote writes on (`PMC_MODBUS_WRITE 1` and Remote control On, 0.13.4) |
-| 9 | 25 | Motor 12 V supply on (always 1 without the supply sense) |
+| 9 | 25 | Motor 12 V supply on: always 1 (the supply sense was removed in 0.14.3) |
 
 ### Faults and warnings (registers 5 and 6)
 
@@ -69,7 +71,7 @@ Reading past address 25 answers exception 2, so read 0 to 25 (26 registers) in o
 | 0 | F-1 No pressure signal | W-1 Switch hit early (Set as 0 % or Skip waiting) |
 | 1 | F-2 Excitation | W-2 Not settling |
 | 2 | F-3 Limit not found | W-3 Controller hot |
-| 3 | F-4 Limit stuck | W-4 Switch pressed off the seat |
+| 3 | F-4 Limit pressed when it should be free (stuck, or pressed during an opening move) | W-4 Switch pressed off the seat |
 | 4 | F-5 Motion timeout | W-5 Over range in AUTO |
 | 5 | F-6 No response | W-6 Driven the wrong way |
 

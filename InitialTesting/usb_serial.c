@@ -147,6 +147,13 @@ void usb_serial_printf(const char *fmt, ...)
 }
 
 #define LINE_IDLE_MS 200
+// Nothing received for this long after a character, then more of the same
+// line: it is being typed key by key (a terminal such as PuTTY), not sent
+// as one text.
+#define TYPED_GAP_MS 50
+// A key-by-key line left this long without CR or LF is dropped (not run),
+// so a terminal that sends no line ending (NECTO) is not stuck behind it.
+#define TYPED_FORGET_MS 10000
 
 static uint32_t rx_bytes;
 
@@ -158,19 +165,42 @@ uint32_t usb_serial_rx_bytes(void)
 bool usb_serial_getline(char *buf, size_t n)
 {
     static link_line_t line;
+    static bool typed;        // the pending line came key by key
+    static uint32_t quiet_ms; // the FIFO seen empty this long after the line's last character
 
     while (tud_cdc_available()) {
         int32_t c = tud_cdc_read_char();
         if (c < 0)
             break;
         rx_bytes++;
-        if (link_line_feed(&line, (char)c, buf, n))
+        // Measured from when the FIFO was seen empty, not from when this
+        // character is read: a packet that waited through a long loop pass
+        // (the NECTO terminal's second 64 bytes) is not a pause.
+        if (line.len > 0 && quiet_ms > TYPED_GAP_MS)
+            typed = true;
+        quiet_ms = 0;
+        if (link_line_feed(&line, (char)c, buf, n)) {
+            typed = false;
             return true;
+        }
+        if (line.len == 0)
+            typed = false;   // CR or LF on an empty line
     }
 
     // The NECTO UART Terminal sends the text with no line ending, so a line
-    // also ends after LINE_IDLE_MS with nothing more received. A terminal
-    // that sends each key as it is typed needs CR or LF instead.
+    // also ends after LINE_IDLE_MS with nothing more received. Not a line
+    // typed key by key: a pause there would run half a command (VALV SET 5
+    // for 50), so it waits for CR or LF.
+    if (line.len > 0)
+        quiet_ms = lv_tick_elaps(line.last_ms);   // the FIFO is empty here
+    if (typed) {
+        if (quiet_ms > TYPED_FORGET_MS) {
+            line.len = 0;
+            line.over = false;
+            typed = false;
+        }
+        return false;
+    }
     return link_line_idle(&line, LINE_IDLE_MS, buf, n);
 }
 

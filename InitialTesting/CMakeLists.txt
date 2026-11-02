@@ -40,8 +40,6 @@ add_executable(InitialTesting
     motor_screen.h
     limit.c
     limit.h
-    supply.c
-    supply.h
     usb_serial.h
     usb_serial.c
     tinyusb_cdc_device.c

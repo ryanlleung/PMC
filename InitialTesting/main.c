@@ -30,12 +30,14 @@
 #include "cfg.h"
 #include "ui.h"
 #include "limit.h"
-#include "supply.h"
 #include "sense.h"
 #include "valvepos.h"
 #include "trend.h"
 #include "baro.h"
 #include "remote.h"
+#if PMC_LINK_ETHERNET
+#include "ethlink.h"
+#endif
 
 /*
  * PERF?: how responsive the main loop is, since the last PERF?. Touch is
@@ -140,7 +142,6 @@ void application_init()
     // when the valve is moved (screen or link).
     clicks_init();
     limit_init();
-    supply_init();   // motor 12 V on PA3
     valve_init();   // NOT HOMED: nothing moves until homed or moved on the screen
     ui_splash_step(40);
     splash_wait(500);
@@ -212,13 +213,21 @@ int main(void)
     ////////////////////////// LVGL timing routine (DO NOT REMOVE) //////////////////////////
     char line[LINK_LINE_MAX + 1];
     uint32_t sense_ms = lv_tick_get();
+    uint32_t held_from = 0;   // when the dump being waited for began holding the next line
     while (1)
     {
         link_task();
+#if PMC_LINK_ETHERNET
+        // A new client does not get the last one's dump: stopped before
+        // valve_task and trend_task write their next lines this pass.
+        if (ethlink_take_new_client()) {
+            valve_events_stop();
+            trend_dump_stop();
+        }
+#endif
         touch_poll();
         rtclock_poll();
         limit_poll();
-        supply_poll();
         stepper3_poll();
         valve_task();
         valvepos_task();
@@ -229,8 +238,14 @@ int main(void)
                 sense_ms = lv_tick_get();
             sense_second();
         }
-        // The remote command set (remote.c): no echo, one reply line.
-        if (link_getline(line, sizeof line))
+        // The remote command set (remote.c): no echo, one reply line. While
+        // an EVNT? or TREND DUMP is going out a few lines a pass, the next
+        // line waits, so its reply does not land among the dump's lines; for
+        // 0.5 s at most, so a STOP is not held longer than that.
+        bool dumping = valve_events_sending() || trend_dumping();
+        if (!dumping)
+            held_from = lv_tick_get();
+        if ((!dumping || lv_tick_elaps(held_from) >= 500) && link_getline(line, sizeof line))
             remote_line(line);
         uint32_t t0 = lv_tick_get();
         lv_timer_handler();

@@ -77,17 +77,17 @@ static void set_status(void)
     char p[16], t[16];
     switch (st) {
     case B_NOT_FITTED:
-        lv_snprintf(status, sizeof status, "S2 Pressure 21: not fitted (%s)", why);
+        lv_snprintf(status, sizeof status, "S1 Pressure 21: not fitted (%s)", why);
         break;
     case B_STARTING:
-        lv_snprintf(status, sizeof status, "S2 Pressure 21: BMP58%d @0x%02X, waiting for the first reading",
+        lv_snprintf(status, sizeof status, "S1 Pressure 21: BMP58%d @0x%02X, waiting for the first reading",
                     chip_id == 0x51 ? 5 : 1, BARO_ADDR);
         break;
     case B_LOST:
-        lv_snprintf(status, sizeof status, "S2 Pressure 21: lost (I2C read failed), retry every %d s", REPROBE_S);
+        lv_snprintf(status, sizeof status, "S1 Pressure 21: lost (I2C read failed), retry every %d s", REPROBE_S);
         break;
     default:
-        lv_snprintf(status, sizeof status, "S2 Pressure 21: BMP58%d @0x%02X  %s mbar  %s C%s", chip_id == 0x51 ? 5 : 1,
+        lv_snprintf(status, sizeof status, "S1 Pressure 21: BMP58%d @0x%02X  %s mbar  %s C%s", chip_id == 0x51 ? 5 : 1,
                     BARO_ADDR, fixed_fmt(p, sizeof p, fixed_round(p_mmbar, 1), 2),
                     fixed_fmt(t, sizeof t, fixed_round(t_mc, 1), 2),
                     st == B_IMPLAUSIBLE ? "  outside 500-1100 mbar" : "");
@@ -160,7 +160,7 @@ void baro_init(void) {}
 void baro_poll(void) {}
 bool baro_reading(int32_t *p, int32_t *t) { (void)p; (void)t; return false; }
 bool baro_fitted(void) { return false; }
-static const char status[] = "S2 Pressure 21: off in this build (PMC_BARO 0)";
+static const char status[] = "S1 Pressure 21: off in this build (PMC_BARO 0)";
 
 #endif
 

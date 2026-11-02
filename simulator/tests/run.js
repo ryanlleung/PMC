@@ -23,12 +23,11 @@ function homed(s) {
 }
 function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '.png')); }
 
-{ // Boot: NOT HOMED, the supply seen, nothing moves.
+{ // Boot: NOT HOMED, nothing moves.
   const s = load(); s.boot(); s.set(5, 40000); s.run(3000);
   check('boot sends nothing unasked', s.out === '', s.out);
   const st = s.cmd('MODE?;VALV?;VALV MOVING?;ALRM?'), ev = events(s);
   check('boot NOT HOMED', st === 'MODE NOT HOMED;VALV NONE;VALV MOVING 0;ALRM NONE\r\n', st);
-  check('boot motor supply seen', /SUP,Motor supply on/.test(ev), ev);
   check('boot no motion', s.get(5) === 40000);
   shot(s, 'boot');
 }
@@ -53,14 +52,6 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   const full = s.get(5) / 2;
   // The needle is the count plus the back-off when 0 % is above the switch (0.12.12).
   check('VALV SET 25 % moves the needle 25 % of 66048', Math.abs(s.get(30) - 16512) <= 1 && [0, 400].includes(full - s.get(30)), 'needle ' + full + ', count ' + s.get(30));
-}
-{ // Motor supply off: moves refused, said on the screen and the console.
-  const s = homed(load());
-  const n0 = s.get(5); s.set(12, 0); s.run(2000);
-  const out = s.cmd('VALV SET 10', 2000);
-  check('supply off seen', /^ERR 212 Motor supply off/m.test(out) && /Motor supply off/.test(events(s, 5)), out);
-  check('supply off: no move', s.get(5) === n0);
-  shot(s, 'supply-off');
 }
 { // F-1: Druck unplugged.
   const s = homed(load()); s.set(8, 0); s.run(5000);
@@ -154,6 +145,19 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   second(298, 0); over(0); s.run(2000);
   check('override + Open opens', opened > rel2 + 300, opened + ' vs ' + rel2);
 }
+{ // Pressure 21 (0.14.0): CAL AIR without a number takes the room sensor.
+  const s = load(); s.boot(); s.run(3000);
+  s.set(11, 0); s.run(3000); s.cmd('CAL VAC', 15000);
+  s.set(11, 1); s.set(19, 1008.4); s.run(3000);
+  const a = s.cmd('CAL AIR', 15000), ev = events(s, 4);
+  check('CAL AIR from the room sensor', !/ERR/.test(a) && /Air point [\d.]+ mV\/V at 1008\.40 mbar from the room sensor/.test(ev), a + ev.slice(-400));
+  // No room sensor: CAL AIR needs a number, BARO? says NONE.
+  const u = load(); u.boot(); u.set(20, 0); u.run(3000); u.set(11, 1); u.run(3000);
+  check('BARO NONE without the sensor', u.cmd('BARO?', 1000) === 'BARO NONE\r\n', u.cmd('BARO?', 1000));
+  const r = u.cmd('CAL AIR', 2000);
+  check('CAL AIR refused without the sensor', /no room pressure sensor: give the pressure/i.test(r), r);
+  { const r2 = u.cmd('CAL AIR 1013', 15000); check('CAL AIR 1013 still works', !/ERR/.test(r2), r2); }
+}
 { // The remote set (0.13.0): the reply rules of the handover page.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
@@ -171,7 +175,7 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   check('PRES SP 5.04;PRES SP? gives 5.0', one('PRES SP 5.04;PRES SP?') === 'PRES SP 5.0 mbar\r\n', one('PRES SP?'));
   const poll = one('PRES?;PRES SP?;MODE?;VALV?;ALRM?');
   check('chained poll', /^PRES \d+\.\d{3} mbar;PRES SP 5\.0 mbar;MODE MANUAL;VALV 30\.00 %;ALRM NONE\r\n$/.test(poll), poll);
-  check('BARO? and NETW? NONE in the simulator', one('BARO?;NETW?') === 'BARO NONE;NETW NONE\r\n');
+  check('BARO? and NETW? in the simulator', one('BARO?;NETW?') === 'BARO 1013.20 mbar;NETW NONE\r\n', one('BARO?;NETW?'));
   check('*IDN?', /^MercShore,iPC,[0-9A-F]{24},\d+\.\d+\.\d+\r\n$/.test(one('*IDN?')), one('*IDN?'));
   // EVNT?: the count line, then that many lines, newest first.
   const ev = s.cmd('EVNT? 3', 2000).split('\r\n');

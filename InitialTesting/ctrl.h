@@ -67,6 +67,7 @@ typedef struct {
     float band;        // target band, mbar
     float outmin;      // AUTO min, % open
     int32_t pos_max;   // steps for 100 %
+    int32_t steps;     // motor counts per full step (2 in HALF); 0 reads as 1
 } ctrl_tune_t;
 
 typedef struct {

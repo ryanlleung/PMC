@@ -70,6 +70,13 @@ bool valve_start_auto(const char **why)
 bool valve_to_manual(const char **why) { (void)why; v_mode = VALVE_MANUAL; return true; }
 bool valve_set_target(int32_t m, const char **why) { (void)why; v_sp = m / 100 * 100; v_sp_set = true; return true; }
 bool valve_target(int32_t *m) { if (m) *m = v_sp; return v_sp_set; }
+void valve_hold(bool on) { (void)on; }
+// As valve.c: the target changes only if AUTO starts.
+bool valve_start_auto_at(int32_t m, const char **why)
+{
+    if (valve_fault_count()) { *why = "Reset the fault first"; return false; }
+    return valve_set_target(m, why) && valve_start_auto(why);
+}
 int32_t valve_range_mmbar(void) { return 1034214; }
 int32_t valve_band_mmbar(void) { return 100; }
 ctrl_reg_t valve_regulation(void) { return v_mode == VALVE_AUTO ? v_reg : CTRL_REG_NONE; }
@@ -90,6 +97,10 @@ bool valve_goto_pct10(int32_t p, const char **why) { (void)why; v_target10 = p; 
 bool valve_goto_pct100(int32_t p, const char **why) { return valve_goto_pct10(p / 10, why); }
 bool valve_move_steps(int32_t steps, const char **why) { (void)steps; (void)why; return true; }
 void valve_stop(void) { moving = false; }
+static bool v_held;   // the remote hold after a STOP on the screen (valve.c)
+void valve_stop_local(void) { valve_stop(); v_held = true; }
+bool valve_remote_held(void) { return v_held; }
+void valve_remote_allow(void) { v_held = false; }
 bool valve_stop_latches(void) { return valve_auto(); }
 int valve_fault_count(void) { return v_f01 + v_f16 + v_f12; }
 bool valve_motion_blocked(void) { return v_f12 || v_f16; }
@@ -274,7 +285,7 @@ int main(int argc, char **argv)
     const char *st = argv[1];
     fake_hw_set_scenario(!strcmp(st, "nodruck") ? "nodruck" : !strcmp(st, "neg") ? "neg" : "cal");
     bool page = !strcmp(st, "valve") || !strcmp(st, "valvenc") || !strcmp(st, "limithit") ||
-                !strcmp(st, "calpage") || !strcmp(st, "calhelp") || !strcmp(st, "faults") || !strcmp(st, "detail") || !strcmp(st, "diag") || !strcmp(st, "supdiag") || !strcmp(st, "supoff") || !strcmp(st, "suplow") || !strcmp(st, "hot") ||
+                !strcmp(st, "calpage") || !strcmp(st, "calhelp") || !strcmp(st, "faults") || !strcmp(st, "detail") || !strcmp(st, "diag") || !strcmp(st, "hot") ||
                 !strcmp(st, "help") || !strcmp(st, "help2") || !strcmp(st, "help3") || !strcmp(st, "back") || !strcmp(st, "svc") ||
                 !strncmp(st, "set-", 4) || !strncmp(st, "cal", 3) || strstr(st, "trend");
     if (!strcmp(st, "manual") || !strcmp(st, "moving") || !strcmp(st, "stop") || !strcmp(st, "keypad") ||
@@ -420,9 +431,7 @@ int main(int argc, char **argv)
                 a, b, c, d, f, (size_t)m.max_used, (size_t)m.total_size);
     }
     if (!strcmp(st, "calset")) v_ref = VALVE_REF_HAND;   // opens on Set position
-    if (!strcmp(st, "supoff") || !strcmp(st, "supdiag")) { extern int32_t fake_sup_mv; fake_sup_mv = 400; }
     if (!strcmp(st, "hot")) { extern bool fake_hot; fake_hot = true; }
-    if (!strcmp(st, "suplow")) { extern int32_t fake_sup_mv; fake_sup_mv = 9800; }
     if (!strcmp(st, "handset")) { v_mode = VALVE_MANUAL; v_cal = true; v_pct10 = 342; v_ref = VALVE_REF_HAND; }
     if (!strcmp(st, "setpos")) { v_mode = VALVE_NOT_CAL; v_cal = false; tap(415, 72); tap(240, 146); }   // Home valve, Set position
     if (!strcmp(st, "bootpick")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; }
@@ -482,7 +491,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "calpage") || !strcmp(st, "calpage2") || !strncmp(st, "calset", 6)) { tap(415, 184); tap(210, 128); }
     if (!strcmp(st, "calhelp")) { tap(415, 184); tap(210, 128); tap(415, 72); }
     if (!strcmp(st, "bootpick")) { run(600); tap(240, 146); }   // start-up question, Set position
-    if (!strcmp(st, "diag") || !strcmp(st, "supdiag")) { tap(415, 184); tap(200, 184); }
+    if (!strcmp(st, "diag")) { tap(415, 184); tap(200, 184); }
     run(1200);
 
     FILE *f = fopen(argv[2], "wb");

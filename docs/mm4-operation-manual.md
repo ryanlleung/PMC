@@ -40,25 +40,24 @@ The controller has four modes, shown in the header of every screen:
 
 A red header with FAULT means a fault is latched (section 9).
 
-The controller is operated from its 4.3 inch touchscreen. It can also be read and commanded over Ethernet: a text command link on TCP port 5000 for bench work and a Modbus TCP server on port 502 for a supervisory system (section 11). The USB-C port carries the same text link when the firmware is built for USB instead of Ethernet.
+The controller is operated from its 4.3 inch touchscreen. It can also be read and commanded over Ethernet: a text command link on TCP port 8888 (the remote command set) and a Modbus TCP server on port 502, for a supervisory system or a person at a terminal (section 11). The USB-C port carries the same text link when the firmware is built for USB instead of Ethernet.
 
 ## 2. Safety and limits
 
 The controller has no hardware interlock. The closing stop is the firmware reading the valve's limit switch before every closing step. This was a design decision for the prototype. The points below follow from it.
 
 - **The limit switch can trip early.** It is a force-actuated normally closed contact. Ice on the valve, or a stiff drive, can press it before the needle reaches the seat. The controller cannot tell an early trip from the seat. When the switch trips during a normal move the controller stops and asks the operator (W-1, section 9). Only a person at the cryostat can judge which it was.
-- **STOP** on the bottom row of every screen stops the valve at once and holds it. In AUTO it also switches to MANUAL. Nothing latches, so operation can resume straight away.
+- **STOP** on the bottom row of every screen stops the valve at once and holds it. In AUTO it also switches to MANUAL. Nothing latches, so operation can resume straight away from the screen. From the network it cannot: the strip says "Stopped here: remote moves held" until Allow is tapped, so a supervisory system that writes its commands every scan does not start the valve again. STOP works with any finger, even with another one on the glass.
 - **Nothing moves at power-up.** The valve is NOT HOMED until the operator homes it or sets its position. The controller never uses a saved position on its own.
 - **Limit override** (Settings > Motor override) drives the valve closed past an open limit switch. It takes two fingers: hold Limit override, then press Close with another finger. Holding Limit override alone does nothing. The valve moves only while both are held and stops at once when either lifts. Open also works while it is held. Use it only when the switch is known to be stuck and the valve is known to be off the seat.
 - **Motor supply.** The Stepper 3 Click has no current limit. The motor supply must be a regulated 12 V. Do not feed 12 V into the Boost 10 Click, which takes 5 V from the board and makes the 10 V Druck excitation.
-- **Remote writes are on.** Anyone who can reach the controller's IP address on port 5000 or port 502 can set the target, move the valve in MANUAL, start AUTO and stop. Keep the controller on the instrument network only.
+- **Remote control.** While Settings > System setup > Remote control is On (the default), anyone who can reach the controller's IP address on port 8888 or port 502 can set the target, move the valve in MANUAL, start AUTO and stop. With it Off the network can only read, and a network STOP is refused too. Keep the controller on the instrument network only.
 
 Operating limits:
 
 | Item | Limit | Source |
 | --- | --- | --- |
 | Board supply | 12 V on the terminal (10.6 to 14 V) | Mikromedia 4 |
-| Motor supply | 12 V regulated. Below 6.0 V moves are refused; below 10.5 V or above 14.0 V is a warning (needs the supply sense wired, section 13) | Firmware |
 | Druck excitation | 9.5 to 10.5 V. Outside this is fault F-2 | Firmware |
 | Pressure range | 0 to 1034 mbar absolute (15 psia sensor). Display resolution 0.1 mbar; accuracy set by the Druck (±0.04 % FS, ±0.4 mbar) and the calibration points | Druck datasheet |
 | Target | 0.0 to the sensor range, kept to 0.1 mbar. Operators use 1 to 25 mbar | Firmware |
@@ -70,12 +69,12 @@ Operating limits:
 | Part | What it does | Connection |
 | --- | --- | --- |
 | Mikromedia 4 for STM32F4 | Controller and 4.3 inch 480 x 272 touchscreen. Runs the control loop, the screens, the Ethernet link and the Modbus server | 12 V terminal (2.54 mm pitch), USB-C for flashing or the USB text link, RJ45 Ethernet |
-| Stepper 3 Click, socket S1 | Drives the unipolar six-lead valve stepper (PK22, 344:1 gearbox) at 12 V. No current limit | Motor cable to the Click's four coil outputs and the 12 V motor supply |
-| Limit switch, socket S2 | One normally closed dry contact to ground, opens at the closed end of travel | PWM pad PD13 (internal pull-up) and GND |
+| Stepper 3 Click, socket S2 | Drives the unipolar six-lead valve stepper (PK22, 344:1 gearbox) at 12 V. No current limit | Motor cable to the Click's four coil outputs and the 12 V motor supply |
+| Limit switch, socket S1 | One normally closed dry contact to ground, opens at the closed end of travel | Socket TX (PD5, internal pull-up) and GND. On the Adapter Click's 10-pin header that is pad 8, printed RX, and pad 10. The Adapter prints its UART pad names from the Click's side, so pad 8 printed RX is the socket's TX, and pad 7 printed TX is the socket's RX |
 | Boost 10 Click, socket S3 | Makes about 10 V from the board's 5 V for the Druck excitation. Trips above 11.5 V. Never feed it 12 V | SPI1 |
 | Power Monitor Click (INA228), socket S4 | Reads the Druck output and the excitation, 128 averages over 600 ms, once a second | I2C2, address 0x4A |
 | Druck UNIK 5000 PDCR50G1 | 15 psia absolute pressure transducer, 10 mV/V, insulated from its case | M12: pin 1 +Supply to Boost 10 VOUT and INA228 VBUS; pin 2 +Out to IN+; pin 4 -Out to IN-; pin 3 -Supply to common GND |
-| Pressure 21 Click (BMP581) on Adapter Click, socket S2 | Room pressure for a future air calibration reference. Driver built, Click not yet fitted (not benched) | I2C, address 0x46 |
+| Pressure 21 Click (BMP581) on Adapter Click, socket S1 | Room pressure for the air point of the calibration. Driver built, Click not yet fitted (not benched) | I2C, address 0x46 |
 | On-board serial flash | Settings, calibration and the saved valve position. Survives reflashing | |
 | On-board real-time clock | Time stamps for the event log and saves. Survives a reset, and a power-off with a cell fitted | |
 
@@ -116,7 +115,7 @@ Every screen has the same frame: a header with Back and Home buttons, the title,
 | Faults and log | Menu > Records > Faults and log | Latched faults, with Reset fault. Tap a fault for its detail and help. The event log (last 100 events) |
 | Valve position | Menu > Calibrate > Valve position | Home valve, and the three ways to set the position without homing: Set as 0 %, Set as other %, Use last saved. Help |
 | Calibrate sensor | Menu > Calibrate > Transducer | The two-point calibration: Capture vacuum, Capture air, and the saved and captured readings side by side |
-| Diagnostics | Menu > System > Diagnostics | Live readings and hardware state: firmware version, Druck signal and excitation, board temperature, motor and limit switch, link and IP address |
+| Diagnostics | Menu > System > Diagnostics | Live readings: Druck signal, pressure before calibration, the room sensor (Pressure 21), motor steps, limit switch and last move, board temperature, excitation and how long the last move took |
 | Settings | Menu > System > Settings | System, Choose sensor, Valve setup, Control tuning, Review and save (with Load settings), Motor override (section 10) |
 
 Display formats: pressure to 1 decimal in mbar, valve position and keypad entries to 2 decimals in %, dates DD/MM/YY.
@@ -143,7 +142,7 @@ AUTO needs the valve homed (or its position set), no fault latched, a valid pres
 
 - The first time after power-up it opens "Target for AUTO, mB" with the allowed range. Type the target and press Set. AUTO starts at once.
 - Later presses ask "Start AUTO at X mB?" with Cancel, New target and Start AUTO.
-- A refused start says why in the strip: Home the valve first, Reset the fault first, No valid pressure, Set a target first, Target outside the sensor range, Pressure above the sensor range, Pressure response not set, Tuning not set, Motor supply off, or Limit switch pressed away from the seat.
+- A refused start says why in the strip: Home the valve first, Reset the fault first, No valid pressure, Set a target first, Target outside the sensor range, Pressure above the sensor range, Pressure response not set, Tuning not set, Limit switch pressed away from the seat, Limit switch question waiting at the screen, Valve being moved on the screen (Close or Open held), or Sensor calibration point being taken.
 
 The entry is bumpless: the loop starts from where the valve is, so the first move is small.
 
@@ -208,17 +207,17 @@ Calibrate when a sensor is first fitted to a board, when the sensor or the Click
 From the screen (Menu > Calibrate > Transducer):
 
 1. Pump the sensor down. Press Capture vacuum. The question "Sensor at vacuum? Capture sets 0 mB" has Capture, which takes the point as 0 mbar, and Not 0 mB, which opens a keypad for the reference gauge reading (0 to 50 mbar). Type what the Pfeiffer gauge shows. The capture averages 5 readings and takes about 5 s.
-2. Vent the sensor to the room. Press Capture air and type the laboratory barometer reading in mbar, for example 1013.2 (500 to 1100 mbar). The capture averages 5 readings.
+2. Vent the sensor to the room. Press Capture air. With the Pressure 21 room sensor fitted, the question "Sensor open to room air?" shows its reading: Capture takes the air point at the room sensor's reading averaged over the same 5 readings, and Enter value opens a keypad for a laboratory barometer reading instead. Without the room sensor the keypad opens straight away: type the barometer reading in mbar, for example 1013.2 (500 to 1100 mbar).
 3. Once both points are held the new calibration is in use and unsaved. Compare Saved cal against Captured on the page.
 4. Press Save settings (Settings > Review and save). Discard changes puts the last save back.
 
 Either point can be redone on its own; the other is kept.
 
-Over the text link the same calibration is CAL VAC (with an optional gauge reading in mbar), CAL AIR followed by the barometer reading, CAL? to check, then CAL SAVE. CAL ERASE goes back to nominal and saves. A calibration table of up to 32 points can also be typed in with CAL NEW, CAL PT and CAL APPLY.
+The cryostat firmware takes the calibration on the screen only. A bench build (with the engineering commands) can also do it over the text link: CAL VAC (with an optional gauge reading in mbar), CAL AIR followed by the barometer reading (or CAL AIR alone to use the room sensor), CAL? to check, then CAL SAVE. CAL ERASE goes back to nominal and saves. A calibration table of up to 32 points can also be typed in with CAL NEW, CAL PT and CAL APPLY.
 
 Up to four sensors can be kept on one board, each with its own calibration, under Settings > Choose sensor. Add a sensor with its serial number and range in psi, then calibrate it. Only the sensor in use is read.
 
-The Pressure 21 Click will give the controller its own room-pressure reading so the air point can be taken without a barometer. The driver is in the firmware and BARO? reads it, but the Click has not arrived and this has not been benched.
+The Pressure 21 Click in S1 gives the controller its own room-pressure reading (BARO?). It is used for the air point. The Click has not arrived and this has not been benched.
 
 ## 9. Faults and warnings
 
@@ -229,8 +228,8 @@ Faults latch until Reset fault (on the strip, on Faults and log, or in the fault
 | F-1 No pressure signal | The Druck reading is missing or outside 0.005 to 11 mV/V | Pressure shows dashes. The valve still moves. AUTO ends | The Druck cable and plug, and the Power Monitor Click | When the reading is back |
 | F-2 Excitation | The Druck excitation left 9.5 to 10.5 V, or the Boost 10 tripped | Pressure not trusted. The valve still moves. AUTO ends | The Boost 10 and the board's 5 V. A trip needs a power cycle | When the excitation is back in the window |
 | F-3 Limit not found | Homing closed 1.1 times the full travel without the limit switch | Stopped. The valve is not homed | The switch and its wire, and that the valve turns | Any time. Then home again |
-| F-4 Limit stuck | The limit switch stayed pressed after the valve moved off it | Stopped. The valve is not homed | The switch is not stuck (ice) and its wire is not broken | Any time. Then home again |
-| F-5 Motion timeout | A move took longer than its distance at the set rate plus the ramps plus 2 s | Stopped the valve and holds it. Homing kept | The valve turns freely, and the motor 12 V supply | Any time |
+| F-4 Limit pressed when it should be free | The limit switch stayed pressed after the valve moved off it, or was pressed again during an opening move | Stopped. The valve is not homed | The switch is not stuck (ice) and its wire is not broken. After an opening move: the motor direction and coil order (Motor override), as the valve was in fact closing | Any time. Then home again |
+| F-5 Motion timeout | A move took longer than its distance at the set rate plus the ramps plus 2 s | Stopped the valve and holds it. Homing kept, unless it came while homing | The valve turns freely, and the motor 12 V supply | Any time |
 | F-6 No response | The valve moved in AUTO but the pressure did not respond over 5 windows of 30 s | Stopped the valve and holds it. MANUAL | Drive slipping, motor unplugged, needle seized, helium supply lost | Any time. Check before starting AUTO again |
 
 Warnings do not latch. W-2, W-4, W-5 and W-6 show on the strip until OK is pressed or the next Start AUTO, and each ends AUTO. W-1 clears when its question is answered. W-3 clears on its own.
@@ -246,7 +245,6 @@ Warnings do not latch. W-2, W-4, W-5 and W-6 show on the strip until OK is press
 
 Other strip messages:
 
-- **Motor supply off (X V): moves blocked**, **Motor supply low** and **Motor supply high**: the motor 12 V sense (section 13, not wired on the prototype). Off below 6.0 V refuses moves, ends a move in progress and clears the homing, and drops AUTO to MANUAL.
 - **Limit override on**, with Cancel: the override from Settings > Motor override is active.
 - **Valve not homed**: the valve position is not known.
 
@@ -254,7 +252,7 @@ The event log (Menu > Records > Faults and log) keeps the last 100 events with a
 
 ## 10. Settings
 
-Settings are commissioning items, not daily operation. Edits on the screen are drafts until Save settings, which checks them together and saves all or nothing. Changes made over the text link are live at once and unsaved until CFG SAVE. Save settings and CFG SAVE are refused in AUTO. The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
+Settings are commissioning items, not daily operation. Edits on the screen are drafts until Save settings, which checks them together and saves all or nothing. The text link does not change settings in the cryostat firmware (a bench build's engineering commands do, live at once and unsaved until CFG SAVE). In AUTO only the control tuning can be saved; anything else answers "Switch to MANUAL first". The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
 
 | Page | Settings | Notes |
 | --- | --- | --- |
@@ -269,7 +267,7 @@ Settings are commissioning items, not daily operation. Edits on the screen are d
 
 Factory defaults for the valve and the loop are for the PK22 344:1 stepper on the Oxford Instruments needle valve. The CF-11 on the bench ran at about 1.6 K with 3 to 8 mbar, the valve around 34 % open, on the Mercury iTC's P 20 % and I 0.1 min. The mm4's equivalent gain and integral time for each cryostat are set at commissioning.
 
-The step test (TUNE STEP over the text link) moves the valve in MANUAL, records the pressure response and suggests a gain and integral time. It applies nothing. It has not been run on a cryostat (not benched).
+The step test (TUNE STEP, an engineering command of a bench build) moves the valve in MANUAL, records the pressure response and suggests a gain and integral time. It applies nothing. It has not been run on a cryostat (not benched).
 
 ## 11. Remote access
 
@@ -279,28 +277,22 @@ The Ethernet build (the one for the cryostat) runs two servers on one cable and 
 
 The controller asks for an address by DHCP. If no DHCP server answers within 10 s it uses the fallback address: the one saved under Settings > System setup, or the build's default 169.254.10.50/16. The header shows the address in use, or NO CABLE, DHCP..., NET NO CLK or NET NO PHY while it has none. Diagnostics shows the link and the address. The hostname is pmc.
 
-To set the fallback address, type it and the mask on the System page (or NET IP over USB), then Save settings and restart. NET IP is refused over port 5000 so a remote user cannot cut off their own link. On a laptop with a fixed address, put the laptop and the fallback address on the same subnet.
+To set the fallback address, type it and the mask on the System page (or NET IP over USB in a bench build), then Save settings and restart. NET IP is refused over the network so a remote user cannot cut off their own link. On a laptop with a fixed address, put the laptop and the fallback address on the same subnet.
 
 Ethernet and Modbus were proven on the bench on 26 October 2026 with the laptop on a fixed address.
 
-### Port 5000: text commands
+### Port 8888: text commands
 
-Port 5000 takes every command the USB link takes, in plain text, one per line, for a person at a terminal (PuTTY in Raw mode, or a Git Bash /dev/tcp redirect). The board echoes each line, answers data lines that start with the group word, and ends every command with OK or ERR and a reason. Anything that finishes later arrives as an EVT line. Type HELP for the groups and HELP CTRL, VALVE, TUNE, MOT, CAL, CFG, DATA or SYS for one group.
+Port 8888 takes the remote command set in plain text, one command per line (upper case, ending in LF or CR LF, at most 96 characters), for a supervisory program or a person at a terminal (PuTTY in Raw mode). One client at a time; a new connection replaces the old. There is no echo and nothing is sent unasked: faults, warnings and switch changes go to the event log. A query (ending in ?) answers one line that starts with its own words. A set command answers nothing when it is accepted, and ERR with a code and a reason when it is refused. Several commands can share a line, separated by ;, and their query replies come back on one line.
 
-| Group | Commands an operator or bench user needs |
+| Group | Commands |
 | --- | --- |
-| Reading | VALVE? mode, position, faults and any waiting switch question. CTRL? latched faults. SENSE? the live sensor readings. EVT? the last events. DATA ON starts a once-a-second DATA line (time, pressure, target, valve %, mode, alarm, ratio, excitation, temperature); DATA OFF stops it. DATA? lists the columns |
-| Control | CTRL SP followed by the target in mbar. CTRL AUTO starts AUTO with the same checks as the screen. CTRL MAN switches to MANUAL, with an optional % to go to. CTRL RESET clears faults whose cause has gone. CTRL OK acknowledges a strip warning |
-| Valve | VALVE CAL homes. VALVE GOTO followed by a % moves in MANUAL. VALVE STOP is the one stop command: it stops the valve and ends AUTO. VALVE SETZERO and VALVE SKIP answer the switch question. VALVE SAVED? and VALVE RESTORE read and use the saved position at start-up |
-| Calibration | CAL?, CAL VAC, CAL AIR, CAL SAVE, CAL ERASE (section 8) |
-| Settings | CFG? and CFG DIFF? show the saves and unsaved changes. CFG SAVE saves. CFG LOAD LAST, PREVIOUS or DEFAULTS loads. CFG NAME sets the cryostat name. NET? and NET IP for the fallback address |
-| System | VER? firmware version, build time and last reset cause. *IDN? identity. TIME? and TIME SET to read and set the clock. LIM? limit switch. SUP? motor supply. BARO? the Pressure 21 (not fitted). PERF? and TOUCH? diagnostics |
-| Motor (engineering) | MOT? and the MOT MOVE, GOTO, STOP, OFF, ZERO, OVERRIDE, RATE, START, ACCEL, MODE, HOLD, DIR and ORDER commands drive the motor directly, past the valve's checks. MOT STOP and MOT OFF end AUTO first |
-| Tuning (engineering) | PID? and PID KP, TI, OUTMIN, DB, BAND and KDIR set the loop live. TUNE STEP, TUNE? and TUNE STOP run the step test |
+| Reading | PRES? the pressure. PRES SP? the target. MODE? MANUAL, AUTO, HOMING or NOT HOMED. VALV? the position; VALV MOVING? 1 while moving or homing. ALRM? the latched faults and the warnings. EVNT? followed by a number, the last events (on a line of its own). BARO? the room pressure. NETW? the address in use. TIME? the clock. *IDN? the identity and firmware version |
+| Control | PRES SP followed by the target in mbar (does not start AUTO). MODE AUTO starts AUTO with the same checks as the screen; MODE MANUAL ends it, the valve stays where it is. VALV SET followed by a % moves the valve in MANUAL. STOP stops the valve and ends AUTO; it is the only stop. ALRM RESET clears the faults whose cause has gone; ALRM OK acknowledges a strip warning. TIME SET 2026-10-27 09:00:00 sets the clock |
 
-In AUTO, moves, homing, calibration, settings loads and saves answer "Switch to MANUAL first". The full command table is in the README.
+Set commands need Remote control On (Settings > System setup); with it Off they answer ERR 211, STOP included. After a STOP on the screen, VALV SET and MODE AUTO answer ERR 212 until Allow is tapped on the strip. Homing, calibration, settings, tuning and the motor are on the touchscreen only. In AUTO, VALV SET answers "Switch to MANUAL first". The error codes and the full table are in the README. A bench build (with the engineering commands) also takes the older commands (VALVE?, CAL VAC, CFG SAVE, MOT, TUNE and others, listed by HELP); the cryostat firmware answers them ERR 100.
 
-Tools in the repository: tools/logger/log_druck.py logs the DATA lines to CSV from an IP address or COM port and reconnects on its own. tools/cal/druck_cal.py manages the calibration table.
+Tools in the repository: tools/logger/log_druck.py polls the pressure, target, valve, mode and alarms once a second and logs them to CSV, from an IP address or a COM port, and reconnects on its own. tools/cal/druck_cal.py manages the calibration table.
 
 ### Port 502: Modbus TCP
 
@@ -334,18 +326,18 @@ The Modbus read test passed on the bench on 26 October 2026. The write test has 
 | --- | --- | --- |
 | Check the pressure reading against the reference gauge | At each cool-down, and whenever the reading looks wrong | Compare the controller's reading with the Pfeiffer gauge at vacuum and at air. Recalibrate (section 8) if either point is off by more than the sensor's accuracy |
 | Home the valve | After every power-up, after a direction or coil order change, and when the position is in doubt | Section 7 |
-| Check the limit switch | When F-3, F-4 or W-4 appears, and at each warm-up | LIM? over the link or the Valve position page shows pressed or free. Press the switch by hand and watch it change. Look for ice on the switch and the valve drive |
-| Check the Druck excitation | When F-2 appears | Diagnostics or SENSE? shows the excitation. It should be 9.5 to 10.5 V. A Boost 10 trip needs a power cycle |
-| Check the motor supply | When moves are slow, F-5 appears or the motor is noisy | Measure the 12 V at the Stepper 3 Click. With the sense wired, SUP? reads it |
-| Review the event log | After a fault, and before clearing it | Menu > Records > Faults and log, or EVT? over the link. The log empties at a restart, so read it first |
-| Save the settings | After any commissioning change | Settings > Review and save > Save settings, or CFG SAVE. Review and save shows the date of the last save |
+| Check the limit switch | When F-3, F-4 or W-4 appears, and at each warm-up | The Valve position page or Diagnostics shows pressed or free. Press the switch by hand and watch it change. Look for ice on the switch and the valve drive |
+| Check the Druck excitation | When F-2 appears | Diagnostics shows the excitation. It should be 9.5 to 10.5 V. A Boost 10 trip needs a power cycle |
+| Check the motor supply | When moves are slow, F-5 appears or the motor is noisy | Measure the 12 V at the Stepper 3 Click. The controller does not measure it |
+| Review the event log | After a fault, and before clearing it | Menu > Records > Faults and log, or EVNT? 100 over the link. The log empties at a restart, so read it first |
+| Save the settings | After any commissioning change | Settings > Review and save > Save settings. Review and save shows the date of the last save |
 | Set the clock | When the dates on saves and events are wrong | TIME SET over the link, in the form TIME SET 2026-10-27 09:00:00 |
-| Update the firmware | When a new version is released | Flash over USB-C with mikroBootloader. The settings, calibration and saved position are in serial flash and survive reflashing. Check VER? or Diagnostics afterwards |
+| Update the firmware | When a new version is released | Flash over USB-C with mikroBootloader. The settings, calibration and saved position are in serial flash and survive reflashing. Check Diagnostics, or *IDN? over the link, afterwards |
 | Clean the touchscreen | As needed | Switch off first, or the taps will act on the screen. A soft cloth, no solvents |
 
 The controller has no fuse, battery or filter to replace. The real-time clock runs from the board supply; a cell in the BAT1 holder keeps it through a power-off.
 
-If the controller stops responding, the independent watchdog restarts it within about 4 s. The reset cause is shown in red on Diagnostics after a watchdog or brown-out reset, and VER? reports every cause. The valve does not move after the restart until it is homed or its position is set, and a position saved before the reset is offered.
+If the controller stops responding, the independent watchdog restarts it within about 4 s. The reset cause is shown in red on Diagnostics after a watchdog or brown-out reset (a bench build's VER? reports every cause). The valve does not move after the restart until it is homed or its position is set, and a position saved before the reset is offered.
 
 ## 13. Items not yet benched
 
@@ -354,7 +346,6 @@ The firmware is a prototype. The items below are in the firmware or the design b
 | Item | State |
 | --- | --- |
 | Pressure 21 Click (room pressure, BARO?) and the air calibration reference from it | Driver built in 0.11.47. Click ordered 15 October, not arrived |
-| Motor 12 V supply sense (Motor supply off, low and high messages, status bit 9) | Built in 0.11.35. The divider is not wired on the prototype and the build option is off, so the controller always reports the supply as on |
 | Step test (TUNE STEP) | Built in 0.12.7 and 0.12.10 and run on a PC model. Not run on a cryostat |
 | Modbus writes (target, valve going to, coils 0 to 3) | On since 0.12.6. The read test passed 26 October; the write test has not been run |
 | VALVE STOP as the only stop command (CTRL STOP removed), MOT STOP and MOT OFF ending AUTO, CFG SAVE refused in AUTO, CTRL OK | Firmware 0.12.16 and 0.12.17, built 26 October. Passed the simulator tests; not yet flashed and checked on the board |

@@ -124,7 +124,6 @@ typedef struct {
 static const field_t F[CFG_N] = {
     [CFG_POSMAX]  = { "100 % travel", "turns", 2, K_TURNS, "Output turns from closed to fully open" },
     [CFG_REVERSE] = { "Motor direction", NULL, 0, K_TOGGLE, "Reversed if Open drives the valve closed; saving it clears the zero" },
-    [CFG_OFFSET]  = { "Zero offset", "steps", 0, K_NUM, "Count at 0 %, the return above the switch" },
     [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Homing step 2: off the switch after the fast close" },
     [CFG_RETURN]  = { "Return", "steps", 0, K_NUM, "Homing step 4: off the switch after the slow close; that point is 0 %" },
     [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM, "Homing step 1: closing fast to the switch" },
@@ -325,9 +324,11 @@ static void ed_turns_keypad(void)
     ui_keypad_ex(&k);
 }
 
+static int32_t ed_present;   // full steps, the position "Use the present position" showed
+
 static void ed_turns_present(void)
 {
-    set_draft(CFG_POSMAX, stepper3_position() / stepper3_scale());   // full steps
+    set_draft(CFG_POSMAX, ed_present);
 }
 
 static void ed_toggle_ok(void)
@@ -349,6 +350,7 @@ static void edit(cfg_key_t k)
             ed_turns_keypad();
             return;
         }
+        ed_present = pos;
         lv_snprintf(t, sizeof t, "Use the present position (%s turns) as 100 %%, or type turns?",
                     value_text(b, sizeof b, k, pos));
         ui_ask(t, "Present", ed_turns_present, "Type turns", ed_turns_keypad);
@@ -474,7 +476,6 @@ static void discard_ask(void)
                     plural(c, sizeof c, n, "unsaved change"));
         ui_confirm(t, "Discard changes", discard_drafts);
     } else if (cfg_unsaved() && cfg_rev(CFG_FROM_SAVED, &rev, &at)) {
-        char w[24];
         lv_snprintf(t, sizeof t, "Put the last save back? %s %s lost.", plural(c, sizeof c, cfg_unsaved(), "change"),
                     cfg_unsaved() == 1 ? "is" : "are");
         ui_confirm(t, "Put back", discard_live);
@@ -562,7 +563,14 @@ static void motor_cb(lv_event_t *e)
 // offered at start-up.
 static void restart_now(lv_timer_t *t)
 {
-    (void)t;
+    // Something moved the valve meanwhile (the network, a tap): stop it and
+    // wait again, so the position is saved at standstill.
+    if (stepper3_busy() || valve_auto() || valve_mode() == VALVE_CALIBRATING) {
+        valve_stop();
+        lv_timer_reset(t);
+        lv_timer_set_repeat_count(t, 1);
+        return;
+    }
     sysinfo_restart();
 }
 
@@ -1336,13 +1344,13 @@ static void load_do(void)
         before = cfg_unsaved();
         for (int k = 0; k < CFG_N; k++)
             before += draft_set[k];
-        drafts_clear();
         if (!cfg_load_live(from, &why)) {
             char t[64];
             lv_snprintf(t, sizeof t, "Not loaded: %s", why);
-            ui_msg(t);
+            ui_msg(t);   // the drafts are kept
             return;
         }
+        drafts_clear();
         n = cfg_unsaved();
     } else {
         for (int k = 0; k < CFG_N; k++) {
@@ -1497,8 +1505,9 @@ static const char *cs_help(void)
            "is inside it.\n"
            "Capture vacuum: pump the sensor down, then Capture. Nothing to type: the point is 0 mB (Not 0 mB "
            "if a gauge reads more).\n"
-           "Capture air: vent the sensor to the room, then type the lab barometer reading in mB, for example "
-           "1013.2.\n"
+           "Capture air: vent the sensor to the room, then Capture. The room pressure comes from the room "
+           "sensor (Pressure 21) when it is fitted; Enter value takes a lab barometer reading in mB instead, "
+           "for example 1013.2.\n"
            "Each capture averages 5 readings. Either point can be redone on its own; the other is kept.\n"
            "Signal: the Druck output over its excitation, in mV/V.\n"
            "Saved cal: the pressure from the saved calibration. Captured: the pressure from the points "
@@ -1563,16 +1572,34 @@ static bool cs_air_set(int32_t v10, const char **why)
     return true;
 }
 
+static void cs_air_typed(void)
+{
+    ui_kp_t k = { .title = "Barometer reading, mB", .info = "Vent sensor to room air first", .dec = 1,
+                  .min = 5000, .max = 11000, .live_label = "Now, mB", .live_milli = now_milli, .live_dec = 1,
+                  .on_set = cs_air_set };
+    ui_keypad_ex(&k);
+}
+
+static void cs_air_baro(void) { cs_start(2, CAL_P_BARO); }
+
 static void air_cb(lv_event_t *e)
 {
     if (ui_btn_disabled(e)) {
         ui_msg(cal_capturing() ? "A capture is running" : "No pressure signal");
         return;
     }
-    ui_kp_t k = { .title = "Barometer reading, mB", .info = "Vent sensor to room air first", .dec = 1,
-                  .min = 5000, .max = 11000, .live_label = "Now, mB", .live_milli = now_milli, .live_dec = 1,
-                  .on_set = cs_air_set };
-    ui_keypad_ex(&k);
+    // With the Pressure 21 fitted the room pressure is read, not typed
+    // (0.14.0); Enter value keeps the lab barometer possible.
+    const clicks_state_t *s = clicks_state();
+    if (!s->baro_ok) {
+        cs_air_typed();
+        return;
+    }
+    static char q[96];
+    char v[16];
+    lv_snprintf(q, sizeof q, "Sensor open to room air? Capture uses the room sensor, now %s mB.",
+                ui_fmt1(v, sizeof v, s->baro_mmbar));
+    ui_ask(q, "Enter value", cs_air_typed, "Capture", cs_air_baro);
 }
 
 static void cs_build(lv_obj_t *scr)

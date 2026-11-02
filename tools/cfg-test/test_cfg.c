@@ -58,6 +58,7 @@ void link_printf(const char *fmt, ...)
     vprintf(fmt, a);
     va_end(a);
 }
+void link_write(const char *s) { link_printf("%s", s); }   // TREND DUMP (trend.c)
 const char *rtclock_iso(void) { return "2026-10-16 08:15:00"; }
 
 /* Druck reading */
@@ -73,9 +74,19 @@ static uint8_t m_order[4] = { 0, 2, 1, 3 };
 bool stepper3_set_rate(uint32_t v) { m_rate = v; return true; }
 bool stepper3_set_start(uint32_t v) { m_start = v; return true; }
 bool stepper3_set_accel(uint32_t v) { m_accel = v; return true; }
-bool stepper3_set_mode(stepper3_mode_t m) { m_mode = m; return true; }
+static const char *m_lock;   // stepper3_lock(): set by the valve layer, e.g. a latched fault
+bool stepper3_set_mode(stepper3_mode_t m) { if (m_lock) return false; m_mode = m; return true; }
+const char *stepper3_locked(void) { return m_lock; }
 bool stepper3_set_hold(bool on) { m_hold = on; return true; }
-bool stepper3_set_reverse(bool on) { m_rev = on; return true; }
+// As stepper3.c: a change of direction clears the homing through the
+// valve layer's stepper3_on_reference_change callback.
+bool stepper3_set_reverse(bool on)
+{
+    if (on != m_rev)
+        valve_uncalibrate("motor direction changed");
+    m_rev = on;
+    return true;
+}
 bool stepper3_set_order(const uint8_t o[4]) { memcpy(m_order, o, 4); return true; }
 uint32_t stepper3_rate(void) { return m_rate; }
 uint32_t stepper3_start_rate(void) { return m_start; }
@@ -86,6 +97,8 @@ bool stepper3_hold(void) { return m_hold; }
 bool stepper3_reverse(void) { return m_rev; }
 void stepper3_order(uint8_t o[4]) { memcpy(o, m_order, 4); }
 bool stepper3_busy(void) { return m_busy; }
+static int stops;
+void stepper3_stop(void) { m_busy = false; stops++; }
 int32_t stepper3_position(void) { return m_pos; }
 static bool (*move_hook)(const char **why);
 void stepper3_on_move_start(bool (*cb)(const char **why)) { move_hook = cb; }
@@ -272,9 +285,11 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
     CHECK(!cal_is_default());
 
-    // Load settings > Previous save: in use, unsaved.
-    CHECK(cfg_load_live(CFG_FROM_PREVIOUS, &why));
-    CHECK(m_rate == 350 && cfg_tune(CFG_KP) == 400 && cfg_unsaved() == 2);
+    // Load settings > Previous save: the version 1 record in A is from
+    // before 0.12.13 (its Direction bit is from either side of 0.11.19), so
+    // it is not loaded and nothing changes (to 0.13.28 it loaded).
+    CHECK(!cfg_load_live(CFG_FROM_PREVIOUS, &why) && strstr(why, "0.12.13"));
+    CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
     CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
     CHECK(cfg_unsaved() == 0);
 
@@ -330,6 +345,17 @@ static void test_cfg(void)
     // Factory defaults keep the sensors.
     CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why));
     CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 400 && cfg_sensor_count() == 1 && !cal_is_default());
+    CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
+
+    // A latched fault locks the step mode: a load that would change it is
+    // refused whole, nothing applied; without the lock it loads.
+    m_mode = STEPPER3_HALF;
+    m_rate = 450;
+    m_lock = "Reset the fault first";
+    CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "fault") && m_rate == 450 &&
+          m_mode == STEPPER3_HALF);
+    m_lock = NULL;
+    CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why) && m_rate == 400 && m_mode == STEPPER3_FULL);
     CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
 
     // Motor direction: saving it clears the calibration.
@@ -598,7 +624,9 @@ static void test_valvepos(void)
     start_move(34000);
     v_cal = false; v_mode = VALVE_NOT_CAL; m_busy = false;
     valvepos_init();
-    CHECK(valvepos_offer(&c) && c == 33880 && valvepos_offer_moving(&off) && off == (int32_t)m_rate * 2);
+    // Up to 4 s (2 s between entries, the 1 s stall stop, a loop pass) at
+    // the fastest rate.
+    CHECK(valvepos_offer(&c) && c == 33880 && valvepos_offer_moving(&off) && off == STEPPER3_RATE_MAX * 4);
     valvepos_decline();
 
     // While it moves: the count every 2 s, no more often (Ryan, 22 Oct).
@@ -617,6 +645,24 @@ static void test_valvepos(void)
     v_cal = false; v_mode = VALVE_NOT_CAL; m_busy = false; m_pos = 0;
     valvepos_init();
     CHECK(valvepos_offer(&c) && c == 10300 && valvepos_offer_moving(&off));
+    valvepos_decline();
+
+    // The flash stops keeping up during a move: the move is stopped, so the
+    // last entry stays within 2 s of travel.
+    v_cal = true; v_mode = VALVE_MANUAL; m_busy = false; m_pos = 10300;
+    tick(2500);
+    CHECK(start_move(12000));
+    m_pos = 10600;
+    int s0 = stops;
+    write_fails = 1000;
+    tick(2100);
+    write_fails = 0;
+    CHECK(stops > s0 && !m_busy);
+    m_busy = false;
+    tick(2500);   // the flash good again: past the retry wait, safe at the stop
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0;
+    valvepos_init();
+    CHECK(valvepos_offer(&c) && c == 10600);
     valvepos_decline();
 
     // Calibrated at a new count without a move (VALVE CLOSED): the old
@@ -701,6 +747,35 @@ static void test_valvepos(void)
     tick(100);
     valvepos_init();
     CHECK(!valvepos_offer(&c));
+
+    // Saved under another motor direction (Direction changed on Motor
+    // override and not saved, then a restart): not offered; under the
+    // direction it was saved, it is.
+    m_busy = false;
+    v_cal = true; v_mode = VALVE_MANUAL; m_pos = 25000; m_rev = true;
+    tick(2500);
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0; m_rev = false;
+    valvepos_init();
+    CHECK(!valvepos_offer(&c));
+    m_rev = true;
+    valvepos_init();
+    CHECK(valvepos_offer(&c) && c == 25000);
+    m_rev = false;   // the direction changes while the offer waits: withdrawn
+    CHECK(!valvepos_offer(&c) && !valvepos_use(&why));
+
+    // An entry written before 0.13.27 records no direction: after the
+    // upgrade it is offered under the direction in use, as before, even a
+    // reversed one. Written raw into sector 0, after the others.
+    struct { uint32_t seq; int32_t count; uint32_t state, crc; } old_e = { 0x7FFFFFF0u, 12345, 0x45464153u, 0 };
+    old_e.crc = crc32(&old_e, 12);
+    extflash_erase_4k(0x7EC000UL);
+    extflash_write(0x7EC000UL, &old_e, sizeof old_e);
+    m_rev = true;
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0;
+    valvepos_init();
+    CHECK(valvepos_offer(&c) && c == 12345);
+    valvepos_decline();
+    m_rev = false;
 }
 
 // Trend slots are fixed one-second boundaries: a late poll fills its own
@@ -722,6 +797,15 @@ static void test_trend(void)
     CHECK(trend_fine(0, &o) && o.p == 5000);
     CHECK(trend_fine(1, &o) && o.p == TREND_NONE);
     CHECK(trend_fine(4, &o) && o.p == 5000);
+    // main.c calls on its own 1 s grid: a call a few ms earlier in its second
+    // than the one before is a new second, not a repeat (to 0.13.25 about
+    // every other reading was dropped after a late first call).
+    uint32_t n1 = trend_seconds();
+    lv_tick_inc(810);  trend_second(&q);   // 10 ms after a slot edge
+    lv_tick_inc(985);  trend_second(&q);   // 5 ms before the next edge
+    lv_tick_inc(1000); trend_second(&q);
+    lv_tick_inc(995);  trend_second(&q);
+    CHECK(trend_seconds() - n1 == 4);
 }
 
 // Stage 8: in AUTO only the tuning changes (screens and PID); the trend

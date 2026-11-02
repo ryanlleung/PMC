@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /**
- * @brief Needle-valve stepper on the Stepper 3 Click (S1, ULN2003, unipolar).
+ * @brief Needle-valve stepper on the Stepper 3 Click (S2, ULN2003, unipolar).
  *
  * The ULN2003 only switches the four coil ends to ground; the step sequence
  * comes from here. Steps are timed by TIM7 (interrupt per step), so the
@@ -17,7 +17,7 @@
  *
  * Direction convention: positive steps open the valve, negative close it.
  * MOT DIR flips the sequence if the wiring turns the other way. Before every
- * closing step the limit input is read (NC contact on PD13, open = stop):
+ * closing step the limit input is read (NC contact on PD5, open = stop):
  * it is the closing stop (limit.c, PMC_LIMIT_STOP).
  *
  * Commands over the link, one per line, replies end with OK or ERR:
@@ -51,7 +51,9 @@ typedef enum {
     STEPPER3_STOP_DONE,     // reached the target
     STEPPER3_STOP_CMD,      // MOT STOP / MOT OFF / stepper3_stop()
     STEPPER3_STOP_LIMIT,    // limit input open during a closing move
-    STEPPER3_STOP_TIMEOUT   // F-5: still moving after |distance| / rate + 2 s
+    STEPPER3_STOP_TIMEOUT,  // F-5: still moving after |distance| / rate + 2 s
+    STEPPER3_STOP_REVERSED, // the switch pressed again during an opening move (F-4)
+    STEPPER3_STOP_STALL     // the main loop stopped for over 1 s (a hang; the watchdog follows)
 } stepper3_stop_t;
 
 // Pins low (coils off). Does not move the motor.
@@ -81,6 +83,10 @@ void stepper3_poll(void);
 // Goes up by one each time a move ends (done, stopped, limit, timeout);
 // stepper3_last_stop() then says why.
 uint32_t stepper3_move_seq(void);
+// Latched stops, read and cleared: the switch pressed during an opening
+// move (STEPPER3_STOP_REVERSED), a move stopped by a stalled main loop.
+bool stepper3_take_reversed(void);
+bool stepper3_take_stall(void);
 // Sets the position count (refused while moving; fine while settling).
 bool stepper3_set_position(int32_t p);
 // While set (non-NULL), MOT MOVE/GOTO/OVERRIDE/ZERO and the motor screen

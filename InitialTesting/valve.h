@@ -50,7 +50,7 @@
  * The remote commands are in remote.c (PRES SP, MODE, VALV SET, STOP, ALRM,
  * EVNT?); they call the functions below. Engineering commands
  * (PMC_ENG_COMMANDS): VALVE?, CTRL?, VALVE CAL, VALVE CLOSED, VALVE SETZERO |
- * SKIP, VALVE POSMAX|FHOME|FCREEP|BACKOFF|RETURN|CLEAR|OFFSET <n>, TUNE.
+ * SKIP, VALVE POSMAX|FHOME|FCREEP|BACKOFF|RETURN|CLEAR <n>, TUNE.
  * Events go to the log only; nothing is sent unasked.
  */
 
@@ -82,6 +82,13 @@ bool valve_auto(void);
 const char *valve_warning(void);
 void valve_warning_clear(void);
 bool valve_start_auto(const char **why);         // MODE AUTO, Start / Resume AUTO
+// Start AUTO at a new target (mmbar, 0.001 mbar): the target changes only
+// if AUTO starts (Home's Start AUTO keypad). Refused in AUTO: a new target
+// there goes through the setpoint keypad and its confirm.
+bool valve_start_auto_at(int32_t mmbar, const char **why);
+// A screen button drives the valve while pressed (true at its press, false
+// at its release): AUTO and remote moves are refused meanwhile.
+void valve_hold(bool on);
 bool valve_to_manual(const char **why);          // MODE MANUAL, Switch to MANUAL
 // Target in 0.001 mbar, kept to 0.1 mbar; refused outside 0 to the range.
 bool valve_set_target(int32_t mmbar, const char **why);
@@ -90,7 +97,8 @@ int32_t valve_range_mmbar(void);                 // sensor in use, full scale
 int32_t valve_band_mmbar(void);                  // target band (BAND)
 ctrl_reg_t valve_regulation(void);               // status words, in AUTO
 
-// Settings, in the order POSMAX FHOME FCREEP BACKOFF CLEAR OFFSET RETURN
+// Settings, in the order POSMAX FHOME FCREEP BACKOFF CLEAR (unused, was
+// OFFSET: always 0) RETURN
 // (cfg.c; RETURN from 0.13.6).
 #define VALVE_N_SETTINGS 7
 const char *valve_setting_name(int i);
@@ -123,6 +131,13 @@ int32_t valve_target_pct10(void);                // where the valve is going
 int32_t valve_pct_milli(void);                   // position in 0.001 % (for 2 dp on screen)
 int32_t valve_target_pct_milli(void);
 void valve_stop(void);                           // STOP (in AUTO: MANUAL, nothing latched)
+// STOP on the screen: valve_stop, and the network's moves (VALV SET, MODE
+// AUTO, Modbus valve % and AUTO coil) are held until valve_remote_allow
+// (Allow on the screen), so a master writing every scan cannot undo it.
+void valve_stop_local(void);
+bool valve_remote_held(void);
+void valve_remote_allow(void);
+#define VALVE_REMOTE_HELD_WHY "Stopped on the screen: Allow remote moves there"
 bool valve_stop_latches(void);                   // STOP would end AUTO now (red STOP button)
 // ALARM RESET; returns the number latched before, left = those kept.
 int valve_reset(char *left, size_t n);
@@ -153,5 +168,10 @@ void valve_event(const char *tag, const char *fmt, ...);
 // EVNT? <n>: "EVNT <n>" now, then n lines "<age s>,<tag>,<text>", newest
 // first, sent from valve_task as the link has room.
 void valve_events_send(int n);
+// An EVNT? dump is still going out: main.c holds the next command line
+// (up to 0.5 s), so no reply lands among its lines. _stop drops the rest
+// (a new client).
+bool valve_events_sending(void);
+void valve_events_stop(void);
 
 #endif // _VALVE_H_

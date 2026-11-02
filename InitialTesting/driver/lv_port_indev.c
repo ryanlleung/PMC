@@ -78,6 +78,12 @@ static uint32_t touch_multi;    // polls that saw more than one touch, for TOUCH
 static bool touch2_now;
 static lv_coord_t touch2_x, touch2_y;
 
+// STOP for any finger (touch_watch): a contact other than the one LVGL
+// follows, landing in the box, is latched at once (a quick tap counts).
+static int32_t wbox[4];
+static bool wbox_set, wbox_in, wbox_hit;
+static uint8_t wbox_n;   // contacts at the last read
+
 static bool touch_follow(const tp_touch_item_t *t, uint8_t n, lv_coord_t *x, lv_coord_t *y, int32_t *idx)
 {
     int32_t best = -1, best_d = 0;
@@ -120,6 +126,32 @@ static void touch_other(const tp_touch_item_t *t, uint8_t n, int32_t skip)
     }
 }
 
+void touch_watch(int32_t x1, int32_t y1, int32_t x2, int32_t y2)
+{
+    wbox[0] = x1; wbox[1] = y1; wbox[2] = x2; wbox[3] = y2;
+    wbox_set = true;
+}
+
+bool touch_watch_take(void)
+{
+    bool h = wbox_hit;
+    wbox_hit = false;
+    return h;
+}
+
+// Any contact but the followed one (skip, -1 none) in the watched box.
+static bool watch_check(const tp_touch_item_t *t, uint8_t n, int32_t skip)
+{
+    if (!wbox_set)
+        return false;
+    for (int32_t i = 0; i < n; i++) {
+        int32_t x = t->point[i].coord_x, y = t->point[i].coord_y;
+        if (i != skip && x >= wbox[0] && x <= wbox[2] && y >= wbox[1] && y <= wbox[3])
+            return true;
+    }
+    return false;
+}
+
 bool touch_second(int32_t *x, int32_t *y)
 {
     if (touch2_now && x && y) {
@@ -141,7 +173,7 @@ void touch_poll(void)
     // The points as the SDK gives them to LVGL (get_touch_coordinates).
     tp_touch_item_t t;
     memset(&t, 0, sizeof t);
-    uint8_t n = tp.touch.n_touches;
+    uint8_t n = touch_last_err == TP_OK ? tp.touch.n_touches : 0;
     if(n)
         tp_press_coordinates(&tp, &t);
     if(n > TP_N_TOUCHES_MAX)
@@ -150,7 +182,14 @@ void touch_poll(void)
         touch_multi++;
 
     int32_t idx = 0;
-    if(n == 0) {
+    if(touch_last_err != TP_OK) {
+        // A failed read says nothing about the finger: tp.touch may still
+        // hold the last good read. End any press, so a hold (Motor
+        // override, the Limit override close) cannot outlive the controller,
+        // and start the next one only after a good read with no finger down.
+        touch_wait_up = touch_wait_up || touch_now;
+        touch_now = false;
+    } else if(n == 0) {
         touch_now = false;
         touch_wait_up = false;
     } else if(touch_now) {
@@ -171,6 +210,13 @@ void touch_poll(void)
         touch_other(&t, n, idx);
     else
         touch2_now = false;
+    // A contact that has just landed there: the count went up this read (a
+    // finger sliding in, or the followed one lost by a fast move, is not).
+    bool in = watch_check(&t, n, touch_now ? idx : -1);
+    if(in && !wbox_in && n > wbox_n)
+        wbox_hit = true;   // latched until taken
+    wbox_in = in;
+    wbox_n = n;
     if(touch_now)
         touch_latched = true;
     touch_was_pressed = touch_now;

@@ -48,6 +48,8 @@ static struct {
     lv_obj_t *rate, *start, *accel, *adj[6];
     lv_obj_t *close, *open, *zero, *over, *hold, *off, *order, *dir;
     lv_obj_t *held;   // the Close or Open button driving a hold move
+    int32_t held_to;  // that move's target, so a release stops only it
+    int32_t held2_to; // the same for held2
     lv_obj_t *held2;  // Close or Open under the second finger, Limit override held
     lv_timer_t *two;  // reads the second finger while the screen is open
 } m;
@@ -143,6 +145,8 @@ static void move_event(lv_event_t *e)
     if (!why && stepper3_move(steps)) {
         if (hold) {
             m.held = lv_event_get_target_obj(e);
+            m.held_to = stepper3_target();
+            valve_hold(true);
             link_printf("MOT screen: hold move %s\r\n", steps > 0 ? "open" : "close");
         } else {
             link_printf("MOT screen: move %ld\r\n", (long)steps);
@@ -162,7 +166,8 @@ static void hold_end(void)
     if (!m.held)
         return;
     m.held = NULL;
-    if (stepper3_busy()) {
+    valve_hold(false);
+    if (stepper3_busy() && stepper3_target() == m.held_to) {   // its own move, not a later one
         stepper3_stop_ramped();
         link_printf("MOT screen: hold move released\r\n");
     }
@@ -230,9 +235,22 @@ static void adjust_event(lv_event_t *e)
     motor_fast();
 }
 
+// Coil order and Direction clear the homing: refused while the valve layer
+// locks the motor (AUTO, homing, a latched fault), as MOT ORDER and MOT DIR
+// are on the link. Checked again here: the question may have waited.
+static bool ref_locked(void)
+{
+    const char *why = stepper3_locked();
+    if (why)
+        ui_msg(why);
+    return why != NULL;
+}
+
 static void do_order(void)
 {
     int i = (order_index() + 1) % 3;
+    if (ref_locked())
+        return;
     if (!stepper3_busy() && stepper3_set_order(orders[i]))
         link_printf("MOT screen: order %d%d%d%d\r\n",
                     orders[i][0], orders[i][1], orders[i][2], orders[i][3]);
@@ -248,6 +266,8 @@ static void order_event(lv_event_t *e)
 
 static void do_dir(void)
 {
+    if (ref_locked())
+        return;
     if (!stepper3_busy() && stepper3_set_reverse(!stepper3_reverse()))
         link_printf("MOT screen: dir %d\r\n", stepper3_reverse() ? 1 : 0);
     motor_fast();
@@ -288,6 +308,10 @@ static void zero_event(lv_event_t *e)
 static void off_event(lv_event_t *e)
 {
     (void)e;
+    // In AUTO the loop would move (and energise) the valve again at its
+    // next step: end AUTO first, as MOT OFF does on the link.
+    if (valve_auto())
+        valve_stop();
     stepper3_off();
     link_printf("MOT screen: coils off at %ld\r\n", (long)stepper3_position());
     motor_fast();
@@ -332,11 +356,12 @@ static void two_end(void)
     if (!b)
         return;
     m.held2 = NULL;
+    valve_hold(false);
     lv_obj_remove_state(b, LV_STATE_PRESSED);
     if (stepper3_override()) {
         bool stopped = stepper3_override_cancel();
         valve_event("LIM", "Limit override move ended (screen)%s", stopped ? ", valve stopped" : "");
-    } else if (stepper3_busy()) {
+    } else if (stepper3_busy() && stepper3_target() == m.held2_to) {   // its own move, not a later one
         stepper3_stop_ramped();
         link_printf("MOT screen: override move released\r\n");
     }
@@ -356,6 +381,8 @@ static bool two_start(lv_obj_t *b)
             stepper3_override_arm();
         if (stepper3_move(steps)) {
             m.held2 = b;
+            m.held2_to = stepper3_target();
+            valve_hold(true);
             lv_obj_add_state(b, LV_STATE_PRESSED);
             valve_event("LIM", close ? "Limit override (screen): closing past the switch"
                                      : "Limit override (screen): opening");
@@ -682,8 +709,8 @@ static void motor_fast(void)
     ui_btn_text(m.order, "Coil order", t);
     ui_btn_text(m.dir, "Direction", stepper3_reverse() ? "Reversed" : "Normal");
     ui_btn_text(m.hold, "Hold torque", stepper3_hold() ? "On" : "Off");
-    ui_btn_enable(m.order, !busy);
-    ui_btn_enable(m.dir, !busy);
+    ui_btn_enable(m.order, !busy && !stepper3_locked());
+    ui_btn_enable(m.dir, !busy && !stepper3_locked());
     ui_btn_enable(m.hold, !busy);
 }
 

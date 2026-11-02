@@ -182,6 +182,12 @@ static uint8_t pm_addr;  // 0 = not found
 static uint8_t pm_ack_addr;
 static uint16_t pm_ack_mfr;
 
+// While not found, the fitted address is tried every second and the rest
+// of 0x40-0x4F (a moved jumper) only every PM_RESCAN_S seconds: each address
+// that does not answer costs a timeout and a bus reset in the main loop.
+#define PM_RESCAN_S 10
+static uint8_t pm_rescan_wait;   // seconds to the next full scan; 0 = this one
+
 static void pm_spin(uint32_t n)
 {
     for (volatile uint32_t i = 0; i < n; i++);
@@ -390,10 +396,15 @@ static void powermonitor_poll(void)
         }
         if (pm_probe(PM_ADDR_FITTED))
             pm_addr = PM_ADDR_FITTED;
-        // 0x46 is the Pressure 21 (baro.c) when PMC_BARO is on.
-        for (uint8_t a = 0x40; a <= 0x4F && pm_addr == 0; a++)
-            if (a != PM_ADDR_FITTED && !(PMC_BARO && a == BARO_ADDR) && pm_probe(a))
-                pm_addr = a;
+        if (pm_addr != 0 || pm_rescan_wait == 0) {
+            // 0x46 is the Pressure 21 (baro.c) when PMC_BARO is on.
+            for (uint8_t a = 0x40; a <= 0x4F && pm_addr == 0; a++)
+                if (a != PM_ADDR_FITTED && !(PMC_BARO && a == BARO_ADDR) && pm_probe(a))
+                    pm_addr = a;
+            pm_rescan_wait = pm_addr ? 0 : PM_RESCAN_S - 1;
+        } else {
+            pm_rescan_wait--;
+        }
         // Continuous readings, 128 averages over 600 ms. Default is
         // 0xFB68, no averaging.
         if (pm_addr != 0 && !pm_write16(INA228_REG_ADC_CONFIG, INA228_ADC_CONFIG_RUN))

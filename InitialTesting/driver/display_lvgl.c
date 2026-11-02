@@ -86,8 +86,9 @@ static void disp_flush(lv_display_t * display, const lv_area_t * area, uint8_t *
     uint16_t full_w = (uint16_t)(area->x2 - area->x1 + 1);
     uint16_t act_w  = (uint16_t)(act_x2 - act_x1 + 1);
 
-    /* LVGL v9 gives pixels as a byte pointer. For RGB565, treat it as uint16_t. */
-    uint16_t * color_p = (uint16_t *)px_map;
+    /* LVGL v9 gives pixels as a byte pointer. For RGB565, treat it as uint16_t.
+     * Clipped at the left or top: start at the first pixel on the screen. */
+    uint16_t * color_p = (uint16_t *)px_map + (act_y1 - area->y1) * full_w + (act_x1 - area->x1);
 
     /* Orientation dependent. */
     set_column();

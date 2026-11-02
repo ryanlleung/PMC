@@ -1,5 +1,5 @@
 #include <math.h>
-#include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
 #include "tune.h"
@@ -9,15 +9,43 @@
 
 static float pct_of(const tune_t *t, int32_t steps) { return 100.0f * (float)steps / (float)t->pos_max; }
 
-// v to dec decimals (0 to 3), without printf's float support.
+// No printf here: stdio's would pull newlib's into every build (the
+// firmware formats with lv_snprintf), and this file stays plain C for
+// tools/ctrl-test.
+
+// The strings one after another into buf, cut to n - 1 characters; NULL
+// ends the list.
+static void join(char *buf, size_t n, ...)
+{
+    va_list a;
+    const char *p;
+    size_t len = 0;
+    va_start(a, n);
+    while ((p = va_arg(a, const char *)) != NULL)
+        while (*p && len + 1 < n)
+            buf[len++] = *p++;
+    va_end(a);
+    buf[len] = '\0';
+}
+
+// v to dec decimals (0 to 3).
 static const char *fx(char *buf, size_t n, float v, int dec)
 {
     long scale = dec == 0 ? 1 : dec == 1 ? 10 : dec == 2 ? 100 : 1000;
-    long q = lroundf(fabsf(v) * (float)scale);
-    if (dec == 0)
-        snprintf(buf, n, "%s%ld", v < 0 && q ? "-" : "", q);
-    else
-        snprintf(buf, n, "%s%ld.%0*ld", v < 0 && q ? "-" : "", q / scale, dec, q % scale);
+    long q = lroundf(fabsf(v) * (float)scale), w = q / scale, f = q % scale;
+    char t[24];
+    int i = sizeof t - 1;
+    t[i] = '\0';
+    for (int k = 0; k < dec; k++, f /= 10)
+        t[--i] = (char)('0' + f % 10);
+    if (dec)
+        t[--i] = '.';
+    do
+        t[--i] = (char)('0' + w % 10);
+    while ((w /= 10) != 0 && i > 1);
+    if (v < 0 && q)
+        t[--i] = '-';
+    join(buf, n, t + i, (const char *)NULL);
     return buf;
 }
 
@@ -39,7 +67,7 @@ int tune_elapsed(const tune_t *t)
 void tune_fail(tune_t *t, const char *why)
 {
     t->phase = TUNE_FAILED;
-    snprintf(t->why, sizeof t->why, "%s", why);
+    join(t->why, sizeof t->why, why, (const char *)NULL);
 }
 
 // A failure found here also takes the valve back to where it started.
@@ -126,8 +154,8 @@ static void result(tune_t *t)
     }
     float k = (a->k + b->k) / 2, tau = (a->tau + b->tau) / 2, theta = (a->theta + b->theta) / 2;
     if (fabsf(a->k - b->k) > TUNE_AGREE_K * fabsf(k) || fabsf(a->tau - b->tau) > TUNE_AGREE_TAU * tau) {
-        snprintf(why, sizeof why, "the two steps disagree (K %s and %s, tau %s and %s s)", fx(x[0], 12, a->k, 3),
-                 fx(x[1], 12, b->k, 3), fx(x[2], 12, a->tau, 0), fx(x[3], 12, b->tau, 0));
+        join(why, sizeof why, "the two steps disagree (K ", fx(x[0], 12, a->k, 3), " and ", fx(x[1], 12, b->k, 3),
+             ", tau ", fx(x[2], 12, a->tau, 0), " and ", fx(x[3], 12, b->tau, 0), " s)", (const char *)NULL);
         fail_back(t, why);
         return;
     }
@@ -147,8 +175,8 @@ static void step_done(tune_t *t, float dy)
         // Too small to fit: twice the step, from here.
         int32_t next = 2 * t->step, at = t->from + t->step;
         if (fabsf(pct_of(t, next)) > TUNE_STEP_MAX_PCT + 0.01f) {
-            snprintf(why, sizeof why, "pressure moved only %s mbar with a %s %% step", fx(x[0], 12, dy, 2),
-                     fx(x[1], 12, pct_of(t, t->step), 1));
+            join(why, sizeof why, "pressure moved only ", fx(x[0], 12, dy, 2), " mbar with a ",
+                 fx(x[1], 12, pct_of(t, t->step), 1), " % step", (const char *)NULL);
             fail_back(t, why);
             return;
         }
@@ -164,8 +192,8 @@ static void step_done(tune_t *t, float dy)
     }
     tune_fit_t *f = &t->fit[t->phase == TUNE_OUT ? 0 : 1];
     if (fabsf(dy) < TUNE_DYMIN_MBAR / 2 || !fit_step(t, dy, f)) {
-        snprintf(why, sizeof why, "no clear response to the step %s (%s mbar)",
-                 t->phase == TUNE_OUT ? "first" : "second", fx(x[0], 12, dy, 2));
+        join(why, sizeof why, "no clear response to the step ", t->phase == TUNE_OUT ? "first" : "second", " (",
+             fx(x[0], 12, dy, 2), " mbar)", (const char *)NULL);
         fail_back(t, why);
         return;
     }
@@ -186,7 +214,7 @@ static void step_done(tune_t *t, float dy)
 
 void tune_step(tune_t *t, float pv, int32_t pos, bool moving)
 {
-    char why[72], x[12];
+    char why[72], x[12], y[12];
     if (!tune_running(t))
         return;
     if (t->phase == TUNE_WAIT) {
@@ -225,15 +253,15 @@ void tune_step(tune_t *t, float pv, int32_t pos, bool moving)
             }
         }
         if (t->waited >= TUNE_WAIT_MAX_S) {
-            snprintf(why, sizeof why, "pressure not steady to %s mbar over %d s", fx(x, sizeof x, TUNE_STEADY_MBAR, 2),
-                     TUNE_STEADY_S);
+            join(why, sizeof why, "pressure not steady to ", fx(x, sizeof x, TUNE_STEADY_MBAR, 2), " mbar over ",
+                 fx(y, sizeof y, (float)TUNE_STEADY_S, 0), " s", (const char *)NULL);
             tune_fail(t, why);   // nothing has moved yet
         }
         return;
     }
     if (fabsf(pv - t->y0) > TUNE_WINDOW_MBAR) {
-        snprintf(why, sizeof why, "pressure moved over %s mbar in one step, use a smaller step",
-                 fx(x, sizeof x, TUNE_WINDOW_MBAR, 1));
+        join(why, sizeof why, "pressure moved over ", fx(x, sizeof x, TUNE_WINDOW_MBAR, 1),
+             " mbar in one step, use a smaller step", (const char *)NULL);
         fail_back(t, why);
         return;
     }
@@ -249,7 +277,8 @@ void tune_step(tune_t *t, float pv, int32_t pos, bool moving)
         }
     }
     if (t->n >= TUNE_SETTLE_MAX_S) {
-        snprintf(why, sizeof why, "step did not settle in %d s", TUNE_SETTLE_MAX_S);
+        join(why, sizeof why, "step did not settle in ", fx(x, sizeof x, (float)TUNE_SETTLE_MAX_S, 0), " s",
+             (const char *)NULL);
         fail_back(t, why);
     }
 }

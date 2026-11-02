@@ -50,13 +50,21 @@ void trend_second(const clicks_state_t *s)
     // first call: a late poll still fills its own slot, and slots the main
     // loop skipped (a stall) go in as no-data samples, so ages stay true on
     // the plot. slot_ms is where the next slot starts.
-    static uint32_t slot_ms;
+    static uint32_t slot_ms, last_ms;
     static bool started;
     uint32_t now = lv_tick_get();
     if (started) {
         int32_t early = (int32_t)(now - slot_ms);
-        if (early < 0)
-            return;                        // this slot already has its sample
+        if (early < 0) {
+            if (now - last_ms <= 500)
+                return;                    // this slot already has its sample
+            // A new second that falls just before the slot edge: the first
+            // call came later in its second than this one (main.c calls on
+            // its own 1 s grid, a few ms late or more). Without this, about
+            // every other reading was dropped. The slots start here now.
+            slot_ms = now;
+            early = 0;
+        }
         uint32_t gap = (uint32_t)early / 1000, fill = gap;
         if (fill > TREND_FINE_N * 6)
             fill = TREND_FINE_N * 6;       // an hour is all that is kept
@@ -68,6 +76,7 @@ void trend_second(const clicks_state_t *s)
         started = true;
         slot_ms = now + 1000;
     }
+    last_ms = now;
 
     trend_pt_t q;
     bool ok = s->pm_found && s->reading_ok && !s->boost_tripped;
@@ -129,6 +138,9 @@ static struct {
 #define DUMP_LINE  64      // room wanted before a line goes out
 #define DUMP_GIVEUP 2000   // ms with no room: the reader has gone
 
+bool trend_dumping(void) { return dump.active; }
+void trend_dump_stop(void) { dump.active = false; }
+
 void trend_task(void)
 {
     if (!dump.active)
@@ -140,13 +152,15 @@ void trend_task(void)
             return;
         }
         dump.since = lv_tick_get();
+        // link_write: link_printf sends only inside an engineering command
+        // (link_eng_open), and this runs later from the main loop.
         if (dump.head) {
-            link_printf("TREND age_s,p_mbar,target_mbar,valve_pct\r\n");
+            link_write("TREND age_s,p_mbar,target_mbar,valve_pct\r\n");
             dump.head = false;
             continue;
         }
         if (dump.next >= dump.end) {
-            link_printf("OK\r\n");
+            link_write("OK\r\n");
             dump.active = false;
             return;
         }
@@ -155,11 +169,12 @@ void trend_task(void)
         // Its age now (the ring may have moved on since the command).
         if (!trend_fine(fine_n - 1 - idx, &q))
             continue;
-        char p[20], sp[20], v[20];
+        char p[20], sp[20], v[20], l[96];
         put_fixed(p, sizeof p, q.p, 3);
         put_fixed(sp, sizeof sp, q.sp, 3);
         put_fixed(v, sizeof v, q.v, 2);
-        link_printf("TREND -%lu,%s,%s,%s\r\n", (unsigned long)(dump.end - 1 - idx), p, sp, v);
+        lv_snprintf(l, sizeof l, "TREND -%lu,%s,%s,%s\r\n", (unsigned long)(dump.end - 1 - idx), p, sp, v);
+        link_write(l);
     }
 }
 

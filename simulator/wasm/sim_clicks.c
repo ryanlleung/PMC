@@ -101,10 +101,20 @@ void clicks_init(void)
     clicks_poll();
 }
 
+// Pressure 21 (0.14.0): room pressure plus its error, 0.01 mbar steps as
+// the BMP581's last digit, 23 degC.
+static void baro_sim(void)
+{
+    state.baro_ok = B.baro;
+    state.baro_mmbar = (int32_t)((B.room_mbar + B.baro_err) * 100 + 0.5) * 10;
+    state.baro_mc = 23000;
+}
+
 void clicks_poll(void)
 {
     powermonitor_poll();
     boost10_poll();
+    baro_sim();
 }
 
 const char *clicks_stepper3_status(void)     { return stepper3_status(); }
