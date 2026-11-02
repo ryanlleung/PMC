@@ -4,7 +4,7 @@
  *
  * Covers: a version 1 record (0.6.0 to 0.8.x) loading as one sensor; a save
  * from the screens (cfg_save_with) going to the other sector as version 2;
- * a restart; Load settings > Previous save; the fallback address (version 4); a combination refused as a
+ * a restart; Load settings > Previous save; the IP address (version 4); a combination refused as a
  * whole; sensors added, switched and removed with their own cals; a motor
  * direction change clearing the calibration; a spoiled record; and the
  * saved valve position written at standstill, withdrawn by a move, and
@@ -459,7 +459,7 @@ static void test_name(void)
     }
 }
 
-// Fallback address (version 4, 0.12.13): parsing, checks, unsaved until a
+// IP address (version 4, 0.12.13; the DHCP fallback until 0.14.9): parsing, checks, unsaved until a
 // save, used after a restart, and a version 3 record loading with the
 // build default.
 static void test_net(void)

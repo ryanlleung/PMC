@@ -30,8 +30,9 @@
  * Version 5 (0.13.4) adds the Remote control switch (0 Off, 1 On); older
  * records load with it Off.
  *
- * Version 4 (0.12.13) adds the Ethernet fallback address and mask (0 for
- * the build's PMC_FALLBACK_IP); version 3 records load with 0.
+ * Version 4 (0.12.13) adds the Ethernet address and mask (then the DHCP
+ * fallback, the only address from 0.14.9; 0 for
+ * the build's PMC_IP); version 3 records load with 0.
  *
  * Version 3 (0.10.9) adds the cryostat name; version 2 records load with
  * the default name.
@@ -80,7 +81,7 @@ typedef struct {
     cfg_sens_t sens[CFG_SENS_MAX];
     char saved_at[20];           // "YYYY-MM-DD HH:MM:SS", "" if the clock was not set
     char name[CFG_NAME_LEN + 4]; // cryostat name, NUL-terminated (version 3)
-    uint32_t net_ip, net_mask;   // fallback address, a.b.c.d as a << 24 | ...; 0 0 = build default (version 4)
+    uint32_t net_ip, net_mask;   // Ethernet address, a.b.c.d as a << 24 | ...; 0 0 = build default (version 4)
     uint32_t remote;             // Remote control: 0 Off, 1 On (version 5)
     uint32_t crc;
 } cfg_rec_t;
@@ -163,7 +164,7 @@ static cfg_sens_t sens[CFG_SENS_MAX] = { { FACTORY_SERIAL, FACTORY_PSI10, 0, { 0
 // Live cryostat name, in the header ("CF-11 pressure controller").
 #define FACTORY_NAME "CF-11"
 static char cname[CFG_NAME_LEN + 1] = FACTORY_NAME;
-// Live fallback address (unsaved until a save, like the name), and the one
+// Live Ethernet address (unsaved until a save, like the name), and the one
 // loaded at start-up, which the Ethernet link uses until the next restart.
 static uint32_t net_ip, net_mask, net_boot_ip, net_boot_mask;
 // Live Remote control switch (0.13.4): On by default (0.13.7, Ryan 28 Oct),
@@ -325,7 +326,7 @@ static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
 // A version 2 to 5 record as version 6. They are version 6 without the
 // return (valve[6]) and without the fields after crc_at; the return is
 // their back-off, so homing ends where it did. Fields they lack are 0 (the
-// build's fallback address), except Remote control, On as the default; a
+// build's address), except Remote control, On as the default; a
 // version 5 record has its own.
 static void from_old(const void *v, size_t tune_at, size_t crc_at, cfg_rec_t *r)
 {
@@ -462,7 +463,7 @@ static int diff(const cfg_rec_t *live, const cfg_rec_t *b, char *buf, size_t n)
         char x[2][48];
         count++;
         cfg_net_text(x[0], sizeof x[0], live->net_ip, live->net_mask);
-        LINE("Fallback address: %s\n", x[0]);
+        LINE("IP address: %s\n", x[0]);
     }
     if (live->remote != b->remote) {
         count++;
@@ -965,10 +966,10 @@ bool cfg_set_name(const char *n, const char **why)
 }
 
 /* --------------------------------------------------------------------------
- * Ethernet fallback address (0.12.13, Ryan 26 Oct): used when no DHCP server
- * answers. Set live and unsaved until a save, like the name; the link takes
+ * Ethernet address (0.12.13, Ryan 26 Oct, as the fallback for DHCP; the only
+ * address from 0.14.9, no DHCP). Set live and unsaved until a save, like the name; the link takes
  * the one loaded at start-up, so a change applies after the next restart.
- * 0 0 is the build's PMC_FALLBACK_IP and PMC_FALLBACK_MASK.
+ * 0 0 is the build's PMC_IP and PMC_MASK.
  * ------------------------------------------------------------------------ */
 bool cfg_net_parse(const char *s, uint32_t *v)
 {
@@ -1015,7 +1016,7 @@ const char *cfg_net_text(char *buf, size_t n, uint32_t ip, uint32_t mask)
 {
     char a[16], m[16];
     if (ip == 0 && mask == 0) {
-        lv_snprintf(buf, n, "%s %s (build default)", PMC_FALLBACK_IP, PMC_FALLBACK_MASK);
+        lv_snprintf(buf, n, "%s %s (build default)", PMC_IP, PMC_MASK);
         return buf;
     }
     net_addr(a, sizeof a, ip);
@@ -1038,8 +1039,8 @@ bool cfg_set_net(uint32_t ip, uint32_t mask, const char **why)
 void cfg_net_boot(char ip[16], char mask[16])
 {
     if (net_boot_ip == 0 && net_boot_mask == 0) {
-        lv_strlcpy(ip, PMC_FALLBACK_IP, 16);
-        lv_strlcpy(mask, PMC_FALLBACK_MASK, 16);
+        lv_strlcpy(ip, PMC_IP, 16);
+        lv_strlcpy(mask, PMC_MASK, 16);
     } else {
         net_addr(ip, 16, net_boot_ip);
         net_addr(mask, 16, net_boot_mask);

@@ -778,8 +778,8 @@ const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
 
 /* --------------------------------------------------------------------------
  * System setup (Settings; Name and network 0.12.13 to 0.13.6, System 0.13.7 to 0.13.18,
- * Ryan 28 Oct): the cryostat name, the Ethernet fallback address (used when
- * no DHCP server answers, Ryan 26 Oct), the address in use, the MAC, the
+ * Ryan 28 Oct): the cryostat name, the Ethernet address (static, no DHCP
+ * from 0.14.9), the address in use, the MAC, the
  * firmware and its build date, and the Remote control switch.
  * ------------------------------------------------------------------------ */
 static struct { lv_obj_t *name, *net, *now, *mac, *fw, *remote, *rsw, *rtext; } nn;
@@ -799,9 +799,9 @@ static void remote_cb(lv_event_t *e)
 static void nn_build(lv_obj_t *scr)
 {
     nn.name = ui_btn(scr, 10, RY[0], 226, RH, UI_NAV, "Cryostat name", nn_go, (void *)&ui_scr_name);
-    nn.net = ui_btn(scr, 244, RY[0], 226, RH, UI_NAV, "Fallback address", nn_go, (void *)&ui_scr_netaddr);
+    nn.net = ui_btn(scr, 244, RY[0], 226, RH, UI_NAV, "IP address", nn_go, (void *)&ui_scr_netaddr);
     nn.now = ui_info(scr, 10, RY[1], 226, RH, "Address in use");
-    // The MAC, for a DHCP reservation (Ryan, 28 Oct).
+    // The MAC, for the site's network records (Ryan, 28 Oct).
     nn.mac = ui_info(scr, 244, RY[1], 226, RH, "MAC address");
     nn.fw = ui_info(scr, 10, RY[2], 226, RH, "Firmware");
     // Remote control: the name and what it means, the switch on the right.
@@ -830,7 +830,7 @@ static void nn_refresh(void)
         lv_strlcpy(t, "Build default", sizeof t);
     else
         *strchr(t, ' ') = '\0';   // the address; the mask is on its page
-    ui_btn_text(nn.net, "Fallback address", t);
+    ui_btn_text(nn.net, "IP address", t);
 #if PMC_LINK_ETHERNET
     ui_set_text(nn.now, ethlink_ip()[0] ? ethlink_ip() : link_chip_text());
     ui_set_text(nn.mac, ethlink_mac()[0] ? ethlink_mac() : "Not read");
@@ -843,12 +843,12 @@ static void nn_refresh(void)
         lv_obj_set_state(nn.rsw, LV_STATE_CHECKED, cfg_remote());
     ui_set_text(nn.rtext, cfg_remote() ? "On: network can set" : "Off: network read only");
     ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, cfg_net_restart_due()
-                 ? "New fallback address: Save settings, then restart." : "Fallback: used if no DHCP server answers.");
+                 ? "New IP address: Save settings, then restart." : "Static address, no DHCP.");
 }
 
 const ui_screen_t ui_scr_namenet = { "System setup", nn_build, nn_refresh, NULL };
 
-/* Fallback address: digits and dots for the address and the mask; Use puts
+/* IP address: digits and dots for the address and the mask; Use puts
  * them in use for the next restart, unsaved until Save settings. */
 static struct {
     lv_obj_t *kb, *box[2], *val[2], *use;
@@ -911,7 +911,7 @@ static void na_use(lv_event_t *e)
         return;
     }
     cfg_net_text(t, sizeof t, ip, mask);
-    valve_event("CFG", "Fallback address set to %s (screen), not saved", t);
+    valve_event("CFG", "IP address set to %s (screen), not saved", t);
     ui_back();
 }
 
@@ -920,7 +920,7 @@ static void na_default(lv_event_t *e)
     (void)e;
     const char *why;
     cfg_set_net(0, 0, &why);
-    valve_event("CFG", "Fallback address set to the build default (screen), not saved");
+    valve_event("CFG", "IP address set to the build default (screen), not saved");
     ui_back();
 }
 
@@ -954,10 +954,10 @@ static void na_build(lv_obj_t *scr)
 
 static void na_refresh(void)
 {
-    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "Used if no DHCP server answers, after Save settings and a restart.");
+    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "The controller's address (no DHCP), after Save settings and a restart.");
 }
 
-const ui_screen_t ui_scr_netaddr = { "Fallback address", na_build, na_refresh, NULL };
+const ui_screen_t ui_scr_netaddr = { "IP address", na_build, na_refresh, NULL };
 
 /* --------------------------------------------------------------------------
  * Choose sensor

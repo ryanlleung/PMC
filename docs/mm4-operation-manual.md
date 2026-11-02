@@ -256,7 +256,7 @@ Settings are commissioning items, not daily operation. Edits on the screen are d
 
 | Page | Settings | Notes |
 | --- | --- | --- |
-| System | Cryostat name (up to 12 characters, shown in the Home title). Fallback IP address and mask. Remote control switch (On by default). Firmware version and build date | The name is in use at once and unsaved until Save settings. The fallback address is used when no DHCP server answers, after Save settings and a restart. Default puts the build's address back. The page shows the address in use |
+| System | Cryostat name (up to 12 characters, shown in the Home title). IP address and mask. Remote control switch (On by default). Firmware version and build date | The name is in use at once and unsaved until Save settings. A new IP address is used after Save settings and a restart. Default puts the build's address back. The page shows the address in use |
 | Choose sensor | Up to four Druck sensors, each with serial number, range in psi and its own calibration. Sensor in use | A new sensor starts uncalibrated. Calibrate puts it in use and opens Calibrate sensor |
 | Valve setup, Valve tab | 100 % travel in output turns (4 by default, 16512 steps per turn). Motor direction | Changing the direction clears the homing. Home again after saving |
 | Valve setup, Homing tab | Back-off (400 full steps), fast close speed (400 steps/s), slow close speed (25 steps/s) | Homing step distances and speeds |
@@ -274,9 +274,9 @@ The Ethernet build (the one for the cryostat) runs two servers on one cable and 
 
 ### Network and IP address
 
-The controller asks for an address by DHCP. If no DHCP server answers within 10 s it uses the fallback address: the one saved under Settings > System setup, or the build's default 169.254.10.50/16. The header shows the address in use, or NO CABLE, DHCP..., NET NO CLK or NET NO PHY while it has none. Diagnostics shows the link and the address. The hostname is pmc.
+The controller has a fixed (static) IP address only; it does not use DHCP. The address is the one saved under Settings > System setup, or the build's default 169.254.10.50/16. There is no gateway, so it answers only on its own subnet. The header shows the address, or NO CABLE, NET NO CLK or NET NO PHY. Diagnostics shows the link and the address. The hostname is pmc.
 
-To set the fallback address, type it and the mask on the System page then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. On a laptop with a fixed address, put the laptop and the fallback address on the same subnet.
+To set the address, type it and the mask on the System page (IP address), then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. Put the PC on the same subnet with a fixed address: for the default, for example 169.254.10.1 with mask 255.255.0.0 (a Windows PC with no DHCP server gives itself an address in 169.254.0.0/16 on its own).
 
 Ethernet and Modbus were proven on the bench on 26 October 2026 with the laptop on a fixed address.
 

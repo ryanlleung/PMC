@@ -37,7 +37,7 @@
 // settings, tuning, saving and the motor are on the touch screen.
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.14.8"
+#define PMC_FW_VERSION    "0.14.9"
 
 // Valve limit switch: one NC dry contact to GND on S1 TX, PD5 (Adapter Click
 // IDC10 pad 8, printed RX: the Adapter labels from the Click's side; 0.14.6).
@@ -78,12 +78,12 @@
 #define PMC_MODBUS_WRITE   1
 #endif
 
-// Address used if no DHCP server answers within PMC_DHCP_TIMEOUT_MS.
+// The controller's address when none is saved under Settings > System setup
+// (static only, no DHCP from 0.14.9).
 // Link-local (169.254.0.0/16), the range Windows gives itself on a direct
 // cable with no DHCP, so a laptop plugged straight in can reach it.
-#define PMC_FALLBACK_IP   "169.254.10.50"
-#define PMC_FALLBACK_MASK "255.255.0.0"
-#define PMC_DHCP_TIMEOUT_MS 10000
+#define PMC_IP            "169.254.10.50"
+#define PMC_MASK          "255.255.0.0"
 
 
 #endif // _PMC_CONFIG_H_

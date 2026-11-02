@@ -445,7 +445,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-pick")) tap(120, 72);
     if (!strncmp(st, "set-name", 8)) { tap(120, 72); tap(120, 72); tap(331, 189); tap(331, 189); tap(24, 65); tap(338, 65); }
     if (!strcmp(st, "set-named")) { tap(415, 128); tap(24, 20); tap(24, 20); tap(24, 20); }   // Use name, Settings, Home
-    // System, Fallback address (0.12.13): keys at x 45/122/199, y 66/107/149/190.
+    // System, IP address (0.12.13): keys at x 45/122/199, y 66/107/149/190.
     if (!strncmp(st, "set-net", 7)) tap(120, 72);
     if (!strcmp(st, "set-remote")) { tap(120, 72); tap(357, 184); }   // System, Remote control Off (On by default)
     if (!strncmp(st, "set-netaddr", 11) || !strcmp(st, "set-netused")) tap(356, 72);

@@ -9,7 +9,6 @@
 #include "core/tcp.h"
 #include "drivers/mac/stm32f4xx_eth_driver.h"
 #include "drivers/phy/lan8720_driver.h"
-#include "dhcp/dhcp_client.h"
 
 #include "lvgl.h"   // lv_vsnprintf, lv_strlcpy
 #include "eth_hw.h"
@@ -26,11 +25,9 @@
  * ------------------------------------------------------------------------ */
 
 static NetInterface *ifc;
-static DhcpClientContext dhcp;
 static Socket *listener;
 static Socket *client;
 static bool up;
-static bool fallback;
 static int phy_addr = ETH_HW_NO_PHY;
 static uint32_t phy_id;
 static char ip_text[16] = "";
@@ -38,7 +35,6 @@ static char mask_text[16] = "";
 static char mac_text[18] = "";
 static char status_text[112] = "Ethernet: not started";
 static const char *chip_err = "NET";   // short fault for the header
-static bool was_linked;
 static bool new_client;
 
 // Line assembly for client input; reset when a new client connects.
@@ -64,19 +60,6 @@ void stm32f4xxEthInitGpio(NetInterface *interface)
 {
     (void)interface;
     eth_hw_init_pins();
-}
-
-static void dhcp_timeout(DhcpClientContext *context, NetInterface *interface)
-{
-    Ipv4Addr a, m;
-    char ip[16], mask[16];
-    dhcpClientStop(context);
-    cfg_net_boot(ip, mask);   // saved (0.12.13), else PMC_FALLBACK_IP
-    ipv4StringToAddr(ip, &a);
-    ipv4StringToAddr(mask, &m);
-    ipv4SetHostAddr(interface, a);
-    ipv4SetSubnetMask(interface, m);
-    fallback = true;
 }
 
 void ethlink_init(void)
@@ -139,14 +122,16 @@ void ethlink_init(void)
         return;
     }
 
-    DhcpClientSettings ds;
-    dhcpClientGetDefaultSettings(&ds);
-    ds.interface = ifc;
-    ds.rapidCommit = FALSE;
-    ds.timeout = PMC_DHCP_TIMEOUT_MS;
-    ds.timeoutEvent = dhcp_timeout;
-    dhcpClientInit(&dhcp, &ds);
-    dhcpClientStart(&dhcp);
+    // A static address only, no DHCP (0.14.9): the one saved under
+    // Settings > System setup, else the build's PMC_IP. No gateway: the
+    // controller answers on its own subnet only.
+    Ipv4Addr a, m;
+    char ip[16], mask[16];
+    cfg_net_boot(ip, mask);
+    ipv4StringToAddr(ip, &a);
+    ipv4StringToAddr(mask, &m);
+    ipv4SetHostAddr(ifc, a);
+    ipv4SetSubnetMask(ifc, m);
 
     listener = socketOpen(SOCKET_TYPE_STREAM, SOCKET_IP_PROTO_TCP);
     if (listener == NULL ||
@@ -274,16 +259,6 @@ void ethlink_task(void)
         return;
     netTask();
 
-    // After the DHCP fallback, a cable unplug and replug (e.g. moving from a
-    // laptop to the site switch) tries DHCP again.
-    bool linked = netGetLinkState(ifc);
-    if (linked && !was_linked && fallback) {
-        ipv4SetHostAddr(ifc, IPV4_UNSPECIFIED_ADDR);
-        fallback = false;
-        dhcpClientStart(&dhcp);
-    }
-    was_linked = linked;
-
     // New connection replaces any existing one.
     Socket *s = socketAccept(listener, NULL, NULL);
     if (s) {
@@ -385,7 +360,7 @@ const char *ethlink_chip_text(void)
         return chip_err;
     if (!netGetLinkState(ifc))
         return "NO CABLE";
-    return ip_text[0] ? ip_text : "DHCP...";
+    return ip_text[0] ? ip_text : "NET";
 }
 
 const char *ethlink_mac(void)
@@ -394,7 +369,6 @@ const char *ethlink_mac(void)
 }
 
 const char *ethlink_mask(void) { return mask_text; }
-bool ethlink_fallback(void) { return fallback; }
 
 const char *ethlink_ip(void)
 {
@@ -418,10 +392,10 @@ const char *ethlink_status(void)
     if (!netGetLinkState(ifc))
         lv_snprintf(status_text, sizeof status_text, "Ethernet: no cable link (PHY %d)", phy_addr);
     else if (!ip_text[0])
-        lv_snprintf(status_text, sizeof status_text, "Ethernet: link up, waiting for DHCP");
+        lv_snprintf(status_text, sizeof status_text, "Ethernet: link up, no address set");
     else
-        lv_snprintf(status_text, sizeof status_text, "Ethernet: %s%s port %d, %s; Modbus %d: %d",
-                    ip_text, fallback ? " (no DHCP, fallback)" : "", PMC_TCP_PORT,
+        lv_snprintf(status_text, sizeof status_text, "Ethernet: %s port %d, %s; Modbus %d: %d",
+                    ip_text, PMC_TCP_PORT,
                     client ? "client connected" : "no client", PMC_MODBUS_PORT,
                     ethlink_modbus_clients());
     return status_text;
