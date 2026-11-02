@@ -37,7 +37,7 @@
 // settings, tuning, saving and the motor are on the touch screen.
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.14.9"
+#define PMC_FW_VERSION    "0.14.10"
 
 // Valve limit switch: one NC dry contact to GND on S1 TX, PD5 (Adapter Click
 // IDC10 pad 8, printed RX: the Adapter labels from the Click's side; 0.14.6).
@@ -82,7 +82,7 @@
 // (static only, no DHCP from 0.14.9).
 // Link-local (169.254.0.0/16), the range Windows gives itself on a direct
 // cable with no DHCP, so a laptop plugged straight in can reach it.
-#define PMC_IP            "169.254.10.50"
+#define PMC_IP            "169.254.1.1"   // the first usable link-local address (169.254.10.50 to 0.14.9)
 #define PMC_MASK          "255.255.0.0"
 
 

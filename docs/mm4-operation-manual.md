@@ -274,9 +274,9 @@ The Ethernet build (the one for the cryostat) runs two servers on one cable and 
 
 ### Network and IP address
 
-The controller has a fixed (static) IP address only; it does not use DHCP. The address is the one saved under Settings > System setup, or the build's default 169.254.10.50/16. There is no gateway, so it answers only on its own subnet. The header shows the address, or NO CABLE, NET NO CLK or NET NO PHY. Diagnostics shows the link and the address. The hostname is pmc.
+The controller has a fixed (static) IP address only; it does not use DHCP. The address is the one saved under Settings > System setup, or the build's default 169.254.1.1/16. There is no gateway, so it answers only on its own subnet. The header shows the address, or NO CABLE, NET NO CLK or NET NO PHY. Diagnostics shows the link and the address. The hostname is pmc.
 
-To set the address, type it and the mask on the System page (IP address), then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. Put the PC on the same subnet with a fixed address: for the default, for example 169.254.10.1 with mask 255.255.0.0 (a Windows PC with no DHCP server gives itself an address in 169.254.0.0/16 on its own).
+To set the address, type it and the mask on the System page (IP address), then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. Put the PC on the same subnet with a fixed address: for the default, for example 169.254.1.2 with mask 255.255.0.0 (a Windows PC with no DHCP server gives itself an address in 169.254.0.0/16 on its own).
 
 Ethernet and Modbus were proven on the bench on 26 October 2026 with the laptop on a fixed address.
 
