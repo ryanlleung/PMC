@@ -1,0 +1,68 @@
+# OI needle valve, inside the motor housing: Portescap motor leads to motor board to Fischer 7-pin receptacle.
+# Sources: UMC0005 Iss 3 s2.5.1 p.8 (board to Fischer), Portescap 26M048B datasheet (lead colours).
+# INFERRED: which colour lands on which board pin. OI does not say. Read it off the board under the blue cover.
+# Render: wireviz motor-to-fischer.yml
+
+metadata:
+  title: OI needle valve motor housing, motor leads to Fischer 7-pin
+  pn: PMC-W02
+
+options:
+  fontname: arial
+  bgcolor: WH
+  color_mode: SHORT
+
+connectors:
+  M1:
+    type: Portescap 26M048B2U (or 35M048B2U)
+    subtype: unipolar, six flying leads
+    pinlabels: [A end 1, A centre tap, A end 2, B end 1, B centre tap, B end 2]
+    notes: >-
+      Colours from 26M datasheet. 35M assumed same (unverified).<br/>
+      26M 110 ohm/phase, 35M 72 ohm/phase.
+  S1:
+    type: Limit microswitch
+    subtype: NC dry contact, closed end of travel
+    pinlabels: [C, NC]
+  B1:
+    type: OI motor circuit board
+    pincount: 8
+    loops: [[2, 4], [4, 5], [5, 7]]
+    notes: Board pins 2, 4, 5, 7 joined on the board (UMC0005 s2.5.1).
+  X1:
+    type: Fischer 7-pin, on motor housing
+    subtype: receptacle, gender not given by OI
+    pinlabels: [COIL, COIL, COIL, COIL, +12V COM, SW, SW]
+    notes: 102 A056 inferred. Face 1 centre, 2 at key, 3-7 round ring.
+
+cables:
+  W1:
+    category: bundle
+    colors: [BN, GN, BK, YE, RD, OG]
+    gauge: 28 AWG
+    notes: >-
+      INFERRED landing. Winding pairs assumed board 1+3 (F2+F4) and 6+8 (F1+F3),<br/>
+      from Mercury bits 0-3 following A, B, A', B'. Which winding goes where, and which end, is not documented.
+  W2:
+    category: bundle
+    wirecount: 5
+    wirelabels: [B1 1 to F2, B1 2/4/5/7 to F5, B1 3 to F4, B1 6 to F1, B1 8 to F3]
+    notes: Board to Fischer per UMC0005 s2.5.1. Internal wiring form (wires or tracks) not documented.
+  W3:
+    category: bundle
+    wirecount: 2
+    notes: Switch to Fischer 6/7 directly (UMC0005 s2.5.1 note). Which switch lead goes to 6 or 7 does not matter.
+
+connections:
+  -
+    - M1: [1, 2, 3, 4, 5, 6]
+    - W1: [1, 2, 3, 4, 5, 6]
+    - B1: [1, 2, 3, 6, 4, 8]
+  -
+    - B1: [1, 2, 3, 6, 8]
+    - W2: [1, 2, 3, 4, 5]
+    - X1: [2, 5, 4, 1, 3]
+  -
+    - S1: [1, 2]
+    - W3: [1, 2]
+    - X1: [6, 7]

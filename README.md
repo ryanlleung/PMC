@@ -6,14 +6,14 @@ Oxford Instruments cryostats (CF-10, CF-11, HM-2, AVM-1, AVM-2) draw helium thro
 
 Operators set a target pressure for each cryostat (typically 1 to 25 mbar) and switch between MANUAL and AUTO. They do not tune the control loop. The pressure trend is shown because it is what they watch.
 
-The controller is a MikroE Mikromedia 4 (STM32F407ZG) touchscreen board with Click boards, built from bought modules only. It has a 4.3 in touchscreen, a text command port and Modbus TCP over Ethernet, and shows pressure to 0.1 mbar. The valve's limit switch is the closing stop and is read in firmware; there is no hardware interlock.
+The controller is a MikroE Mikromedia 4 (STM32F407ZG) touchscreen board with four Click boards (see Hardware), built from bought modules only. It has a 4.3 in touchscreen, a text command port and Modbus TCP over Ethernet, and shows pressure to 0.1 mbar. The valve's limit switch is the closing stop and is read in firmware; there is no hardware interlock.
 
 ## Repository
 
 | Folder | Holds |
 | --- | --- |
 | `InitialTesting/` | The firmware (NECTO Studio 7 project, mikroSDK, LVGL 9.4) |
-| `docs/` | Operation manual (`mm4-operation-manual.md`), Modbus register map (`modbus-register-map.md`), HMI reference |
+| `docs/` | Operation manual (`mm4-operation-manual.md`), Modbus register map (`modbus-register-map.md`), hardware schematics and wiring (`hardware/`), HMI reference |
 | `simulator/` | The firmware compiled to WebAssembly, run in a browser over a simulated bench (`simulator/README.md`) |
 | `secop/` | A reference Frappy (SECoP) driver for the text port (`secop/README.md`) |
 | `tools/` | PC tests, screen previews, a cross-build, a logger and calibration helpers |
@@ -22,20 +22,54 @@ The firmware version is `PMC_FW_VERSION` in `InitialTesting/pmc_config.h`; `*IDN
 
 ## Hardware
 
-| Part | What it does | Connection |
-| --- | --- | --- |
-| Mikromedia 4 for STM32F4 (STM32F407ZG, 168 MHz, 1 MB flash, 192 KB RAM) | Controller, 4.3 in 480x272 capacitive touchscreen (SSD1963 display controller, touch over I2C) | 12 V terminal, USB-C, Ethernet |
-| Socket S1: Adapter Click with a Pressure 21 Click (BMP581) | Room pressure, used as the air point of the transducer calibration. The Adapter's IDC10 header also takes the limit switch | Pressure 21 on I2C2, address 0x46. Limit switch on pad 8 (printed RX) and GND on pad 10 |
-| Valve limit switch | One NC dry contact to GND, opens at the closed end of travel | Socket S1 TX, PD5, internal pull-up. The Adapter labels its UART pads from the Click's side, so printed RX is the socket's TX |
-| Socket S2: Stepper 3 Click (ULN2003) | Drives the unipolar six-lead valve stepper (PK22, 344:1 gearbox) at 12 V | AN PB0, RST PC3, CS PA15, PWM PD13 |
-| Socket S3: Boost 10 Click (LT8337, TPL0501 digipot) | Raises 5 V to about 10 V excitation for the Druck. Never feed it 12 V | SPI1 PA5/PA6/PB5, CS PF8, PG PG2 |
-| Socket S4: Power Monitor Click (INA228) | Reads the Druck output (shunt input) and the excitation (VBUS), ±163.84 mV range | I2C2 PF1/PF0, address 0x4A |
-| Druck UNIK 5000 PDCR50G1, 15 psia absolute, 10 mV/V | Pressure transducer | M12: pin 1 +Supply to Boost 10 VOUT and INA228 VBUS; pin 2 +Out to IN+; pin 4 -Out to IN-; pin 3 -Supply to common GND |
-| On-board SST26VF064B (8 MB) | Settings, calibration and saved valve position | SPI2 bit-banged: CS PB11, SCK PB13, MISO PB14, MOSI PB15 |
-| On-board RTC, 32.768 kHz crystal | Time stamps; survives a reset (and a power-off with a cell in BAT1) | |
-| On-board LAN8720A | Ethernet | RMII |
+The controller is one MikroE development board with a socket shield and four Click boards. MikroE calls its small add-on modules "Click boards"; each plugs into a mikroBUS socket (two 1x8 headers carrying SPI, I2C, UART, PWM, an analog pin, reset, 3.3 V and 5 V). The names below are MikroE's product names. Schematics and wiring diagrams are in [`docs/hardware/`](docs/hardware/).
 
-Power: the board takes 12 V on its terminal (10.6 to 14 V; priority 12 V, then USB-C, then Li-Po; SW1 on). The motor supply is regulated 12 V from a PoE splitter. The Stepper 3 Click has no current limit, so the motor supply must stay at 12 V. The board's 0 V is bonded to chassis earth at one point; without it the floating board picks up noise on the Druck reading. Socket pin details are in `InitialTesting/clicks.h`, `limit.h`, `extflash.h` and the comments at the top of each driver.
+### Boards
+
+| Board | MikroE part | Main chip | Where | What it does in the controller |
+| --- | --- | --- | --- | --- |
+| Mikromedia 4 for STM32 Capacitive | MIKROE-3618 | STM32F407ZG (168 MHz, 1 MB flash, 192 KB RAM); SSD1963 display controller; LAN8720A Ethernet PHY; SST26VF064B 8 MB serial flash | Main board | Runs the firmware. 4.3 in 480x272 capacitive touchscreen, 12 V terminal, USB-C (power and flashing), real-time clock |
+| Mikromedia 4 Capacitive Shield | MIKROE-3631 | none | Plugs onto the back of the main board | Four mikroBUS sockets, S1 to S4, and the RJ45 for Ethernet |
+| Adapter Click | MIKROE-1432 | none (a pass-through) | Socket S1 | Raises the Pressure 21 Click above the shield and brings every socket pin out on a 2x5 IDC10 header. The valve limit switch is wired to this header |
+| Pressure 21 Click | Pressure 21 Click | Bosch BMP581 barometric sensor | On top of the Adapter Click in S1 | Room (atmospheric) pressure. Used as the air point of the transducer calibration and shown on Diagnostics and `BARO?` |
+| Stepper 3 Click | MIKROE-2035 | ULN2003 Darlington array | Socket S2 | Drives the valve's unipolar stepper motor from the 12 V motor supply |
+| Boost 10 Click | MIKROE-6927 | LT8337 boost converter, TPL0501 digital potentiometer | Socket S3 | Makes the 10 V excitation for the Druck transducer from the socket's 5 V |
+| Power Monitor Click | MIKROE-4810 | TI INA228 | Socket S4 | Measures the Druck output (shunt input, ±163.84 mV) and the excitation (bus input), so the firmware can use their ratio. Its die temperature drives the W-3 warning |
+
+Off-board parts: the Druck UNIK 5000 transducer (PDCR50G1, 15 psia absolute, 10 mV/V, M12 4-pin), the existing Oxford Instruments needle valve (Portescap 26M048B2U or 35M048B2U unipolar stepper, PK22 344:1 gearbox, NC limit switch, Fischer 7-pin), and a PoE splitter giving regulated 12 V.
+
+### Connections
+
+| From | To | Pins |
+| --- | --- | --- |
+| Druck M12 pin 1, +Supply | Boost 10 VOUT and Power Monitor VBUS | |
+| Druck M12 pin 2, +Out | Power Monitor IN+ | |
+| Druck M12 pin 4, -Out | Power Monitor IN- | |
+| Druck M12 pin 3, -Supply | Common 0 V | |
+| Valve Fischer pins 1 to 4, coils | Stepper 3 outputs A to D | Coil order is set on the screen (Settings > Motor override > Coils) |
+| Valve Fischer pin 5, coil centre taps | Stepper 3 COM, the 12 V motor supply | Stepper 3 J1 set to external supply |
+| Valve Fischer pins 6 and 7, limit switch | Adapter Click IDC10 pad 8 and pad 10 (GND) | Pad 8 is printed RX but is the socket's TX pin, PD5, read with an internal pull-up. The Adapter labels its UART pads from the Click's side |
+| PoE splitter 12 V | Mikromedia 4 12 V terminal and Stepper 3 COM | Regulated 12 V. The Stepper 3 Click has no current limit |
+| PoE splitter data | Shield RJ45 | Ethernet |
+| Board 0 V | Chassis earth | One bond at one point. Without it the floating board picks up noise on the Druck reading |
+
+Socket pins used by the firmware:
+
+| Socket | Board | Signals |
+| --- | --- | --- |
+| S1 | Adapter Click + Pressure 21 | Pressure 21 on I2C2 (PF1 SCL, PF0 SDA), address 0x46. Limit switch on PD5 (socket TX) |
+| S2 | Stepper 3 | AN PB0, RST PC3, CS PA15, PWM PD13: the four coil outputs |
+| S3 | Boost 10 | SPI1 (PA5 SCK, PA6 MISO, PB5 MOSI), CS PF8, power good PG2 |
+| S4 | Power Monitor | I2C2 (PF1, PF0), address 0x4A |
+
+On-board: serial flash on SPI2 (CS PB11, SCK PB13, MISO PB14, MOSI PB15), display on a 16-bit 8080 bus on GPIOE (WR PF11), Ethernet PHY on RMII.
+
+### Settings and cautions
+
+- Every Click logic-level jumper is set to 3.3 V.
+- Never connect the Boost 10 Click to 12 V: it takes 5 V from the socket and its input maximum is 10 V.
+- Never put the Stepper 3 Click in S4: that socket's RST pin (PC13) cannot drive a coil.
+- The board takes 10.6 to 14 V on its terminal and chooses 12 V, then USB-C, then Li-Po. SW1 must be on.
 
 ## Firmware structure
 
