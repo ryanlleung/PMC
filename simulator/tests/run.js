@@ -114,6 +114,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const ev = events(s, 10);
   check('F-6 no response', /F-6/.test(ev), ev);
   shot(s, 'f06');
+  // Fault detail: its buttons sit in the strip's row, so the strip hides (0.14.13).
+  s.tap(415, 184); s.tap(386, 72); s.tap(180, 72);
+  shot(s, 'f06-detail');
+  s.tap(181, 240);   // Reset fault
+  check('fault detail Reset fault works', s.cmd('ALRM?') === 'ALRM NONE\r\n', s.cmd('ALRM?'));
 }
 { // W-2: the rotary pump stops in AUTO; the pressure never comes back into band.
   const s = homed(load());

@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision C, 3 November 2026. Firmware 0.14.8, checked against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677`. This revision aligns the instructions with the source; it does not add hardware bench verification.
+Revision D, 3 November 2026. Firmware 0.14.13. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.8: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.13: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -110,9 +110,9 @@ Every screen has the same frame: a header with Back and Home buttons, the title,
 | --- | --- | --- |
 | Home | Home button | Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar, Setpoint box) and Valve tile (reading in %, bar, Go to box). The mode button reads Home valve, Start AUTO or Switch to MANUAL as the mode allows. Valve and Menu buttons. A tap on the sparkline opens Trend |
 | Valve | Home > Valve | MANUAL moves: hold Close or Open, -1 %, +1 %, -5 %, +5 %, Fully close, Fully open, and the Go to box for a typed % (white with a blue underline when it takes a tap). In AUTO the buttons are grey and Go to shows where AUTO is sending the valve; a tap asks to switch to MANUAL |
-| Menu | Home > Menu | Records: Trend, Faults and log. Calibrate: Valve position, Transducer. System: Diagnostics, Settings |
+| Menu | Home > Menu | Records: Trend, Events. Calibrate: Valve position, Transducer. System: Diagnostics, Settings |
 | Trend | Menu > Records > Trend | Pressure (left axis), the target while in AUTO (dashed) and valve % (right axis) over 1, 2, 5, 10, 30 min or 1 hour |
-| Faults and log | Menu > Records > Faults and log | Latched faults, with Reset fault. Tap a fault for its detail and help. The event log (last 100 events) |
+| Events | Menu > Records > Events | Latched faults, with Reset fault. Tap a fault for its detail and help. The event log (last 100 events) |
 | Valve position | Menu > Calibrate > Valve position | One page with Home valve, Set as 0 %, Set as other % and Use last saved, plus Help. Shows the position reference and output turns; during homing it shows the current stage |
 | Calibrate sensor | Menu > Calibrate > Transducer | The two-point calibration: Capture vacuum, Capture air, and the saved and captured readings side by side |
 | Diagnostics | Menu > System > Diagnostics | Live readings: Druck signal, pressure before calibration, the room sensor (Pressure 21), motor steps, limit switch and last move, board temperature, excitation and how long the last move took |
@@ -222,7 +222,7 @@ The Pressure 21 Click in S1 gives the controller its own room-pressure reading (
 
 ## 9. Faults and warnings
 
-Faults latch until Reset fault (on the strip, on Faults and log, or in the fault detail), which clears only those whose cause has gone. The strip shows the highest-priority fault; the number order is the priority order. Any fault in AUTO stops the valve and switches to MANUAL. F-1 and F-2 are sensor faults and do not block valve moves, so the valve can still be moved and homed with no pressure reading. F-3 to F-6 block moves until reset. Tap a fault on Faults and log for its detail: what happened, what the controller did, what to check, and when it can be reset.
+Faults latch until Reset fault (on the strip, on Events, or in the fault detail), which clears only those whose cause has gone. The strip shows the highest-priority fault; the number order is the priority order. Any fault in AUTO stops the valve and switches to MANUAL. F-1 and F-2 are sensor faults and do not block valve moves, so the valve can still be moved and homed with no pressure reading. F-3 to F-6 block moves until reset. Tap a fault on Events for its detail: what happened, what the controller did, what to check, and when it can be reset.
 
 | Fault | Cause | What the controller did | Check | Reset |
 | --- | --- | --- | --- | --- |
@@ -249,15 +249,15 @@ Other strip messages:
 - **Limit override held / closing past the switch**: the override from Settings > Motor override is in use. Release either finger to stop a closing override; there is no Cancel button on the strip.
 - **Valve not homed**: the valve position is not known.
 
-The event log (Menu > Records > Faults and log) keeps the last 100 events with a time stamp: faults, warnings, mode changes, moves, settings saves, calibration captures and remote commands with the client's IP address. It is in RAM and empties at a restart.
+The event log (Menu > Records > Events) keeps the last 100 events with a time stamp: faults, warnings, mode changes, moves, settings saves, calibration captures and remote commands with the client's IP address. It is in RAM and empties at a restart.
 
 ## 10. Settings
 
-Settings are commissioning items, not daily operation. Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. The name, fallback address selection, Remote control switch, sensor operations and captured calibration take effect before saving and remain unsaved until Save settings; a changed fallback address is used after a restart. The text link does not change settings. In AUTO, Save settings accepts control-tuning drafts; changed valve or sensor-selection drafts answer "Switch to MANUAL first". Live changes such as the name and Remote control switch are also included in the saved record. The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
+Settings are commissioning items, not daily operation. Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. The name, IP address, Remote control switch, sensor operations and captured calibration take effect before saving and remain unsaved until Save settings; a changed IP address is used after a restart. The text link does not change settings. In AUTO, Save settings accepts control-tuning drafts; changed valve or sensor-selection drafts answer "Switch to MANUAL first". Live changes such as the name and Remote control switch are also included in the saved record. The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
 
 | Page | Settings | Notes |
 | --- | --- | --- |
-| System setup | Cryostat name (up to 12 characters, shown in the Home title). Fallback IP address and mask. Remote control switch (On by default). Firmware version and build date | The name is in use at once and unsaved until Save settings. The fallback address is used when no DHCP server answers, after Save settings and a restart. Default puts the build's address back. The page shows the address in use |
+| System setup | Cryostat name (up to 12 characters, shown in the Home title). IP address and mask. Remote control switch (On by default). Firmware version and build date | The name is in use at once and unsaved until Save settings. A new IP address is used after Save settings and a restart. Default puts the build's address back. The page shows the address in use |
 | Choose sensor | Up to four Druck sensors, each with serial number, range in psi and its own calibration. Sensor in use | A new sensor starts uncalibrated. Calibrate puts it in use and opens Calibrate sensor |
 | Valve setup, Valve tab | 100 % travel in output turns (4 by default, 16512 steps per turn). Motor direction | Changing the direction clears the homing. Home again after saving |
 | Valve setup, Homing tab | Back-off (400 full steps), Return (400 full steps), fast close speed (400 steps/s), slow close speed (25 steps/s) | Back-off follows the fast close; Return follows the slow close and defines 0 %. The distances are independent |
@@ -276,9 +276,9 @@ The Ethernet build (the one for the cryostat) runs two servers on one cable and 
 
 ### Network and IP address
 
-The controller asks for an address by DHCP. If no DHCP server answers within 10 s it uses the fallback address: the one saved under Settings > System setup, or the build's default 169.254.10.50/16. The header shows the address in use, or NO CABLE, DHCP..., NET NO CLK or NET NO PHY while it has none. Settings > System setup shows the address in use and MAC address. The hostname is pmc.
+The controller has a fixed (static) IP address only; it does not use DHCP. The address is the one saved under Settings > System setup, or the build's default 192.168.1.100 with mask 255.255.255.0. There is no gateway, so it answers only on its own subnet. The header shows the address, or NO CABLE, NET NO CLK or NET NO PHY. Settings > System setup shows the address in use and MAC address. There is no DHCP or DNS, so connect by the IP address.
 
-To set the fallback address, type it and the mask on the System setup page then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. On a laptop with a fixed address, put the laptop and the fallback address on the same subnet.
+To set the address, type it and the mask on the System setup page (IP address), then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. Put the PC on the same subnet with a fixed address: for the default, for example 192.168.1.10 with mask 255.255.255.0. On a site network, give each controller its own address on the instrument subnet: they all start at 192.168.1.100.
 
 Ethernet and Modbus were proven on the bench on 26 October 2026 with the laptop on a fixed address.
 
@@ -330,7 +330,7 @@ The Modbus read test passed on the bench on 26 October 2026. The write test has 
 | Check the limit switch | When F-3, F-4 or W-4 appears, and at each warm-up | The Valve position page or Diagnostics shows pressed or free. Press the switch by hand and watch it change. Look for ice on the switch and the valve drive |
 | Check the Druck excitation | When F-2 appears | Diagnostics shows the excitation. It should be 9.5 to 10.5 V. A Boost 10 trip needs a power cycle |
 | Check the motor supply | When moves are slow, F-5 appears or the motor is noisy | Measure the 12 V at the Stepper 3 Click. The controller does not measure it |
-| Review the event log | After a fault, and before clearing it | Menu > Records > Faults and log, or EVNT? 100 over the link. The log empties at a restart, so read it first |
+| Review the event log | After a fault, and before clearing it | Menu > Records > Events, or EVNT? 100 over the link. The log empties at a restart, so read it first |
 | Save the settings | After any commissioning change | Settings > Review and save > Save settings. Review and save shows the date of the last save |
 | Set the clock | When the dates on saves and events are wrong | TIME SET over the link, in the form TIME SET 2026-10-27 09:00:00 |
 | Update the firmware | When a new version is released | Flash over USB-C with mikroBootloader. The settings, calibration and saved position are in serial flash and survive reflashing. Check Settings > System setup, or *IDN? over the link, afterwards |
@@ -360,3 +360,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | A | 27 October 2026 | First issue, from firmware 0.12.17 and the design documents listed in the reference block |
 | B | 2 November 2026 | Firmware 0.14.8: the text link takes the remote command set only (engineering commands, the step test and the typed calibration table removed) |
 | C | 3 November 2026 | Checked against firmware 0.14.8 on main: corrected movement prerequisites, independent homing Return and four stages, motor-supply behaviour and legacy status bit, tuning saves in AUTO, motor defaults, current screens and labels, remote refusals and version references. Historical bench status retained separately |
+| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip) |

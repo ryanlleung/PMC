@@ -13,7 +13,7 @@
 
 /* --------------------------------------------------------------------------
  * Operator screens for MANUAL (stage 5, simulator v63): Valve, Calibrate
- * valve, Faults and log, Diagnostics. The closed-switch question is in
+ * valve, Events, Diagnostics. The closed-switch question is in
  * ui.c, on every screen.
  * ------------------------------------------------------------------------ */
 
@@ -444,7 +444,7 @@ static void calib_refresh(void)
 const ui_screen_t ui_scr_calib = { "Valve position", calib_build, calib_refresh, calib_fast };
 
 /* --------------------------------------------------------------------------
- * Faults and log
+ * Events
  * ------------------------------------------------------------------------ */
 #define LOG_ROWS 40
 static struct {
@@ -574,7 +574,7 @@ static void detail_deleted(lv_event_t *e)
 
 static void detail_open(int i)
 {
-    lv_obj_t *o = ui_overlay();
+    lv_obj_t *o = ui_overlay_full();   // its buttons sit in the strip's row
     fp.detail = i;
     lv_obj_add_event_cb(o, detail_deleted, LV_EVENT_DELETE, NULL);
     lv_obj_t *c = ui_card(o, 10, 8, 460, 160);
@@ -773,7 +773,7 @@ static void faults_refresh(void)
     ui_strip_set(UI_STRIP_INFO, n ? LV_SYMBOL_WARNING : LV_SYMBOL_OK, t);
 }
 
-const ui_screen_t ui_scr_faults = { "Faults and log", faults_build, faults_refresh, NULL };
+const ui_screen_t ui_scr_faults = { "Events", faults_build, faults_refresh, NULL };
 
 /* --------------------------------------------------------------------------
  * Diagnostics

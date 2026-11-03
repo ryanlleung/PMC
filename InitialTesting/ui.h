@@ -158,6 +158,9 @@ void ui_pick(const char *title, const char *const *items, int n, int sel, void (
 void ui_text_view(const char *title, const char *text);
 // Empty overlay over 0,40 480x232 (STOP stays on top) for a screen's own dialog.
 lv_obj_t *ui_overlay(void);
+// The same, for a dialog with buttons on the bottom row (left of STOP): the
+// status strip is hidden while it is open, as for the keypad.
+lv_obj_t *ui_overlay_full(void);
 // The closed-switch question opens itself on every screen (ui.c).
 
 bool ui_overlay_open(void);
@@ -181,7 +184,7 @@ int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 
 // invalidated (Home does it once a second); a tap opens Trend.
 extern const ui_screen_t ui_scr_trend;
 lv_obj_t *ui_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h, bool valve);
-// Valve, Calibrate valve, Faults and log, Diagnostics (ui_valve.c).
+// Valve, Calibrate valve, Events, Diagnostics (ui_valve.c).
 extern const ui_screen_t ui_scr_valve, ui_scr_calib, ui_scr_faults, ui_scr_diag;
 // Settings, its five pages and Calibrate sensor (ui_settings.c).
 extern const ui_screen_t ui_scr_settings, ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_sensor_set, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
