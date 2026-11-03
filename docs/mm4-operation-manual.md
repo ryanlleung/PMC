@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision D, 3 November 2026. Firmware 0.14.9. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D only renames the Faults and log screen to Events. It does not add hardware bench verification.
+Revision D, 3 November 2026. Firmware 0.14.12. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.8: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.12: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -253,11 +253,11 @@ The event log (Menu > Records > Events) keeps the last 100 events with a time st
 
 ## 10. Settings
 
-Settings are commissioning items, not daily operation. Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. The name, fallback address selection, Remote control switch, sensor operations and captured calibration take effect before saving and remain unsaved until Save settings; a changed fallback address is used after a restart. The text link does not change settings. In AUTO, Save settings accepts control-tuning drafts; changed valve or sensor-selection drafts answer "Switch to MANUAL first". Live changes such as the name and Remote control switch are also included in the saved record. The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
+Settings are commissioning items, not daily operation. Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. The name, IP address, Remote control switch, sensor operations and captured calibration take effect before saving and remain unsaved until Save settings; a changed IP address is used after a restart. The text link does not change settings. In AUTO, Save settings accepts control-tuning drafts; changed valve or sensor-selection drafts answer "Switch to MANUAL first". Live changes such as the name and Remote control switch are also included in the saved record. The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
 
 | Page | Settings | Notes |
 | --- | --- | --- |
-| System setup | Cryostat name (up to 12 characters, shown in the Home title). Fallback IP address and mask. Remote control switch (On by default). Firmware version and build date | The name is in use at once and unsaved until Save settings. The fallback address is used when no DHCP server answers, after Save settings and a restart. Default puts the build's address back. The page shows the address in use |
+| System setup | Cryostat name (up to 12 characters, shown in the Home title). IP address and mask. Remote control switch (On by default). Firmware version and build date | The name is in use at once and unsaved until Save settings. A new IP address is used after Save settings and a restart. Default puts the build's address back. The page shows the address in use |
 | Choose sensor | Up to four Druck sensors, each with serial number, range in psi and its own calibration. Sensor in use | A new sensor starts uncalibrated. Calibrate puts it in use and opens Calibrate sensor |
 | Valve setup, Valve tab | 100 % travel in output turns (4 by default, 16512 steps per turn). Motor direction | Changing the direction clears the homing. Home again after saving |
 | Valve setup, Homing tab | Back-off (400 full steps), Return (400 full steps), fast close speed (400 steps/s), slow close speed (25 steps/s) | Back-off follows the fast close; Return follows the slow close and defines 0 %. The distances are independent |
@@ -276,9 +276,9 @@ The Ethernet build (the one for the cryostat) runs two servers on one cable and 
 
 ### Network and IP address
 
-The controller asks for an address by DHCP. If no DHCP server answers within 10 s it uses the fallback address: the one saved under Settings > System setup, or the build's default 169.254.10.50/16. The header shows the address in use, or NO CABLE, DHCP..., NET NO CLK or NET NO PHY while it has none. Settings > System setup shows the address in use and MAC address. The hostname is pmc.
+The controller has a fixed (static) IP address only; it does not use DHCP. The address is the one saved under Settings > System setup, or the build's default 192.168.1.100 with mask 255.255.255.0. There is no gateway, so it answers only on its own subnet. The header shows the address, or NO CABLE, NET NO CLK or NET NO PHY. Settings > System setup shows the address in use and MAC address. There is no DHCP or DNS, so connect by the IP address.
 
-To set the fallback address, type it and the mask on the System setup page then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. On a laptop with a fixed address, put the laptop and the fallback address on the same subnet.
+To set the address, type it and the mask on the System setup page (IP address), then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. Put the PC on the same subnet with a fixed address: for the default, for example 192.168.1.10 with mask 255.255.255.0. On a site network, give each controller its own address on the instrument subnet: they all start at 192.168.1.100.
 
 Ethernet and Modbus were proven on the bench on 26 October 2026 with the laptop on a fixed address.
 
@@ -360,4 +360,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | A | 27 October 2026 | First issue, from firmware 0.12.17 and the design documents listed in the reference block |
 | B | 2 November 2026 | Firmware 0.14.8: the text link takes the remote command set only (engineering commands, the step test and the typed calibration table removed) |
 | C | 3 November 2026 | Checked against firmware 0.14.8 on main: corrected movement prerequisites, independent homing Return and four stages, motor-supply behaviour and legacy status bit, tuning saves in AUTO, motor defaults, current screens and labels, remote refusals and version references. Historical bench status retained separately |
-| D | 3 November 2026 | Firmware 0.14.9: the Faults and log screen is renamed Events |
+| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events |

@@ -6,7 +6,8 @@
 
 /**
  * @brief Ethernet text link: TCP server on PMC_TCP_PORT (pmc_config.h),
- * address from DHCP, or PMC_FALLBACK_IP if no DHCP server answers.
+ * on a static address (no DHCP): the one saved under Settings > System
+ * setup, else PMC_IP.
  * Uses the mikroSDK CycloneTCP stack and the board's LAN8720A.
  */
 
@@ -38,8 +39,6 @@ const char *ethlink_mac(void);
 const char *ethlink_ip(void);
 // Subnet mask as text, "" until an address is set (NETW?).
 const char *ethlink_mask(void);
-// True when the address is the fallback (no DHCP server answered).
-bool ethlink_fallback(void);
 
 bool ethlink_link_up(void);
 bool ethlink_client_connected(void);

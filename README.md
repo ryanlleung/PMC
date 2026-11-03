@@ -84,7 +84,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 
 | File | What it does |
 | --- | --- |
-| `pmc_config.h` | Build options: link, write access, limit input polarity, network ports and fallback address, version |
+| `pmc_config.h` | Build options: link, write access, limit input polarity, network ports and the default IP address, version |
 | `clicks.c` | Boost 10 Click excitation set-up and 11.5 V trip, Power Monitor Click reads, Druck plausibility, pressure from the calibration |
 | `baro.c` | Pressure 21 Click room pressure: start-up, reads, plausibility window, retry when lost |
 | `cal.c` | Druck calibration table: ratio (mV/V) against pressure, linear between points; two-point calibration (vacuum and air) |
@@ -135,7 +135,7 @@ At power-up the MercShore iPC logo shows on white with a bar that fills as the b
 - **Menu**: Records (Trend, Events), Calibrate (Valve position, Transducer), System (Diagnostics, Settings).
 - **Valve**: manual moves and the valve's state. **Valve position**: how the position was set, output turns, the current homing stage, and the date or age of the last successful homing. Motor steps and the live limit switch are on Diagnostics. **Events**: latched faults (tap for detail and help) and the event log. **Diagnostics**: raw readings in three rows: pressure sensor (signal, before calibration, room pressure), valve motor (steps, limit switch, last move), controller (board temperature, excitation, how long the last move took).
 - **Trend**: pressure (left axis), the setpoint in AUTO (dashed) and valve (right axis) over 1, 2, 5, 10, 30 min or 1 hour.
-- **Settings**: System setup (cryostat name, fallback address, Remote control switch, the address in use, MAC, firmware version and build date), Choose sensor (up to four Druck sensors, each with its own calibration), Valve setup (travel, direction, homing back-off, return and speeds, drive rates), Control tuning, Review and save, Load settings (last save, previous save, factory), Restart, and Motor override (Move, Speed and Coils tabs). Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. Control-tuning drafts can be saved in AUTO; changed valve or sensor-selection drafts need MANUAL. The cryostat name, fallback address selection, Remote control switch, sensor operations and captured calibration take effect before saving and are kept across restarts only after Save settings; a changed fallback address is used after a restart.
+- **Settings**: System setup (cryostat name, IP address, Remote control switch, the address in use, MAC, firmware version and build date), Choose sensor (up to four Druck sensors, each with its own calibration), Valve setup (travel, direction, homing back-off, return and speeds, drive rates), Control tuning, Review and save, Load settings (last save, previous save, factory), Restart, and Motor override (Move, Speed and Coils tabs). Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. Control-tuning drafts can be saved in AUTO; changed valve or sensor-selection drafts need MANUAL. The cryostat name, IP address, Remote control switch, sensor operations and captured calibration take effect before saving and are kept across restarts only after Save settings; a changed IP address is used after a restart.
 - **Calibrate transducer**: two-point calibration on the screen: vacuum, then air at the Pressure 21 Click room reading or a typed barometer reading.
 
 Display formats: pressure 1 decimal, valve % and keypad 2 decimals, dates DD/MM/YY. Fonts are Montserrat Medium 12, 16 and 26 px, and 40 px digits for the Home readings. The display is driven over the SSD1963's 16-bit 8080 bus, bit-banged on GPIOE (WR on PF11). LVGL heap: 64 KB in CCM in the default Ethernet build. The USB build adds a 24 KB pool in main RAM (88 KB total); the simulator uses that USB-build heap, so it does not establish that a screen fits the Ethernet build.
@@ -158,7 +158,7 @@ The trend and the event log are in RAM and empty after a restart.
 
 ## Build and flash
 
-- `InitialTesting/pmc_config.h` sets the build. `PMC_LINK_ETHERNET 1` (default) gives the text port on TCP 8888 and Modbus TCP on 502, with DHCP, or the fallback address when no DHCP server answers (the one saved from Settings > System setup, else `PMC_FALLBACK_IP`, 169.254.10.50). `0` gives the text port on the USB COM port instead; the two cannot run together, because RMII and USB need different clocks from the same PLL.
+- `InitialTesting/pmc_config.h` sets the build. `PMC_LINK_ETHERNET 1` (default) gives the text port on TCP 8888 and Modbus TCP on 502, on a static IP address only, no DHCP: the one saved from Settings > System setup, else `PMC_IP`, 192.168.1.100/24 (mask 255.255.255.0). There is no gateway, so the controller answers on its own subnet only. `0` gives the text port on the USB COM port instead; the two cannot run together, because RMII and USB need different clocks from the same PLL.
 - Network writes (set commands and Modbus writes) are taken only while Settings > System setup > Remote control is On (the default); while it is Off they are refused. `PMC_LINK_WRITE 0` and `PMC_MODBUS_WRITE 0` make the text port or Modbus read only whatever the switch says.
 - Build Debug in NECTO (Clean first after `CMakeLists.txt` changes). The Release SSD1963 library leaves the display blank. `InitialTesting/CMakeLists.txt` keeps the SDK libraries and the hardware drivers at -O0 (`driver/display_lvgl.c` must stay -O0) and compiles LVGL, the pixel loop and the screens at -O2. About 667 KB of flash.
 - The linker script `.meproject/setup/FileLinker/stm32f407zg.ld` is patched so `.ccmram` is `(NOLOAD)`, keeping the LVGL heap out of the flash image. If NECTO regenerates this file, re-apply the patch.
@@ -191,7 +191,7 @@ Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in
 | `BARO?` | `BARO 1013.25 mbar` or `BARO NONE` (Pressure 21 Click not fitted or not reading) |
 | `ALRM?` | `ALRM NONE`, or the active alarms joined by `\|`, faults first: `<tag>,<0\|1>,<text>`. For a fault, 1 when `ALRM RESET` clears it now; for a warning, 1 when `ALRM OK` clears it |
 | `EVNT? [<n>]` | `EVNT <n>`, then n lines `<age s>,<tag>,<text>`, newest first; default 1, at most 100 |
-| `NETW?` | `NETW DHCP\|FALLBACK,<address>,<mask>,<MAC>`; `NETW NONE` in the USB build |
+| `NETW?` | `NETW STATIC,<address>,<mask>,<MAC>`; `NETW NONE` in the USB build |
 | `TIME?` | `TIME 2026-10-27 11:05:00` or `TIME NONE` |
 | `*IDN?` | `MercShore,iPC,<chip id>,<version>` |
 

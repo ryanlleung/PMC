@@ -157,7 +157,7 @@ static void netw_query(void)
 {
 #if PMC_LINK_ETHERNET
     if (ethlink_ip()[0])
-        reply("NETW %s,%s,%s,%s", ethlink_fallback() ? "FALLBACK" : "DHCP", ethlink_ip(), ethlink_mask(),
+        reply("NETW STATIC,%s,%s,%s", ethlink_ip(), ethlink_mask(),
               ethlink_mac()[0] ? ethlink_mac() : "NONE");
     else
         reply("NETW NONE");

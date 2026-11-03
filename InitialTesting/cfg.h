@@ -63,8 +63,8 @@ const char *cfg_name(void);
 bool cfg_name_ok(const char *n);
 bool cfg_set_name(const char *n, const char **why);
 
-// Ethernet fallback address (0.12.13), a.b.c.d as a << 24 | b << 16 | c << 8
-// | d; 0 0 is the build's PMC_FALLBACK_IP. Set live, unsaved until a save;
+// Ethernet address (0.12.13; the only one from 0.14.9, no DHCP), a.b.c.d as
+// a << 24 | b << 16 | c << 8 | d; 0 0 is the build's PMC_IP. Set live, unsaved until a save;
 // the link uses the one loaded at start-up (cfg_net_boot).
 bool cfg_net_parse(const char *s, uint32_t *v);          // "a.b.c.d"
 const char *cfg_net_why(uint32_t ip, uint32_t mask);    // NULL if usable
