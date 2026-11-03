@@ -772,22 +772,23 @@ bool valve_restore(int32_t count, const char **why)
     return true;
 }
 
-// The operator's position: seated (closed), or a typed %.
-static bool set_by_hand(bool seated, int32_t pct100, const char **why)
+// The operator's position: 0 % where it stands (Set as 0 %), or a typed %.
+// Set as 0 % reads 0.00 % (0.14.14, Ryan 4 Nov), not the seat below it.
+static bool set_by_hand(bool zero, int32_t pct100, const char **why)
 {
     if (pct100 < 0 || pct100 > 10000) { *why = "Outside 0 to 100 %"; return false; }
     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
     if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
     if (ref_unproven)               { *why = "Direction or coil order changed: home the valve first"; return false; }
-    int32_t c = seated ? seat_count() : (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
+    int32_t c = zero ? 0 : (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
     if (stepper3_busy() || !stepper3_set_position(c)) { *why = "Wait for the valve to stop"; return false; }
     calibrated = true;
     ref_how = VALVE_REF_HAND;
     mode = VALVE_MANUAL;
     char p[16];
-    if (seated)
-        ev("REF", "Set as seated by the operator: count %ld (%s %%), not verified by homing", (long)c,
+    if (zero)
+        ev("REF", "Set as 0 %% by the operator: count %ld (%s %%), not verified by homing", (long)c,
            pct_text(p, sizeof p, c));
     else
         ev("REF", "Position set by the operator: count %ld (%ld.%02ld %%), not verified by homing",

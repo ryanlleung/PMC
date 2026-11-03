@@ -371,7 +371,7 @@ static void set_closed(void)
     if (!valve_set_closed(&why))
         ui_msg(valve_motion_blocked() ? "Reset the fault first" : why);
     else
-        ui_msg("Position set to closed (0 %). Not verified by homing.");
+        ui_msg("Position set to 0 %. Not verified by homing.");
 }
 
 static bool set_position(int32_t v100, const char **why)
@@ -397,7 +397,7 @@ static void set_position_ask(void)
 
 static void set_closed_ask(void)
 {
-    ui_confirm("Set the valve as closed (0 %)? Use only if the valve is known to be seated. Not verified by homing.",
+    ui_confirm("Set the present position as 0 %? Not verified by homing.",
                "Set as 0 %", set_closed);
 }
 

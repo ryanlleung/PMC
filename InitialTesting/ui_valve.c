@@ -82,7 +82,7 @@ static bool vp_goto(int32_t pct10, int dir)
 {
     vp.jog = false;   // a new move has its own target (jog_press sets it again)
     const char *why = why_not_manual();
-    // Seated below 0 % (Set as 0 % gives the seat, about -0.6 %): 0 % is
+    // Seated below 0 % (after homing the seat reads about -0.6 %): 0 % is
     // above it, so a close would open.
     if (!why && dir < 0 && pct10 <= 0 && (stepper3_busy() ? valve_target_pct10() : valve_pct10()) <= 0)
         why = "Valve at 0 %, nothing to close";
@@ -316,8 +316,7 @@ static const char *const calib_help =
     "Takes up to a few minutes. STOP cancels it.\n\n"
     "Set as 0 %, Set as other % and Use last saved record a position without moving the valve. "
     "They are not verified against the limit switch.\n"
-    "Set as 0 %: use only when the valve is known to be seated. It then reads the seat, "
-    "about -0.6 %, as after homing.\n"
+    "Set as 0 %: the present position becomes 0 % and reads 0.00 %.\n"
     "Set as other %: use when the position is known, for example from the previous run.\n"
     "Use last saved: the position stored before power was lost. Available after start-up "
     "until the valve moves or is homed.\n\n"

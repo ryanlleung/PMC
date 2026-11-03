@@ -51,10 +51,16 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('home from the screen', /Homed in/.test(s.out) && s.get(30) === 0 && off === s.setting(CFG.RETURN), s.out.slice(-400));
   shot(s, 'homed');
 }
-{ // Set position (no homing): Closed takes the count as the seat where it stands.
+{ // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
   const s = load(); s.boot(); s.run(2000);
-  const ok = s.setClosed(), st = s.cmd('MODE?');
-  check('set position by hand', ok && st === 'MODE MANUAL\r\n', s.why() + ' ' + st);
+  const ok = s.setClosed(), st = s.cmd('MODE?;VALV?');
+  check('set position by hand reads 0.00 %', ok && st === 'MODE MANUAL;VALV 0.00 %\r\n', s.why() + ' ' + st);
+}
+{ // Set as 0 % after homing reads 0.00 %, not the seat (Ryan, 4 Nov).
+  const s = homed(load());
+  s.cmd('VALV SET 10', 30000); s.cmd('STOP');
+  const ok = s.setClosed(), st = s.cmd('VALV?');
+  check('Set as 0 % after homing reads 0.00 %', ok && st === 'VALV 0.00 %\r\n', s.why() + ' ' + st);
 }
 { // MANUAL go-to and the needle follows the coils.
   const s = homed(load());

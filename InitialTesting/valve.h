@@ -110,8 +110,7 @@ bool valve_calibrate(const char **why);          // VALVE CAL
 void valve_uncalibrate(const char *why);         // e.g. motor direction changed
 // Takes a saved step count as the position (operator's choice at boot).
 bool valve_restore(int32_t count, const char **why);
-// Takes the valve as fully closed where it stands (0 %, homed without the
-// switch): the operator knows it is seated. VALVE CLOSED.
+// Takes the present position as 0 % (count 0, reads 0.00 %), without homing.
 bool valve_set_closed(const char **why);
 // The same, taking the present position as pct100 (0.01 %, 0 to 10000).
 bool valve_set_position(int32_t pct100, const char **why);
