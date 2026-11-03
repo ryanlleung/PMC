@@ -25,9 +25,10 @@ The stand-ins are in `wasm/`: `include/` (register structs for GPIO, RCC, TIM7, 
 
 ## Tests
 
-- `node simulator/tests/run.js [--png dir]`: bench scenarios against the build, in node, about 3 s: boot, homing from the screen, Set position, a MANUAL move, supply off, F-1 to F-6 (except F-5), W-2, W-3, settings and saved position over a power cycle, and the remote command set's reply rules and error codes (0.13.0).
+- `node simulator/tests/run.js [--png dir]`: bench scenarios against the build, in node: boot and bundled firmware-version checks, homing from the screen, Set position, MANUAL move prerequisites, independent homing Return, motor power loss, tuning saves in AUTO, F-1 to F-6 (except F-5), W-2, W-3, settings and saved position over a power cycle, and the remote command set's reply rules and error codes (0.13.0).
 - `node simulator/tests/remote-only.js`: the text port's command set: unrecognised commands answer ERR 100 with Remote control On (ERR 211 with it Off), homing on the screen, then the valve and AUTO from the link.
-- `node simulator/tests/tcp-board.js [port] [speed] [--remote-off]`: serves the simulated board on a TCP port (8888 by default), with Remote control On unless `--remote-off` is passed. **The helper is stale for firmware 0.14.8:** its start-up still sends the removed `VALVE CAL` command, which answers ERR 100; the following valve move is then refused because the position is not set. It therefore does not provide the intended homed, 5 % fixture. Update that helper to use the simulator's `sim_home` test hook before relying on it for driver or logger tests. A new board normally starts with Remote control On.
+- `node simulator/tests/tcp-board.js [port] [speed] [--remote-off]`: serves the simulated board on a TCP port (8888 by default), homed and in MANUAL at 5 % open. Homing uses the `sim_home` test hook, as the screen does; startup fails if homing or the move fails. Remote control is On unless `--remote-off` is passed. Pass port 0 to request an available local port.
+- `node simulator/tests/tcp-board-test.js`: starts that helper with remote writes On and Off, and checks its homed 5 % startup, query replies, setpoint writes and STOP refusals.
 - `node simulator/tests/page.js [shot.png]`: the page in Chromium (Playwright): taps, homing, a console command, settings kept over a reload.
 
 ## Not simulated

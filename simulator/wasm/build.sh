@@ -48,7 +48,6 @@ $ZIG cc $CFLAGS -mexec-model=reactor -o "$WASM" \
   "$HERE/sim_main.c" "$HERE/sim_clicks.c" "$HERE/bench.c" \
   "$OUT/patched/stepper3.c" $SRC "$OUT/liblvgl.a" \
   -Wl,--export=malloc -Wl,--strip-all -lm
-if [ "$ENG" = 0 ]; then ls -l "$WASM"; exit 0; fi
 # The page loads it from a script, so it also opens from a file:// path.
 { printf '// Built by simulator/wasm/build.sh from InitialTesting (PMC_FW_VERSION in pmc_config.h). Do not edit.\n'
   printf 'window.PMC_WASM = "'; base64 -w0 "$OUT/pmc.wasm"; printf '";\n'; } > "$HERE/../pmc-wasm.js"

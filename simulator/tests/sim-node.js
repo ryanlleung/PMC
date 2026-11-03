@@ -19,6 +19,7 @@ function load(file) {
   x._initialize();
   const sim = {
     x, halted: () => halted,
+    version: () => cstr(x.sim_version()),
     out: '',
     // opts.remote: false turns Remote control Off; otherwise it is On, the
     // default from 0.13.7, so the link takes set commands.
