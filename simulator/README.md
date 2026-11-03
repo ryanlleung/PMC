@@ -7,7 +7,7 @@ From 0.11.38 the simulator runs the mm4 firmware itself. `pmc-wasm.js` is the fi
 | On the board | In the simulator |
 |---|---|
 | Display and touch panel | 480 x 272 canvas, mouse or finger (a press lasts at least 80 ms) |
-| Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so MOT MODE, DIR and ORDER act as on the bench |
+| Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so the step mode, direction and coil order selected on Settings > Motor override > Coils act as on the bench |
 | Needle valve, limit switch | flow-line needle, 16512 steps a turn, seats 30 steps past the switch; switch faults: broken wire, stuck, trips early |
 | Druck through the INA228 | the cryostat flow line (the v63 model, as `tools/ctrl-test/model.c`) read through the 5 % input loading; open to room air for calibration |
 | Boost 10, motor 12 V supply (the motor stalls without it; the firmware does not sense it from 0.14.3), INA228 die temperature | bench controls (excitation, supply volts, controller temperature) |
@@ -26,15 +26,15 @@ The stand-ins are in `wasm/`: `include/` (register structs for GPIO, RCC, TIM7, 
 ## Tests
 
 - `node simulator/tests/run.js [--png dir]`: bench scenarios against the build, in node, about 3 s: boot, homing from the screen, Set position, a MANUAL move, supply off, F-1 to F-6 (except F-5), W-2, W-3, settings and saved position over a power cycle, and the remote command set's reply rules and error codes (0.13.0).
-- `node simulator/tests/remote-only.js`: the text port's command set: every other command answers ERR 100, homing on the screen, then the valve and AUTO from the link.
-- `node simulator/tests/tcp-board.js [port] [speed] [--remote-off]`: the simulated board on a TCP port (8888 by default) in real time, homed and at 5 %, with Remote control On (`--remote-off` leaves it Off, as a new board), for a driver or the logger to talk to. The Frappy driver's tests pass against it, apart from the room pressure (the simulator has no Pressure 21).
+- `node simulator/tests/remote-only.js`: the text port's command set: unrecognised commands answer ERR 100 with Remote control On (ERR 211 with it Off), homing on the screen, then the valve and AUTO from the link.
+- `node simulator/tests/tcp-board.js [port] [speed] [--remote-off]`: serves the simulated board on a TCP port (8888 by default), with Remote control On unless `--remote-off` is passed. **The helper is stale for firmware 0.14.8:** its start-up still sends the removed `VALVE CAL` command, which answers ERR 100; the following valve move is then refused because the position is not set. It therefore does not provide the intended homed, 5 % fixture. Update that helper to use the simulator's `sim_home` test hook before relying on it for driver or logger tests. A new board normally starts with Remote control On.
 - `node simulator/tests/page.js [shot.png]`: the page in Chromium (Playwright): taps, homing, a console command, settings kept over a reload.
 
 ## Not simulated
 
 - F-5 (motion timeout): the step interrupt is never late here, so a move cannot overrun its time.
 - Ethernet / Modbus TCP (the build is the USB one, as `pmc_config.h`), the mikroBootloader, the watchdog's timing (an LVGL assert stops the page and restarts the firmware with reset reason watchdog).
-- Real speed: PERF? and redraw times are the browser's, not the STM32's. The LVGL heap is the board's size (64 + 24 KB), so running out of it would show.
+- Real speed: redraw times are the browser's, not the STM32's. `PERF?` is no longer a text-port command (ERR 100 with Remote control On). The simulator uses the USB build's 64 + 24 KB LVGL heap; the default Ethernet firmware has 64 KB only, so a simulator pass does not verify the Ethernet build's heap margin.
 - The Druck, Power Monitor and cryostat are models: noise, drift and the cryostat's response are not the bench's.
 
 ## Before 0.11.38: the JavaScript simulator (v1 to v62)
