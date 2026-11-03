@@ -158,6 +158,9 @@ void ui_pick(const char *title, const char *const *items, int n, int sel, void (
 void ui_text_view(const char *title, const char *text);
 // Empty overlay over 0,40 480x232 (STOP stays on top) for a screen's own dialog.
 lv_obj_t *ui_overlay(void);
+// The same, for a dialog with buttons on the bottom row (left of STOP): the
+// status strip is hidden while it is open, as for the keypad.
+lv_obj_t *ui_overlay_full(void);
 // The closed-switch question opens itself on every screen (ui.c).
 
 bool ui_overlay_open(void);

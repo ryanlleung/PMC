@@ -397,6 +397,7 @@ static int back_n;
 static bool overlay_tv;         // the overlay is a text page (Help): strip shown greyed
 static int overlay_q;           // the overlay is a question: 1 closed switch, 2 saved position
 static bool kp_open;            // the overlay is the keypad
+static bool overlay_full;       // the overlay uses the bottom row (fault detail): strip hidden, as for the keypad
 static char kp_head[40];        // its heading in the header: the title up to the comma
 static void kp_side(void);
 static void question_check(void);
@@ -925,7 +926,7 @@ static void frame_refresh(void)
     bool hot = sense_hot(&die_mc);
     bool held = valve_remote_held();
     bool quiet = !msg_until && !nf && !stepper3_override() && !held && !hot && !line_text[0];
-    show(strip, (!overlay || !kp_open) && !quiet);
+    show(strip, !(overlay && (kp_open || overlay_full)) && !quiet);
     char buf[96];
     if (msg_until) {
         strip_draw(UI_STRIP_WARN, NULL, msg_text, msg_ok, false);
@@ -1073,10 +1074,19 @@ void ui_overlay_close(void)
     }
     overlay_q = 0;
     overlay_tv = false;
+    overlay_full = false;
     kp_open = false;
 }
 
 lv_obj_t *ui_overlay(void) { return overlay_new(); }
+
+lv_obj_t *ui_overlay_full(void)
+{
+    lv_obj_t *o = overlay_new();
+    overlay_full = true;
+    frame_refresh();           // the strip goes now, not at the next refresh
+    return o;
+}
 
 static lv_obj_t *overlay_new(void)
 {

@@ -574,7 +574,7 @@ static void detail_deleted(lv_event_t *e)
 
 static void detail_open(int i)
 {
-    lv_obj_t *o = ui_overlay();
+    lv_obj_t *o = ui_overlay_full();   // its buttons sit in the strip's row
     fp.detail = i;
     lv_obj_add_event_cb(o, detail_deleted, LV_EVENT_DELETE, NULL);
     lv_obj_t *c = ui_card(o, 10, 8, 460, 160);
