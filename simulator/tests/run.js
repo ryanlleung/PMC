@@ -5,6 +5,9 @@
 // port takes the remote command set only; homing, calibration and settings
 // go through the simulator's test hooks (sim-node.js), as the screens do.
 const { load, CFG } = require('./sim-node.js');
+const fs = require('fs'), path = require('path');
+const firmwareVersion = fs.readFileSync(path.join(__dirname, '../../InitialTesting/pmc_config.h'), 'utf8')
+  .match(/#define\s+PMC_FW_VERSION\s+"([^"]+)"/)[1];
 const pngDir = process.argv.includes('--png') ? process.argv[process.argv.indexOf('--png') + 1] : null;
 let failed = 0;
 function check(name, ok, detail) {
@@ -20,7 +23,12 @@ function homed(s) {
   if (!/Homed in/.test(ev)) throw new Error('homing failed:\n' + ev.slice(-800));
   return s;
 }
-function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '.png')); }
+function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
+
+{ // A stale committed bundle must not silently test an older firmware release.
+  const s = load();
+  check('bundle matches PMC_FW_VERSION', s.version() === firmwareVersion, s.version() + ' vs ' + firmwareVersion);
+}
 
 { // Boot: NOT HOMED, nothing moves.
   const s = load(); s.boot(); s.set(5, 40000); s.run(3000);
@@ -29,15 +37,18 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   check('boot NOT HOMED', st === 'MODE NOT HOMED;VALV NONE;VALV MOVING 0;ALRM NONE\r\n', st);
   check('boot no motion', s.get(5) === 40000);
   shot(s, 'boot');
+  s.tap(415, 126);   // Valve page: normal moves are disabled before a reference is set.
+  for (const [x, y] of [[63, 140], [181, 140], [299, 140], [417, 140],
+    [63, 188], [181, 188], [299, 188], [417, 188]]) s.tap(x, y);
+  check('Valve-page moves blocked before homing', s.get(5) === 40000 && s.get(30) === 0 && !s.busy());
 }
 { // Homing from the screen: Home valve, then Home in the question.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
   s.tap(415, 72); s.tap(346, 147); s.run(120000);
   s.out += events(s, 10);
-  // After homing the needle sits 0 or 400 full steps (the final back-off) above the switch. The count is
-  // that distance up to 0.12.11 and 0 from 0.12.12 (0 % is the point after the back-off).
+  // The current firmware defines count 0 at the independent Return point above the switch.
   const off = s.get(5) / 2 - s.get(30);
-  check('home from the screen', /Homed in/.test(s.out) && [0, 400].includes(s.get(5) / 2) && [0, 400].includes(off), s.out.slice(-400));
+  check('home from the screen', /Homed in/.test(s.out) && s.get(30) === 0 && off === s.setting(CFG.RETURN), s.out.slice(-400));
   shot(s, 'homed');
 }
 { // Set position (no homing): Closed takes the count as the seat where it stands.
@@ -49,8 +60,8 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   const s = homed(load());
   s.cmd('VALV SET 25', 60000);
   const full = s.get(5) / 2;
-  // The needle is the count plus the back-off when 0 % is above the switch (0.12.12).
-  check('VALV SET 25 % moves the needle 25 % of 66048', Math.abs(s.get(30) - 16512) <= 1 && [0, 400].includes(full - s.get(30)), 'needle ' + full + ', count ' + s.get(30));
+  // The needle is the count plus Return, since 0 % is above the switch.
+  check('VALV SET 25 % moves the needle 25 % of 66048', Math.abs(s.get(30) - 16512) <= 1 && full - s.get(30) === s.setting(CFG.RETURN), 'needle ' + full + ', count ' + s.get(30));
 }
 { // F-1: Druck unplugged.
   const s = homed(load()); s.set(8, 0); s.run(5000);
@@ -83,6 +94,17 @@ function shot(s, name) { if (pngDir) s.png(require('path').join(pngDir, name + '
   check('AUTO 5 mbar stable', s.reg() === 3, 'regulation ' + s.reg());
   check('poll in AUTO', /^PRES [45]\.\d{3} mbar;PRES SP 5\.0 mbar;MODE AUTO;VALV \d+\.\d\d %;ALRM NONE\r\n$/.test(d), d);
   shot(s, 'auto');
+  check('control tuning saves in AUTO', s.save(CFG.KP, 300) && s.setting(CFG.KP) === 300 &&
+    s.cmd('MODE?') === 'MODE AUTO\r\n', s.why());
+}
+{ // The motor supply is no longer sensed: counted moves can continue without physical motion.
+  const s = homed(load());
+  s.cmd('PRES SP 5;MODE AUTO'); s.run(400000);
+  s.set(12, 0);
+  const needle = s.get(5), count = s.get(30);
+  s.cmd('PRES SP 8'); s.run(5000);
+  check('motor power loss does not directly end AUTO', s.cmd('MODE?;ALRM?') === 'MODE AUTO;ALRM NONE\r\n');
+  check('unpowered motor stays still while the step count advances', s.get(5) === needle && s.get(30) !== count);
 }
 { // F-6: the needle slips in AUTO, so the pressure does not follow.
   const s = homed(load());
