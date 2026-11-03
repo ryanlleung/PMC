@@ -25,7 +25,7 @@ Screens follow the template's grid: four columns at x 10, 127, 244 and 361, each
 | Menu | Rows Records (Trend, Events), Service (Valve position, Diagnostics), Setup (Settings, System). |
 | Settings | Navigation tiles only: Choose sensor, Calibrate sensor, Valve setup, Control tuning, Review and save. |
 | System | On the Menu, title System. Cryostat name, IP address; MAC address, Remote control; Firmware 343 wide with Restart beside it. Address in use dropped (static address only). |
-| Valve position | Motor override moved here from Settings; Use last saved now 109 wide. |
+| Valve position | Motor override moved here from Settings; Use last saved now 109 wide. State texts "Set by hand, not homed" and "Last saved, not homed" (were "Entered by hand, not homed" and "From last save, not homed", both clipped in the tile). |
 | Diagnostics | Caption column 109, tiles in columns 2 to 4. Captions Nominal, mB (was Before cal, mB) and Board, °C (was Temperature, °C) to fit 85 px. A long Last move result drops to 12 px. |
 | Help | Text card 343 x 160, Up and Down 109 x 76 in the right column. |
 | Up and Down | Drawn 21 x 12 chevrons (3 px stroke) on Trend, Events and Help. |

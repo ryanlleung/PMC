@@ -479,7 +479,7 @@ index 8fd099e..2cee036 100644
      tr.win_seen = -1;
  }
 diff --git a/InitialTesting/ui_valve.c b/InitialTesting/ui_valve.c
-index f284278..a36f56e 100644
+index f284278..6f67d95 100644
 --- a/InitialTesting/ui_valve.c
 +++ b/InitialTesting/ui_valve.c
 @@ -175,7 +175,7 @@ static void help_cb(lv_event_t *e)
@@ -535,6 +535,18 @@ index f284278..a36f56e 100644
  }
  
  // Motor turns from closed at 10 Hz (Ryan, 24 Oct: turns read more
+@@ -413,9 +432,9 @@ static void calib_refresh(void)
+     else if (how == VALVE_REF_HOMED && when)
+         lv_snprintf(st, sizeof st, "Homed %s", when);
+     else if (how == VALVE_REF_HAND)
+-        lv_strlcpy(st, "Entered by hand, not homed", sizeof st);
++        lv_strlcpy(st, "Set by hand, not homed", sizeof st);   // fits the 226 tile (Ryan, PR #38)
+     else if (how == VALVE_REF_SAVED)
+-        lv_strlcpy(st, "From last save, not homed", sizeof st);
++        lv_strlcpy(st, "Last saved, not homed", sizeof st);
+     else
+         lv_strlcpy(st, "Not homed", sizeof st);
+     ui_set_text(cp.state, st);
 @@ -578,12 +597,12 @@ static void detail_open(int i)
      fp.detail = i;
      lv_obj_add_event_cb(o, detail_deleted, LV_EVENT_DELETE, NULL);
