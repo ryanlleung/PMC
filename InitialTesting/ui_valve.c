@@ -412,9 +412,9 @@ static void calib_refresh(void)
     else if (how == VALVE_REF_HOMED && when)
         lv_snprintf(st, sizeof st, "Homed %s", when);
     else if (how == VALVE_REF_HAND)
-        lv_strlcpy(st, "Entered by hand, not homed", sizeof st);
+        lv_strlcpy(st, "Set by hand, not homed", sizeof st);
     else if (how == VALVE_REF_SAVED)
-        lv_strlcpy(st, "From last save, not homed", sizeof st);
+        lv_strlcpy(st, "Last saved, not homed", sizeof st);
     else
         lv_strlcpy(st, "Not homed", sizeof st);
     ui_set_text(cp.state, st);

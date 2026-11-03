@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision D, 3 November 2026. Firmware 0.14.14. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
+Revision D, 3 November 2026. Firmware 0.14.15. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.14: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.15: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -180,7 +180,7 @@ After any initial clearance, the strip reads "Homing 1 of 4: fast close", "Homin
 
 ### Setting the position without homing
 
-The Valve position page also offers three ways to set the position without moving the valve. None of them is checked against the limit switch, and the Valve position page shows "Entered by hand, not homed" or "From last save, not homed" afterwards.
+The Valve position page also offers three ways to set the position without moving the valve. None of them is checked against the limit switch, and the Valve position page shows "Set by hand, not homed" or "Last saved, not homed" afterwards.
 
 | Option | When to use it |
 | --- | --- |
@@ -360,4 +360,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | A | 27 October 2026 | First issue, from firmware 0.12.17 and the design documents listed in the reference block |
 | B | 2 November 2026 | Firmware 0.14.8: the text link takes the remote command set only (engineering commands, the step test and the typed calibration table removed) |
 | C | 3 November 2026 | Checked against firmware 0.14.8 on main: corrected movement prerequisites, independent homing Return and four stages, motor-supply behaviour and legacy status bit, tuning saves in AUTO, motor defaults, current screens and labels, remote refusals and version references. Historical bench status retained separately |
-| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %) |
+| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %). Firmware 0.14.15: the Valve position state reads Set by hand or Last saved, not homed |
