@@ -206,7 +206,7 @@ index f3bdc09..31f1bc2 100644
  lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
  lv_obj_t *ui_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, const lv_font_t *font,
 diff --git a/InitialTesting/ui_home.c b/InitialTesting/ui_home.c
-index a032ea0..4e9c03a 100644
+index a032ea0..f8866f3 100644
 --- a/InitialTesting/ui_home.c
 +++ b/InitialTesting/ui_home.c
 @@ -176,7 +176,8 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
@@ -219,6 +219,24 @@ index a032ea0..4e9c03a 100644
      // Caption and unit 16 px (Ryan, 21 Oct: 12 px was too small).
      ui_label(t->tile, 12, 6, 90, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
      ui_label(t->tile, 75, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
+@@ -371,7 +372,7 @@ static void set_closed(void)
+     if (!valve_set_closed(&why))
+         ui_msg(valve_motion_blocked() ? "Reset the fault first" : why);
+     else
+-        ui_msg("Position set to closed (0 %). Not verified by homing.");
++        ui_msg("Position set to 0 %. Not verified by homing.");
+ }
+ 
+ static bool set_position(int32_t v100, const char **why)
+@@ -397,7 +398,7 @@ static void set_position_ask(void)
+ 
+ static void set_closed_ask(void)
+ {
+-    ui_confirm("Set the valve as closed (0 %)? Use only if the valve is known to be seated. Not verified by homing.",
++    ui_confirm("Set the present position as 0 %? Not verified by homing.",
+                "Set as 0 %", set_closed);
+ }
+ 
 @@ -660,11 +661,13 @@ void ui_status_line(void)
  const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
  
@@ -479,9 +497,18 @@ index 8fd099e..2cee036 100644
      tr.win_seen = -1;
  }
 diff --git a/InitialTesting/ui_valve.c b/InitialTesting/ui_valve.c
-index f284278..6f67d95 100644
+index f284278..d706ecc 100644
 --- a/InitialTesting/ui_valve.c
 +++ b/InitialTesting/ui_valve.c
+@@ -82,7 +82,7 @@ static bool vp_goto(int32_t pct10, int dir)
+ {
+     vp.jog = false;   // a new move has its own target (jog_press sets it again)
+     const char *why = why_not_manual();
+-    // Seated below 0 % (Set as 0 % gives the seat, about -0.6 %): 0 % is
++    // Seated below 0 % (after homing the seat reads about -0.6 %): 0 % is
+     // above it, so a close would open.
+     if (!why && dir < 0 && pct10 <= 0 && (stepper3_busy() ? valve_target_pct10() : valve_pct10()) <= 0)
+         why = "Valve at 0 %, nothing to close";
 @@ -175,7 +175,7 @@ static void help_cb(lv_event_t *e)
  // 3 px bar near the bottom of a 148 px card; returns the fill.
  static lv_obj_t *thin_bar(lv_obj_t *card, int32_t y)
@@ -500,7 +527,17 @@ index f284278..6f67d95 100644
      right(v);
      lv_obj_set_style_text_font(v, &ui_num_26, 0);
      lv_obj_set_y(v, 20);
-@@ -368,6 +368,20 @@ static void timer_deleted(lv_event_t *e)
+@@ -316,8 +316,7 @@ static const char *const calib_help =
+     "Takes up to a few minutes. STOP cancels it.\n\n"
+     "Set as 0 %, Set as other % and Use last saved record a position without moving the valve. "
+     "They are not verified against the limit switch.\n"
+-    "Set as 0 %: use only when the valve is known to be seated. It then reads the seat, "
+-    "about -0.6 %, as after homing.\n"
++    "Set as 0 %: the present position becomes 0 % and reads 0.00 %.\n"
+     "Set as other %: use when the position is known, for example from the previous run.\n"
+     "Use last saved: the position stored before power was lost. Available after start-up "
+     "until the valve moves or is homed.\n\n"
+@@ -368,6 +367,20 @@ static void timer_deleted(lv_event_t *e)
      lv_timer_delete(lv_event_get_user_data(e));
  }
  
@@ -521,7 +558,7 @@ index f284278..6f67d95 100644
  static void calib_build(lv_obj_t *scr)
  {
      memset(&cp, 0, sizeof cp);
-@@ -381,7 +395,12 @@ static void calib_build(lv_obj_t *scr)
+@@ -381,7 +394,12 @@ static void calib_build(lv_obj_t *scr)
      cp.closed = ui_btn(scr, 10, 104, 226, 48, UI_SECONDARY, "Set as 0 %", setpos_cb, (void *)(intptr_t)0);
      cp.start = ui_btn(scr, 244, 104, 226, 48, UI_PRIMARY, "Home valve", start_cb, NULL);
      cp.enter = ui_btn(scr, 10, 160, 226, 48, UI_SECONDARY, "Set as other %", setpos_cb, (void *)(intptr_t)1);
@@ -535,7 +572,7 @@ index f284278..6f67d95 100644
  }
  
  // Motor turns from closed at 10 Hz (Ryan, 24 Oct: turns read more
-@@ -413,9 +432,9 @@ static void calib_refresh(void)
+@@ -413,9 +431,9 @@ static void calib_refresh(void)
      else if (how == VALVE_REF_HOMED && when)
          lv_snprintf(st, sizeof st, "Homed %s", when);
      else if (how == VALVE_REF_HAND)
@@ -547,7 +584,7 @@ index f284278..6f67d95 100644
      else
          lv_strlcpy(st, "Not homed", sizeof st);
      ui_set_text(cp.state, st);
-@@ -578,12 +597,12 @@ static void detail_open(int i)
+@@ -578,12 +596,12 @@ static void detail_open(int i)
      fp.detail = i;
      lv_obj_add_event_cb(o, detail_deleted, LV_EVENT_DELETE, NULL);
      lv_obj_t *c = ui_card(o, 10, 8, 460, 160);
@@ -564,7 +601,7 @@ index f284278..6f67d95 100644
          lv_label_set_long_mode(fp.d_text[k], LV_LABEL_LONG_WRAP);
      }
      fp.d_next = ui_btn(o, 10, 176, 109, 48, UI_SECONDARY, "Next fault", d_next_cb, NULL);
-@@ -639,11 +658,11 @@ static void faults_build(lv_obj_t *scr)
+@@ -639,11 +657,11 @@ static void faults_build(lv_obj_t *scr)
      fp.reset = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Reset fault", faults_reset_cb, NULL);
  
      lv_obj_t *ev = ui_card(scr, 10, 104, 343, 104);
@@ -579,7 +616,7 @@ index f284278..6f67d95 100644
      lv_obj_set_scroll_dir(box, LV_DIR_VER);
      lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
                              LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_CHAIN);
-@@ -654,15 +673,15 @@ static void faults_build(lv_obj_t *scr)
+@@ -654,15 +672,15 @@ static void faults_build(lv_obj_t *scr)
      lv_obj_set_style_bg_color(box, UI_IDLE, LV_PART_SCROLLBAR);
      fp.box = box;
      for (int i = 0; i < 2; i++) {
@@ -598,7 +635,7 @@ index f284278..6f67d95 100644
      lv_label_set_long_mode(fp.log, LV_LABEL_LONG_WRAP);
      for (int i = 0; i < 3; i++)
          lv_obj_set_style_text_line_space(i == 0 ? fp.log_time : i == 1 ? fp.log_tag : fp.log, 2, 0);
-@@ -684,7 +703,7 @@ static void faults_rows(void)
+@@ -684,7 +702,7 @@ static void faults_rows(void)
      lv_strlcpy(fp.sig, sig, sizeof fp.sig);
      lv_obj_clean(fp.list);
      if (!n) {
@@ -607,7 +644,7 @@ index f284278..6f67d95 100644
          return;
      }
      for (int i = 0; i < n && valve_fault_get(i, &f); i++) {
-@@ -697,9 +716,9 @@ static void faults_rows(void)
+@@ -697,9 +715,9 @@ static void faults_rows(void)
          lv_obj_add_event_cb(r, row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
          char t[48], w[16];
          lv_snprintf(t, sizeof t, "%s  %s", f.tag, f.text);
@@ -619,7 +656,7 @@ index f284278..6f67d95 100644
          ui_label(r, 318, 14, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
      }
  }
-@@ -726,7 +745,7 @@ static void faults_log(void)
+@@ -726,7 +744,7 @@ static void faults_log(void)
          if (a.x > tw) tw = a.x;
          if (b.x > gw) gw = b.x;
      }
@@ -628,7 +665,7 @@ index f284278..6f67d95 100644
      size_t lt = 0, lg = 0, lx = 0;
      log_text[0] = log_time[0] = log_tag[0] = '\0';
      for (int i = 0; i < n; i++) {
-@@ -798,25 +817,27 @@ static void diag_build(lv_obj_t *scr)
+@@ -798,25 +816,27 @@ static void diag_build(lv_obj_t *scr)
  {
      // The board temperature in the bottom row from 0.13.4, as the strip
      // shows the Home status line (Ryan, 28 Oct); Moved, steps went.
@@ -662,7 +699,7 @@ index f284278..6f67d95 100644
      }
      lv_timer_t *t = lv_timer_create(diag_motor, 20, NULL);
      lv_obj_add_event_cb(scr, timer_deleted, LV_EVENT_DELETE, t);
-@@ -851,6 +872,12 @@ static void diag_refresh(void)
+@@ -851,6 +871,12 @@ static void diag_refresh(void)
          case STEPPER3_STOP_STALL:   res = "Loop stalled"; break;
          default: break;
      }
@@ -675,11 +712,78 @@ index f284278..6f67d95 100644
      ui_set_text(dp.v[6], res);
      ui_set_text(dp.v[8], any ? ui_fmt1(buf, sizeof buf, ms) : "--");
  
+diff --git a/InitialTesting/valve.c b/InitialTesting/valve.c
+index 0e39942..834567e 100644
+--- a/InitialTesting/valve.c
++++ b/InitialTesting/valve.c
+@@ -772,22 +772,23 @@ bool valve_restore(int32_t count, const char **why)
+     return true;
+ }
+ 
+-// The operator's position: seated (closed), or a typed %.
+-static bool set_by_hand(bool seated, int32_t pct100, const char **why)
++// The operator's position: 0 % where it stands (Set as 0 %), or a typed %.
++// Set as 0 % reads 0.00 % (0.14.14, Ryan 4 Nov), not the seat below it.
++static bool set_by_hand(bool zero, int32_t pct100, const char **why)
+ {
+     if (pct100 < 0 || pct100 > 10000) { *why = "Outside 0 to 100 %"; return false; }
+     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
+     if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
+     if (any_latched())              { *why = "Reset the fault first"; return false; }
+     if (ref_unproven)               { *why = "Direction or coil order changed: home the valve first"; return false; }
+-    int32_t c = seated ? seat_count() : (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
++    int32_t c = zero ? 0 : (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
+     if (stepper3_busy() || !stepper3_set_position(c)) { *why = "Wait for the valve to stop"; return false; }
+     calibrated = true;
+     ref_how = VALVE_REF_HAND;
+     mode = VALVE_MANUAL;
+     char p[16];
+-    if (seated)
+-        ev("REF", "Set as seated by the operator: count %ld (%s %%), not verified by homing", (long)c,
++    if (zero)
++        ev("REF", "Set as 0 %% by the operator: count %ld (%s %%), not verified by homing", (long)c,
+            pct_text(p, sizeof p, c));
+     else
+         ev("REF", "Position set by the operator: count %ld (%ld.%02ld %%), not verified by homing",
+diff --git a/InitialTesting/valve.h b/InitialTesting/valve.h
+index a49301a..c431d65 100644
+--- a/InitialTesting/valve.h
++++ b/InitialTesting/valve.h
+@@ -110,8 +110,7 @@ bool valve_calibrate(const char **why);          // VALVE CAL
+ void valve_uncalibrate(const char *why);         // e.g. motor direction changed
+ // Takes a saved step count as the position (operator's choice at boot).
+ bool valve_restore(int32_t count, const char **why);
+-// Takes the valve as fully closed where it stands (0 %, homed without the
+-// switch): the operator knows it is seated. VALVE CLOSED.
++// Takes the present position as 0 % (count 0, reads 0.00 %), without homing.
+ bool valve_set_closed(const char **why);
+ // The same, taking the present position as pct100 (0.01 %, 0 to 10000).
+ bool valve_set_position(int32_t pct100, const char **why);
 diff --git a/simulator/tests/run.js b/simulator/tests/run.js
-index fa9457d..bda5402 100644
+index fa9457d..389d052 100644
 --- a/simulator/tests/run.js
 +++ b/simulator/tests/run.js
-@@ -146,7 +146,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
+@@ -51,10 +51,16 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
+   check('home from the screen', /Homed in/.test(s.out) && s.get(30) === 0 && off === s.setting(CFG.RETURN), s.out.slice(-400));
+   shot(s, 'homed');
+ }
+-{ // Set position (no homing): Closed takes the count as the seat where it stands.
++{ // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
+   const s = load(); s.boot(); s.run(2000);
+-  const ok = s.setClosed(), st = s.cmd('MODE?');
+-  check('set position by hand', ok && st === 'MODE MANUAL\r\n', s.why() + ' ' + st);
++  const ok = s.setClosed(), st = s.cmd('MODE?;VALV?');
++  check('set position by hand reads 0.00 %', ok && st === 'MODE MANUAL;VALV 0.00 %\r\n', s.why() + ' ' + st);
++}
++{ // Set as 0 % after homing reads 0.00 %, not the seat (Ryan, 4 Nov).
++  const s = homed(load());
++  s.cmd('VALV SET 10', 30000); s.cmd('STOP');
++  const ok = s.setClosed(), st = s.cmd('VALV?');
++  check('Set as 0 % after homing reads 0.00 %', ok && st === 'VALV 0.00 %\r\n', s.why() + ' ' + st);
+ }
+ { // MANUAL go-to and the needle follows the coils.
+   const s = homed(load());
+@@ -146,7 +152,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
  { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
    // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
    const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
@@ -688,7 +792,7 @@ index fa9457d..bda5402 100644
    s.set(7, 1); s.run(500);                                              // switch stuck pressed
    s.tap(186, 184, 1000);
    const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
-@@ -246,11 +246,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
+@@ -246,11 +252,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
    check('switch Off: PRES SP refused', s.cmd('PRES SP 5') === 'ERR 211 Read only over the network\r\n', s.cmd('PRES SP 5'));
    check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
    check('switch Off: queries answer', s.cmd('MODE?;PRES SP?') === 'MODE NOT HOMED;PRES SP NONE\r\n', s.cmd('MODE?;PRES SP?'));

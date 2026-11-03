@@ -33,4 +33,6 @@ Screens follow the template's grid: four columns at x 10, 127, 244 and 361, each
 | Padding | 12 px inside read-only tiles, settings fields, keypad cards, valve reading cards, fault detail, Events, Remote control, Help and the Trend legend and time labels. |
 | Status strip | No full stop after a single phrase; "All settings saved 24/10/26 14:02" without the comma. |
 
+Also in the patch, until PR #39 merges: the Set as 0 % fix from PR #39 (0.14.14, Set as 0 % reads 0.00 %), with its test change. Once #39 is on main, write the patch again without it.
+
 Not in the patch: the Home card contents (options A, B and C are still open), event texts in DD/MM/YY (H8), and the Events list height.
