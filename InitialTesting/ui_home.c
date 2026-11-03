@@ -675,7 +675,7 @@ static void menu_build(lv_obj_t *scr)
 {
     // Grouped in rows with a caption on the left, as on Diagnostics.
     static const char *const rows[3] = { "Records", "Calibrate", "System" };
-    static const char *const names[6] = { "Trend", "Faults and log", "Valve position",
+    static const char *const names[6] = { "Trend", "Events", "Valve position",
                                           "Transducer", "Diagnostics", "Settings" };
     // Caption and two tiles in 1 : 1.5 : 1.5, the caption centred on its row.
     for (int r = 0; r < 3; r++) {

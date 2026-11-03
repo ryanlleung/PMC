@@ -103,7 +103,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | `modbus.c`, `mbmap.c` | Modbus TCP server on port 502: the protocol (FC1, FC3, FC5, FC16) and the register map (`docs/modbus-register-map.md`; `tools/modbus-test` runs both on a PC) |
 | `ui.c` | Screen framework: header, status strip, STOP, buttons, cards, keypad, pick lists, dialogs, start-up screen |
 | `ui_home.c` | Home and Menu |
-| `ui_valve.c` | Valve, Valve position, Faults and log, Diagnostics |
+| `ui_valve.c` | Valve, Valve position, Events, Diagnostics |
 | `ui_settings.c` | Settings pages and Calibrate transducer |
 | `ui_trend.c` | Trend page and the Home sparkline |
 | `motor_screen.c` | Settings > Motor override |
@@ -132,8 +132,8 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 At power-up the MercShore iPC logo shows on white with a bar that fills as the board starts, then Home; the firmware version and build date are in the corner.
 
 - **Home** ("<cryostat name> pressure controller"): Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar, Setpoint box), Valve tile (reading in %, bar, Go to box), the mode button (Home valve / Start AUTO / Switch to MANUAL), Valve, Menu and the pressure card (a tap on the sparkline opens Trend).
-- **Menu**: Records (Trend, Faults and log), Calibrate (Valve position, Transducer), System (Diagnostics, Settings).
-- **Valve**: manual moves and the valve's state. **Valve position**: how the position was set, output turns, the current homing stage, and the date or age of the last successful homing. Motor steps and the live limit switch are on Diagnostics. **Faults and log**: latched faults (tap for detail and help) and the event log. **Diagnostics**: raw readings in three rows: pressure sensor (signal, before calibration, room pressure), valve motor (steps, limit switch, last move), controller (board temperature, excitation, how long the last move took).
+- **Menu**: Records (Trend, Events), Calibrate (Valve position, Transducer), System (Diagnostics, Settings).
+- **Valve**: manual moves and the valve's state. **Valve position**: how the position was set, output turns, the current homing stage, and the date or age of the last successful homing. Motor steps and the live limit switch are on Diagnostics. **Events**: latched faults (tap for detail and help) and the event log. **Diagnostics**: raw readings in three rows: pressure sensor (signal, before calibration, room pressure), valve motor (steps, limit switch, last move), controller (board temperature, excitation, how long the last move took).
 - **Trend**: pressure (left axis), the setpoint in AUTO (dashed) and valve (right axis) over 1, 2, 5, 10, 30 min or 1 hour.
 - **Settings**: System setup (cryostat name, fallback address, Remote control switch, the address in use, MAC, firmware version and build date), Choose sensor (up to four Druck sensors, each with its own calibration), Valve setup (travel, direction, homing back-off, return and speeds, drive rates), Control tuning, Review and save, Load settings (last save, previous save, factory), Restart, and Motor override (Move, Speed and Coils tabs). Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. Control-tuning drafts can be saved in AUTO; changed valve or sensor-selection drafts need MANUAL. The cryostat name, fallback address selection, Remote control switch, sensor operations and captured calibration take effect before saving and are kept across restarts only after Save settings; a changed fallback address is used after a restart.
 - **Calibrate transducer**: two-point calibration on the screen: vacuum, then air at the Pressure 21 Click room reading or a typed barometer reading.

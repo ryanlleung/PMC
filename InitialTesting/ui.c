@@ -391,7 +391,7 @@ static lv_obj_t *strip, *strip_icon, *strip_shape, *strip_text, *strip_ok, *stri
 static lv_obj_t *stop_btn;
 
 static lv_obj_t *home_scr, *cur_scr, *overlay;
-// Screens to go Back to (Home is under them all), e.g. Menu under Faults and log.
+// Screens to go Back to (Home is under them all), e.g. Menu under Events.
 static const ui_screen_t *back_stack[4];
 static int back_n;
 static bool overlay_tv;         // the overlay is a text page (Help): strip shown greyed

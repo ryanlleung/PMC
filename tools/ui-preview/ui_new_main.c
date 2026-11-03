@@ -375,7 +375,7 @@ int main(int argc, char **argv)
         tap(40, 15); run(300);                                  // its Back: Settings
         tap(24, 20); tap(24, 20);                               // Menu, Home
         tap(415, 128); tap(24, 20);                             // Valve
-        tap(415, 184); tap(350, 72); tap(24, 20); tap(24, 20);  // Faults and log
+        tap(415, 184); tap(350, 72); tap(24, 20); tap(24, 20);  // Events
         tap(415, 184); tap(120, 128); tap(24, 20); tap(24, 20); // Calibrate valve
         tap(415, 184); tap(120, 184); tap(24, 20); tap(24, 20); // Diagnostics
         tap(415, 184); tap(379, 184);                           // Settings
