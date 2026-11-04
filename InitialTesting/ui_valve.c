@@ -231,10 +231,11 @@ static void valve_build(lv_obj_t *scr)
     vp.go_chev = ui_label(vp.go_card, 126, 28, 0, &lv_font_montserrat_14, UI_BLUE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
 
     // Row 1: hold to close or open, 1 % steps; row 2: fully close or open
-    // under them, 5 % steps.
+    // under them, 5 % steps. The 109 px columns of the other screens (x 10,
+    // 127, 244, 361; the last one is the STOP column).
     static const char *const row1[4] = { "Close", "-1 %", "+1 %", "Open" };
     for (int i = 0; i < 4; i++) {
-        lv_obj_t *b = ui_btn(scr, 10 + i * 118, 120, 106, 40, UI_SECONDARY, row1[i],
+        lv_obj_t *b = ui_btn(scr, 10 + i * 117, 120, 109, 40, UI_SECONDARY, row1[i],
                              i == 1 || i == 2 ? step_cb : NULL, (void *)(intptr_t)(i == 1 ? -10 : 10));
         if (i == 0 || i == 3) {
             hold_btn(b, i == 3);
@@ -242,10 +243,10 @@ static void valve_build(lv_obj_t *scr)
         }
         vp.btn[i] = b;
     }
-    vp.btn[4] = ui_btn(scr, 128, 168, 106, 40, UI_SECONDARY, "-5 %", step_cb, (void *)(intptr_t)-50);
-    vp.btn[5] = ui_btn(scr, 246, 168, 106, 40, UI_SECONDARY, "+5 %", step_cb, (void *)(intptr_t)50);
-    vp.btn[6] = ui_btn(scr, 10, 168, 106, 40, UI_SECONDARY, "Fully close", full_cb, NULL);
-    vp.btn[7] = ui_btn(scr, 364, 168, 106, 40, UI_SECONDARY, "Fully open", full_cb, (void *)1);
+    vp.btn[4] = ui_btn(scr, 127, 168, 109, 40, UI_SECONDARY, "-5 %", step_cb, (void *)(intptr_t)-50);
+    vp.btn[5] = ui_btn(scr, 244, 168, 109, 40, UI_SECONDARY, "+5 %", step_cb, (void *)(intptr_t)50);
+    vp.btn[6] = ui_btn(scr, 10, 168, 109, 40, UI_SECONDARY, "Fully close", full_cb, NULL);
+    vp.btn[7] = ui_btn(scr, 361, 168, 109, 40, UI_SECONDARY, "Fully open", full_cb, (void *)1);
 }
 
 // Valve %, its bar and Go to, at 10 Hz.
