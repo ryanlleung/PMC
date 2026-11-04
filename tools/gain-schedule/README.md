@@ -51,5 +51,5 @@ If the PC or the network stops, the board keeps the last KP and TI it was given.
 
 ```
 python test_pmc_gains.py          # fit, table and run against a fake board
-python test_pmc_gains.py --sim    # also tunes 3 mbar on simulator/tests/tcp-board.js (needs node)
+python test_pmc_gains.py --sim    # also tunes 3 mbar and runs on simulator/tests/tcp-board.js (needs node)
 ```

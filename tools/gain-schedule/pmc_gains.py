@@ -476,6 +476,7 @@ def cmd_run(a):
     while True:
         try:
             sp_part, mode_part, pid_part = link.ask('PRES SP?;MODE?;PID?')
+            mode_part = mode_part.partition(' ')[2]
             sp = value(sp_part, 'PRES SP')
             kp_now, ti_now = [float(v) for v in pid_part.split()[1].split(',')[:2]]
             if sp is not None and sp != last_sp:

@@ -2,7 +2,7 @@
 """Tests for pmc_gains.py.
 
     python test_pmc_gains.py          # fit, table and run against a fake board (seconds)
-    python test_pmc_gains.py --sim    # also tune one setpoint on the simulated board (node, about 1 min)
+    python test_pmc_gains.py --sim    # also tune and run on the simulated board (node, about 1 min)
 """
 import io
 import math
@@ -150,6 +150,11 @@ def sim_tune():
         tab = g.load_table(out)
         assert len(tab) == 1 and tab[0][1] > 0 and tab[0][2] > 0, tab
         print('sim tune: OK')
+        # run (firmware 0.15.8 on): the board takes the table's gains for its setpoint.
+        g.main(['run', f'127.0.0.1:{port}', out, '--once'])
+        pid = g.Link(f'127.0.0.1:{port}').ask('PID?')[0]
+        assert pid == 'PID %.2f,%.2f,0.00' % g.gains_for(tab, 3.0), pid
+        print('sim run: OK')
     finally:
         board.terminate()
 
