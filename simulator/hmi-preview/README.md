@@ -21,7 +21,9 @@ Screens follow the template's grid: four columns at x 10, 127, 244 and 361, each
 
 | Screen | Change |
 |---|---|
-| Home | Cards 168 + 8 + 167, as the other halved pages (was 167 + 9 + 167). Start AUTO, Stop AUTO and Home valve sit under the bar, as wide as it. |
+| Header | The same on every screen (Ryan, 4 Nov): Power, Back and Home icons 44 wide at the left, greyed where they do nothing (Back and Home on Home, Power and Home under a popup), then the title from x 140, left-aligned. Home's title falls back to the cryostat name alone if "<name> pressure controller" does not fit. The mode panel starts at x 357, the middle of the gap between the columns below (was 351). |
+| Power | On every screen. Its question has Cancel, Restart and Shut down (Ryan: Restart in the power button as well); Restart asks its own question, as on System. Three-button questions are 376 wide so "Shut down" fits on one line. |
+| Home | Cards 168 + 8 + 167, as the other halved pages (was 167 + 9 + 167). Start AUTO, Stop AUTO and Home valve sit under the bar, as wide as it. Trend back in the right column in place of the IP tile (Ryan, 4 Nov); the address is on System. |
 | Menu | Rows Records (Trend, Events), Service (Valve position, Diagnostics), Setup (Settings, System). |
 | Settings | Navigation tiles only: Choose sensor, Calibrate sensor, Valve setup, PID tuning, Review and save. |
 | System | On the Menu, title System. Cryostat name, IP address; MAC address, Remote control; Firmware 343 wide with Restart beside it. Address in use dropped (static address only). |
@@ -30,7 +32,7 @@ Screens follow the template's grid: four columns at x 10, 127, 244 and 361, each
 | Diagnostics | Caption column 109, tiles in columns 2 to 4. Captions Nominal, mB (was Before cal, mB) and Board, °C (was Temperature, °C) to fit 85 px. A long Last move result drops to 12 px. |
 | Help | Text card 343 x 160, Up and Down 109 x 76 in the right column. |
 | Up and Down | Drawn 21 x 12 chevrons (3 px stroke) on Trend, Events and Help. |
-| Keypad | A popup over the dimmed page (Ryan, 4 Nov: an operator took the large present value for the entry): box 343 x 216 on columns 1 to 3, STOP beside it. Title, range and present value in small text on the left ("Valve now 0.00 %"), the entry in a blue-edged field on the right, keys 56 x 44, Cancel over Set. The header keeps the keypad's title and Home. An entry too long for 26 px (8-figure serial numbers) drops to 16 px. |
+| Keypad | A popup over the dimmed page (Ryan, 4 Nov: an operator took the large present value for the entry): box 343 x 216 on columns 1 to 3, STOP beside it. Title, info and present value in small text on the left ("Valve now 0.00 %"), the entry in a blue-edged field on the right with Min and Max in its top corners (Ryan, 4 Nov; the Setpoint and settings range lines are dropped as repeats; none for a serial number), keys 56 x 44, Cancel over Set. The header keeps the keypad's title and Home. An entry too long for 26 px (8-figure serial numbers) drops to 16 px. |
 | Padding | 12 px inside read-only tiles, settings fields, keypad cards, valve reading cards, fault detail, Events, Remote control, Help and the Trend legend and time labels. |
 | Status strip | No full stop after a single phrase; "All settings saved 24/10/26 14:02" without the comma. |
 
