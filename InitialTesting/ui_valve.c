@@ -152,7 +152,7 @@ static void calib_refresh(void)
     else if (how == VALVE_REF_SAVED)
         lv_strlcpy(st, "Last saved, not homed", sizeof st);
     else if (how == VALVE_REF_PARKED)
-        lv_strlcpy(st, "Set at shut down", sizeof st);
+        lv_strlcpy(st, "Kept at shut down", sizeof st);
     else
         lv_strlcpy(st, "Not homed", sizeof st);
     ui_set_text(cp.state, st);

@@ -84,10 +84,9 @@ typedef struct {
     void (*fast)(void);
 } ui_screen_t;
 
-void ui_splash(void);          // start-up screen, right after the display driver
-void ui_splash_step(int pct);  // the bar's goal, 0 to 100
-int ui_splash_tick(void);     // call every 30 ms; 1 once the bar is full
-void ui_splash_done(void);     // the bar's goal full
+// The OFF screen from the first frame (every start is OFF, 0.15.1), right
+// after the display driver, until ui_init.
+void ui_splash(void);
 // "0.13.13, built 28/10/26": the version and the build date (DD/MM/YY).
 const char *ui_fw_text(void);
 void ui_init(void);            // after the drivers and valve/cfg init

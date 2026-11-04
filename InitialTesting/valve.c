@@ -188,14 +188,11 @@ static int sw_far_n;      // W-4: consecutive 1 s reads with the switch pressed 
 static bool sw_far_said;  // W-4 raised for this occurrence
 static int over_n;        // W-5: consecutive reads above the sensor range in AUTO
 
-// Shut down (valve.h): the close running, and whether the count was proven
-// (homed or parked) when it started, so the switch must be near the seat.
+// Shut down (valve.h): the move to 0 % running, and where it started.
 #define OFF_WHY  "Controller is off: turn it on at the screen"
 #define SHUT_WHY "Shutting down: STOP to cancel"
 static bool shut_moving;
-static bool shut_checked;
-static int32_t shut_from;          // where the close started
-static int32_t shut_tol(void) { return pm() / 100; }   // 1 % of travel
+static int32_t shut_from;
 
 static bool any_latched(void)
 {
@@ -205,11 +202,14 @@ static bool any_latched(void)
     return false;
 }
 
+// OFF is not a lock here (0.15.1): the controller starts OFF, before
+// cfg_init() sets the saved step mode, which a lock would refuse. Nothing
+// can move the valve while OFF anyway: the OFF screen covers the screens
+// and valve_off_why() refuses the rest.
 static void update_lock(void)
 {
     stepper3_lock(mode == VALVE_CALIBRATING ? "Homing: STOP to cancel"
                   : mode == VALVE_SHUTDOWN ? SHUT_WHY
-                  : mode == VALVE_OFF ? OFF_WHY
                   : any_latched() ? "Reset the fault first"
                   : is_auto() ? "Switch to MANUAL first" : NULL);
 }
@@ -283,7 +283,8 @@ static void raise(fault_t f, bool uncalibrate, const char *fmt, ...)
     }
     if (uncalibrate) {
         calibrated = false;
-        mode = VALVE_NOT_CAL;
+        if (mode != VALVE_OFF)
+            mode = VALVE_NOT_CAL;
         question = false;   // its count belongs to the homing just lost
     }
     update_lock();
@@ -443,7 +444,8 @@ static void limit_hit(void)
 
 /* --------------------------------------------------------------------------
  * Shut down (0.15.0, Ryan 4 Nov: operators forget to close the valve before
- * switching off). valve.h has the rules; valvepos.c keeps the parked entry.
+ * switching off; to 0 %, not onto the switch, from 0.15.1). valve.h has the
+ * rules; valvepos.c keeps the count while OFF.
  * ------------------------------------------------------------------------ */
 static void seq_check(void);
 
@@ -457,45 +459,18 @@ static void go_off(void)
     update_lock();
 }
 
-// On the switch: its point becomes the seat, then OFF.
-static void shut_park(void)
-{
-    int32_t at = stepper3_position();
-    char v[16], t[72];
-    if (shut_checked && at - seat_count() > shut_tol()) {
-        // Ice, a switch tripping early, or a count that slipped: only a
-        // look can tell, so the seat is not moved.
-        fixed_fmt(v, sizeof v, fixed_round(milli_of(at), 1), 2);
-        lv_snprintf(t, sizeof t, "Shut down stopped: switch pressed at %s %%, above the seat", v);
-        ev("OFF", "Switch pressed at count %ld (%s %%), over 1 %% above the seat %ld: not taken",
-           (long)at, pct_text(v, sizeof v, at), (long)seat_count());
-        shut_cancel("switch above the seat", t);
-        return;
-    }
-    if (!stepper3_set_position(seat_count())) {
-        shut_cancel("count not set", "Shut down stopped: try again");
-        return;
-    }
-    calibrated = true;
-    ref_how = VALVE_REF_PARKED;
-    ref_unproven = false;   // the switch was found closing: the direction is right
-    ev("OFF", "Valve closed on the switch at count %ld, now the seat %ld; coils off, OFF", (long)at,
-       (long)seat_count());
-    go_off();
-}
-
 static void shut_move_ended(stepper3_stop_t why)
 {
     shut_moving = false;
-    if (why == STEPPER3_STOP_LIMIT) {
-        shut_park();
-    } else if (why == STEPPER3_STOP_DONE) {
-        // Closed past where the switch should be: the count is not to be
-        // trusted (as F-3 for homing), so home it once the switch is checked.
-        ev("OFF", "Switch not found on the shut down close, at count %ld: homing cleared",
-           (long)stepper3_position());
-        calibrated = false;
-        shut_cancel("switch not found", "Shut down stopped: limit switch not found");
+    if (why == STEPPER3_STOP_DONE) {
+        ev("OFF", "Valve at 0 %%, count %ld; coils off, OFF", (long)stepper3_position());
+        go_off();
+    } else if (why == STEPPER3_STOP_LIMIT) {
+        // The switch before 0 %: ice, a switch tripping early or a count
+        // that slipped. Only a look can tell: MANUAL and the switch question,
+        // as for any other move.
+        shut_cancel("limit switch pressed", "Shut down stopped: limit switch pressed before 0 %");
+        limit_hit();
     } else {
         shut_cancel(stepper3_stop_name(why), NULL);
     }
@@ -506,42 +481,33 @@ bool valve_shutdown(const char **why)
     if (mode == VALVE_SHUTDOWN || mode == VALVE_OFF) return true;
     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
     if (any_latched())             { *why = "Reset the fault first"; return false; }
-    bool checked = calibrated && (ref_how == VALVE_REF_HOMED || ref_how == VALVE_REF_PARKED);
-    seq_check();   // a move that ended just before (at the switch) is handled first
-    int32_t pos = stepper3_position();
-    // Already on the switch: taken only at a proven seat (a broken wire
-    // reads pressed too).
-    bool on_switch = limit_open_now();
-    if (on_switch && (!checked || pos - seat_count() > shut_tol() || seat_count() - pos > shut_tol())) {
-        *why = "Limit switch pressed: home the valve first";
-        return false;
-    }
+    seq_check();   // a move that ended just before is handled first
     bool was_auto = is_auto();
     stepper3_override_cancel();
     if (stepper3_busy()) {
         stepper3_stop();
         seq_seen = stepper3_move_seq();
-        pos = stepper3_position();
     }
-    question = false;   // the switch point is taken below, or the shut down stops
+    question = false;
     warn[0] = 0;
-    shut_checked = checked;
+    int32_t pos = stepper3_position();
+    char p[16];
+    if (!calibrated) {
+        // Not homed: where 0 % is, is not known, so the valve stays put.
+        ev("OFF", "Shut down, not homed: valve not moved; coils off, OFF");
+        go_off();
+        return true;
+    }
+    if (pos == 0) {
+        ev("OFF", "Shut down%s at 0 %%: coils off, OFF", was_auto ? ", AUTO ended," : "");
+        go_off();
+        return true;
+    }
     shut_from = pos;
     mode = VALVE_SHUTDOWN;
     update_lock();
-    char p[16];
-    if (calibrated)
-        ev("OFF", "Shut down%s: closing onto the switch from %s %%", was_auto ? ", AUTO ended" : "",
-           pct_text(p, sizeof p, pos));
-    else
-        ev("OFF", "Shut down, not homed: closing to find the switch from count %ld", (long)pos);
-    if (on_switch) {
-        shut_park();
-        return true;
-    }
-    int32_t to = checked ? (pos < seat_count() ? pos : seat_count()) - shut_tol()
-                         : pos - (int32_t)(((int64_t)pm() * 11 + 5) / 10);
-    shut_moving = stepper3_goto_rate(to, (uint32_t)f_rate(f_home));
+    ev("OFF", "Shut down%s: to 0 %% from %s %%", was_auto ? ", AUTO ended" : "", pct_text(p, sizeof p, pos));
+    shut_moving = stepper3_goto(0);
     seq_seen = stepper3_move_seq();
     if (!shut_moving) {
         *why = stepper3_refusal();
@@ -560,24 +526,20 @@ bool valve_turn_on(const char **why)
     return true;
 }
 
-bool valve_restore_parked(int32_t count, bool off, const char **why)
+bool valve_restore_parked(int32_t count, bool homed, const char **why)
 {
-    if (mode != VALVE_NOT_CAL || calibrated) { *why = "Position already set"; return false; }
+    if (calibrated || (mode != VALVE_OFF && mode != VALVE_NOT_CAL)) { *why = "Position already set"; return false; }
     if (ref_unproven)               { *why = "Direction or coil order changed: home the valve first"; return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
     if (stepper3_busy() || !stepper3_set_position(count)) { *why = "Wait for the valve to stop"; return false; }
     calibrated = true;
-    ref_how = VALVE_REF_PARKED;
+    ref_how = homed ? VALVE_REF_PARKED : VALVE_REF_SAVED;
     char p[16];
-    ev("REF", "Parked at the last shut down, switch still pressed: count %ld (%s %%)", (long)count,
-       pct_text(p, sizeof p, count));
-    if (off) {
-        go_off();
-        ev("MODE", "Restarted while off: OFF");
-    } else {
-        mode = VALVE_MANUAL;
+    ev("REF", "Kept from the last shut down: count %ld (%s %%)%s", (long)count, pct_text(p, sizeof p, count),
+       homed ? "" : ", not homed");
+    if (mode == VALVE_NOT_CAL) {
+        mode = VALVE_MANUAL;   // turned on already
         update_lock();
-        ev("MODE", "Switched on: MANUAL");
     }
     return true;
 }
@@ -586,13 +548,12 @@ bool valve_shutdown_progress(int *left_pct, int *secs)
 {
     if (mode != VALVE_SHUTDOWN)
         return false;
-    // Not homed: shown as if from fully open, the time not known.
-    int32_t end = calibrated ? seat_count() : shut_from - pm();
-    int32_t span = shut_from - end, left = stepper3_position() - end;
-    if (left < 0) left = 0;
+    int32_t span = shut_from < 0 ? -shut_from : shut_from, left = stepper3_position();
+    if (left < 0) left = -left;
     if (left > span) left = span;
     *left_pct = span > 0 ? (int)((int64_t)left * 100 / span) : 0;
-    *secs = calibrated ? (int)((left + f_rate(f_home) - 1) / f_rate(f_home)) : -1;
+    int32_t r = (int32_t)stepper3_rate();
+    *secs = r > 0 ? (int)((left + r - 1) / r) : -1;
     return true;
 }
 
@@ -609,7 +570,10 @@ void valve_init(void)
     ctrl_init(&ctl);
     seq_seen = stepper3_move_seq();
     stepper3_on_reference_change(valve_uncalibrate);
-    ev("BOOT", "Power-up (event only), valve not homed");
+    // Every start is OFF (0.15.1, Ryan 4 Nov): a double tap on the screen
+    // turns it on. valvepos.c may then set the count kept at Shut down.
+    mode = VALVE_OFF;
+    ev("BOOT", "Power-up (event only), OFF, valve not homed");
     update_lock();
 }
 
@@ -942,7 +906,8 @@ void valve_uncalibrate(const char *why)
         stepper3_stop();
     calibrated = false;
     question = false;
-    mode = VALVE_NOT_CAL;
+    if (mode != VALVE_OFF)
+        mode = VALVE_NOT_CAL;
     ev("REF", "Homing cleared (%s)", why);
     update_lock();
 }
@@ -1083,7 +1048,7 @@ void valve_stop(void)
     // drops to MANUAL (no fault since 0.11.20, Ryan 22 Oct).
     bool was_auto = is_auto();
     seq_check();   // a move that ended just before (at the switch: W-1) is not this stop's
-    bool was_shut = mode == VALVE_SHUTDOWN;   // not if the close has just parked (OFF)
+    bool was_shut = mode == VALVE_SHUTDOWN;   // not if 0 % has just been reached (OFF)
     stepper3_stop();
     seq_seen = stepper3_move_seq();
     cal_abort("STOP");

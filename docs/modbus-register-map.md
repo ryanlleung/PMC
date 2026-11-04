@@ -30,7 +30,7 @@ Rewriting the target with the value it already has changes nothing (no event; th
 | --- | --- | --- | --- |
 | 0 | U16 | Map version | 1 |
 | 1 | U16 | Heartbeat | Seconds since start-up, wraps at 65535. A value that stops changing means the controller has stopped |
-| 2 | U16 | Mode | 0 NOT HOMED, 1 HOMING, 2 MANUAL, 3 AUTO, 4 SHUTTING DOWN (closing onto the switch for Shut down), 5 OFF (from 0.15.0; turned on only at the screen) |
+| 2 | U16 | Mode | 0 NOT HOMED, 1 HOMING, 2 MANUAL, 3 AUTO, 4 SHUTTING DOWN (going to 0 % for Shut down), 5 OFF (from 0.15.0; every start from 0.15.1; turned on only at the screen) |
 | 3 | U16 | Status bits | See below |
 | 4 | U16 | Regulation | In AUTO: 0 no reading, 1 Regulating, 2 In band, 3 Stable. 0 outside AUTO |
 | 5 | U16 | Faults latched | Bit 0 F-1 ... bit 5 F-6 |
@@ -55,7 +55,7 @@ Reading past address 25 answers exception 2, so read 0 to 25 (26 registers) in o
 | --- | --- | --- |
 | 0 | 16 | Pressure reading valid |
 | 1 | 17 | Valve position set (homed, set by hand or from the saved position) |
-| 2 | 18 | Homed on the closed switch, or set on it at Shut down (from 0.15.0) |
+| 2 | 18 | Homed on the closed switch, also when kept through Shut down and a power-off (from 0.15.0) |
 | 3 | 19 | Valve moving |
 | 4 | 20 | Closed switch pressed |
 | 5 | 21 | A fault is latched |

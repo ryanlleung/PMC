@@ -350,11 +350,8 @@ int main(int argc, char **argv)
     memset(flash, 0xFF, 8u << 20);
     if (strcmp(st, "nosave"))
         seed_flash();
-    if (!strcmp(st, "splash")) {   // the start-up screen (0.13.3; logo from 0.13.13), part way
+    if (!strcmp(st, "splash")) {   // the start-up screen: OFF from 0.15.1
         ui_splash();
-        ui_splash_step(65);
-        for (int i = 0; i < 60; i++)
-            ui_splash_tick();   // the bar caught up
         FILE *f = fopen(argv[2], "wb");
         if (!f) { perror(argv[2]); return 1; }
         fwrite(fb, sizeof fb, 1, f);
@@ -380,19 +377,19 @@ int main(int argc, char **argv)
         // Settings, with Menu behind.
         tap(415, 128); tap(379, 184); ui_service(); run(300);   // from Settings
         tap(40, 15); run(300);                                  // its Back: Settings
-        tap(24, 20); tap(24, 20);                               // Menu, Home
+        tap(72, 20);                                            // Home (Back twice would land on the power icon)
         tap(415, 184); tap(24, 20);                             // PID tuning
-        tap(415, 128); tap(350, 72); tap(24, 20); tap(24, 20);  // Events
-        tap(415, 128); tap(120, 128); tap(24, 20); tap(24, 20); // Calibrate valve
-        tap(415, 128); tap(120, 184); tap(24, 20); tap(24, 20); // Diagnostics
+        tap(415, 128); tap(350, 72); tap(72, 20);               // Events
+        tap(415, 128); tap(120, 128); tap(72, 20);              // Calibrate valve
+        tap(415, 128); tap(120, 184); tap(72, 20);              // Diagnostics
         tap(415, 128); tap(379, 184);                           // Settings
         tap(120, 72); tap(24, 20);                              //   Cryostat name
         tap(356, 72); tap(24, 20);                              //   Pressure sensor
         tap(120, 128); tap(270, 72); tap(24, 20);               //   Valve setup, Drive tab
         tap(356, 128); tap(94, 72); tap(24, 20); tap(24, 20);   //   Control tuning, keypad
         tap(120, 184); tap(24, 20);                             //   Review and save
-        tap(24, 20); tap(24, 20);
-        tap(415, 128); tap(379, 128); tap(24, 20); tap(24, 20); // Calibrate sensor
+        tap(72, 20);                                            // Home
+        tap(415, 128); tap(379, 128); tap(72, 20);              // Calibrate sensor
     }
     run(1200);
     size_t after = heap_used();
@@ -420,8 +417,8 @@ int main(int argc, char **argv)
     if (!strcmp(st, "autofirst") || !strcmp(st, "autoask") || !strcmp(st, "automan") || !strcmp(st, "paused2")) tap(415, 72);
     if (!strcmp(st, "autosp")) { tap(115, 184); tap(41, 240); tap(111, 240); tap(321, 184); }   // Setpoint 12: applies at once
     if (!strcmp(st, "limithit")) v_q = true;
-    if (!strcmp(st, "shutask")) tap(329, 20);                      // the power icon: confirm
-    if (!strcmp(st, "shutting")) { tap(329, 20); tap(250, 180); }   // Shut down: black, closing
+    if (!strcmp(st, "shutask")) tap(24, 20);                      // the power icon (top left): confirm
+    if (!strcmp(st, "shutting")) { tap(24, 20); tap(250, 180); }   // Shut down: black, closing
     if (!strcmp(st, "off")) v_mode = VALVE_OFF;
     if (!strcmp(st, "svc")) {
         size_t a = heap_used();

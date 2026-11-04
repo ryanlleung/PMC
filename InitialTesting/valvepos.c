@@ -19,14 +19,15 @@
 #define VP_SAFE      0x45464153UL   // "SAFE": at standstill
 #define VP_MOVING    0x45564F4DUL   // "MOVE": during a move, within MOVE_MS of travel
 #define VP_UNSAFE    0UL            // not calibrated: nothing to offer
-#define VP_PARKED    0x4B524150UL   // "PARK": closed on the switch at Shut down, OFF (0.15.0)
+#define VP_PARKED    0x4B524150UL   // "PARK": OFF after Shut down, homed (0.15.0; at 0 % from 0.15.1)
+#define VP_PARKED_NH 0x4E524150UL   // "PARN": the same, not homed (set by hand or from a saved count)
 #define STILL_MS     2000
 #define MOVE_MS      2000           // a moving entry at most this often (Ryan, 22 Oct)
 
 typedef struct {
     uint32_t seq;        // +1 each entry, never 0xFFFFFFFF
     int32_t count;
-    uint32_t state;      // VP_SAFE, VP_MOVING or VP_UNSAFE, XOR the drive's reference (ref_sig)
+    uint32_t state;      // VP_SAFE, VP_MOVING, VP_PARKED(_NH) or VP_UNSAFE, XOR the drive's reference (ref_sig)
     uint32_t crc;
 } vp_entry_t;
 _Static_assert(sizeof(vp_entry_t) == 16, "16-byte entries");
@@ -44,7 +45,7 @@ static uint32_t writes;
 static bool warned;            // withdraw failure logged
 static bool failed;            // the last put() did not take
 static uint32_t failed_at;     // tick of that put()
-static bool parked_boot;       // the newest entry is PARKED: taken once the switch is read
+static bool parked_boot;       // the newest entry is parked: taken once the switch is read
 static bool unparked;          // the offer is from a power-up without Shut down
 
 /* The direction and coil order the count was saved under (0 for the
@@ -66,13 +67,18 @@ static uint32_t state_of(const vp_entry_t *e)
 {
     return e->state & VP_REF ? (e->state & ~VP_REF) ^ ref_sig() : e->state;
 }
-// SAFE, MOVING or PARKED under whatever direction and order it was saved:
+// SAFE, MOVING or parked under whatever direction and order it was saved:
 // it could be used at a restart under those, so a withdrawal must cover it.
 static bool live(const vp_entry_t *e)
 {
     uint32_t s = e->state & ~VP_REF;   // the reference bits stay below 0x200
     return e->seq && (((s ^ VP_SAFE) & ~0x1FFu) == 0 || ((s ^ VP_MOVING) & ~0x1FFu) == 0 ||
-                      ((s ^ VP_PARKED) & ~0x1FFu) == 0);
+                      ((s ^ VP_PARKED) & ~0x1FFu) == 0 || ((s ^ VP_PARKED_NH) & ~0x1FFu) == 0);
+}
+// Parked at Shut down, under the present direction and order.
+static bool parked(const vp_entry_t *e)
+{
+    return e->seq && (state_of(e) == VP_PARKED || state_of(e) == VP_PARKED_NH);
 }
 
 static bool good(const vp_entry_t *e)
@@ -224,9 +230,9 @@ void valvepos_init(void)
     // without Shut down (0.15.0). Said on the start-up question.
     const char *rr = sysinfo_reset_reason();
     bool power = !strcmp(rr, "power-on") || !strcmp(rr, "brown-out");
-    if (state_of(&last) == VP_PARKED && last.seq) {
-        // Closed on the switch at Shut down: taken in valvepos_task once the
-        // switch reads steadily, if it is still pressed.
+    if (parked(&last)) {
+        // Shut down at 0 %: taken in valvepos_task once the switch reads
+        // steadily, if it is released.
         parked_boot = true;
     } else if (offerable(&last)) {
         offer = true;
@@ -246,24 +252,23 @@ void valvepos_init(void)
     }
 }
 
-// The parked entry at start-up: the switch still pressed means the needle
-// is still on the seat (MANUAL, or OFF again after a restart while off,
-// not a power-up); released, it was moved: not homed, and the entry is
-// withdrawn by valvepos_task.
+// The parked entry at start-up (0.15.1: Shut down leaves the valve at 0 %,
+// above the switch). The switch released: the count is taken, still OFF.
+// Pressed: the valve was closed further while off, or the switch or its
+// wire is at fault; not homed, and valvepos_task withdraws the entry.
 static void parked_check(void)
 {
     limit_state_t l = limit_state();
     if (l == LIMIT_UNKNOWN)
         return;
     parked_boot = false;
-    if (l != LIMIT_OPEN) {
-        valve_event("REF", "Parked at the last shut down, but the limit switch is released: home the valve");
+    if (l == LIMIT_OPEN) {
+        valve_event("REF", "Kept at the last shut down, but the limit switch is pressed: home the valve");
         return;
     }
-    const char *rr = sysinfo_reset_reason(), *why;
-    bool off = strcmp(rr, "power-on") != 0;
-    if (!valve_restore_parked(last.count * stepper3_scale(), off, &why))
-        valve_event("REF", "Parked position not used: %s", why);
+    const char *why;
+    if (!valve_restore_parked(last.count * stepper3_scale(), state_of(&last) == VP_PARKED, &why))
+        valve_event("REF", "Position kept at shut down not used: %s", why);
 }
 
 void valvepos_task(void)
@@ -280,11 +285,13 @@ void valvepos_task(void)
     bool cal = valve_calibrated();
     int32_t pos = stepper3_position() / stepper3_scale();   // saved in full steps
     if (m == VALVE_OFF && cal) {
-        // On the switch, coils off: parked, at once (the supply may be
-        // switched off any moment now). Tried again after MOVE_MS if the
-        // write fails.
-        if ((state_of(&last) != VP_PARKED || last.count != pos) &&
-            (!failed || lv_tick_elaps(failed_at) >= MOVE_MS) && !put2(pos, VP_PARKED))
+        // Shut down, coils off: parked, at once (the supply may be switched
+        // off any moment now), saying whether it was homed. Tried again
+        // after MOVE_MS if the write fails.
+        valve_ref_t r = valve_reference();
+        uint32_t want = r == VALVE_REF_HOMED || r == VALVE_REF_PARKED ? VP_PARKED : VP_PARKED_NH;
+        if ((state_of(&last) != want || last.count != pos) &&
+            (!failed || lv_tick_elaps(failed_at) >= MOVE_MS) && !put2(pos, want))
             valve_event("REF", "Parked position could not be written (flash)");
         still = false;
         return;
@@ -305,9 +312,9 @@ void valvepos_task(void)
     // can take an erase (up to 100 ms) and uses up a slot.
     if (failed && lv_tick_elaps(failed_at) < MOVE_MS)
         return;
-    if (cal && !moving && state_of(&last) == VP_PARKED && last.seq) {
-        // Turned on again: safe at once, so a restart now is not taken as
-        // a restart while off.
+    if (cal && !moving && parked(&last)) {
+        // Turned on: safe at once, so a power cut from now on is told at
+        // the next start as one without Shut down.
         (void)put(pos, VP_SAFE);
         return;
     }

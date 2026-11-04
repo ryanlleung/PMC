@@ -13,6 +13,10 @@ const path = require('path');
   await p.waitForTimeout(1500);
   const box = await p.locator('#screen').boundingBox(), k = box.width / 480;
   const tap = async (x, y) => { await p.mouse.click(box.x + x * k, box.y + y * k); await p.waitForTimeout(400); };
+  // Every start is OFF (0.15.1): a double tap turns it on, then the logo.
+  await p.mouse.click(box.x + 240 * k, box.y + 136 * k); await p.waitForTimeout(200);
+  await tap(240, 136);
+  await p.waitForTimeout(3000);
   await tap(415, 72);    // Home valve
   await tap(346, 147);   // Home
   await p.selectOption('#speed', '600');

@@ -14,10 +14,10 @@
  * Ported from the simulator (stage 2 of the porting plan). Settings are kept
  * by CFG SAVE (cfg.c, stage 3).
  *
- * Modes: NOT CALIBRATED (boot, watchdog reset, after F-3/F-4 or an
- * aborted calibration), CALIBRATING, MANUAL and AUTO (stage 8,
- * ctrl.c), SHUTDOWN and OFF (0.15.0, Shut down below). Nothing moves at
- * boot.
+ * Modes: OFF (every start, 0.15.1; Shut down below), NOT CALIBRATED
+ * (turned on not homed, after F-3/F-4 or an aborted calibration),
+ * CALIBRATING, MANUAL and AUTO (stage 8, ctrl.c), SHUTDOWN. Nothing moves
+ * at boot.
  *
  * AUTO (from MANUAL) after the entry checks (ctrl_check), with
  * the target set; bumpless from where the valve is going. Every second,
@@ -65,8 +65,8 @@ const char *valve_mode_name(void);
 bool valve_calibrated(void);
 // How the position was last set: homed on the switch, or set by the
 // operator (closed or a typed %) or from the saved position, neither
-// checked against the switch, or on the switch at Shut down (PARKED, also
-// after a power-up with the switch still pressed). NONE when not homed.
+// checked against the switch, or kept from the last Shut down of a homed
+// valve (PARKED; not homed before it: SAVED). NONE when not homed.
 typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
@@ -135,23 +135,22 @@ bool valve_fault_is(const char *tag);            // e.g. "F-5" latched
 bool valve_question(int32_t *pct10);             // switch question waiting, where
 bool valve_answer(bool set_zero, const char **why);   // VALVE SETZERO / VALVE SKIP
 
-/* Shut down (0.15.0, Ryan 4 Nov): AUTO ends, the valve closes onto the
- * limit switch at the homing rate, the switch point becomes the seat and
- * the coils go off: OFF. Moves, AUTO and homing are refused while OFF
- * (pressure is still read); the screen turns it on (MANUAL). STOP cancels
- * a shut down under way (MANUAL, the valve where it stopped). With the
- * count proven (homed, or parked before) the close goes at most 1 % of
- * travel past the seat and a switch more than 1 % above it is not taken
- * (warning, MANUAL); otherwise it searches as homing's fast close does.
- * A switch already pressed is only taken near a proven seat. */
+/* Shut down (0.15.0, Ryan 4 Nov; to 0 % from 0.15.1, Ryan: "should not
+ * home to limit, just go to 0"): AUTO ends, the valve goes to 0 % at the
+ * run rate and the coils go off: OFF. Not homed: OFF at once, the valve
+ * not moved. Moves, AUTO and homing are refused while OFF (pressure is
+ * still read); a double tap on the screen turns it on (MANUAL, or NOT
+ * HOMED). STOP cancels a shut down under way (MANUAL, the valve where it
+ * stopped); so does the limit switch before 0 % (MANUAL and the switch
+ * question). Every start is OFF (0.15.1). */
 bool valve_shutdown(const char **why);
-bool valve_turn_on(const char **why);            // OFF -> MANUAL
-// valvepos.c at start-up: parked at the last Shut down and the switch still
-// pressed. The count is the seat's; off: back to OFF (a restart while off),
-// else MANUAL (switched on).
-bool valve_restore_parked(int32_t count, bool off, const char **why);
-// While shutting down: how much of the close is left (100 at the start,
-// 0 at the seat) and the seconds left (-1 if not known: not homed).
+bool valve_turn_on(const char **why);            // OFF -> MANUAL (NOT HOMED if not homed)
+// valvepos.c at start-up: the count kept at the last Shut down, the limit
+// switch released. homed: the valve was homed (PARKED), else SAVED. Stays
+// OFF (MANUAL if already turned on).
+bool valve_restore_parked(int32_t count, bool homed, const char **why);
+// While shutting down: how much of the move is left (100 at the start, 0
+// at 0 %) and the seconds left at the run rate.
 bool valve_shutdown_progress(int *left_pct, int *secs);
 // Why moves and mode changes are refused now: off or shutting down; NULL
 // otherwise.

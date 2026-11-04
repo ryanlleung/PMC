@@ -23,7 +23,8 @@ function load(file) {
     out: '',
     // opts.remote: false turns Remote control Off; otherwise it is On, the
     // default from 0.13.7, so the link takes set commands. opts.reset: 0
-    // power-on (default), 1 watchdog, 2 software (Restart).
+    // power-on (default), 1 watchdog, 2 software (Restart). Every start is
+    // OFF (0.15.1): turned on at once (the double tap) unless opts.off.
     boot(flash, opts = {}) {
       // application_init() runs once per instance, as on the board: use a new load() per boot.
       if (sim.booted) throw new Error('boot() twice on one instance: use a new load()');
@@ -34,6 +35,7 @@ function load(file) {
       const d = new Date(2026, 9, 24, 14, 0, 0);
       x.sim_boot(opts.reset || 0, d.getTime() / 1000 - d.getTimezoneOffset() * 60);
       if (opts.remote === false) x.sim_remote(0);
+      if (!opts.off) x.sim_turn_on();
     },
     run(ms) { for (let t = 0; t < ms; t += 100) { x.sim_run(Math.min(100, ms - t)); sim.drain(); } },
     drain() { const n = x.sim_tx_len(); if (n) { sim.out += Buffer.from(new Uint8Array(x.memory.buffer, x.sim_tx(), n)).toString(); x.sim_tx_clear(); } },
