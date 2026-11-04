@@ -1,5 +1,5 @@
 diff --git a/InitialTesting/ui.c b/InitialTesting/ui.c
-index 4ef7eea..6c5e1b2 100644
+index 4ef7eea..211e9c4 100644
 --- a/InitialTesting/ui.c
 +++ b/InitialTesting/ui.c
 @@ -184,8 +184,9 @@ void ui_set_color(lv_obj_t *o, lv_color_t c)
@@ -270,7 +270,7 @@ index 4ef7eea..6c5e1b2 100644
  static struct {
      char entry[10];
      ui_kp_t k;
-@@ -1120,18 +1174,40 @@ static const char *fmt_dec(char *buf, size_t n, int64_t v, int dec)
+@@ -1120,18 +1174,42 @@ static const char *fmt_dec(char *buf, size_t n, int64_t v, int dec)
      return fixed_fmt(buf, n, v, dec);
  }
  
@@ -311,12 +311,14 @@ index 4ef7eea..6c5e1b2 100644
  {
      show(kp.title, why == NULL);
 -    show(kp.info, why == NULL);
++    if (kp.live)
++        show(kp.live, why == NULL);
 +    if (kp.info)
 +        show(kp.info, why == NULL);
      show(kp.err, why != NULL);
      if (why)
          ui_set_text(kp.err, why);
-@@ -1206,9 +1282,21 @@ static void kp_key(lv_event_t *e)
+@@ -1206,9 +1284,21 @@ static void kp_key(lv_event_t *e)
          kp.entry[n] = *k;
          kp.entry[n + 1] = '\0';
      }
@@ -338,7 +340,7 @@ index 4ef7eea..6c5e1b2 100644
  void ui_keypad_ex(const ui_kp_t *k)
  {
      lv_obj_t *o = overlay_new();
-@@ -1220,46 +1308,75 @@ void ui_keypad_ex(const ui_kp_t *k)
+@@ -1220,46 +1310,75 @@ void ui_keypad_ex(const ui_kp_t *k)
      if (comma)
          *comma = '\0';
  
@@ -359,27 +361,29 @@ index 4ef7eea..6c5e1b2 100644
 +    bool long_title = sz.x > 174;
 +    kp.title = ui_label(box, 12, long_title ? 9 : 6, 174, long_title ? &ui_font_12 : &ui_font_16, UI_TEXT,
 +                        LV_TEXT_ALIGN_LEFT, k->title);
-+    // The lines under the title close up when there is no info line.
++    // Under the title the present value, then the info line (Ryan 4 Nov:
++    // the present value straight under the title on every keypad).
 +    int32_t ly = 26;
-+    if (k->info && k->info[0]) {
-+        kp.info = ui_label(box, 12, ly, 174, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, k->info);
-+        ly += 15;
-+    }
-+    kp.err = ui_label(box, 12, 6, 174, &ui_font_12, UI_FAULT, LV_TEXT_ALIGN_LEFT, "");
-     lv_label_set_long_mode(kp.err, LV_LABEL_LONG_WRAP);
-     lv_obj_add_flag(kp.err, LV_OBJ_FLAG_HIDDEN);
--    kp.value = ui_label(card, 190, 10, 143, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "");
 +    if (k->live_label) {
 +        kp.live = ui_label(box, 12, ly, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
 +        kp_side();
++        ly += 15;
 +    } else if (k->side_text[0]) {
 +        char t[64];
 +        if (k->side_text[1])
 +            lv_snprintf(t, sizeof t, "%s %s   %s %s", k->side_label[0], k->side_text[0], k->side_label[1], k->side_text[1]);
 +        else
 +            lv_snprintf(t, sizeof t, "%s %s", k->side_label[0], k->side_text[0]);
-+        ui_label(box, 12, ly, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, t);
++        kp.live = ui_label(box, 12, ly, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, t);
++        ly += 15;
 +    }
++    if (k->info && k->info[0])
++        kp.info = ui_label(box, 12, ly, 174, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, k->info);
++    // A refusal takes the place of the title and the lines under it.
++    kp.err = ui_label(box, 12, 6, 174, &ui_font_12, UI_FAULT, LV_TEXT_ALIGN_LEFT, "");
+     lv_label_set_long_mode(kp.err, LV_LABEL_LONG_WRAP);
+     lv_obj_add_flag(kp.err, LV_OBJ_FLAG_HIDDEN);
+-    kp.value = ui_label(card, 190, 10, 143, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "");
  
 +    // Right: the entry, in a field with a blue edge, over the last two columns.
 +    lv_obj_t *field = plain(box);
@@ -388,14 +392,12 @@ index 4ef7eea..6c5e1b2 100644
 +    lv_obj_set_style_radius(field, 4, 0);
 +    lv_obj_set_style_border_width(field, 2, 0);
 +    lv_obj_set_style_border_color(field, UI_BLUE, 0);
-+    // The lower and upper limit in the field's top corners, small (Ryan,
-+    // 4 Nov), the entry under them.
++    // The lower and upper limit in the field's top corners, small, the
++    // numbers alone (Ryan, 4 Nov), the entry under them.
 +    if (!k->no_limits) {
-+        char a[24], b[24], t[32];
-+        lv_snprintf(t, sizeof t, "Min %s", fmt_dec(a, sizeof a, k->min, k->dec));
-+        ui_label(field, 6, 3, 64, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, t);
-+        lv_snprintf(t, sizeof t, "Max %s", fmt_dec(b, sizeof b, k->max, k->dec));
-+        ui_label(field, 6, 3, 125, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_RIGHT, t);
++        char a[24], b[24];
++        ui_label(field, 6, 3, 60, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, fmt_dec(a, sizeof a, k->min, k->dec));
++        ui_label(field, 6, 3, 125, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_RIGHT, fmt_dec(b, sizeof b, k->max, k->dec));
 +    }
 +    kp.value = ui_label(field, 6, 9, 125, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "");
 +    kp_value_place();
@@ -441,7 +443,7 @@ index 4ef7eea..6c5e1b2 100644
      frame_refresh();
  }
  
-@@ -1368,8 +1485,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
+@@ -1368,8 +1487,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
      confirm_cancel = on_cancel;
      confirm_mid = on_mid;
      confirm_mid2 = on_mid2;
@@ -453,7 +455,7 @@ index 4ef7eea..6c5e1b2 100644
      lv_obj_t *box = ui_card(o, (480 - bw) / 2, 0, bw, 100);
      lv_obj_set_style_radius(box, 8, 0);
      lv_obj_t *t = ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, text);
-@@ -1387,9 +1505,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
+@@ -1387,9 +1507,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
          dialog_btn(box, 214, by, 91, 48, mid2, confirm_event, (void *)3);
          ui_btn(box, 313, by, 91, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
      } else if (mid) {
@@ -466,7 +468,7 @@ index 4ef7eea..6c5e1b2 100644
      } else {
          dialog_btn(box, 16, by, 150, 48, cancel, confirm_event, NULL);
          ui_btn(box, 174, by, 150, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
-@@ -1437,15 +1555,17 @@ static void shut_ask(void)
+@@ -1437,15 +1557,17 @@ static void shut_ask(void)
  {
      shut_close = true;
      if (!valve_calibrated()) {
@@ -487,7 +489,7 @@ index 4ef7eea..6c5e1b2 100644
      lv_obj_t *box = ui_card(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
      lv_obj_set_style_radius(box, 8, 0);
      ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Shut down the controller?");
-@@ -1473,27 +1593,21 @@ static void shut_ask(void)
+@@ -1473,27 +1595,21 @@ static void shut_ask(void)
      ui_label(row, 46, 12, bw - 70, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Close the valve to 0 %");
      shut_box_show();
      int32_t by = 42 + 44 + 8;
@@ -522,7 +524,7 @@ index 4ef7eea..6c5e1b2 100644
  #define TV_STEP (TV_H - 38)   // a page less one line
  static lv_obj_t *tv_card, *tv_btn[2];
  
-@@ -1522,7 +1636,7 @@ void ui_text_view(const char *title, const char *text)
+@@ -1522,7 +1638,7 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_t *o = overlay_new();
      // Not clickable, so a touch on the text does nothing; it still scrolls
      // from the buttons and shows where it is with the scroll bar.
@@ -531,7 +533,7 @@ index 4ef7eea..6c5e1b2 100644
      tv_card = c;
      lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
      lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-@@ -1533,19 +1647,19 @@ void ui_text_view(const char *title, const char *text)
+@@ -1533,19 +1649,19 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_set_style_radius(c, 3, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_opa(c, LV_OPA_COVER, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_color(c, UI_IDLE, LV_PART_SCROLLBAR);
@@ -596,7 +598,7 @@ index 0de94c8..d915aef 100644
  void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void));
  // With a third button between them (NULL mid: as ui_ask).
 diff --git a/InitialTesting/ui_home.c b/InitialTesting/ui_home.c
-index 978094a..2d2ed97 100644
+index 978094a..aff7a33 100644
 --- a/InitialTesting/ui_home.c
 +++ b/InitialTesting/ui_home.c
 @@ -32,7 +32,20 @@
@@ -728,13 +730,16 @@ index 978094a..2d2ed97 100644
 +    ui_btn(scr, 361, 104, 109, 48, UI_NAV, "Trend", trend_event, NULL);
      ui_btn(scr, 361, 160, 109, 48, UI_NAV, "Menu", menu_event, NULL);
      // The mode buttons on the tiles' bottom rows, in place of the SP and Go
-     // to boxes (0.15.3): Start AUTO outside AUTO, Stop AUTO in AUTO, both
-     // outlined blue; Home valve while not homed, filled (what is expected).
+-    // to boxes (0.15.3): Start AUTO outside AUTO, Stop AUTO in AUTO, both
+-    // outlined blue; Home valve while not homed, filled (what is expected).
 -    start_btn = ui_btn(pt.tile, 12, 116, 143, 40, UI_SECONDARY, "Start AUTO", start_event, NULL);
-+    // Under the bar and as wide (Ryan, 4 Nov: sized to the widest reading).
-+    start_btn = ui_btn(pt.tile, 156 - BAR_W, 116, BAR_W, 40, UI_SECONDARY, "Start AUTO", start_event, NULL);
-     ui_btn_outline(start_btn, true);
+-    ui_btn_outline(start_btn, true);
 -    stop_btn = ui_btn(vt.tile, 12, 116, 143, 40, UI_SECONDARY, "Stop AUTO", stop_event, NULL);
++    // to boxes (0.15.3): Start AUTO outside AUTO, filled dark blue with
++    // white lettering in the template (Ryan, 4 Nov; outlined to 0.15.7),
++    // Stop AUTO in AUTO, outlined blue; Home valve while not homed, filled.
++    // Under the bar and as wide (Ryan, 4 Nov: sized to the widest reading).
++    start_btn = ui_btn(pt.tile, 156 - BAR_W, 116, BAR_W, 40, UI_PRIMARY, "Start AUTO", start_event, NULL);
 +    stop_btn = ui_btn(vt.tile, 155 - BAR_W, 116, BAR_W, 40, UI_SECONDARY, "Stop AUTO", stop_event, NULL);
      ui_btn_outline(stop_btn, true);
 -    homev_btn = ui_btn(vt.tile, 12, 116, 143, 40, UI_PRIMARY, "Home valve", homev_event, NULL);
