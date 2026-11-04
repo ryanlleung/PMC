@@ -4,17 +4,19 @@ Schematics of the boards in the controller and wiring diagrams of the valve. The
 
 ## Schematics (`schematics/`)
 
-MikroE publishes a schematic PDF on each board's product page. One file per board, named after the board:
+MikroE publishes a schematic PDF on each board's product page. The files as downloaded:
 
-| Board | MikroE part | File |
+| Board | MikroE part | Files |
 | --- | --- | --- |
-| Mikromedia 4 for STM32 Capacitive | MIKROE-3618 | `mikromedia-4-stm32-capacitive-schematic.pdf` (to add) |
-| Mikromedia 4 Capacitive Shield | MIKROE-3631 | `mikromedia-4-capacitive-shield-schematic.pdf` (to add) |
-| Adapter Click | MIKROE-1432 | `adapter-click-schematic.pdf` (to add) |
-| Pressure 21 Click | Pressure 21 Click | `pressure-21-click-schematic.pdf` (to add) |
-| Stepper 3 Click | MIKROE-2035 | `stepper-3-click-schematic.pdf` (to add) |
-| Boost 10 Click | MIKROE-6927 | `boost-10-click-schematic.pdf` (to add) |
-| Power Monitor Click | MIKROE-4810 | [`power-monitor-click-v100-schematic.pdf`](schematics/power-monitor-click-v100-schematic.pdf) |
+| Mikromedia 4 for STM32 Capacitive | MIKROE-3618 | [`mikromedia-4-for-stm32-capacitive-schematic.pdf`](schematics/mikromedia-4-for-stm32-capacitive-schematic.pdf), manual [`mikromedia-4-stm32-capacitive-manual.pdf`](schematics/mikromedia-4-stm32-capacitive-manual.pdf) |
+| Mikromedia 4 Capacitive Shield | MIKROE-3631 | [`mikromedia-4-cap-mikrobus-shield-schematic.pdf`](schematics/mikromedia-4-cap-mikrobus-shield-schematic.pdf), [`Mikromedia_4_Capacitive_shield.pdf`](schematics/Mikromedia_4_Capacitive_shield.pdf) |
+| Adapter Click | MIKROE-1432 | [`Adapter_click_v100_Schematic.pdf`](schematics/Adapter_click_v100_Schematic.pdf), [`Adapter_Click.pdf`](schematics/Adapter_Click.pdf) |
+| Pressure 21 Click | Pressure 21 Click | [`Pressure_21_click_v100_Schematic.pdf`](schematics/Pressure_21_click_v100_Schematic.pdf), [`Pressure_21_Click.pdf`](schematics/Pressure_21_Click.pdf) |
+| Stepper 3 Click | MIKROE-2035 | [`stepper-3-click-schematic-v103.pdf`](schematics/stepper-3-click-schematic-v103.pdf), [`Stepper_3_Click.pdf`](schematics/Stepper_3_Click.pdf) |
+| Boost 10 Click | MIKROE-6927 | [`boost-10-click-schematic.pdf`](schematics/boost-10-click-schematic.pdf), [`Boost_10_Click.pdf`](schematics/Boost_10_Click.pdf) |
+| Power Monitor Click | MIKROE-4810 | [`power-monitor-click-v100-schematic.pdf`](schematics/power-monitor-click-v100-schematic.pdf), [`Power_Monitor_Click.pdf`](schematics/Power_Monitor_Click.pdf) |
+
+Also there: [`um1974-stm32-nucleo144-boards-mb1137-stmicroelectronics.pdf`](schematics/um1974-stm32-nucleo144-boards-mb1137-stmicroelectronics.pdf), the ST user manual for the Nucleo-144 boards.
 
 ## Wiring (`wiring/`)
 
