@@ -173,7 +173,14 @@ void touch_poll(void)
     // The points as the SDK gives them to LVGL (get_touch_coordinates).
     tp_touch_item_t t;
     memset(&t, 0, sizeof t);
-    uint8_t n = touch_last_err == TP_OK ? tp.touch.n_touches : 0;
+    // The controller runs in polling mode (ft5xx6_default_cfg): its INT pin
+    // is low while a finger is on the glass. The SDK reads the touch count
+    // only while INT is low and otherwise keeps the last one, so a lift
+    // whose final report (count 0) came and went between two polls, as
+    // during a slow redraw (Trend), left the press down: the button stayed
+    // lit and never clicked (Ryan, 4 Nov). INT high means no finger.
+    uint8_t n = touch_last_err == TP_OK && tp_press_detect(&tp) == TP_EVENT_PRESS_DET
+              ? tp.touch.n_touches : 0;
     if(n)
         tp_press_coordinates(&tp, &t);
     if(n > TP_N_TOUCHES_MAX)
