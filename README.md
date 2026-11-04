@@ -131,7 +131,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 
 At power-up the MercShore iPC logo shows on white with a bar that fills as the board starts, then Home; the firmware version and build date are in the corner.
 
-- **Home** ("<cryostat name> pressure controller"): Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar, Setpoint box), Valve tile (reading in %, bar, Go to box), the mode button (Home valve / Start AUTO / Switch to MANUAL), Valve, Menu and the pressure card (a tap on the sparkline opens Trend).
+- **Home** ("<cryostat name> pressure controller"): Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar, SP (setpoint) box), Valve tile (reading in %, bar, Go to box), the mode button (Home valve / Start AUTO / Switch to MANUAL), Valve, Menu and the pressure card (a tap on the sparkline opens Trend).
 - **Menu**: Records (Trend, Events), Calibrate (Valve position, Transducer), System (Diagnostics, Settings).
 - **Valve**: manual moves and the valve's state. **Valve position**: how the position was set, output turns, the current homing stage, and the date or age of the last successful homing. Motor steps and the live limit switch are on Diagnostics. **Events**: latched faults (tap for detail and help) and the event log. **Diagnostics**: raw readings in three rows: pressure sensor (signal, before calibration, room pressure), valve motor (steps, limit switch, last move), controller (board temperature, excitation, how long the last move took).
 - **Trend**: pressure (left axis), the setpoint in AUTO (dashed) and valve (right axis) over 1, 2, 5, 10, 30 min or 1 hour.

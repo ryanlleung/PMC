@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision D, 3 November 2026. Firmware 0.14.19. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
+Revision D, 3 November 2026. Firmware 0.14.20. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.19: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.20: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -108,7 +108,7 @@ Every screen has the same frame: a header with Back and Home buttons, the title,
 
 | Screen | How to reach it | What it shows and does |
 | --- | --- | --- |
-| Home | Home button | Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar, Setpoint box) and Valve tile (reading in %, bar, Go to box). The mode button reads Home valve, Start AUTO or Switch to MANUAL as the mode allows. Valve and Menu buttons. A tap on the sparkline opens Trend |
+| Home | Home button | Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar, SP (setpoint) box) and Valve tile (reading in %, bar, Go to box). The mode button reads Home valve, Start AUTO or Switch to MANUAL as the mode allows. Valve and Menu buttons. A tap on the sparkline opens Trend |
 | Valve | Home > Valve | MANUAL moves: hold Close or Open, -1 %, +1 %, -5 %, +5 %, Fully close, Fully open, and the Go to box for a typed % (white with a blue underline when it takes a tap). In AUTO the buttons are grey and Go to shows where AUTO is sending the valve; a tap asks to switch to MANUAL |
 | Menu | Home > Menu | Records: Trend, Events. Calibrate: Valve position, Transducer. System: Diagnostics, Settings |
 | Trend | Menu > Records > Trend | Pressure (left axis), the target while in AUTO (dashed) and valve % (right axis) over 1, 2, 5, 10, 30 min or 1 hour |
@@ -150,7 +150,7 @@ The entry is bumpless: the loop starts from where the valve is, so the first mov
 
 Once a second, after the pressure reading, the controller works out a new valve position and moves to it. The strip reads Regulating to X mB, then In band, X mB when the pressure is within the target band (0.1 mbar by default), then Stable at X mB after 60 s in the band. The Trend page shows the target as a dashed line.
 
-- Change the target from the Setpoint box on Home. A change of more than 5 mbar asks "Change setpoint to X mB?" first. Smaller changes apply at once.
+- Change the target from the SP (setpoint) box on Home. A change of more than 5 mbar asks "Change setpoint to X mB?" first. Smaller changes apply at once.
 - The valve moves in short bursts rather than continuously. Small reversals are held until the command is at least 0.1 % of travel from the valve, so the reading's noise does not turn the motor round inside the drive's backlash (firmware 0.12.12). The motion is still less smooth than the Mercury iTC's; this is a known difference (26 October 2026).
 - The Valve page is locked: the move buttons are grey and a tap on Go to asks to switch to MANUAL. Homing and changes to valve settings are refused in AUTO with "Switch to MANUAL first". Control-tuning drafts can be saved and take effect from the next control step; changed valve or sensor-selection drafts must wait for MANUAL.
 - The controller watches for a pressure that does not respond to valve moves (F-6), a pressure that does not settle in 30 min (W-2), a pressure above the sensor range (W-5) and the valve pinned at an end the wrong way (W-6). Each of these ends AUTO; section 9 says what to do.
@@ -360,4 +360,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | A | 27 October 2026 | First issue, from firmware 0.12.17 and the design documents listed in the reference block |
 | B | 2 November 2026 | Firmware 0.14.8: the text link takes the remote command set only (engineering commands, the step test and the typed calibration table removed) |
 | C | 3 November 2026 | Checked against firmware 0.14.8 on main: corrected movement prerequisites, independent homing Return and four stages, motor-supply behaviour and legacy status bit, tuning saves in AUTO, motor defaults, current screens and labels, remote refusals and version references. Historical bench status retained separately |
-| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %). Firmware 0.14.15: the Valve position state reads Set by hand or Last saved, not homed. Firmware 0.14.16: a STOP on the screen no longer holds remote moves (no Allow on the strip). Firmware 0.14.17: the limit switch question's button reads Set as seat. Firmware 0.14.18: the Valve screen's buttons use the same column widths as the other screens. Firmware 0.14.19: a tap during a slow redraw (Trend) no longer leaves the button lit without acting |
+| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %). Firmware 0.14.15: the Valve position state reads Set by hand or Last saved, not homed. Firmware 0.14.16: a STOP on the screen no longer holds remote moves (no Allow on the strip). Firmware 0.14.17: the limit switch question's button reads Set as seat. Firmware 0.14.18: the Valve screen's buttons use the same column widths as the other screens. Firmware 0.14.19: a tap during a slow redraw (Trend) no longer leaves the button lit without acting. Firmware 0.14.20: on Home, the Setpoint label reads SP, and SP and Go to are at the button text size |

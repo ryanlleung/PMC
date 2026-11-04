@@ -189,7 +189,8 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
     lv_obj_set_pos(t->bar, 12, 76);   // 14 px from the digits, as the caption is above them
     lv_obj_set_size(t->bar, BAR_W, 30);
     lv_obj_add_event_cb(t->bar, bar_draw, LV_EVENT_DRAW_MAIN, t);
-    ui_label(t->tile, 12, 128, 50, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, sp);
+    // SP / Go to at the button text size, 16 px (Ryan, 4 Nov).
+    ui_label(t->tile, 12, 126, 54, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, sp);
     t->box = lv_obj_create(t->tile);
     lv_obj_remove_style_all(t->box);
     lv_obj_remove_flag(t->box, LV_OBJ_FLAG_SCROLLABLE);
@@ -526,7 +527,7 @@ void ui_reset_fault_event(lv_event_t *e)
 /* Build and refresh ------------------------------------------------------ */
 static void home_build(lv_obj_t *scr)
 {
-    make_tile(scr, &pt, 10, "Pressure", "mB", "Setpoint", true, target_event);
+    make_tile(scr, &pt, 10, "Pressure", "mB", "SP", true, target_event);
     make_tile(scr, &vt, 186, "Valve", "%", "Go to", false, goto_event);
     mode_btn = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Home valve", mode_event, NULL);
     valve_btn = ui_btn(scr, 361, 104, 109, 48, UI_NAV, "Valve", valve_event_cb, NULL);
