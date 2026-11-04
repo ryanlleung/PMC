@@ -97,10 +97,6 @@ bool valve_goto_pct10(int32_t p, const char **why) { (void)why; v_target10 = p; 
 bool valve_goto_pct100(int32_t p, const char **why) { return valve_goto_pct10(p / 10, why); }
 bool valve_move_steps(int32_t steps, const char **why) { (void)steps; (void)why; return true; }
 void valve_stop(void) { moving = false; }
-static bool v_held;   // the remote hold after a STOP on the screen (valve.c)
-void valve_stop_local(void) { valve_stop(); v_held = true; }
-bool valve_remote_held(void) { return v_held; }
-void valve_remote_allow(void) { v_held = false; }
 bool valve_stop_latches(void) { return valve_auto(); }
 int valve_fault_count(void) { return v_f01 + v_f16 + v_f12; }
 bool valve_motion_blocked(void) { return v_f12 || v_f16; }

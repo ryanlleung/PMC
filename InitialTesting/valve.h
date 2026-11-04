@@ -127,13 +127,6 @@ int32_t valve_target_pct10(void);                // where the valve is going
 int32_t valve_pct_milli(void);                   // position in 0.001 % (for 2 dp on screen)
 int32_t valve_target_pct_milli(void);
 void valve_stop(void);                           // STOP (in AUTO: MANUAL, nothing latched)
-// STOP on the screen: valve_stop, and the network's moves (VALV SET, MODE
-// AUTO, Modbus valve % and AUTO coil) are held until valve_remote_allow
-// (Allow on the screen), so a master writing every scan cannot undo it.
-void valve_stop_local(void);
-bool valve_remote_held(void);
-void valve_remote_allow(void);
-#define VALVE_REMOTE_HELD_WHY "Stopped on the screen: Allow remote moves there"
 bool valve_stop_latches(void);                   // STOP would end AUTO now (red STOP button)
 // ALARM RESET; returns the number latched before, left = those kept.
 int valve_reset(char *left, size_t n);

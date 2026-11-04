@@ -243,9 +243,7 @@ static bool set(const char *c)
         else if (!valve_set_target((int32_t)v, &why))
             refuse_why(why);
     } else if (strcmp(c, "MODE AUTO") == 0) {
-        if (PMC_REMOTE_SWITCH && valve_remote_held() && !valve_auto())
-            refuse(212, VALVE_REMOTE_HELD_WHY);
-        else if (!valve_start_auto(&why))
+        if (!valve_start_auto(&why))
             refuse_why(why);
     } else if (strcmp(c, "MODE MANUAL") == 0) {
         // Outside AUTO there is nothing to end; the valve stays where it is.
@@ -258,8 +256,6 @@ static bool set(const char *c)
             refuse(101, "Expected: VALV SET <%%>");
         else if (v < 0 || v > 1000)
             refuse(102, "Outside 0 to 100 %%");
-        else if (PMC_REMOTE_SWITCH && valve_remote_held())
-            refuse(212, VALVE_REMOTE_HELD_WHY);
         else if (!valve_goto_pct10((int32_t)v, &why))
             refuse_why(why);
     } else if (strcmp(c, "STOP") == 0) {

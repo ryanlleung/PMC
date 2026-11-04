@@ -204,8 +204,6 @@ uint8_t mbmap_write_regs(uint16_t addr, uint16_t n, const uint16_t *v)
                 return MODBUS_EX_VALUE;
             int32_t p = (int32_t)lroundf(f * 100.0f);
             fixed_fmt(t, sizeof t, p, 2);
-            if (valve_remote_held())
-                return refused("valve %", VALVE_REMOTE_HELD_WHY);
             if (!valve_goto_pct100(p, &why))
                 return refused("valve %", why);
             valve_event("NET", "Modbus %s: valve to %s %%", peer, t);
@@ -223,8 +221,6 @@ uint8_t mbmap_write_coil(uint16_t addr, bool on)
     case CO_AUTO:
         if (on == valve_auto())
             return 0;
-        if (on && valve_remote_held())
-            return refused("AUTO", VALVE_REMOTE_HELD_WHY);
         if (on ? !valve_start_auto(&why) : !valve_to_manual(&why))
             return refused(on ? "AUTO" : "MANUAL", why);
         valve_event("NET", "Modbus %s: %s", peer, on ? "AUTO" : "MANUAL");

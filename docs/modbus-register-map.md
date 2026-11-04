@@ -15,7 +15,7 @@ Map version 1, checked against firmware 0.14.8 (`main` commit `bbf2ec46fa6dccaba
 
 With writes on, the writable registers and command coils go through the same calls as the screen buttons, so the same checks and refusals apply. A write the controller refuses answers exception 4 and logs a NET event with the reason ("Switch to MANUAL first", "No target set", ...). Each accepted write is logged as a NET event with the client's IP address.
 
-Rewriting the target with the value it already has changes nothing (no event; the W-2 and Stable timers run on), and a refused write is logged once a minute at most. A STOP on the screen holds the network's moves (0.13.31): valve % writes and AUTO coil = 1 answer exception 4 ("Stopped on the screen: Allow remote moves there") until the operator taps Allow on the screen's strip, so a master that writes every scan cannot start the valve or AUTO again. STOP, RESET, OK, AUTO = 0 and the target are not held. A STOP from the network (coil 1, or STOP on port 8888) does not hold.
+Rewriting the target with the value it already has changes nothing (no event; the W-2 and Stable timers run on), and a refused write is logged once a minute at most. A STOP on the screen does not hold the network's moves (the hold of 0.13.31 was removed in 0.14.16).
 
 | Exception | Meaning |
 | --- | --- |

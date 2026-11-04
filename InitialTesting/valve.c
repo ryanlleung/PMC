@@ -147,7 +147,6 @@ static bool hold_on;              // a screen button drives the valve while pres
 static const char *auto_said;     // the AUTO move refusal last logged (once per reason, per AUTO run)
 static bool ref_unproven;         // Direction or coil order changed since the last homing
 static bool running;              // the main loop has started (not the settings load at start-up)
-static bool remote_hold;          // STOP pressed on the screen: remote moves wait for Allow there
 static int32_t question_at;       // where the switch was pressed, full steps (a mode change rescales the count)
 static int32_t q_count(void) { return question_at * stepper3_scale(); }   // in motor counts now
 
@@ -867,32 +866,6 @@ static bool can_reset(fault_t f)
     if (f == F01) return sensed && !cause_f01;
     if (f == F02) return sensed && !cause_f02;
     return true;
-}
-
-/* A STOP on the screen holds the network's moves (port 8888 VALV SET and
- * MODE AUTO, Modbus valve % and the AUTO coil) until the operator taps
- * Allow on the screen: a master that writes every scan would otherwise
- * start the valve again at its next scan. Network STOP, targets, resets
- * and queries are not held. Only where the network is remote (the Ethernet
- * build) and while Remote control is On (Off holds everything anyway). */
-void valve_stop_local(void)
-{
-    valve_stop();
-#if PMC_REMOTE_SWITCH
-    if (!remote_hold)
-        ev("NET", "Remote moves held after STOP on the screen (Allow there to release)");
-    remote_hold = true;
-#endif
-}
-
-bool valve_remote_held(void) { return remote_hold && cfg_remote(); }
-
-void valve_remote_allow(void)
-{
-    if (!remote_hold)
-        return;
-    remote_hold = false;
-    ev("NET", "Remote moves allowed (screen)");
 }
 
 bool valve_stop_latches(void)

@@ -455,15 +455,7 @@ static void stop_event(lv_event_t *e)
 {
     (void)e;
     ui_overlay_close();
-    valve_stop_local();
-    frame_refresh();
-}
-
-// Allow on the strip: the network's moves, held since a STOP here, go again.
-static void allow_remote_event(lv_event_t *e)
-{
-    (void)e;
-    valve_remote_allow();
+    valve_stop();
     frame_refresh();
 }
 
@@ -924,8 +916,7 @@ static void frame_refresh(void)
     // The keypad uses the strip's row; an empty line (Home, idle) hides it.
     int32_t die_mc;
     bool hot = sense_hot(&die_mc);
-    bool held = valve_remote_held();
-    bool quiet = !msg_until && !nf && !stepper3_override() && !held && !hot && !line_text[0];
+    bool quiet = !msg_until && !nf && !stepper3_override() && !hot && !line_text[0];
     show(strip, !(overlay && (kp_open || overlay_full)) && !quiet);
     char buf[96];
     if (msg_until) {
@@ -941,11 +932,6 @@ static void frame_refresh(void)
         lv_snprintf(n, sizeof n, "%d faults", nf);
         ui_strip_action("Reset fault", nf > 1 ? n : NULL, ui_reset_fault_event);
         strip_draw(UI_STRIP_FAULT, NULL, buf, false, true);
-    } else if (held) {
-        // On every screen until Allow: the network cannot move the valve or
-        // start AUTO meanwhile (a master writing every scan would undo STOP).
-        ui_strip_action("Allow", "remote", allow_remote_event);
-        strip_draw(UI_STRIP_WARN, NULL, "Stopped here: remote moves held", false, true);
     } else if (stepper3_override()) {
         // While the Limit override button is held (or MOT OVERRIDE armed it):
         // no Cancel, releasing the button ends it (0.13.2, Ryan 28 Oct).
@@ -978,7 +964,7 @@ static void fast_timer(lv_timer_t *t)
     touch_watch(sa.x1, sa.y1, sa.x2, sa.y2);
     if (touch_watch_take() && !lv_obj_has_state(stop_btn, LV_STATE_PRESSED)) {
         ui_overlay_close();
-        valve_stop_local();
+        valve_stop();
         frame_refresh();
     }
     if (frame_due && !overlay) {
