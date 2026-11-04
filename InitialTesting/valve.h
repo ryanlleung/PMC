@@ -14,9 +14,10 @@
  * Ported from the simulator (stage 2 of the porting plan). Settings are kept
  * by CFG SAVE (cfg.c, stage 3).
  *
- * Modes: NOT CALIBRATED (boot, watchdog reset, after F-3/F-4 or an
- * aborted calibration), CALIBRATING, MANUAL and AUTO (stage 8,
- * ctrl.c). Nothing moves at boot.
+ * Modes: OFF (every start, 0.15.1; Shut down below), NOT CALIBRATED
+ * (turned on not homed, after F-3/F-4 or an aborted calibration),
+ * CALIBRATING, MANUAL and AUTO (stage 8, ctrl.c), SHUTDOWN. Nothing moves
+ * at boot.
  *
  * AUTO (from MANUAL) after the entry checks (ctrl_check), with
  * the target set; bumpless from where the valve is going. Every second,
@@ -26,7 +27,7 @@
  * MANUAL too, the valve idle (no PAUSED state since 0.11.25, Ryan 22 Oct);
  * the strip shows W-2 until OK or the next Start AUTO. Leaving AUTO ramps the valve down and
  * MANUAL holds where it stops. MANUAL moves, homing and the valve settings
- * are refused in AUTO ("Switch to MANUAL first").
+ * are refused in AUTO ("Stop AUTO first" on the screen from 0.15.3; ERR 202 "Switch to MANUAL first" over the network).
  *
  * Calibration (Control Logic 4): if the switch is pressed, an N_clear
  * clearance move off it first (F-4 if still pressed); a fast close at
@@ -52,7 +53,8 @@
  * Events go to the log only; nothing is sent unasked.
  */
 
-typedef enum { VALVE_NOT_CAL, VALVE_CALIBRATING, VALVE_MANUAL, VALVE_AUTO } valve_mode_t;
+// The numbers are the Modbus mode register (docs/modbus-register-map.md).
+typedef enum { VALVE_NOT_CAL, VALVE_CALIBRATING, VALVE_MANUAL, VALVE_AUTO, VALVE_SHUTDOWN, VALVE_OFF } valve_mode_t;
 
 void valve_init(void);           // after stepper3_init(); logs BOOT power-up
 void valve_task(void);           // every main-loop pass: calibration, limit hits
@@ -63,8 +65,9 @@ const char *valve_mode_name(void);
 bool valve_calibrated(void);
 // How the position was last set: homed on the switch, or set by the
 // operator (closed or a typed %) or from the saved position, neither
-// checked against the switch. NONE when not homed.
-typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED } valve_ref_t;
+// checked against the switch, or kept from the last Shut down of a homed
+// valve (PARKED; not homed before it: SAVED). NONE when not homed.
+typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
 int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
@@ -110,8 +113,7 @@ bool valve_calibrate(const char **why);          // VALVE CAL
 void valve_uncalibrate(const char *why);         // e.g. motor direction changed
 // Takes a saved step count as the position (operator's choice at boot).
 bool valve_restore(int32_t count, const char **why);
-// Takes the valve as fully closed where it stands (0 %, homed without the
-// switch): the operator knows it is seated. VALVE CLOSED.
+// Takes the present position as 0 % (count 0, reads 0.00 %), without homing.
 bool valve_set_closed(const char **why);
 // The same, taking the present position as pct100 (0.01 %, 0 to 10000).
 bool valve_set_position(int32_t pct100, const char **why);
@@ -120,21 +122,10 @@ uint32_t valve_cal_elapsed_s(void);              // into the calibration running
 int valve_cal_step(void);    // -1 not calibrating, 0 moving off the switch, 1-4 step
 bool valve_goto_pct10(int32_t pct10, const char **why);   // VALVE SET, 0.1 %
 bool valve_goto_pct100(int32_t pct100, const char **why); // the same in 0.01 % (keypad)
-// A move by steps from where the valve is (or is going), calibrated or not:
-// the Valve page's Close, Open, -5 % and +5 % before a calibration. A
-// closing move still stops at the switch (no question without a zero).
-bool valve_move_steps(int32_t steps, const char **why);
 int32_t valve_target_pct10(void);                // where the valve is going
 int32_t valve_pct_milli(void);                   // position in 0.001 % (for 2 dp on screen)
 int32_t valve_target_pct_milli(void);
 void valve_stop(void);                           // STOP (in AUTO: MANUAL, nothing latched)
-// STOP on the screen: valve_stop, and the network's moves (VALV SET, MODE
-// AUTO, Modbus valve % and AUTO coil) are held until valve_remote_allow
-// (Allow on the screen), so a master writing every scan cannot undo it.
-void valve_stop_local(void);
-bool valve_remote_held(void);
-void valve_remote_allow(void);
-#define VALVE_REMOTE_HELD_WHY "Stopped on the screen: Allow remote moves there"
 bool valve_stop_latches(void);                   // STOP would end AUTO now (red STOP button)
 // ALARM RESET; returns the number latched before, left = those kept.
 int valve_reset(char *left, size_t n);
@@ -143,6 +134,27 @@ bool valve_fault_first(const char **tag, const char **text);   // highest priori
 bool valve_fault_is(const char *tag);            // e.g. "F-5" latched
 bool valve_question(int32_t *pct10);             // switch question waiting, where
 bool valve_answer(bool set_zero, const char **why);   // VALVE SETZERO / VALVE SKIP
+
+/* Shut down (0.15.0, Ryan 4 Nov; to 0 % from 0.15.1, Ryan: "should not
+ * home to limit, just go to 0"): AUTO ends, the valve goes to 0 % at the
+ * run rate and the coils go off: OFF. Not homed: OFF at once, the valve
+ * not moved. Moves, AUTO and homing are refused while OFF (pressure is
+ * still read); a double tap on the screen turns it on (MANUAL, or NOT
+ * HOMED). STOP cancels a shut down under way (MANUAL, the valve where it
+ * stopped); so does the limit switch before 0 % (MANUAL and the switch
+ * question). Every start is OFF (0.15.1). */
+bool valve_shutdown(const char **why);
+bool valve_turn_on(const char **why);            // OFF -> MANUAL (NOT HOMED if not homed)
+// valvepos.c at start-up: the count kept at the last Shut down, the limit
+// switch released. homed: the valve was homed (PARKED), else SAVED. Stays
+// OFF (MANUAL if already turned on).
+bool valve_restore_parked(int32_t count, bool homed, const char **why);
+// While shutting down: how much of the move is left (100 at the start, 0
+// at 0 %) and the seconds left at the run rate.
+bool valve_shutdown_progress(int *left_pct, int *secs);
+// Why moves and mode changes are refused now: off or shutting down; NULL
+// otherwise.
+const char *valve_off_why(void);
 
 // Latched fault i (0 = highest priority, below valve_fault_count()).
 typedef struct {

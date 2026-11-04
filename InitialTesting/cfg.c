@@ -46,20 +46,23 @@
 #define CFG_ADDR_A   0x7FD000UL
 #define CFG_ADDR_B   0x7FE000UL
 #define CFG_MAGIC    0x47464350UL   // "PCFG"
-#define CFG_VERSION  6
+#define CFG_VERSION  7
 #define OLD_VALVE_N  6       // valve[] in records before version 6
 
 enum { M_RATE, M_START, M_ACCEL, M_MODE, M_HOLD, M_DIR, M_ORDER, M_N };
 static const char *const mot_name[M_N] = { "RATE", "START", "ACCEL", "MODE", "HOLD", "DIR", "ORDER" };
 
-// Control tuning, used from stage 8 (AUTO). Fixed point as noted.
-enum { T_KP, T_TI, T_OUTMIN, T_DB, T_KDIR, T_BAND, T_N };
-static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", "BAND" };
-static const int32_t tune_def[T_N] = { 400, 25, 0, 8, 1, 10 };
-static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 10 };
-static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000 };
-static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10 };
-// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar.
+// Control tuning, used from stage 8 (AUTO). Fixed point as noted. KD
+// (0.14.21, Ryan 4 Nov) is last so older records keep their order; they
+// have the first six (OLD_TUNE_N) and load KD 0, as the loop ran before.
+enum { T_KP, T_TI, T_OUTMIN, T_DB, T_KDIR, T_BAND, T_KD, T_N };
+#define OLD_TUNE_N  6        // tune[] in records before version 7
+static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", "BAND", "KD" };
+static const int32_t tune_def[T_N] = { 400, 25, 0, 8, 1, 10, 0 };
+static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 10,   0 };
+static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000 };
+static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10, 0 };
+// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar, 0.01 % per mbar/s.
 
 typedef struct {
     uint32_t serial;
@@ -86,13 +89,28 @@ typedef struct {
     uint32_t crc;
 } cfg_rec_t;
 
+// Version 6 (0.13.6 to 0.14.20), read only: version 7 without KD.
+typedef struct {
+    uint32_t magic, version, size, rev;
+    int32_t mot[M_N];
+    int32_t valve[VALVE_N_SETTINGS];
+    int32_t tune[OLD_TUNE_N];
+    uint32_t nsens, active;
+    cfg_sens_t sens[CFG_SENS_MAX];
+    char saved_at[20];
+    char name[CFG_NAME_LEN + 4];
+    uint32_t net_ip, net_mask;
+    uint32_t remote;
+    uint32_t crc;
+} cfg_rec_v6_t;
+
 // Version 5 (0.13.4 and 0.13.5), read only: version 6 with one valve
 // setting fewer.
 typedef struct {
     uint32_t magic, version, size, rev;
     int32_t mot[M_N];
     int32_t valve[OLD_VALVE_N];
-    int32_t tune[T_N];
+    int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
     cfg_sens_t sens[CFG_SENS_MAX];
     char saved_at[20];
@@ -107,7 +125,7 @@ typedef struct {
     uint32_t magic, version, size, rev;
     int32_t mot[M_N];
     int32_t valve[OLD_VALVE_N];
-    int32_t tune[T_N];
+    int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
     cfg_sens_t sens[CFG_SENS_MAX];
     char saved_at[20];
@@ -122,7 +140,7 @@ typedef struct {
     uint32_t magic, version, size, rev;
     int32_t mot[M_N];
     int32_t valve[OLD_VALVE_N];
-    int32_t tune[T_N];
+    int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
     cfg_sens_t sens[CFG_SENS_MAX];
     char saved_at[20];
@@ -136,7 +154,7 @@ typedef struct {
     uint32_t magic, version, size, rev;
     int32_t mot[M_N];
     int32_t valve[OLD_VALVE_N];
-    int32_t tune[T_N];
+    int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
     cfg_sens_t sens[CFG_SENS_MAX];
     char saved_at[20];
@@ -301,7 +319,7 @@ static const char *values_why(const cfg_rec_t *r)
     return NULL;
 }
 
-// A version 1 record as version 6: one sensor, default tuning, the return
+// A version 1 record as version 7: one sensor, default tuning, the return
 // as the back-off.
 static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
 {
@@ -323,25 +341,34 @@ static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
     r->remote = 1;
 }
 
-// A version 2 to 5 record as version 6. They are version 6 without the
-// return (valve[6]) and without the fields after crc_at; the return is
-// their back-off, so homing ends where it did. Fields they lack are 0 (the
-// build's address), except Remote control, On as the default; a
-// version 5 record has its own.
-static void from_old(const void *v, size_t tune_at, size_t crc_at, cfg_rec_t *r)
+// A version 2 to 6 record as version 7. They have the first six tuning
+// values (KD reads 0, the loop as it ran) and none of the fields after
+// crc_at. Versions 2 to 5 also lack the return (valve[6]): it is their
+// back-off, so homing ends where it did. Fields they lack are 0 (the
+// build's address), except Remote control, On as the default; versions 5
+// and 6 have their own.
+static void from_old(const void *v, size_t tune_at, size_t crc_at, bool has_return, cfg_rec_t *r)
 {
+    const uint8_t *b = v;
+    const size_t old_tune = OLD_TUNE_N * sizeof(int32_t);
     memset(r, 0, sizeof *r);
-    r->remote = 1;                                                 // version 5 overwrites it
-    memcpy(r, v, tune_at);                                         // header, mot, valve[0..5]
-    memcpy(r->tune, (const uint8_t *)v + tune_at, crc_at - tune_at);   // tune on
-    r->valve[6] = r->valve[3];
+    r->remote = 1;                                                 // versions 5 and 6 overwrite it
+    memcpy(r, b, tune_at);                                         // header, mot, valve
+    memcpy(r->tune, b + tune_at, old_tune);                        // KP to BAND
+    memcpy(&r->nsens, b + tune_at + old_tune, crc_at - tune_at - old_tune);   // nsens on
+    if (!has_return)
+        r->valve[6] = r->valve[3];
     r->version = CFG_VERSION;
     r->size = sizeof *r;
 }
 _Static_assert(offsetof(cfg_rec_v5_t, tune) == offsetof(cfg_rec_t, valve) + OLD_VALVE_N * 4, "old valve[] then tune");
+_Static_assert(offsetof(cfg_rec_v6_t, tune) == offsetof(cfg_rec_t, tune), "v6 has the whole valve[]");
+_Static_assert(offsetof(cfg_rec_t, nsens) == offsetof(cfg_rec_t, tune) + T_N * 4, "tune then nsens");
+_Static_assert(offsetof(cfg_rec_v6_t, crc) - offsetof(cfg_rec_v6_t, tune) - OLD_TUNE_N * 4 ==
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v6 is v7 from nsens on");
 _Static_assert(offsetof(cfg_rec_v5_t, crc) - offsetof(cfg_rec_v5_t, tune) ==
-               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, tune), "v5 is v6 from tune on");
-#define FROM_OLD(T, v, r) from_old((v), offsetof(T, tune), offsetof(T, crc), (r))
+               offsetof(cfg_rec_v6_t, crc) - offsetof(cfg_rec_v6_t, tune), "v5 is v6 from tune on");
+#define FROM_OLD(T, v, ret, r) from_old((v), offsetof(T, tune), offsetof(T, crc), (ret), (r))
 
 // Reads one sector into slot[i]; NULL if usable, else why not.
 static const char *read_slot(int i)
@@ -352,6 +379,7 @@ static const char *read_slot(int i)
         cfg_rec_v3_t v3;
         cfg_rec_v4_t v4;
         cfg_rec_v5_t v5;
+        cfg_rec_v6_t v6;
     } old;
     cfg_rec_t *r = &slot[i];
     extflash_read(slot_addr[i], r, sizeof *r);
@@ -367,23 +395,28 @@ static const char *read_slot(int i)
         memcpy(&old.v2, r, sizeof old.v2);
         if (old.v2.crc != crc32_ieee(&old.v2, offsetof(cfg_rec_v2_t, crc)))
             return "CRC mismatch";
-        FROM_OLD(cfg_rec_v2_t, &old.v2, r);
+        FROM_OLD(cfg_rec_v2_t, &old.v2, false, r);
         lv_strlcpy(r->name, FACTORY_NAME, sizeof r->name);   // no name before version 3
     } else if (r->magic == CFG_MAGIC && r->version == 3 && r->size == sizeof old.v3) {
         memcpy(&old.v3, r, sizeof old.v3);
         if (old.v3.crc != crc32_ieee(&old.v3, offsetof(cfg_rec_v3_t, crc)))
             return "CRC mismatch";
-        FROM_OLD(cfg_rec_v3_t, &old.v3, r);
+        FROM_OLD(cfg_rec_v3_t, &old.v3, false, r);
     } else if (r->magic == CFG_MAGIC && r->version == 4 && r->size == sizeof old.v4) {
         memcpy(&old.v4, r, sizeof old.v4);
         if (old.v4.crc != crc32_ieee(&old.v4, offsetof(cfg_rec_v4_t, crc)))
             return "CRC mismatch";
-        FROM_OLD(cfg_rec_v4_t, &old.v4, r);
+        FROM_OLD(cfg_rec_v4_t, &old.v4, false, r);
     } else if (r->magic == CFG_MAGIC && r->version == 5 && r->size == sizeof old.v5) {
         memcpy(&old.v5, r, sizeof old.v5);
         if (old.v5.crc != crc32_ieee(&old.v5, offsetof(cfg_rec_v5_t, crc)))
             return "CRC mismatch";
-        FROM_OLD(cfg_rec_v5_t, &old.v5, r);
+        FROM_OLD(cfg_rec_v5_t, &old.v5, false, r);
+    } else if (r->magic == CFG_MAGIC && r->version == 6 && r->size == sizeof old.v6) {
+        memcpy(&old.v6, r, sizeof old.v6);
+        if (old.v6.crc != crc32_ieee(&old.v6, offsetof(cfg_rec_v6_t, crc)))
+            return "CRC mismatch";
+        FROM_OLD(cfg_rec_v6_t, &old.v6, true, r);
     } else if (r->magic != CFG_MAGIC || r->version != CFG_VERSION || r->size != sizeof *r) {
         return "not a settings record of this version";
     } else if (r->crc != rec_crc(r)) {
@@ -517,7 +550,7 @@ static void sync_cal_saved(void)
 // (cfg_save_with, PID).
 static const char *busy_why(void)
 {
-    if (valve_auto()) return "Switch to MANUAL first";
+    if (valve_auto()) return "Stop AUTO first";
     if (valve_mode() == VALVE_CALIBRATING || stepper3_busy()) return "wait for the valve to stop";
     return NULL;
 }
@@ -694,6 +727,7 @@ static int32_t *key_ref(cfg_rec_t *r, cfg_key_t k)
     case CFG_DB:      return &r->tune[T_DB];
     case CFG_KDIR:    return &r->tune[T_KDIR];
     case CFG_BAND:    return &r->tune[T_BAND];
+    case CFG_KD:      return &r->tune[T_KD];
     default:          return NULL;
     }
 }
@@ -741,7 +775,7 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
     static const int32_t vlo[] = { 1000, 16, 16, 10, 10, 0, 10 }, vhi[] = { 300000, 1000, 1000, 5000, 10000, 0, 5000 };
     _Static_assert(sizeof vlo / sizeof vlo[0] == VALVE_N_SETTINGS, "valve ranges");
     *lo = 0; *hi = 0;
-    if (k >= CFG_KP && k <= CFG_BAND) {
+    if (k >= CFG_KP && k <= CFG_KD) {
         *lo = tune_lo[k - CFG_KP]; *hi = tune_hi[k - CFG_KP];
     } else if (k == CFG_RATE || k == CFG_START) {
         *lo = STEPPER3_RATE_MIN; *hi = STEPPER3_RATE_MAX;
@@ -754,11 +788,11 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
         *lo = vlo[i]; *hi = vhi[i];   // the indices key_ref() uses
     }
 }
-_Static_assert(CFG_KP + T_N - 1 == CFG_BAND, "tuning keys in tune[] order");
+_Static_assert(CFG_KP + T_N - 1 == CFG_KD, "tuning keys in tune[] order");
 
 int32_t cfg_tune(cfg_key_t k)
 {
-    return k >= CFG_KP && k <= CFG_BAND ? tune[k - CFG_KP] : 0;
+    return k >= CFG_KP && k <= CFG_KD ? tune[k - CFG_KP] : 0;
 }
 
 static cfg_rec_t cand;   // cfg_save_with, cfg_sensor_use and cfg_load_live (never at once)
@@ -773,11 +807,11 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     for (int k = 0; k < CFG_N; k++) {
         if (!set[k])
             continue;
-        if (tune_only && (k < CFG_KP || k > CFG_BAND)) {
+        if (tune_only && (k < CFG_KP || k > CFG_KD)) {
             // cand holds the live values here (only tuning keys are written).
             bool same = k == CFG_SENSOR ? (uint32_t)v[k] == cand.sens[cand.active].serial
                                         : v[k] == *key_ref(&cand, (cfg_key_t)k);
-            if (!same) { *why = "Switch to MANUAL first"; return false; }
+            if (!same) { *why = "Stop AUTO first"; return false; }
             continue;
         }
         if (k == CFG_SENSOR) {

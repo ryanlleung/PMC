@@ -73,10 +73,13 @@ static void refuse(int err, const char *fmt, ...)
  *                                 212 the valve cannot move now (the
  *                                     switch, a move running), or the
  *                                     clock is not running
+ *                                 213 controller off or shutting down
+ *                                     (0.15.0): turned on at the screen
  */
 static const struct { const char *head; int num; const char *text; } why_codes[] = {
     { "Homing", 201, "Homing, STOP to cancel" },
     { "Switch to MANUAL", 202, "Switch to MANUAL first" },
+    { "Stop AUTO", 202, "Switch to MANUAL first" },   // the screen's wording from 0.15.3
     { "Reset the fault", 203, "Reset the fault first" },
     { "Home the valve", 204, "Home the valve first" },
     { "No valid pressure", 205, "No valid pressure" }, { "No pressure", 205, "No valid pressure" },
@@ -85,6 +88,8 @@ static const struct { const char *head; int num; const char *text; } why_codes[]
     { "Pressure above", 208, "Pressure above the sensor range" },
     { "Pressure response", 209, "Control settings not set" },
     { "Tuning not set", 209, "Control settings not set" },
+    { "Controller is off", 213, "Controller is off" },
+    { "Shutting down", 213, "Shutting down, STOP to cancel" },
     { "Expected", 101, NULL },
     { "Outside", 102, NULL },
 };
@@ -243,13 +248,14 @@ static bool set(const char *c)
         else if (!valve_set_target((int32_t)v, &why))
             refuse_why(why);
     } else if (strcmp(c, "MODE AUTO") == 0) {
-        if (PMC_REMOTE_SWITCH && valve_remote_held() && !valve_auto())
-            refuse(212, VALVE_REMOTE_HELD_WHY);
-        else if (!valve_start_auto(&why))
+        if (!valve_start_auto(&why))
             refuse_why(why);
     } else if (strcmp(c, "MODE MANUAL") == 0) {
         // Outside AUTO there is nothing to end; the valve stays where it is.
-        if (valve_auto() && !valve_to_manual(&why))
+        // Off or shutting down it is refused: only the screen turns it on.
+        if (valve_off_why())
+            refuse_why(valve_off_why());
+        else if (valve_auto() && !valve_to_manual(&why))
             refuse_why(why);
     } else if (strncmp(c, "MODE", 4) == 0 && (c[4] == ' ' || c[4] == '\0')) {
         refuse(101, "Expected: MODE AUTO or MODE MANUAL");
@@ -258,8 +264,6 @@ static bool set(const char *c)
             refuse(101, "Expected: VALV SET <%%>");
         else if (v < 0 || v > 1000)
             refuse(102, "Outside 0 to 100 %%");
-        else if (PMC_REMOTE_SWITCH && valve_remote_held())
-            refuse(212, VALVE_REMOTE_HELD_WHY);
         else if (!valve_goto_pct10((int32_t)v, &why))
             refuse_why(why);
     } else if (strcmp(c, "STOP") == 0) {

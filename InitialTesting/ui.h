@@ -38,6 +38,7 @@ extern lv_font_t ui_num_16, ui_num_26, ui_num_40;
 #define UI_BLUE    lv_color_hex(0x2D5877)
 #define UI_WARN    lv_color_hex(0x3F3F3F)
 #define UI_YELLOW  lv_color_hex(0xF2C230)   // warning yellow: the header's unsaved icon
+#define UI_MODE_PANEL lv_color_hex(0x384652)   // the header's mode panel outside AUTO
 #define UI_TRACK   lv_color_hex(0xE8EEF4)
 #define UI_FILL    lv_color_hex(0x7B8794)
 #define UI_TICK    lv_color_hex(0xA3AFBB)
@@ -84,10 +85,9 @@ typedef struct {
     void (*fast)(void);
 } ui_screen_t;
 
-void ui_splash(void);          // start-up screen, right after the display driver
-void ui_splash_step(int pct);  // the bar's goal, 0 to 100
-int ui_splash_tick(void);     // call every 30 ms; 1 once the bar is full
-void ui_splash_done(void);     // the bar's goal full
+// The OFF screen from the first frame (every start is OFF, 0.15.1), right
+// after the display driver, until ui_init.
+void ui_splash(void);
 // "0.13.13, built 28/10/26": the version and the build date (DD/MM/YY).
 const char *ui_fw_text(void);
 void ui_init(void);            // after the drivers and valve/cfg init
@@ -171,13 +171,12 @@ extern const ui_screen_t ui_scr_home, ui_scr_menu;
 void ui_status_line(void);     // mode/move line, in a screen's refresh()
 void ui_reset_fault_event(lv_event_t *e);   // the strip's Reset fault (ui_home.c)
 // Home and Set position (ui_home.c): ui_home_ask the Home confirm,
-// ui_set_position_ask the Set position list, ui_position_ask both (Home's
-// mode button while not homed).
+// ui_set_position_ask the Set position list, ui_position_ask both (Home
+// valve on Home's Valve tile while not homed).
 void ui_home_ask(void);
 void ui_set_position_ask(void);
 void ui_set_position_pick(int i);   // 0 closed, 1 enter %, 2 saved
 void ui_position_ask(void);
-void ui_manual_ask(void);      // the Switch to MANUAL confirm (AUTO)
 int32_t ui_log_px(int32_t p_mmbar, int32_t w);   // 0.1-1000 mbar on a log scale, 0 to w px
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
 // Trend and the Home sparklines (ui_trend.c). A sparkline redraws when
@@ -185,7 +184,7 @@ int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 
 extern const ui_screen_t ui_scr_trend;
 lv_obj_t *ui_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h, bool valve);
 // Valve, Calibrate valve, Events, Diagnostics (ui_valve.c).
-extern const ui_screen_t ui_scr_valve, ui_scr_calib, ui_scr_faults, ui_scr_diag;
+extern const ui_screen_t ui_scr_calib, ui_scr_faults, ui_scr_diag;
 // Settings, its five pages and Calibrate sensor (ui_settings.c).
 extern const ui_screen_t ui_scr_settings, ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_sensor_set, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
                          ui_scr_sensor_cal;

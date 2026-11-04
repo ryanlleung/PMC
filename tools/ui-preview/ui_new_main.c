@@ -50,8 +50,19 @@ valve_mode_t valve_mode(void) { return v_mode; }
 const char *valve_mode_name(void)
 {
     return v_mode == VALVE_CALIBRATING ? "HOMING" : v_mode == VALVE_MANUAL ? "MANUAL"
-         : v_mode == VALVE_AUTO ? "AUTO" : "NOT HOMED";
+         : v_mode == VALVE_AUTO ? "AUTO" : v_mode == VALVE_SHUTDOWN ? "SHUTDOWN"
+         : v_mode == VALVE_OFF ? "OFF" : "NOT HOMED";
 }
+// Shut down (0.15.0).
+bool valve_shutdown(const char **why) { (void)why; v_mode = VALVE_SHUTDOWN; return true; }
+bool valve_turn_on(const char **why) { (void)why; v_mode = VALVE_MANUAL; return true; }
+bool valve_shutdown_progress(int *left, int *secs)
+{
+    if (v_mode != VALVE_SHUTDOWN) return false;
+    *left = 60; *secs = 34;
+    return true;
+}
+const char *valve_off_why(void) { return v_mode == VALVE_OFF ? "Controller is off" : NULL; }
 // AUTO (stage 8).
 static bool v_sp_set;
 static int32_t v_sp = 5000;
@@ -95,12 +106,7 @@ bool valve_set_position(int32_t p, const char **why) { (void)why; v_cal = true; 
 bool valve_calibrate(const char **why) { (void)why; v_mode = VALVE_CALIBRATING; v_step = 1; return true; }
 bool valve_goto_pct10(int32_t p, const char **why) { (void)why; v_target10 = p; moving = true; return true; }
 bool valve_goto_pct100(int32_t p, const char **why) { return valve_goto_pct10(p / 10, why); }
-bool valve_move_steps(int32_t steps, const char **why) { (void)steps; (void)why; return true; }
 void valve_stop(void) { moving = false; }
-static bool v_held;   // the remote hold after a STOP on the screen (valve.c)
-void valve_stop_local(void) { valve_stop(); v_held = true; }
-bool valve_remote_held(void) { return v_held; }
-void valve_remote_allow(void) { v_held = false; }
 bool valve_stop_latches(void) { return valve_auto(); }
 int valve_fault_count(void) { return v_f01 + v_f16 + v_f12; }
 bool valve_motion_blocked(void) { return v_f12 || v_f16; }
@@ -180,6 +186,7 @@ bool valvepos_offer(int32_t *c) { if (vp_offer) *c = 33880; return vp_offer; }
 bool valvepos_use(const char **why) { (void)why; vp_offer = false; v_cal = true; v_ref = VALVE_REF_SAVED; v_mode = VALVE_MANUAL; return true; }
 void valvepos_decline(void) { vp_offer = false; }
 bool valvepos_offer_moving(int32_t *s) { *s = 400; return vp_offer && vp_moving; }
+bool valvepos_offer_unparked(void) { return false; }
 
 static uint32_t crc32(const void *data, size_t len)
 {
@@ -343,11 +350,8 @@ int main(int argc, char **argv)
     memset(flash, 0xFF, 8u << 20);
     if (strcmp(st, "nosave"))
         seed_flash();
-    if (!strcmp(st, "splash")) {   // the start-up screen (0.13.3; logo from 0.13.13), part way
+    if (!strcmp(st, "splash")) {   // the start-up screen: OFF from 0.15.1
         ui_splash();
-        ui_splash_step(65);
-        for (int i = 0; i < 60; i++)
-            ui_splash_tick();   // the bar caught up
         FILE *f = fopen(argv[2], "wb");
         if (!f) { perror(argv[2]); return 1; }
         fwrite(fb, sizeof fb, 1, f);
@@ -373,19 +377,19 @@ int main(int argc, char **argv)
         // Settings, with Menu behind.
         tap(415, 184); tap(379, 184); ui_service(); run(300);   // from Settings
         tap(40, 15); run(300);                                  // its Back: Settings
-        tap(24, 20); tap(24, 20);                               // Menu, Home
-        tap(415, 128); tap(24, 20);                             // Valve
-        tap(415, 184); tap(350, 72); tap(24, 20); tap(24, 20);  // Events
-        tap(415, 184); tap(120, 128); tap(24, 20); tap(24, 20); // Calibrate valve
-        tap(415, 184); tap(120, 184); tap(24, 20); tap(24, 20); // Diagnostics
+        tap(72, 20);                                            // Home (Back twice would land on the power icon)
+        tap(415, 72); tap(24, 20);                              // PID tuning
+        tap(415, 184); tap(350, 72); tap(72, 20);               // Events
+        tap(415, 184); tap(120, 128); tap(72, 20);              // Calibrate valve
+        tap(415, 184); tap(120, 184); tap(72, 20);              // Diagnostics
         tap(415, 184); tap(379, 184);                           // Settings
         tap(120, 72); tap(24, 20);                              //   Cryostat name
         tap(356, 72); tap(24, 20);                              //   Pressure sensor
         tap(120, 128); tap(270, 72); tap(24, 20);               //   Valve setup, Drive tab
         tap(356, 128); tap(94, 72); tap(24, 20); tap(24, 20);   //   Control tuning, keypad
         tap(120, 184); tap(24, 20);                             //   Review and save
-        tap(24, 20); tap(24, 20);
-        tap(415, 184); tap(379, 128); tap(24, 20); tap(24, 20); // Calibrate sensor
+        tap(72, 20);                                            // Home
+        tap(415, 184); tap(379, 128); tap(72, 20);              // Calibrate sensor
     }
     run(1200);
     size_t after = heap_used();
@@ -409,12 +413,14 @@ int main(int argc, char **argv)
     if (!strcmp(st, "overon")) { fake_override = true; tap(415, 184); }   // Menu, override armed
     if (!strcmp(st, "menu")) tap(415, 184);
     if (!strcmp(st, "keypad")) { tap(300, 184); tap(41, 184); tap(111, 240); tap(251, 240); tap(111, 184); tap(111, 184); }
-    if (!strcmp(st, "confirm")) tap(415, 72);
-    if (!strcmp(st, "autofirst") || !strcmp(st, "autoask") || !strcmp(st, "automan") || !strcmp(st, "paused2")) tap(415, 72);
-    if (!strcmp(st, "autosp")) { tap(115, 184); tap(41, 240); tap(111, 240); tap(321, 184); }   // Target 12: asks
-    if (!strcmp(st, "autovalve")) tap(415, 128);
-    if (!strcmp(st, "valve") || !strcmp(st, "valvenc") || !strcmp(st, "limithit")) tap(415, 128);
+    if (!strcmp(st, "confirm")) { v_mode = VALVE_NOT_CAL; v_cal = false; tap(269, 184); }   // Home valve: Home or Set position
+    if (!strcmp(st, "autofirst") || !strcmp(st, "autoask")) tap(93, 184);   // Start AUTO (the Pressure tile)
+    if (!strcmp(st, "automan") || !strcmp(st, "paused2")) tap(269, 184);     // Stop AUTO (the Valve tile)
+    if (!strcmp(st, "autosp")) { tap(115, 184); tap(41, 240); tap(111, 240); tap(321, 184); }   // Setpoint 12: applies at once
     if (!strcmp(st, "limithit")) v_q = true;
+    if (!strcmp(st, "shutask")) tap(24, 20);                      // the power icon (top left): confirm
+    if (!strcmp(st, "shutting")) { tap(24, 20); tap(250, 180); }   // Shut down: black, closing
+    if (!strcmp(st, "off")) v_mode = VALVE_OFF;
     if (!strcmp(st, "svc")) {
         size_t a = heap_used();
         tap(415, 184); tap(300, 240);     // Menu, Service (0.6.0 screens built)
@@ -422,7 +428,7 @@ int main(int argc, char **argv)
         size_t b = heap_used();
         ui_home(); run(600);
         size_t c = heap_used();
-        tap(415, 128); run(600);           // Valve page
+        tap(415, 72); run(600);            // PID tuning
         size_t d = heap_used();
         tap(60, 184); run(600);            // Go to: keypad
         size_t f = heap_used();
@@ -433,7 +439,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "calset")) v_ref = VALVE_REF_HAND;   // opens on Set position
     if (!strcmp(st, "hot")) { extern bool fake_hot; fake_hot = true; }
     if (!strcmp(st, "handset")) { v_mode = VALVE_MANUAL; v_cal = true; v_pct10 = 342; v_ref = VALVE_REF_HAND; }
-    if (!strcmp(st, "setpos")) { v_mode = VALVE_NOT_CAL; v_cal = false; tap(415, 72); tap(240, 146); }   // Home valve, Set position
+    if (!strcmp(st, "setpos")) { v_mode = VALVE_NOT_CAL; v_cal = false; tap(269, 184); tap(240, 146); }   // Home valve, Set position
     if (!strcmp(st, "bootpick")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; }
     if (!strcmp(st, "bootask")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; }
     if (!strcmp(st, "bootmove")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; vp_moving = true; }
@@ -477,13 +483,13 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-saved")) tap(249, 136 + 40);
     if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) tap(120, 184);
     if (!strcmp(st, "set-load")) tap(120, 184);
-    if (strstr(st, "trend")) { tap(415, 184); tap(210, 72); }   // Menu, Trend
+    if (strstr(st, "trend")) tap(415, 128);   // Trend on Home (0.15.3)
     if (!strcmp(st, "trend1h")) { tap(415, 72); tap(415, 72); }
-    if (!strcmp(st, "trend1m")) { tap(415, 184); tap(415, 184); tap(415, 184); }
+    if (!strcmp(st, "trend1m")) { tap(415, 128); tap(415, 184); tap(415, 184); }
     if (!strcmp(st, "calsensor") || !strcmp(st, "calvac")) { tap(415, 184); tap(379, 128); }
     if (!strcmp(st, "calvac")) tap(298, 128);
     if (!strcmp(st, "back")) { tap(415, 184); tap(120, 184); tap(24, 20); }   // Diagnostics, Back: Menu
-    if (!strcmp(st, "help") || !strcmp(st, "help2") || !strcmp(st, "help3")) { tap(415, 128); tap(415, 184); }
+    if (!strcmp(st, "help") || !strcmp(st, "help2") || !strcmp(st, "help3")) { tap(415, 72); tap(415, 72); }   // PID tuning, Help
     if (!strcmp(st, "help2")) tap(TVX, 172);
     if (!strcmp(st, "help3")) { tap(TVX, 172); tap(TVX, 172); tap(TVX, 172); tap(TVX, 172); }
     if (!strcmp(st, "faults") || !strcmp(st, "detail")) { tap(415, 184); tap(350, 72); }

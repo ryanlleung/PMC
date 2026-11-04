@@ -84,7 +84,9 @@ void mbmap_begin(void)
     uint16_t st = 0;
     if (s->reading_ok)                         st |= 1u << ST_READING_OK;
     if (valve_calibrated())                    st |= 1u << ST_POSITION_SET;
-    if (valve_reference() == VALVE_REF_HOMED)  st |= 1u << ST_HOMED;
+    // Homed, also kept through a Shut down (0.15.0; PARKED is homed only, 0.15.1).
+    if (valve_reference() == VALVE_REF_HOMED || valve_reference() == VALVE_REF_PARKED)
+        st |= 1u << ST_HOMED;
     if (stepper3_busy())                       st |= 1u << ST_MOVING;
     if (stepper3_limit_open())                 st |= 1u << ST_SWITCH;
     if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 and F-2 too
@@ -204,8 +206,6 @@ uint8_t mbmap_write_regs(uint16_t addr, uint16_t n, const uint16_t *v)
                 return MODBUS_EX_VALUE;
             int32_t p = (int32_t)lroundf(f * 100.0f);
             fixed_fmt(t, sizeof t, p, 2);
-            if (valve_remote_held())
-                return refused("valve %", VALVE_REMOTE_HELD_WHY);
             if (!valve_goto_pct100(p, &why))
                 return refused("valve %", why);
             valve_event("NET", "Modbus %s: valve to %s %%", peer, t);
@@ -223,8 +223,6 @@ uint8_t mbmap_write_coil(uint16_t addr, bool on)
     case CO_AUTO:
         if (on == valve_auto())
             return 0;
-        if (on && valve_remote_held())
-            return refused("AUTO", VALVE_REMOTE_HELD_WHY);
         if (on ? !valve_start_auto(&why) : !valve_to_manual(&why))
             return refused(on ? "AUTO" : "MANUAL", why);
         valve_event("NET", "Modbus %s: %s", peer, on ? "AUTO" : "MANUAL");

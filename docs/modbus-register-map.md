@@ -13,9 +13,9 @@ Map version 1, checked against firmware 0.14.8 (`main` commit `bbf2ec46fa6dccaba
 
 `PMC_MODBUS_WRITE` in `pmc_config.h` is 1 from 0.12.6, so anyone who can reach port 502 can set the target and run the valve. From 0.13.4 writes also need Settings > System setup > Remote control On on the screen (On by default from 0.13.7, Off to 0.13.6, kept by Save settings); while it is Off every write answers exception 1 and the reads go on as before. With `PMC_MODBUS_WRITE 0` the server is read only and every write (FC5, FC16) answers exception 1, whatever the switch says. A write to an address outside the map answers exception 2 either way.
 
-With writes on, the writable registers and command coils go through the same calls as the screen buttons, so the same checks and refusals apply. A write the controller refuses answers exception 4 and logs a NET event with the reason ("Switch to MANUAL first", "No target set", ...). Each accepted write is logged as a NET event with the client's IP address.
+With writes on, the writable registers and command coils go through the same calls as the screen buttons, so the same checks and refusals apply. A write the controller refuses answers exception 4 and logs a NET event with the reason ("Switch to MANUAL first", "No target set", ...). While OFF or shutting down (mode 5 or 4), the AUTO coil and the valve going to register are refused ("Controller is off", "Shutting down"); STOP cancels a shut down; the target can still be written. Each accepted write is logged as a NET event with the client's IP address.
 
-Rewriting the target with the value it already has changes nothing (no event; the W-2 and Stable timers run on), and a refused write is logged once a minute at most. A STOP on the screen holds the network's moves (0.13.31): valve % writes and AUTO coil = 1 answer exception 4 ("Stopped on the screen: Allow remote moves there") until the operator taps Allow on the screen's strip, so a master that writes every scan cannot start the valve or AUTO again. STOP, RESET, OK, AUTO = 0 and the target are not held. A STOP from the network (coil 1, or STOP on port 8888) does not hold.
+Rewriting the target with the value it already has changes nothing (no event; the W-2 and Stable timers run on), and a refused write is logged once a minute at most. A STOP on the screen does not hold the network's moves (the hold of 0.13.31 was removed in 0.14.16).
 
 | Exception | Meaning |
 | --- | --- |
@@ -30,7 +30,7 @@ Rewriting the target with the value it already has changes nothing (no event; th
 | --- | --- | --- | --- |
 | 0 | U16 | Map version | 1 |
 | 1 | U16 | Heartbeat | Seconds since start-up, wraps at 65535. A value that stops changing means the controller has stopped |
-| 2 | U16 | Mode | 0 NOT HOMED, 1 HOMING, 2 MANUAL, 3 AUTO |
+| 2 | U16 | Mode | 0 NOT HOMED, 1 HOMING, 2 MANUAL, 3 AUTO, 4 SHUTTING DOWN (going to 0 % for Shut down), 5 OFF (from 0.15.0; every start from 0.15.1; turned on only at the screen) |
 | 3 | U16 | Status bits | See below |
 | 4 | U16 | Regulation | In AUTO: 0 no reading, 1 Regulating, 2 In band, 3 Stable. 0 outside AUTO |
 | 5 | U16 | Faults latched | Bit 0 F-1 ... bit 5 F-6 |
@@ -41,7 +41,7 @@ Rewriting the target with the value it already has changes nothing (no event; th
 | 10-11 | F32 | Pressure | mbar absolute. NaN without a valid reading |
 | 12-13 | F32 W | Target | mbar, kept to 0.1 mbar, 0 to the sensor range. NaN until set. Write: as Set target on the screen, in any mode |
 | 14-15 | F32 | Valve position | % open. NaN when the position is not set |
-| 16-17 | F32 W | Valve going to | % open, where the valve is going. Write: as Go to % on the Valve page, 0 to 100, MANUAL only |
+| 16-17 | F32 W | Valve going to | % open, where the valve is going. Write: as Go to % on Home, 0 to 100, MANUAL only |
 | 18-19 | F32 | Sensor range | mbar, full scale of the sensor in use |
 | 20-21 | F32 | Excitation | V, the Druck supply. NaN if the Power Monitor does not answer |
 | 22-23 | F32 | Controller temperature | degC, Power Monitor die. NaN if it does not answer |
@@ -55,7 +55,7 @@ Reading past address 25 answers exception 2, so read 0 to 25 (26 registers) in o
 | --- | --- | --- |
 | 0 | 16 | Pressure reading valid |
 | 1 | 17 | Valve position set (homed, set by hand or from the saved position) |
-| 2 | 18 | Homed on the closed switch |
+| 2 | 18 | Homed on the closed switch, also when kept through Shut down and a power-off (from 0.15.0) |
 | 3 | 19 | Valve moving |
 | 4 | 20 | Closed switch pressed |
 | 5 | 21 | A fault is latched |

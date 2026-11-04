@@ -360,6 +360,27 @@ int main(int argc, char **argv)
         K.kdir = -K.kdir;
     }
 
+    // KD (0.14.21, a setting): the D term works on the measured pressure's
+    // rate and against it; KD 0 is the PI as before.
+    {
+        ctrl_tune_t k0 = K, k1 = K;
+        k0.kd = 0;
+        k1.kd = 1.0f;   // 1 % of travel per mbar/s
+        ctrl_t a, b;
+        ctrl_init(&a);
+        ctrl_init(&b);
+        ctrl_set_sp(&a, 5, FS, 0);
+        ctrl_set_sp(&b, 5, FS, 0);
+        ctrl_start(&a, &k0, 0, 5, 30000);
+        ctrl_start(&b, &k1, 0, 5, 30000);
+        ctrl_in_t in = { .t_ms = 1000, .pv = 5.5f, .pos = 30000, .fs = FS };
+        ctrl_step(&a, &k0, &in);
+        ctrl_step(&b, &k1, &in);
+        long dd = (long)(b.pos_cmd - a.pos_cmd), want = -lroundf(0.01f * (float)K.pos_max * 0.5f);
+        CHECK(labs(dd - want) <= 1, "KD 1 %%/(mB/s), pressure rising 0.5 mB/s: command %ld steps from the PI's (expected %ld)",
+              dd, want);
+    }
+
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails ? 1 : 0;
 }

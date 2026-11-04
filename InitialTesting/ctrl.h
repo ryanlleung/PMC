@@ -12,7 +12,8 @@
  * works out the next valve command and the checks.
  *
  * Once per Ts (1 s), straight after the pressure read:
- *   - PI in position form, D on the measurement (Kd 0, off), output in steps.
+ *   - PID in position form, D on the measurement (KD, 0 is off; a setting
+ *     from 0.14.21), output in steps.
  *     Bumpless entry: the first output is the position in force. A KP or
  *     KDIR change in AUTO re-bases the integral the same way (0.11.38).
  *   - Anti-windup: no integration past POS_MAX or AUTO min in the direction
@@ -39,9 +40,8 @@
  */
 
 // Fixed for now (the simulator's DEF_P); the tuning in cfg.c is KP, TI,
-// OUTMIN, DB, KDIR and BAND.
+// OUTMIN, DB, KDIR, BAND and KD.
 #define CTRL_TS_S       1       // control step, s
-#define CTRL_KD         0.0f    // derivative, % per mbar/s (off)
 #define CTRL_TCHECK_S   30      // response window, s
 #define CTRL_NRESP      5       // windows with no response before F-6
 #define CTRL_DPMIN      0.05f   // smallest pressure change that counts, mbar
@@ -51,7 +51,6 @@
 #define CTRL_LEAD_MAX   3000    // travel anti-windup, steps
 #define CTRL_TLAG_S     40      // process lag for the response monitor, s
 #define CTRL_STABLE_S   60      // in band this long reads Stable, s
-#define CTRL_SP_CONFIRM 5.0f    // target changes larger than this ask first, mbar
 #ifndef CTRL_PV_TAU_S
 #define CTRL_PV_TAU_S   0.0f    // pressure filter for the PI, s (ctrl_t pv_tau); off, see below
 #endif
@@ -68,6 +67,8 @@ typedef struct {
     float outmin;      // AUTO min, % open
     int32_t pos_max;   // steps for 100 %
     int32_t steps;     // motor counts per full step (2 in HALF); 0 reads as 1
+    float kd;          // derivative, % of POS_MAX per mbar/s of pressure change (0 = off); last, so
+                       // initialisers without it read 0
 } ctrl_tune_t;
 
 typedef struct {
