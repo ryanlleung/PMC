@@ -311,6 +311,8 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'system');
   s.tap(357, 184);
   check('switch Off again: refused', s.cmd('PRES SP 6') === 'ERR 211 Read only over the network\r\n');
+  check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
+    s.cmd('PID?') === 'PID 4.00,0.25,0.00\r\n', s.cmd('PID?'));
 }
 { // Homing return: its own setting, the step 4 move off the switch; 0 % is there.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
@@ -464,6 +466,26 @@ let parkedFlash;
 { // Already at 0 %: OFF at once.
   const s = homed(load());
   check('at 0 %: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALV?') === 'MODE OFF;VALV 0.00 %\r\n', s.why() + s.cmd('MODE?;VALV?'));
+}
+{ // PID? and PID SET (0.15.8): the PID tab's Save over the text port, also in AUTO.
+  const s = homed(load());
+  const one = c => s.cmd(c, 1000);
+  check('PID? defaults', one('PID?') === 'PID 4.00,0.25,0.00\r\n', one('PID?'));
+  check('PID SET kp,ti silent, PID? confirms', one('PID SET 3.5,0.5') === '' && one('PID?') === 'PID 3.50,0.50,0.00\r\n', one('PID?'));
+  check('PID SET kp,ti,kd', one('PID SET 3.5, 0.5, 1.25;PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
+  check('PID SET saves the settings', s.setting(CFG.KP) === 350 && s.setting(CFG.TI) === 50 && s.setting(CFG.KD) === 125,
+    [s.setting(CFG.KP), s.setting(CFG.TI), s.setting(CFG.KD)].join());
+  const bad = [['PID SET', 101], ['PID SET 3', 101], ['PID SET 3,0.5,1,2', 101], ['PID SET x,1', 101], ['PID SET 3,,1', 101],
+    ['PID SET 0,0.5', 102], ['PID SET 101,0.5', 102], ['PID SET 3,-1', 102], ['PID SET 3,0.5,101', 102]];
+  const wrong = bad.map(([c, n]) => [c, n, one(c)]).filter(([c, n, r]) => !new RegExp('^ERR ' + n + ' [A-Z][^;\\r\\n]*\\r\\n$').test(r))
+    .map(([c, n, r]) => c + ' -> ' + JSON.stringify(r) + ' (want ' + n + ')');
+  check('PID SET refusals', wrong.length === 0, wrong.join('\n     '));
+  check('PID SET range text', one('PID SET 0,0.5') === 'ERR 102 Outside 0.01 to 100.00 for KP\r\n', one('PID SET 0,0.5'));
+  check('refused PID SET changes nothing', one('PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
+  s.cmd('VALV SET 30', 60000);
+  s.cmd('PRES SP 3;MODE AUTO', 20000);
+  check('PID SET in AUTO, AUTO kept', one('PID SET 2,0.4;PID?;MODE?') === 'PID 2.00,0.40,1.25;MODE AUTO\r\n', one('PID?;MODE?'));
+  check('PID SET in AUTO saves', s.setting(CFG.KP) === 200 && s.setting(CFG.TI) === 40, s.setting(CFG.KP) + ' ' + s.setting(CFG.TI));
 }
 console.log(failed ? failed + ' failed' : 'all passed');
 process.exit(failed ? 1 : 0);

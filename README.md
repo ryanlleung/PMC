@@ -168,7 +168,7 @@ The trend and the event log are in RAM and empty after a restart.
 
 ## Text port commands
 
-The text port and Modbus take the same operator command set, and nothing else: what an operator can use and judge away from the cryostat. Homing, calibration, settings, tuning, saving and the motor are on the touch screen. `InitialTesting/remote.c` is the text port; the Modbus registers and coils for the same commands are in `docs/modbus-register-map.md`.
+The text port and Modbus take the same operator command set, and nothing else: what an operator can use and judge away from the cryostat. The text port also takes the PID gains (`PID?`, `PID SET`), for a gain schedule run from a PC; Modbus does not. Homing, calibration, the other settings and the motor are on the touch screen. `InitialTesting/remote.c` is the text port; the Modbus registers and coils for the same commands are in `docs/modbus-register-map.md`.
 
 Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in the USB build. One client at a time; a new connection replaces the old. Send upper case ASCII, a line ending in LF or CR LF, at most 96 characters. Replies end in CR LF.
 
@@ -185,6 +185,7 @@ Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in
 | `STOP` | Stop the valve now; in AUTO it also ends AUTO. Cancels homing and a shut down. The only stop |
 | `ALRM RESET` / `ALRM OK` | Clear the latched faults whose cause has gone / acknowledge the warning, as the screen's OK |
 | `TIME SET <YYYY-MM-DD> <HH:MM:SS>` | Set the clock |
+| `PID SET <kp>,<ti>[,<kd>]` | Set and save the PID gains, as Save on the PID tuning page: KP in %/mB, TI in min (0 off), KD in %/(mB/s) (0 off, left as it is when not given), 2 dp. KP 0.01 to 100, TI and KD 0 to 100. Taken in AUTO too, at the next control step. Each change is a settings save in flash, so send it when the gains change, not every poll; gains equal to the present ones write nothing |
 | `PRES?` | `PRES 4.625 mbar` or `PRES NONE` |
 | `PRES SP?` | `PRES SP 5.0 mbar` or `PRES SP NONE` |
 | `MODE?` | `MODE MANUAL`, `MODE AUTO`, `MODE HOMING`, `MODE NOT HOMED`, `MODE SHUTDOWN` (going to 0 % for Shut down) or `MODE OFF` |
@@ -194,6 +195,7 @@ Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in
 | `EVNT? [<n>]` | `EVNT <n>`, then n lines `<age s>,<tag>,<text>`, newest first; default 1, at most 100 |
 | `NETW?` | `NETW STATIC,<address>,<mask>,<MAC>`; `NETW NONE` in the USB build |
 | `TIME?` | `TIME 2026-10-27 11:05:00` or `TIME NONE` |
+| `PID?` | `PID 4.00,0.25,0.00`: KP, TI, KD in use |
 | `*IDN?` | `MercShore,iPC,<chip id>,<version>` |
 
 Error codes: 100 unknown command (anything not in the table above when network writes are enabled; with writes off, unrecognised input also gets 211), 101 expected form, 102 outside range, 103 line too long, 104 `EVNT?` not on its own line, 201 homing, STOP to cancel, 202 switch to MANUAL first, 203 reset the fault first, 204 home the valve first, 205 no valid pressure, 206 set a target first, 207 target outside the sensor range, 208 pressure above the sensor range, 209 control settings not set, 210 not reset, cause still present, 211 read only over the network, 212 the valve cannot move now (the limit switch, Close or Open held on the screen, the switch question waiting, a calibration point being taken) or the clock is not running, 213 controller off or shutting down (turned on at the screen).
@@ -201,6 +203,7 @@ Error codes: 100 unknown command (anything not in the table above when network w
 ## Tools
 
 - `tools/logger/log_druck.py <IP or COM>` polls pressure, target, valve, mode, alarms and room pressure once a second into a CSV and reconnects on its own.
+- `tools/gain-schedule/pmc_gains.py` measures KP and TI at a few setpoints with step tests (`tune`), then keeps the board's KP and TI matched to its setpoint over the text port (`run`). Python 3 only, no pip.
 - `tools/ui-preview/build.sh` renders the screens to PNG on a PC with the real settings store over a flash held in RAM, and checks the LVGL heap returns after opening and leaving screens.
 - `tools/ctrl-test/run.sh` runs `ctrl.c` on a PC against a model of the flow line (helium pot, needle valve, pump, motor ramp, closed switch): setpoint steps, helium off (F-6), pump off (W-2), a slipping drive (F-6), and the entry refusals.
 - `tools/cfg-test/run.sh` tests the settings store and the saved valve position against a flash held in RAM.
