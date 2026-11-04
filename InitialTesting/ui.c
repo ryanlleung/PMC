@@ -1465,7 +1465,7 @@ static void q_answer(bool zero)
     if (!valve_answer(zero, &why))
         ui_msg(why);
     else if (zero)
-        ui_msg("Set as 0 %.");
+        ui_msg("Set as seat.");
 }
 static void q_zero(void) { q_answer(true); }
 static void q_skip(void) { q_answer(false); }
@@ -1500,9 +1500,9 @@ static void question_check(void)
     char v[16];
     asking = true;
     if (want == 1) {
-        lv_snprintf(t, sizeof t, "Limit switch at %s %%. Set as 0 %%?",
+        lv_snprintf(t, sizeof t, "Limit switch at %s %%. Set as seat?",
                     ui_fmt1(v, sizeof v, (int64_t)q * 100));
-        ui_ask(t, "Skip", q_skip, "Set as 0 %", q_zero);
+        ui_ask(t, "Skip", q_skip, "Set as seat", q_zero);
     } else {
         int32_t pm = valve_pos_max();
         ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);

@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision D, 3 November 2026. Firmware 0.14.16. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
+Revision D, 3 November 2026. Firmware 0.14.17. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.16: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.17: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -133,7 +133,7 @@ In MANUAL the operator positions the valve and watches the pressure. Position is
 - On the Valve page, hold Close or Open to move while pressed, or tap -1 %, +1 %, -5 % or +5 % to step from where the valve is going.
 - Tap the Go to box (on Home or the Valve page) to type a position, then Set. Fully close and Fully open go to 0 % and 100 %.
 - Moves run at the drive's run speed (Settings > Valve setup > Drive). A new Go to during a move retargets it: further on extends the move, behind it ramps down and turns round.
-- The limit switch stops any closing move. If it trips away from 0 % the controller asks Set as 0 % or Skip (W-1, section 9).
+- The limit switch stops any closing move. If it trips away from 0 % the controller asks Set as seat or Skip (W-1, section 9).
 - All normal Valve-page moves, including Close, Open and the step buttons, need the valve homed or its position set. Before that the controls are grey. Settings > Motor override can move the motor by steps without a position reference.
 
 ### Starting AUTO
@@ -192,9 +192,9 @@ Home the valve when you can. Only homing checks the position. After a motor dire
 
 ### Limit switch during a move
 
-If the switch trips during a normal closing move away from 0 %, the valve stops and the strip asks "Limit switch at X %. Set as 0 %?" with Skip and Set as 0 % (W-1). The count is never zeroed on its own.
+If the switch trips during a normal closing move away from 0 %, the valve stops and the strip asks "Limit switch at X %. Set as seat?" with Skip and Set as seat (W-1). Set as seat takes the switch point as the seat, which reads about -0.6 %, as after homing. The count is never zeroed on its own.
 
-- Set as 0 % when the valve really is at the seat, for example after a direction change or a slipped drive.
+- Set as seat when the valve really is at the seat, for example after a direction change or a slipped drive.
 - Skip when the switch tripped early (ice, a stiff drive). The count is kept. Open the valve, let the ice clear, and home again later.
 
 A switch that reads pressed with the valve well off the seat raises W-4 (section 9).
@@ -237,7 +237,7 @@ Warnings do not latch. W-2, W-4, W-5 and W-6 show on the strip until OK is press
 
 | Warning | Cause | What the controller did | What to do |
 | --- | --- | --- | --- |
-| W-1 Limit switch pressed at X % | The switch tripped during a closing move away from 0 % | Stopped the valve and asks Set as 0 % or Skip, over any screen | Set as 0 % if the valve is at the seat. Skip if the switch tripped early (ice). Section 7 |
+| W-1 Limit switch pressed at X % | The switch tripped during a closing move away from 0 % | Stopped the valve and asks Set as seat or Skip, over any screen | Set as seat if the valve is at the seat. Skip if the switch tripped early (ice). Section 7 |
 | W-2 Not settling | 1800 s outside the target band in AUTO | AUTO ended, MANUAL, valve idle where it stopped | Check the pump, the helium supply and the target against what the cryostat can reach. Press OK. Start AUTO again when ready |
 | W-3 Controller hot | Power Monitor die at or above 55 °C | Nothing blocked. Shown until it cools below 50 °C | Check the enclosure ventilation |
 | W-4 Switch pressed off the seat | The switch reads pressed with the valve well off the seat, two reads in a row | In AUTO: AUTO ended, valve idle. In MANUAL: a strip warning | Check the switch, its wiring and the valve position. Home again when the switch is free |
@@ -360,4 +360,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | A | 27 October 2026 | First issue, from firmware 0.12.17 and the design documents listed in the reference block |
 | B | 2 November 2026 | Firmware 0.14.8: the text link takes the remote command set only (engineering commands, the step test and the typed calibration table removed) |
 | C | 3 November 2026 | Checked against firmware 0.14.8 on main: corrected movement prerequisites, independent homing Return and four stages, motor-supply behaviour and legacy status bit, tuning saves in AUTO, motor defaults, current screens and labels, remote refusals and version references. Historical bench status retained separately |
-| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %). Firmware 0.14.15: the Valve position state reads Set by hand or Last saved, not homed. Firmware 0.14.16: a STOP on the screen no longer holds remote moves (no Allow on the strip) |
+| D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %). Firmware 0.14.15: the Valve position state reads Set by hand or Last saved, not homed. Firmware 0.14.16: a STOP on the screen no longer holds remote moves (no Allow on the strip). Firmware 0.14.17: the limit switch question's button reads Set as seat |

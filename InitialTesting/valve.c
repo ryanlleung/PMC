@@ -407,7 +407,7 @@ static void limit_hit(void)
     question_at = stepper3_position() / stepper3_scale();
     question = true;
     char p[16];
-    ev("W-1", "Limit switch pressed at count %ld (%s %%): Set as 0 %% or Skip",
+    ev("W-1", "Limit switch pressed at count %ld (%s %%): Set as seat or Skip",
        (long)q_count(), pct_text(p, sizeof p, q_count()));
 
 }
