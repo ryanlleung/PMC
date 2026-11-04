@@ -483,7 +483,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-saved")) tap(249, 136 + 40);
     if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) tap(120, 184);
     if (!strcmp(st, "set-load")) tap(120, 184);
-    if (strstr(st, "trend")) tap(415, 128);   // Trend on Home (0.15.3)
+    if (strstr(st, "trend")) { tap(415, 184); tap(210, 72); }   // Menu, Trend
     if (!strcmp(st, "trend1h")) { tap(415, 72); tap(415, 72); }
     if (!strcmp(st, "trend1m")) { tap(415, 128); tap(415, 184); tap(415, 184); }
     if (!strcmp(st, "calsensor") || !strcmp(st, "calvac")) { tap(415, 184); tap(379, 128); }

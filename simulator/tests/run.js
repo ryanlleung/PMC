@@ -78,13 +78,14 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Stop AUTO goes to MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n', s.cmd('MODE?'));
   check('Stop AUTO leaves the valve', Math.abs(s.get(30) - at) < 330, at + ' -> ' + s.get(30));
 }
-{ // Trend on Home (0.15.3) opens Trend, as Menu > Trend does; Menu sits above STOP.
+{ // The IP tile on Home (0.15.6, in place of Trend) opens System setup, as Menu > Settings > System does.
   const hdr = (s) => Buffer.from(new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 40).slice().buffer).toString('base64');
   const a = homed(load()), home = hdr(a);
-  a.tap(415, 128); shot(a, 'home-trend');
+  shot(a, 'home-ip');
+  a.tap(415, 128); shot(a, 'home-ip-system');
   const b = homed(load());
-  b.tap(415, 184); const menu = hdr(b); b.tap(210, 72);
-  check('Home Trend opens Trend', hdr(a) === hdr(b) && hdr(a) !== home && menu !== home);
+  b.tap(415, 184); b.tap(379, 184); b.tap(120, 72);
+  check('Home IP tile opens System setup', hdr(a) === hdr(b) && hdr(a) !== home);
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
   const s = homed(load());

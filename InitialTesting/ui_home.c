@@ -9,12 +9,14 @@
 #include "ui.h"
 #include "cfg.h"
 #include "fixed.h"
+#include "pmc_config.h"
 
 /* --------------------------------------------------------------------------
  * Home (simulator v63 buildCtrl). Pressure and Valve tiles; on the right
  * the PID tile (KP, TI and KD in use; a tap opens PID tuning; 0.14.21, Ryan
- * 4 Nov: the operator does not tune, but wants to see the values), Trend,
- * Menu and STOP. No mode button from 0.15.3 (Ryan, 4 Nov: it did what the
+ * 4 Nov: the operator does not tune, but wants to see the values), the IP
+ * tile (the address and mask in use; a tap opens System setup; Trend until
+ * 0.15.5, Ryan 4 Nov), Menu and STOP. No mode button from 0.15.3 (Ryan, 4 Nov: it did what the
  * tiles' buttons do): the header's panel shows the mode, and each tile's
  * bottom row changes the mode or sets its value:
  *   MANUAL     Pressure: Start AUTO (AUTO at the pressure shown, from where
@@ -521,10 +523,36 @@ static void menu_event(lv_event_t *e)
     ui_open(&ui_scr_menu);
 }
 
-static void trend_event(lv_event_t *e)
+// IP tile (0.15.6, Ryan 4 Nov: in place of Trend, still on Menu and the
+// sparkline): the address and mask the link uses, from start-up (a new one
+// waits for a restart), 12 px, the address over the mask. A tap opens
+// System setup.
+static lv_obj_t *ip_val[2];
+
+static void ip_event(lv_event_t *e)
 {
     (void)e;
-    ui_open(&ui_scr_trend);
+    ui_open(&ui_scr_namenet);
+}
+
+static void ip_make(lv_obj_t *scr, int32_t y)
+{
+    lv_obj_t *b = ui_btn(scr, 361, y, 109, 48, UI_SECONDARY, "", ip_event, NULL);
+    ip_val[0] = ui_label(b, 1, 8, 107, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
+    ip_val[1] = ui_label(b, 1, 25, 107, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
+}
+
+static void ip_refresh(void)
+{
+#if PMC_REMOTE_SWITCH
+    char ip[16], mask[16];
+    cfg_net_boot(ip, mask);
+    ui_set_text(ip_val[0], ip);
+    ui_set_text(ip_val[1], mask);
+#else
+    ui_set_text(ip_val[0], "No Ethernet");
+    ui_set_text(ip_val[1], "USB build");
+#endif
 }
 
 void ui_reset_fault_event(lv_event_t *e)
@@ -543,9 +571,10 @@ static void home_build(lv_obj_t *scr)
 {
     make_tile(scr, &pt, 10, "Pressure", "mB", "SP", true, target_event);
     make_tile(scr, &vt, 186, "Valve", "%", "Go to", false, goto_event);
-    // The PID tile on top, Trend, then Menu above STOP (Ryan, 4 Nov, 0.15.3).
+    // The PID tile on top, the IP tile, then Menu above STOP (Ryan, 4 Nov,
+    // 0.15.3; the IP tile in place of Trend from 0.15.6).
     pid_make(scr, 48);
-    ui_btn(scr, 361, 104, 109, 48, UI_NAV, "Trend", trend_event, NULL);
+    ip_make(scr, 104);
     ui_btn(scr, 361, 160, 109, 48, UI_NAV, "Menu", menu_event, NULL);
     // The mode buttons on the tiles' bottom rows, in place of the SP and Go
     // to boxes (0.15.3): Start AUTO outside AUTO, Stop AUTO in AUTO, both
@@ -581,6 +610,7 @@ static void home_fast(void)
 static void home_refresh(void)
 {
     pid_refresh();
+    ip_refresh();
     const clicks_state_t *s = clicks_state();
     valve_mode_t m = valve_mode();
     char buf[32];
