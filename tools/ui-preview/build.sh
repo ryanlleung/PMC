@@ -31,7 +31,7 @@ for s in splash notcal manual calib moving nodruck stop neg menu keypad confirm 
          set-tune set-tunekp set-tunedraft set-saveask set-saved set-review set-load motor motor-speed motor-coils motor-ask motor-held motor-moving motor-steps set-name set-named set-net set-remote set-netaddr set-netaddr2 set-netused \
          overon calsensor calvac trend trend1h trend1m notrend \
          auto autostable autoreg autofirst autoask autosp automan autovalve paused warn4 warn5 warn6 f16 trendauto \
-         shutask shutting off; do
+         shutask shutclose shutleave shutting off; do
   "$OUT/ui_new" "$s" "$OUT/new-$s.raw"
   python3 "$HERE/render.py" "$OUT/new-$s.raw" "$OUT/new-$s.png"
   rm "$OUT/new-$s.raw"

@@ -138,6 +138,8 @@ void lv_port_disp_init(void)
     lv_display_set_flush_cb(d, flush_cb);
 }
 
+void lv_port_disp_light(void) {}   // the board's backlight (0.15.7); the page has none
+
 static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
@@ -456,6 +458,6 @@ EXPORT(sim_offer) int sim_offer(void) { int32_t c; return valvepos_offer(&c) ? c
 EXPORT(sim_busy) int sim_busy(void) { return stepper3_busy(); }
 // Shut down (the power icon on Home, after its confirm) and turn on (the
 // double tap on the OFF screen).
-EXPORT(sim_shutdown) int sim_shutdown(void) { const char *w = NULL; return hook(valve_shutdown(&w), w); }
+EXPORT(sim_shutdown) int sim_shutdown(int close) { const char *w = NULL; return hook(valve_shutdown(close != 0, &w), w); }
 EXPORT(sim_turn_on) int sim_turn_on(void) { const char *w = NULL; return hook(valve_turn_on(&w), w); }
 EXPORT(sim_override) int sim_override(void) { return stepper3_override(); }

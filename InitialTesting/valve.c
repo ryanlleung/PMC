@@ -476,11 +476,12 @@ static void shut_move_ended(stepper3_stop_t why)
     }
 }
 
-bool valve_shutdown(const char **why)
+bool valve_shutdown(bool close, const char **why)
 {
     if (mode == VALVE_SHUTDOWN || mode == VALVE_OFF) return true;
     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
-    if (any_latched())             { *why = "Reset the fault first"; return false; }
+    close = close && calibrated;   // not homed: no 0 % to go to
+    if (close && any_latched())    { *why = "Reset the fault first"; return false; }
     seq_check();   // a move that ended just before is handled first
     bool was_auto = is_auto();
     stepper3_override_cancel();
@@ -495,6 +496,14 @@ bool valve_shutdown(const char **why)
     if (!calibrated) {
         // Not homed: where 0 % is, is not known, so the valve stays put.
         ev("OFF", "Shut down, not homed: valve not moved; coils off, OFF");
+        go_off();
+        return true;
+    }
+    if (!close) {
+        // The operator chose not to close it (0.15.7): it stays where it
+        // is, and valvepos.c keeps the count as at 0 %.
+        ev("OFF", "Shut down%s, valve left at %s %%: coils off, OFF", was_auto ? ", AUTO ended" : "",
+           pct_text(p, sizeof p, pos));
         go_off();
         return true;
     }

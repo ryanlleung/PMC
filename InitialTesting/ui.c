@@ -445,19 +445,12 @@ static void home_event(lv_event_t *e)
     ui_home();    // from a keypad too: the entry is dropped (0.13.18)
 }
 
-// Shut down (0.15.0): the power icon on Home asks first (Ryan 4 Nov: short).
-// Not homed, the valve is not moved (0.15.1), and the question says so.
-static void shut_go(void)
-{
-    const char *why;
-    if (!valve_shutdown(&why))
-        ui_msg(why);
-}
+// Shut down (0.15.0): the power icon on Home asks first (shut_ask, below).
+static void shut_ask(void);
 static void pwr_event(lv_event_t *e)
 {
     (void)e;
-    ui_confirm(valve_calibrated() ? "Close the valve and shut down?"
-                                  : "Valve not homed: shut down without moving it?", "Shut down", shut_go);
+    shut_ask();
 }
 
 static void unsaved_event(lv_event_t *e)
@@ -1407,6 +1400,82 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
 void ui_confirm(const char *text, const char *ok, void (*on_ok)(void))
 {
     ui_ask(text, "Cancel", NULL, ok, on_ok);
+}
+
+/* The Shut down question (Ryan 4 Nov: short). From 0.15.7 (Ryan: "a
+ * checkbox or a button ... whether I want to close the valve") a checkbox
+ * "Close the valve to 0 %", ticked each time it opens; untick it and the
+ * valve stays where it is. Not homed there is no 0 % to go to: no
+ * checkbox, and the question says the valve is not moved (0.15.1). */
+static bool shut_close = true;
+static lv_obj_t *shut_box;   // the checkbox's square
+
+static void shut_go(void)
+{
+    const char *why;
+    if (!valve_shutdown(shut_close, &why))
+        ui_msg(why);
+}
+
+static void shut_box_show(void)
+{
+    lv_obj_set_style_bg_color(shut_box, shut_close ? UI_BLUE : UI_CARD, 0);
+    lv_obj_set_style_border_color(shut_box, shut_close ? UI_BLUE : UI_MUTED, 0);
+    lv_obj_t *m = lv_obj_get_child(shut_box, 0);
+    if (shut_close) lv_obj_remove_flag(m, LV_OBJ_FLAG_HIDDEN);
+    else            lv_obj_add_flag(m, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void shut_check_event(lv_event_t *e)
+{
+    (void)e;
+    shut_close = !shut_close;
+    shut_box_show();
+}
+
+static void shut_ask(void)
+{
+    shut_close = true;
+    if (!valve_calibrated()) {
+        ui_confirm("Valve not homed: shut down without moving it?", "Shut down", shut_go);
+        return;
+    }
+    lv_obj_t *o = overlay_new();
+    lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
+    lv_obj_set_style_bg_opa(o, 140, 0);
+    confirm_ok = shut_go;
+    confirm_cancel = confirm_mid = confirm_mid2 = NULL;
+    const int32_t bw = 340, h = 14 + 22 + 6 + 44 + 8 + 48 + 12;
+    lv_obj_t *box = ui_card(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
+    lv_obj_set_style_radius(box, 8, 0);
+    ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Shut down the controller?");
+    // The whole row is the checkbox (a 44 px touch target).
+    lv_obj_t *row = plain(box);
+    lv_obj_set_pos(row, 8, 42);
+    lv_obj_set_size(row, bw - 16, 44);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_radius(row, 6, 0);
+    lv_obj_set_style_bg_color(row, UI_TRACK, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(row, shut_check_event, LV_EVENT_CLICKED, NULL);
+    shut_box = plain(row);
+    lv_obj_remove_flag(shut_box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(shut_box, 8, 9);
+    lv_obj_set_size(shut_box, 26, 26);
+    lv_obj_set_style_radius(shut_box, 4, 0);
+    lv_obj_set_style_bg_opa(shut_box, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(shut_box, 2, 0);
+    lv_obj_t *m = lv_label_create(shut_box);
+    lv_label_set_text(m, LV_SYMBOL_OK);
+    lv_obj_set_style_text_color(m, lv_color_white(), 0);
+    lv_obj_set_style_text_font(m, &ui_font_16, 0);
+    lv_obj_center(m);
+    ui_label(row, 46, 12, bw - 70, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Close the valve to 0 %");
+    shut_box_show();
+    int32_t by = 42 + 44 + 8;
+    dialog_btn(box, 16, by, 150, 48, "Cancel", confirm_event, NULL);
+    ui_btn(box, 174, by, 150, 48, UI_PRIMARY, "Shut down", confirm_event, (void *)1);
+    frame_refresh();
 }
 
 // Text page over the screen (Help). Header Back closes it. No dragging (a

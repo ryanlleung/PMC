@@ -344,7 +344,7 @@ let parkedFlash;
   const s = homed(load());
   s.cmd('VALV SET 30', 60000); s.run(2000);
   s.tap(24, 20); shot(s, 'shutdown-ask');
-  s.tap(318, 138, 3000);
+  s.tap(318, 165, 3000);
   const during = s.cmd('MODE?;VALV MOVING?');
   check('shut down: to 0 %', during === 'MODE SHUTDOWN;VALV MOVING 1\r\n', during);
   check('shut down: ERR 213 while moving', s.cmd('VALV SET 10') === 'ERR 213 Shutting down, STOP to cancel\r\n' &&
@@ -369,6 +369,21 @@ let parkedFlash;
   shot(s, 'on-again');
   s.cmd('VALV SET 5', 15000);
   check('on again: moves', s.cmd('VALV?') === 'VALV 5.00 %\r\n', s.cmd('VALV?'));
+}
+{ // Close the valve unticked (0.15.7): OFF at once, the valve left open, its count kept.
+  const s = homed(load());
+  s.cmd('VALV SET 30', 60000); s.run(2000);
+  const needle = s.get(5);
+  s.tap(24, 20); s.tap(240, 111); shot(s, 'shutdown-leave');
+  s.tap(318, 165, 1000);
+  check('shut down, valve left: OFF at 30 %', s.cmd('MODE?;VALV?;VALV MOVING?') === 'MODE OFF;VALV 30.00 %;VALV MOVING 0\r\n' &&
+    s.get(5) === needle && s.get(15) === 0, s.cmd('MODE?;VALV?') + ' needle ' + s.get(5) + ' coils ' + s.get(15));
+  check('shut down, valve left: event', /OFF,Shut down, valve left at 30\.0 %: coils off, OFF/.test(events(s, 5)), events(s, 5));
+  const t = load(); t.boot(s.flash(), { off: true }); t.set(5, needle); t.run(2000);
+  check('shut down, valve left: kept at the next start', t.cmd('MODE?;VALV?') === 'MODE OFF;VALV 30.00 %\r\n', t.cmd('MODE?;VALV?'));
+  const u = homed(load());
+  u.tap(24, 20); u.tap(240, 111); u.tap(240, 111); u.tap(318, 165, 1000);
+  check('ticked again: closes', u.cmd('MODE?') === 'MODE OFF\r\n' && /at 0 %: coils off, OFF/.test(events(u, 5)), events(u, 5));
 }
 { // Power-up after Shut down, the switch released: OFF, the count kept; on, it moves at once.
   for (const r of [0, 1, 2]) {

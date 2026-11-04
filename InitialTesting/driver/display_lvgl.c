@@ -46,6 +46,19 @@ void lv_port_disp_init(void)
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
 }
 
+/* The backlight, 0 to 255: the SSD1963's PWM output, as the SDK's
+ * tft8_set_backlight() sets it but without its display off and on. */
+static void backlight(uint8_t level)
+{
+    write_command(SSD1963_CMD_SET_PWM_CONF);
+    write_param(0x06);
+    write_param(level);
+    write_param(0x01);
+    write_param(0xFF);
+    write_param(0x00);
+    write_param(0x01);
+}
+
 /* Initialize your display and the required peripherals. */
 static void disp_init(void)
 {
@@ -53,16 +66,23 @@ static void disp_init(void)
 
     /* The SSD1963 frame memory holds random pixels at power-up, and the
      * SDK init above turns the display and backlight on, so the panel
-     * showed them until LVGL drew Home (about a second, 0.13.2). Turn the
-     * display off, clear the memory to the OFF screen's black (grey 0.13.3
-     * to 0.13.12, white to 0.15.0) and turn it on again; the OFF screen
-     * follows (every start is OFF, 0.15.1). */
-    write_command(SSD1963_CMD_SET_DISPLAY_OFF);
+     * showed them until LVGL drew Home (about a second, 0.13.2). 0.13.3 to
+     * 0.15.6 turned the display off while clearing the memory, but this
+     * panel shows white with the display off: a white flash before the
+     * black OFF screen (Ryan, 4 Nov). From 0.15.7 the backlight goes off at
+     * once instead, the memory is cleared to black with the display on,
+     * and lv_port_disp_light() turns the backlight on once the OFF screen
+     * is drawn. */
+    backlight(0);
     const uint16_t black = 0x0000;
     frame_start(0, _TFT_WIDTH_ - 1, 0, _TFT_HEIGHT_ - 1);
     display_px_write(&black, 1, (int32_t)_TFT_WIDTH_ * _TFT_HEIGHT_, 0);   /* about 10 ms */
     display_deselect();
-    write_command(SSD1963_CMD_SET_DISPLAY_ON);
+}
+
+void lv_port_disp_light(void)
+{
+    backlight(0xFF);
 }
 
 /* Flush the content of the internal buffer to the display.
