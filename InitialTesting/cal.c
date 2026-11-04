@@ -226,7 +226,7 @@ bool cal_capture(int what, int32_t p_mmbar, const char **why)
     const clicks_state_t *s = clicks_state();
     // In AUTO the line is held at the target, not at vacuum or air, and a
     // new point would move the reading AUTO regulates on (0.11.44).
-    if (valve_auto())    { *why = "Switch to MANUAL first"; return false; }
+    if (valve_auto())    { *why = "Stop AUTO first"; return false; }
     if (cap.what)        { *why = "a capture is running"; return false; }
     if (!s->reading_ok)  { *why = "no valid Druck reading"; return false; }
     // A vacuum reads under 5 % of span (0.5 mV/V); room air at least 40 % of

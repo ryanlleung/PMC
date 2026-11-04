@@ -550,7 +550,7 @@ static void sync_cal_saved(void)
 // (cfg_save_with, PID).
 static const char *busy_why(void)
 {
-    if (valve_auto()) return "Switch to MANUAL first";
+    if (valve_auto()) return "Stop AUTO first";
     if (valve_mode() == VALVE_CALIBRATING || stepper3_busy()) return "wait for the valve to stop";
     return NULL;
 }
@@ -811,7 +811,7 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
             // cand holds the live values here (only tuning keys are written).
             bool same = k == CFG_SENSOR ? (uint32_t)v[k] == cand.sens[cand.active].serial
                                         : v[k] == *key_ref(&cand, (cfg_key_t)k);
-            if (!same) { *why = "Switch to MANUAL first"; return false; }
+            if (!same) { *why = "Stop AUTO first"; return false; }
             continue;
         }
         if (k == CFG_SENSOR) {

@@ -17,7 +17,7 @@ const path = require('path');
   await p.mouse.click(box.x + 240 * k, box.y + 136 * k); await p.waitForTimeout(200);
   await tap(240, 136);
   await p.waitForTimeout(3000);
-  await tap(415, 72);    // Home valve
+  await tap(269, 184);   // Home valve (the Valve tile)
   await tap(346, 147);   // Home
   await p.selectOption('#speed', '600');
   // The board sends nothing unasked: ask MODE? until homing is done.

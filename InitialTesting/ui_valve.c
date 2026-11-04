@@ -67,7 +67,7 @@ static void start_cb(lv_event_t *e)
     else if (valve_motion_blocked())
         ui_msg("Reset the fault first");
     else if (valve_auto())
-        ui_msg("Switch to MANUAL first");
+        ui_msg("Stop AUTO first");
     else
         ui_home_ask();
 }
@@ -83,7 +83,7 @@ static const char *setpos_why(void)
 {
     if (valve_mode() == VALVE_CALIBRATING) return "Homing: STOP to cancel";
     if (valve_motion_blocked())            return "Reset the fault first";
-    if (valve_auto())                      return "Switch to MANUAL first";
+    if (valve_auto())                      return "Stop AUTO first";
     if (stepper3_busy())                   return "Wait for the valve to stop";
     return NULL;
 }

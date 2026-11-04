@@ -171,13 +171,12 @@ extern const ui_screen_t ui_scr_home, ui_scr_menu;
 void ui_status_line(void);     // mode/move line, in a screen's refresh()
 void ui_reset_fault_event(lv_event_t *e);   // the strip's Reset fault (ui_home.c)
 // Home and Set position (ui_home.c): ui_home_ask the Home confirm,
-// ui_set_position_ask the Set position list, ui_position_ask both (Home's
-// mode button while not homed).
+// ui_set_position_ask the Set position list, ui_position_ask both (Home
+// valve on Home's Valve tile while not homed).
 void ui_home_ask(void);
 void ui_set_position_ask(void);
 void ui_set_position_pick(int i);   // 0 closed, 1 enter %, 2 saved
 void ui_position_ask(void);
-void ui_manual_ask(void);      // the Switch to MANUAL confirm (AUTO)
 int32_t ui_log_px(int32_t p_mmbar, int32_t w);   // 0.1-1000 mbar on a log scale, 0 to w px
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
 // Trend and the Home sparklines (ui_trend.c). A sparkline redraws when

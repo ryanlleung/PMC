@@ -435,7 +435,7 @@ static void save_ask(void)
         return;
     }
     // In AUTO the valve moves all the time; tuning saves there (cfg.c
-    // refuses anything else with "Switch to MANUAL first").
+    // refuses anything else with "Stop AUTO first").
     if (!valve_auto() && (stepper3_busy() || valve_mode() == VALVE_CALIBRATING)) {
         ui_msg("Wait for the valve to stop");
         return;
@@ -1440,7 +1440,7 @@ static void load_cb(lv_event_t *e)
     const char *at;
     load_n = 0;
     if (valve_auto()) {
-        ui_msg("Switch to MANUAL first");
+        ui_msg("Stop AUTO first");
         return;
     }
     if (stepper3_busy() || valve_mode() == VALVE_CALIBRATING) {

@@ -22,7 +22,7 @@ check('every other command: ERR 100', bad.length === 0, bad.join('\n     '));
 check('nothing moved', s.get(5) === 40000);
 
 // Home on the screen (Home valve, then Home in the question), then drive it remotely.
-s.tap(415, 72); s.tap(346, 147); s.run(120000);
+s.tap(269, 184); s.tap(346, 147); s.run(120000);   // Home valve (the Valve tile), Home
 check('homed on the screen', s.cmd('MODE?;VALV?') === 'MODE MANUAL;VALV 0.00 %\r\n', s.cmd('MODE?;VALV?'));
 check('VALV SET 20', s.cmd('VALV SET 20', 60000) === '' && s.cmd('VALV?;VALV MOVING?') === 'VALV 20.00 %;VALV MOVING 0\r\n',
   s.cmd('VALV?'));

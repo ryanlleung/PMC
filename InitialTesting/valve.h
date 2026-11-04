@@ -27,7 +27,7 @@
  * MANUAL too, the valve idle (no PAUSED state since 0.11.25, Ryan 22 Oct);
  * the strip shows W-2 until OK or the next Start AUTO. Leaving AUTO ramps the valve down and
  * MANUAL holds where it stops. MANUAL moves, homing and the valve settings
- * are refused in AUTO ("Switch to MANUAL first").
+ * are refused in AUTO ("Stop AUTO first" on the screen from 0.15.3; ERR 202 "Switch to MANUAL first" over the network).
  *
  * Calibration (Control Logic 4): if the switch is pressed, an N_clear
  * clearance move off it first (F-4 if still pressed); a fast close at

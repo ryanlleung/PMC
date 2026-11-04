@@ -11,18 +11,22 @@
 #include "fixed.h"
 
 /* --------------------------------------------------------------------------
- * Home (simulator v63 buildCtrl). Pressure and Valve tiles, the mode button,
- * Menu and the PID tile (KP, TI and KD in use; a tap opens PID tuning), in
- * place of the Valve button, whose page went in 0.14.21 (Ryan, 4 Nov, from
- * his user: the operator does not tune, but wants to see the values).
- * In MANUAL the Pressure tile's SP row is Maintain: AUTO at the pressure
- * shown, no question. AUTO (stage 8): the first Start AUTO asks for a target and
- * Set starts AUTO; later ones confirm the target kept or offer New target.
- * In AUTO the SP box opens the keypad; Set applies it at once (no question
- * since 0.14.22) and
- * the Go to box reads "AUTO", flat. The strip shows the status line, with
- * the 5 min pressure sparkline on its right as on the operator screens
- * (ui.c, Ryan 21 Oct). A tap on the sparkline opens Trend.
+ * Home (simulator v63 buildCtrl). Pressure and Valve tiles; on the right
+ * the PID tile (KP, TI and KD in use; a tap opens PID tuning; 0.14.21, Ryan
+ * 4 Nov: the operator does not tune, but wants to see the values), Trend,
+ * Menu and STOP. No mode button from 0.15.3 (Ryan, 4 Nov: it did what the
+ * tiles' buttons do): the header's panel shows the mode, and each tile's
+ * bottom row changes the mode or sets its value:
+ *   MANUAL     Pressure: Start AUTO (AUTO at the pressure shown, from where
+ *              the valve is, no question). Valve: Go to.
+ *   AUTO       Pressure: the SP box (the keypad; Set applies at once, no
+ *              question since 0.14.22). Valve: Stop AUTO (MANUAL, the valve
+ *              stays where it is, no question).
+ *   NOT HOMED  Valve: Home valve (Home or Set position). Start AUTO greyed.
+ *   HOMING     Valve: the Go to box, greyed, "----".
+ * The strip shows the status line, with the 5 min pressure sparkline on its
+ * right as on the operator screens (ui.c, Ryan 21 Oct). A tap on the
+ * sparkline opens Trend.
  * ------------------------------------------------------------------------ */
 #define TILE_W  167
 #define TILE_H  160
@@ -35,7 +39,15 @@ typedef struct {
 } tile_t;
 
 static tile_t pt, vt;
-static lv_obj_t *mode_btn, *pid_btn, *pid_val[3], *keep_btn;
+static lv_obj_t *pid_btn, *pid_val[3], *start_btn, *stop_btn, *homev_btn;
+
+static void show_if(lv_obj_t *o, bool on)
+{
+    if (on == lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+        if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
 
 // log2 in Q8 (as main_screen.c), for the log pressure bar.
 static int32_t log2_q8(uint32_t v)
@@ -220,7 +232,7 @@ static const char *not_manual_why(void)
 {
     if (valve_motion_blocked()) return "Reset the fault first";
     if (valve_mode() == VALVE_CALIBRATING) return "Homing: STOP to cancel";
-    if (valve_auto()) return "Switch to MANUAL first";
+    if (valve_auto()) return "Stop AUTO first";
     return "Home the valve first";
 }
 
@@ -235,45 +247,11 @@ static const char *range_info(void)
     return info;
 }
 
-static int32_t ask_sp;   // the setpoint "Start AUTO at X mB?" showed
-
-static void start_auto(void)
-{
-    const char *why;
-    int32_t sp;
-    // The target may have changed (the network) while the question was up.
-    if (!valve_target(&sp) || sp != ask_sp) {
-        ui_msg("Setpoint changed meanwhile: tap Start AUTO again");
-        return;
-    }
-    if (!valve_start_auto(&why))
-        ui_msg(why);
-}
-
 static void to_manual(void)
 {
     const char *why;
     if (!valve_to_manual(&why))
         ui_msg(why);
-}
-
-static bool sp_set(int32_t v10, const char **why);
-
-// Typed target, then AUTO at it with no second question (simulator keypadStart).
-// If AUTO started meanwhile (the network), a setpoint change.
-static bool start_set(int32_t v10, const char **why)
-{
-    if (valve_auto())
-        return sp_set(v10, why);
-    return valve_start_auto_at(v10 * 100, why);   // the target changes only if AUTO starts
-}
-
-static void keypad_start(void)
-{
-    ui_kp_t k = { .title = "Setpoint for AUTO, mB", .info = range_info(), .dec = 1, .min = 0,
-                  .max = valve_range_mmbar() / 100, .live_label = "Now, mB", .live_milli = pv_milli,
-                  .live_dec = 1, .on_set = start_set };
-    ui_keypad_ex(&k);
 }
 
 // A typed setpoint applies at once, however large the change: no "Change
@@ -308,12 +286,6 @@ static const char *auto_text(char *t, size_t n, bool unit)
     return t;
 }
 
-void ui_manual_ask(void)
-{
-    // No %: the valve keeps moving while this is up (Ryan, 22 Oct).
-    ui_confirm("Switch to MANUAL? Valve holds where it is.", "Switch to\nMANUAL", to_manual);
-}
-
 static void warn_ok_event(lv_event_t *e)
 {
     (void)e;
@@ -326,7 +298,7 @@ static void target_event(lv_event_t *e)
     if (valve_auto())
         keypad_sp();
     else
-        ui_msg(valve_mode() == VALVE_MANUAL ? "Setpoint is used in AUTO: Start AUTO asks for it"
+        ui_msg(valve_mode() == VALVE_MANUAL ? "Setpoint is used in AUTO"
                                             : not_manual_why());
 }
 
@@ -442,7 +414,7 @@ void ui_home_ask(void)
     ui_confirm(home_q, "Home valve", calibrate);
 }
 
-// Home's mode button while not homed: the two jobs side by side.
+// Home valve (Home's Valve tile) while not homed: the two jobs side by side.
 void ui_position_ask(void)
 {
     lv_snprintf(home_q, sizeof home_q, "Valve position unknown. Home the valve on the limit switch (%s), or set the position?",
@@ -450,36 +422,25 @@ void ui_position_ask(void)
     ui_ask3(home_q, "Cancel", NULL, "Set\nposition", ui_set_position_ask, "Home\nvalve", calibrate);
 }
 
-static valve_mode_t btn_mode = VALVE_NOT_CAL;   // the mode the button's label was set for
-
-static void mode_event(lv_event_t *e)
+// Stop AUTO (the Valve tile, AUTO): MANUAL, the valve stays where it is,
+// no question (Switch to MANUAL had none from 28 Oct).
+static void stop_event(lv_event_t *e)
 {
-    (void)e;
-    static char q[64];
-    char a[16];
-    int32_t sp;
-    bool have = valve_target(&sp);
-    valve_mode_t m = valve_mode();
-    if (m != btn_mode) {
-        // Changed (the network) since the label was drawn: a tap on Start
-        // AUTO must not switch to MANUAL, nor the reverse.
-        ui_msg("The mode changed: check the button and tap again");
+    if (ui_btn_disabled(e) || !valve_auto()) {
+        ui_msg("Not in AUTO");
         ui_refresh_soon();
         return;
     }
-    if (m == VALVE_CALIBRATING)
-        ui_msg("Homing: STOP to cancel");
-    else if (m == VALVE_AUTO)
-        to_manual();   // no confirm (Ryan, 28 Oct); Go to in AUTO still asks
-    else if (m == VALVE_MANUAL && valve_fault_count())
-        ui_msg("Reset the fault first");
-    else if (m == VALVE_MANUAL && !have)
-        keypad_start();   // no default target (Ryan, 10 Oct): the first Start AUTO asks for one
-    else if (m == VALVE_MANUAL) {
-        ask_sp = sp;
-        lv_snprintf(q, sizeof q, "Start AUTO at %s mB?", ui_fmt1(a, sizeof a, sp));
-        ui_ask3(q, "Cancel", NULL, "New\nsetpoint", keypad_start, "Start\nAUTO", start_auto);
-    } else if (valve_motion_blocked())
+    to_manual();
+}
+
+// Home valve (the Valve tile, not homed).
+static void homev_event(lv_event_t *e)
+{
+    (void)e;
+    if (valve_mode() != VALVE_NOT_CAL)
+        ui_refresh_soon();   // homed meanwhile (the network): the row changes
+    else if (valve_motion_blocked())
         ui_msg("Reset the fault first");
     else
         ui_position_ask();
@@ -530,7 +491,7 @@ static void pid_refresh(void)
         ui_set_text(pid_val[i], fmt3(b, sizeof b, cfg_tune(key[i])));
 }
 
-// Maintain ---------------------------------------------------------------
+// Start AUTO --------------------------------------------------------------
 static bool reading_ok(void)
 {
     const clicks_state_t *s = clicks_state();
@@ -538,8 +499,8 @@ static bool reading_ok(void)
 }
 
 // AUTO at the pressure as shown (0.1 mB), from where the valve is, with no
-// question (Ryan, 4 Nov).
-static void keep_event(lv_event_t *e)
+// question (Ryan, 4 Nov: Maintain in 0.14.21, Start AUTO from 0.15.3).
+static void start_event(lv_event_t *e)
 {
     const char *why;
     if (ui_btn_disabled(e) || valve_mode() != VALVE_MANUAL) {
@@ -558,6 +519,12 @@ static void menu_event(lv_event_t *e)
     ui_open(&ui_scr_menu);
 }
 
+static void trend_event(lv_event_t *e)
+{
+    (void)e;
+    ui_open(&ui_scr_trend);
+}
+
 void ui_reset_fault_event(lv_event_t *e)
 {
     (void)e;
@@ -574,13 +541,18 @@ static void home_build(lv_obj_t *scr)
 {
     make_tile(scr, &pt, 10, "Pressure", "mB", "SP", true, target_event);
     make_tile(scr, &vt, 186, "Valve", "%", "Go to", false, goto_event);
-    mode_btn = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Home valve", mode_event, NULL);
-    // Menu above the PID tile (Ryan, 4 Nov).
-    ui_btn(scr, 361, 104, 109, 48, UI_NAV, "Menu", menu_event, NULL);
-    pid_make(scr, 160);
-    // Maintain on the SP row outside AUTO, outlined blue as Switch to MANUAL.
-    keep_btn = ui_btn(pt.tile, 12, 116, 143, 40, UI_SECONDARY, "Maintain", keep_event, NULL);
-    ui_btn_outline(keep_btn, true);
+    // The PID tile on top, Trend, then Menu above STOP (Ryan, 4 Nov, 0.15.3).
+    pid_make(scr, 48);
+    ui_btn(scr, 361, 104, 109, 48, UI_NAV, "Trend", trend_event, NULL);
+    ui_btn(scr, 361, 160, 109, 48, UI_NAV, "Menu", menu_event, NULL);
+    // The mode buttons on the tiles' bottom rows, in place of the SP and Go
+    // to boxes (0.15.3): Start AUTO outside AUTO, Stop AUTO in AUTO, both
+    // outlined blue; Home valve while not homed, filled (what is expected).
+    start_btn = ui_btn(pt.tile, 12, 116, 143, 40, UI_SECONDARY, "Start AUTO", start_event, NULL);
+    ui_btn_outline(start_btn, true);
+    stop_btn = ui_btn(vt.tile, 12, 116, 143, 40, UI_SECONDARY, "Stop AUTO", stop_event, NULL);
+    ui_btn_outline(stop_btn, true);
+    homev_btn = ui_btn(vt.tile, 12, 116, 143, 40, UI_PRIMARY, "Home valve", homev_event, NULL);
 }
 
 // Valve reading and bar, at 10 Hz.
@@ -620,54 +592,29 @@ static void home_refresh(void)
     int32_t sp;
     bool auto_on = valve_auto();
     box_set(&pt, auto_on, valve_target(&sp) ? ui_fmt1(buf, sizeof buf, sp) : "Not set");
-    // AUTO: the SP field. Otherwise Maintain, greyed while Start AUTO would
-    // be refused (a press says why).
-    lv_obj_t *const on[2] = { pt.box, pt.sp_cap };
-    for (int i = 0; i < 2; i++) {
-        if (auto_on) lv_obj_remove_flag(on[i], LV_OBJ_FLAG_HIDDEN);
-        else         lv_obj_add_flag(on[i], LV_OBJ_FLAG_HIDDEN);
-    }
-    if (auto_on) lv_obj_add_flag(keep_btn, LV_OBJ_FLAG_HIDDEN);
-    else         lv_obj_remove_flag(keep_btn, LV_OBJ_FLAG_HIDDEN);
-    ui_btn_enable(keep_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
+    // AUTO: the SP field. Otherwise Start AUTO, greyed while it would be
+    // refused (a press says why).
+    show_if(pt.box, auto_on);
+    show_if(pt.sp_cap, auto_on);
+    show_if(start_btn, !auto_on);
+    ui_btn_enable(start_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
 
     home_fast();
     alarm_set(&vt, valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") ||
                    valve_fault_is("F-6"));
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
-    // Where the valve is going, greyed when not editable (in AUTO the
-    // position AUTO sends it to); "----" until homed.
+    // Where the valve is going, greyed when not editable; "----" while
+    // homing.
     bool have = valve_calibrated() && m != VALVE_CALIBRATING;
     box_set(&vt, manual, have ? ui_fmt2(buf, sizeof buf, valve_target_pct_milli()) : "----");
 
-    // Mode button.
-    btn_mode = m;
-    int step = valve_cal_step();
-        if (m == VALVE_CALIBRATING) {
-        lv_snprintf(buf, sizeof buf, "%d of 4", step < 1 ? 1 : step);
-        ui_btn_text(mode_btn, "Homing", buf);
-        ui_btn_enable(mode_btn, false);
-        ui_btn_outline(mode_btn, false);
-    } else if (m == VALVE_MANUAL) {
-        // Greyed while it would be refused (HMI review H1, 28 Oct); a press
-        // still says why.
-        ui_btn_text(mode_btn, "Start AUTO", NULL);
-        ui_btn_enable(mode_btn, !valve_fault_count());
-        ui_btn_outline(mode_btn, false);
-        ui_btn_primary(mode_btn, true);
-    } else if (m == VALVE_AUTO) {
-        // Not filled in AUTO: nothing is expected of the operator (H4);
-        // outlined in Start AUTO's blue (Ryan, 28 Oct: plain white was not liked).
-        ui_btn_text(mode_btn, "Switch to\nMANUAL", NULL);
-        ui_btn_enable(mode_btn, true);
-        ui_btn_primary(mode_btn, false);
-        ui_btn_outline(mode_btn, true);
-    } else {
-        ui_btn_text(mode_btn, "Home valve", NULL);   // a fault is refused on press
-        ui_btn_enable(mode_btn, true);
-        ui_btn_outline(mode_btn, false);
-        ui_btn_primary(mode_btn, true);
-    }
+    // The Valve tile's row: Stop AUTO in AUTO, Home valve while not homed,
+    // otherwise the Go to box.
+    bool stop_on = auto_on, homev_on = m == VALVE_NOT_CAL;
+    show_if(stop_btn, stop_on);
+    show_if(homev_btn, homev_on);
+    show_if(vt.box, !stop_on && !homev_on);
+    show_if(vt.sp_cap, !stop_on && !homev_on);
 
     ui_status_line();
 }

@@ -971,9 +971,9 @@ static void test_auto(void)
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == rev0 + 1);
     v[CFG_RATE] = (int32_t)rate + 50;                             // changed: refused
     v[CFG_KP] = 320;
-    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "MANUAL"));
+    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "Stop AUTO"));
     CHECK(cfg_tune(CFG_KP) == 300 && m_rate == rate);
-    CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "MANUAL"));
+    CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "Stop AUTO"));
     clicks_state_t q = { .pm_found = true, .reading_ok = true, .p_mmbar = 5100 };
     trend_pt_t o;
     lv_tick_inc(1000); trend_second(&q);

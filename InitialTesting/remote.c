@@ -79,6 +79,7 @@ static void refuse(int err, const char *fmt, ...)
 static const struct { const char *head; int num; const char *text; } why_codes[] = {
     { "Homing", 201, "Homing, STOP to cancel" },
     { "Switch to MANUAL", 202, "Switch to MANUAL first" },
+    { "Stop AUTO", 202, "Switch to MANUAL first" },   // the screen's wording from 0.15.3
     { "Reset the fault", 203, "Reset the fault first" },
     { "Home the valve", 204, "Home the valve first" },
     { "No valid pressure", 205, "No valid pressure" }, { "No pressure", 205, "No valid pressure" },

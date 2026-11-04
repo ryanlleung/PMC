@@ -211,7 +211,7 @@ static void update_lock(void)
     stepper3_lock(mode == VALVE_CALIBRATING ? "Homing: STOP to cancel"
                   : mode == VALVE_SHUTDOWN ? SHUT_WHY
                   : any_latched() ? "Reset the fault first"
-                  : is_auto() ? "Switch to MANUAL first" : NULL);
+                  : is_auto() ? "Stop AUTO first" : NULL);
 }
 
 static void cal_end(valve_mode_t m)
@@ -324,7 +324,7 @@ static bool cal_start(const char **err)
 {
     if (mode == VALVE_CALIBRATING) { *err = "Homing: STOP to cancel"; return false; }
     if (valve_off_why())           { *err = valve_off_why(); return false; }
-    if (is_auto())                 { *err = "Switch to MANUAL first"; return false; }
+    if (is_auto())                 { *err = "Stop AUTO first"; return false; }
     if (any_latched())             { *err = "Reset the fault first"; return false; }
     stepper3_stop();
     stepper3_override_cancel();
@@ -916,7 +916,7 @@ bool valve_restore(int32_t count, const char **why)
 {
     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
     if (valve_off_why())            { *why = valve_off_why(); return false; }
-    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
+    if (is_auto())                  { *why = "Stop AUTO first"; return false; }
     if (calibrated)                 { *why = "Position already set"; return false; }
     if (ref_unproven)               { *why = "Direction or coil order changed: home the valve first"; return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
@@ -938,7 +938,7 @@ static bool set_by_hand(bool zero, int32_t pct100, const char **why)
     if (pct100 < 0 || pct100 > 10000) { *why = "Outside 0 to 100 %"; return false; }
     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
     if (valve_off_why())            { *why = valve_off_why(); return false; }
-    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
+    if (is_auto())                  { *why = "Stop AUTO first"; return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
     if (ref_unproven)               { *why = "Direction or coil order changed: home the valve first"; return false; }
     int32_t c = zero ? 0 : (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
@@ -1168,7 +1168,7 @@ bool valve_goto_pct100(int32_t pct100, const char **why)
     if (mode == VALVE_CALIBRATING)  { *why = "Homing: STOP to cancel"; return false; }
     if (valve_off_why())            { *why = valve_off_why(); return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
-    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
+    if (is_auto())                  { *why = "Stop AUTO first"; return false; }
     if (!calibrated)                { *why = "Home the valve first"; return false; }
     if (holding())                  { *why = "Valve being moved on the screen"; return false; }
     int32_t to = (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
@@ -1247,7 +1247,7 @@ bool valve_question(int32_t *pct10)
 bool valve_answer(bool set_zero, const char **why)
 {
     if (!question)          { *why = "No switch question waiting"; return false; }
-    if (set_zero && is_auto())       { *why = "Switch to MANUAL first"; return false; }
+    if (set_zero && is_auto())       { *why = "Stop AUTO first"; return false; }
     if (set_zero && valve_off_why()) { *why = valve_off_why(); return false; }
     if (set_zero && stepper3_busy()) { *why = "Wait for the valve to stop"; return false; }
     question = false;
