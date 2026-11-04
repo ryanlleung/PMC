@@ -206,20 +206,64 @@ index f3bdc09..31f1bc2 100644
  lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
  lv_obj_t *ui_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, const lv_font_t *font,
 diff --git a/InitialTesting/ui_home.c b/InitialTesting/ui_home.c
-index a032ea0..f8866f3 100644
+index a032ea0..d3983fb 100644
 --- a/InitialTesting/ui_home.c
 +++ b/InitialTesting/ui_home.c
-@@ -176,7 +176,8 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
+@@ -19,7 +19,20 @@
+  * ------------------------------------------------------------------------ */
+ #define TILE_W  167
+ #define TILE_H  160
+-#define BAR_W   143
++// The bar as wide as the widest reading, so it sits right under it: the
++// wider of "1013.2" and "100.00" at 40 px (Ryan, 4 Nov).
++static int32_t bar_w(void)
++{
++    static int32_t w = 0;
++    if (!w) {
++        lv_point_t a, b;
++        lv_text_get_size(&a, "1013.2", &ui_num_40, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
++        lv_text_get_size(&b, "100.00", &ui_num_40, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
++        w = a.x > b.x ? a.x : b.x;
++    }
++    return w;
++}
++#define BAR_W   bar_w()
+ 
+ typedef struct {
+     lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev;
+@@ -176,24 +189,26 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
  {
      t->log = log;
      t->fill = -1;
 -    t->tile = ui_card(scr, x, 48, TILE_W, TILE_H);
 +    // Halves of the 343 area as on every page, 168 + 8 + 167 (common HMI template).
-+    t->tile = ui_card(scr, x, 48, x == 10 ? 168 : TILE_W, TILE_H);
++    int32_t w = x == 10 ? 168 : TILE_W, r = w - 12;   // right edge of the unit, reading, bar and box
++    t->tile = ui_card(scr, x, 48, w, TILE_H);
      // Caption and unit 16 px (Ryan, 21 Oct: 12 px was too small).
      ui_label(t->tile, 12, 6, 90, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
-     ui_label(t->tile, 75, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
-@@ -371,7 +372,7 @@ static void set_closed(void)
+-    ui_label(t->tile, 75, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
++    ui_label(t->tile, r - 80, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
+     // The reading, 40 px (Ryan 16 Oct: bigger once the sparklines left the
+     // tiles); "1013.2" just fits, right edge on the bar's.
+-    t->reading = ui_label(t->tile, 0, 34, 12 + BAR_W, &ui_num_40, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "----");
++    t->reading = ui_label(t->tile, 0, 34, r, &ui_num_40, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "----");
+     t->bar = lv_obj_create(t->tile);
+     lv_obj_remove_style_all(t->bar);
+     lv_obj_remove_flag(t->bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+-    lv_obj_set_pos(t->bar, 12, 76);   // 14 px from the digits, as the caption is above them
++    lv_obj_set_pos(t->bar, r - BAR_W, 76);   // 14 px from the digits, as the caption is above them
+     lv_obj_set_size(t->bar, BAR_W, 30);
+     lv_obj_add_event_cb(t->bar, bar_draw, LV_EVENT_DRAW_MAIN, t);
+     ui_label(t->tile, 12, 128, 50, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, sp);
+     t->box = lv_obj_create(t->tile);
+     lv_obj_remove_style_all(t->box);
+     lv_obj_remove_flag(t->box, LV_OBJ_FLAG_SCROLLABLE);
+-    lv_obj_set_pos(t->box, 67, 116);   // wide enough for "100.00" and the chevron
++    lv_obj_set_pos(t->box, r - 88, 116);   // wide enough for "100.00" and the chevron
+     lv_obj_set_size(t->box, 88, 40);
+     lv_obj_set_style_bg_opa(t->box, LV_OPA_COVER, 0);
+     lv_obj_set_style_bg_color(t->box, lv_color_hex(0xEEF2F6), 0);
+@@ -371,7 +386,7 @@ static void set_closed(void)
      if (!valve_set_closed(&why))
          ui_msg(valve_motion_blocked() ? "Reset the fault first" : why);
      else
@@ -228,7 +272,7 @@ index a032ea0..f8866f3 100644
  }
  
  static bool set_position(int32_t v100, const char **why)
-@@ -397,7 +398,7 @@ static void set_position_ask(void)
+@@ -397,7 +412,7 @@ static void set_position_ask(void)
  
  static void set_closed_ask(void)
  {
@@ -237,7 +281,7 @@ index a032ea0..f8866f3 100644
                 "Set as 0 %", set_closed);
  }
  
-@@ -660,11 +661,13 @@ void ui_status_line(void)
+@@ -660,11 +675,13 @@ void ui_status_line(void)
  const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
  
  /* --------------------------------------------------------------------------
@@ -255,7 +299,7 @@ index a032ea0..f8866f3 100644
  
  static void menu_tile_event(lv_event_t *e)
  {
-@@ -674,9 +677,9 @@ static void menu_tile_event(lv_event_t *e)
+@@ -674,9 +691,9 @@ static void menu_tile_event(lv_event_t *e)
  static void menu_build(lv_obj_t *scr)
  {
      // Grouped in rows with a caption on the left, as on Diagnostics.
@@ -497,7 +541,7 @@ index 8fd099e..2cee036 100644
      tr.win_seen = -1;
  }
 diff --git a/InitialTesting/ui_valve.c b/InitialTesting/ui_valve.c
-index f284278..d706ecc 100644
+index f284278..85c0ea5 100644
 --- a/InitialTesting/ui_valve.c
 +++ b/InitialTesting/ui_valve.c
 @@ -82,7 +82,7 @@ static bool vp_goto(int32_t pct10, int dir)
@@ -509,16 +553,33 @@ index f284278..d706ecc 100644
      // above it, so a close would open.
      if (!why && dir < 0 && pct10 <= 0 && (stepper3_busy() ? valve_target_pct10() : valve_pct10()) <= 0)
          why = "Valve at 0 %, nothing to close";
-@@ -175,7 +175,7 @@ static void help_cb(lv_event_t *e)
+@@ -172,10 +172,24 @@ static void help_cb(lv_event_t *e)
+ /* Readings 64 px tall with 26 px numbers; move buttons 40 px in two rows
+  * (Ryan chose this over one row of six, 15 Oct). */
+ 
++// The thin bars as wide as the widest 26 px reading, the wider of "1013.2"
++// and "100.00", right-aligned under it (Ryan, 4 Nov).
++static int32_t rbar_w(void)
++{
++    static int32_t w = 0;
++    if (!w) {
++        lv_point_t a, b;
++        lv_text_get_size(&a, "1013.2", &ui_num_26, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
++        lv_text_get_size(&b, "100.00", &ui_num_26, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
++        w = a.x > b.x ? a.x : b.x;
++    }
++    return w;
++}
++
  // 3 px bar near the bottom of a 148 px card; returns the fill.
  static lv_obj_t *thin_bar(lv_obj_t *card, int32_t y)
  {
 -    lv_obj_t *track = ui_card(card, 10, y, 128, 3);
-+    lv_obj_t *track = ui_card(card, 12, y, 124, 3);
++    lv_obj_t *track = ui_card(card, 136 - rbar_w(), y, rbar_w(), 3);
      lv_obj_set_style_radius(track, 0, 0);
      lv_obj_set_style_bg_color(track, UI_TRACK, 0);
      lv_obj_t *fill = ui_card(track, 0, 0, 0, 3);
-@@ -196,7 +196,7 @@ static lv_obj_t *reading(lv_obj_t *scr, int32_t x, int32_t h, const char *cap, c
+@@ -196,7 +210,7 @@ static lv_obj_t *reading(lv_obj_t *scr, int32_t x, int32_t h, const char *cap, c
  {
      lv_obj_t *v = ui_info(scr, x, 48, 148, h, cap);
      lv_obj_t *card = lv_obj_get_parent(v);
@@ -527,7 +588,25 @@ index f284278..d706ecc 100644
      right(v);
      lv_obj_set_style_text_font(v, &ui_num_26, 0);
      lv_obj_set_y(v, 20);
-@@ -316,8 +316,7 @@ static const char *const calib_help =
+@@ -256,7 +270,7 @@ static void valve_fast(void)
+     ui_set_text(vp.v, cal ? pct_text(buf, sizeof buf, valve_pct_milli()) : "----");
+     ui_set_color(vp.v, cal && !valve_auto() ? UI_TEXT : UI_IDLE);   // grey in AUTO, as "AUTO"
+     int32_t p = cal ? ui_pct_shown(valve_pct_milli()) : 0;
+-    bar_width(vp.fill, p * 128 / 10000);
++    bar_width(vp.fill, p * rbar_w() / 10000);
+     // A dialog over a hold (the switch question, a fault) takes the touch
+     // away from the button without a release: stop the hold.
+     if (vp.jog && !stepper3_busy())
+@@ -279,7 +293,7 @@ static void valve_refresh(void)
+     bool ok;
+     ui_set_text(vp.p, pressure_text(buf, sizeof buf, &ok));
+     ui_set_color(vp.p, ok ? UI_TEXT : UI_FAULT);
+-    bar_width(vp.pfill, ok ? ui_log_px(clicks_state()->p_mmbar, 128) : 0);   // log, 0.1 to 1000 mB
++    bar_width(vp.pfill, ok ? ui_log_px(clicks_state()->p_mmbar, rbar_w()) : 0);   // log, 0.1 to 1000 mB
+     valve_fast();
+     bool on = why_not_manual() == NULL;
+     for (int i = 0; i < 8; i++)
+@@ -316,8 +330,7 @@ static const char *const calib_help =
      "Takes up to a few minutes. STOP cancels it.\n\n"
      "Set as 0 %, Set as other % and Use last saved record a position without moving the valve. "
      "They are not verified against the limit switch.\n"
@@ -537,7 +616,7 @@ index f284278..d706ecc 100644
      "Set as other %: use when the position is known, for example from the previous run.\n"
      "Use last saved: the position stored before power was lost. Available after start-up "
      "until the valve moves or is homed.\n\n"
-@@ -368,6 +367,20 @@ static void timer_deleted(lv_event_t *e)
+@@ -368,6 +381,20 @@ static void timer_deleted(lv_event_t *e)
      lv_timer_delete(lv_event_get_user_data(e));
  }
  
@@ -558,7 +637,7 @@ index f284278..d706ecc 100644
  static void calib_build(lv_obj_t *scr)
  {
      memset(&cp, 0, sizeof cp);
-@@ -381,7 +394,12 @@ static void calib_build(lv_obj_t *scr)
+@@ -381,7 +408,12 @@ static void calib_build(lv_obj_t *scr)
      cp.closed = ui_btn(scr, 10, 104, 226, 48, UI_SECONDARY, "Set as 0 %", setpos_cb, (void *)(intptr_t)0);
      cp.start = ui_btn(scr, 244, 104, 226, 48, UI_PRIMARY, "Home valve", start_cb, NULL);
      cp.enter = ui_btn(scr, 10, 160, 226, 48, UI_SECONDARY, "Set as other %", setpos_cb, (void *)(intptr_t)1);
@@ -572,7 +651,7 @@ index f284278..d706ecc 100644
  }
  
  // Motor turns from closed at 10 Hz (Ryan, 24 Oct: turns read more
-@@ -413,9 +431,9 @@ static void calib_refresh(void)
+@@ -413,9 +445,9 @@ static void calib_refresh(void)
      else if (how == VALVE_REF_HOMED && when)
          lv_snprintf(st, sizeof st, "Homed %s", when);
      else if (how == VALVE_REF_HAND)
@@ -584,7 +663,7 @@ index f284278..d706ecc 100644
      else
          lv_strlcpy(st, "Not homed", sizeof st);
      ui_set_text(cp.state, st);
-@@ -578,12 +596,12 @@ static void detail_open(int i)
+@@ -578,12 +610,12 @@ static void detail_open(int i)
      fp.detail = i;
      lv_obj_add_event_cb(o, detail_deleted, LV_EVENT_DELETE, NULL);
      lv_obj_t *c = ui_card(o, 10, 8, 460, 160);
@@ -601,7 +680,7 @@ index f284278..d706ecc 100644
          lv_label_set_long_mode(fp.d_text[k], LV_LABEL_LONG_WRAP);
      }
      fp.d_next = ui_btn(o, 10, 176, 109, 48, UI_SECONDARY, "Next fault", d_next_cb, NULL);
-@@ -639,11 +657,11 @@ static void faults_build(lv_obj_t *scr)
+@@ -639,11 +671,11 @@ static void faults_build(lv_obj_t *scr)
      fp.reset = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Reset fault", faults_reset_cb, NULL);
  
      lv_obj_t *ev = ui_card(scr, 10, 104, 343, 104);
@@ -616,7 +695,7 @@ index f284278..d706ecc 100644
      lv_obj_set_scroll_dir(box, LV_DIR_VER);
      lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
                              LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_CHAIN);
-@@ -654,15 +672,15 @@ static void faults_build(lv_obj_t *scr)
+@@ -654,15 +686,15 @@ static void faults_build(lv_obj_t *scr)
      lv_obj_set_style_bg_color(box, UI_IDLE, LV_PART_SCROLLBAR);
      fp.box = box;
      for (int i = 0; i < 2; i++) {
@@ -635,7 +714,7 @@ index f284278..d706ecc 100644
      lv_label_set_long_mode(fp.log, LV_LABEL_LONG_WRAP);
      for (int i = 0; i < 3; i++)
          lv_obj_set_style_text_line_space(i == 0 ? fp.log_time : i == 1 ? fp.log_tag : fp.log, 2, 0);
-@@ -684,7 +702,7 @@ static void faults_rows(void)
+@@ -684,7 +716,7 @@ static void faults_rows(void)
      lv_strlcpy(fp.sig, sig, sizeof fp.sig);
      lv_obj_clean(fp.list);
      if (!n) {
@@ -644,7 +723,7 @@ index f284278..d706ecc 100644
          return;
      }
      for (int i = 0; i < n && valve_fault_get(i, &f); i++) {
-@@ -697,9 +715,9 @@ static void faults_rows(void)
+@@ -697,9 +729,9 @@ static void faults_rows(void)
          lv_obj_add_event_cb(r, row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
          char t[48], w[16];
          lv_snprintf(t, sizeof t, "%s  %s", f.tag, f.text);
@@ -656,7 +735,7 @@ index f284278..d706ecc 100644
          ui_label(r, 318, 14, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
      }
  }
-@@ -726,7 +744,7 @@ static void faults_log(void)
+@@ -726,7 +758,7 @@ static void faults_log(void)
          if (a.x > tw) tw = a.x;
          if (b.x > gw) gw = b.x;
      }
@@ -665,7 +744,7 @@ index f284278..d706ecc 100644
      size_t lt = 0, lg = 0, lx = 0;
      log_text[0] = log_time[0] = log_tag[0] = '\0';
      for (int i = 0; i < n; i++) {
-@@ -798,25 +816,27 @@ static void diag_build(lv_obj_t *scr)
+@@ -798,25 +830,27 @@ static void diag_build(lv_obj_t *scr)
  {
      // The board temperature in the bottom row from 0.13.4, as the strip
      // shows the Home status line (Ryan, 28 Oct); Moved, steps went.
@@ -699,7 +778,7 @@ index f284278..d706ecc 100644
      }
      lv_timer_t *t = lv_timer_create(diag_motor, 20, NULL);
      lv_obj_add_event_cb(scr, timer_deleted, LV_EVENT_DELETE, t);
-@@ -851,6 +871,12 @@ static void diag_refresh(void)
+@@ -851,6 +885,12 @@ static void diag_refresh(void)
          case STEPPER3_STOP_STALL:   res = "Loop stalled"; break;
          default: break;
      }
