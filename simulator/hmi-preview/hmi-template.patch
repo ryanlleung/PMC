@@ -1,5 +1,5 @@
 diff --git a/InitialTesting/ui.c b/InitialTesting/ui.c
-index 4ef7eea..211e9c4 100644
+index 4ef7eea..c1e6611 100644
 --- a/InitialTesting/ui.c
 +++ b/InitialTesting/ui.c
 @@ -184,8 +184,9 @@ void ui_set_color(lv_obj_t *o, lv_color_t c)
@@ -14,29 +14,33 @@ index 4ef7eea..211e9c4 100644
  }
  
  const char *ui_date(char *buf, size_t n, const char *iso)
-@@ -385,7 +386,9 @@ bool ui_btn_disabled(lv_event_t *e)
+@@ -385,8 +386,10 @@ bool ui_btn_disabled(lv_event_t *e)
  /* --------------------------------------------------------------------------
   * Frame on lv_layer_top(): header, status strip, STOP
   * ------------------------------------------------------------------------ */
 -#define HDR_BTN_W 48  // Back and Home, icons only
-+#define HDR_BTN_W 44  // Power, Back and Home, icons only (48 to 0.15.7)
-+#define HDR_TITLE_X (3 * HDR_BTN_W + 8)   // every title starts here (common HMI template)
+-static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
++#define HDR_BTN_W 44  // Power and Back, icons only (Back 48 to 0.15.7)
++#define HDR_TITLE_X (2 * HDR_BTN_W + 8)   // every title starts here (common HMI template)
 +#define HDR_MODE_X 357   // the mode panel's left edge: mid-gap between the columns below
- static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
++static lv_obj_t *frame, *hdr, *back_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
  static lv_obj_t *strip, *strip_icon, *strip_shape, *strip_text, *strip_ok, *strip_act, *strip_spark;
  static lv_obj_t *stop_btn;
-@@ -440,8 +443,8 @@ void ui_back(void)
- static void home_event(lv_event_t *e)
- {
-     (void)e;
--    if (overlay && !kp_open)
--        return;   // greyed under a popup: Back closes the popup first
-+    if ((overlay || cur == &ui_scr_home) && !kp_open)
-+        return;   // greyed under a popup (Back closes it) and on Home itself
-     ui_home();    // from a keypad too: the entry is dropped (0.13.18)
+ 
+@@ -437,19 +440,13 @@ void ui_back(void)
+         ui_home();
  }
  
-@@ -450,6 +453,8 @@ static void shut_ask(void);
+-static void home_event(lv_event_t *e)
+-{
+-    (void)e;
+-    if (overlay && !kp_open)
+-        return;   // greyed under a popup: Back closes the popup first
+-    ui_home();    // from a keypad too: the entry is dropped (0.13.18)
+-}
+-
+ // Shut down (0.15.0): the power icon on Home asks first (shut_ask, below).
+ static void shut_ask(void);
  static void pwr_event(lv_event_t *e)
  {
      (void)e;
@@ -45,7 +49,7 @@ index 4ef7eea..211e9c4 100644
      shut_ask();
  }
  
-@@ -482,6 +487,36 @@ static void act_event(lv_event_t *e)
+@@ -482,6 +479,36 @@ static void act_event(lv_event_t *e)
          act_cb(e);
  }
  
@@ -82,7 +86,7 @@ index 4ef7eea..211e9c4 100644
  // The status line's drawn icons, 16 x 16, in the label colour.
  typedef enum { SHAPE_VALVE, SHAPE_TARGET } shape_t;
  static shape_t shape;
-@@ -539,11 +574,14 @@ static void build_frame(void)
+@@ -539,36 +566,42 @@ static void build_frame(void)
      lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
      lv_obj_set_style_bg_color(hdr, UI_TEXT, 0);
      lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);    // touches on the header stop here
@@ -93,20 +97,30 @@ index 4ef7eea..211e9c4 100644
 -    home_btn = ui_btn(hdr, HDR_BTN_W, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_HOME, home_event, NULL);
 +    // One header on every screen (common HMI template, Ryan 4 Nov: Home's
 +    // and the other screens' headers differed, and only Home had the power
-+    // icon): Power, Back and Home, icons only, 44 px each, then the title
-+    // from x 140 on the left, the unsaved icon and the mode panel. Each is
-+    // always there, greyed where it does nothing: Back and Home on Home,
-+    // Power and Home under a popup (Back closes the popup).
++    // icon; then "too noisy" with three icons, option A): Power and Back,
++    // icons only, 44 px each, then the title from x 96 on the left, the
++    // unsaved icon and the mode panel. No Home icon: pages are at most
++    // three Backs deep, and a keypad closes with Cancel or Back. Back is
++    // hidden on Home (shown there only to close a popup); Power is greyed
++    // under a popup.
 +    back_btn = ui_btn(hdr, HDR_BTN_W, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_LEFT, back_event, NULL);
-+    home_btn = ui_btn(hdr, 2 * HDR_BTN_W, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_HOME, home_event, NULL);
      // A touch in the 8 px gap under the header is Back's, not the page's.
      lv_obj_set_ext_click_area(hdr, 8);
      lv_obj_set_ext_click_area(back_btn, 8);
-@@ -555,20 +593,25 @@ static void build_frame(void)
-         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
-         lv_obj_center(l);
-     }
+-    lv_obj_set_ext_click_area(home_btn, 8);
+-    // The fault rule runs the full width, over Back and Home (not clickable,
+-    // so their touches still reach them).
+-    for (int i = 0; i < 2; i++) {
+-        lv_obj_t *l = lv_obj_get_child(i ? home_btn : back_btn, 0);
+-        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+-        lv_obj_center(l);
+-    }
 -    pmc_lbl = ui_label(hdr, 10, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER,
++    // The fault rule runs the full width, over Back (not clickable, so its
++    // touches still reach it).
++    lv_obj_t *bl = lv_obj_get_child(back_btn, 0);
++    lv_obj_set_style_text_align(bl, LV_TEXT_ALIGN_CENTER, 0);
++    lv_obj_center(bl);
 +    pmc_lbl = ui_label(hdr, HDR_TITLE_X, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_LEFT,
                         "Pressure controller");
      lv_label_set_long_mode(pmc_lbl, LV_LABEL_LONG_DOT);
@@ -134,7 +148,7 @@ index 4ef7eea..211e9c4 100644
      lv_obj_set_height(mode_lbl, 40);
      lv_obj_set_style_pad_top(mode_lbl, (40 - lv_font_get_line_height(&ui_font_16)) / 2, 0);
      lv_obj_set_style_radius(mode_lbl, 0, 0);
-@@ -589,15 +632,13 @@ static void build_frame(void)
+@@ -589,15 +622,13 @@ static void build_frame(void)
      lv_obj_set_style_border_color(unsaved_btn, UI_YELLOW, 0);
      lv_obj_set_ext_click_area(unsaved_btn, 6);
      lv_obj_add_flag(unsaved_btn, LV_OBJ_FLAG_HIDDEN);
@@ -152,7 +166,7 @@ index 4ef7eea..211e9c4 100644
  
      strip = plain(frame);
      lv_obj_set_pos(strip, 10, 216);
-@@ -639,6 +680,15 @@ static void show(lv_obj_t *o, bool on)
+@@ -639,6 +670,15 @@ static void show(lv_obj_t *o, bool on)
      else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
  }
  
@@ -168,7 +182,7 @@ index 4ef7eea..211e9c4 100644
  void ui_msg(const char *text)
  {
      msg_ok = true;
-@@ -647,6 +697,7 @@ void ui_msg(const char *text)
+@@ -647,6 +687,7 @@ void ui_msg(const char *text)
      // the screen every message starts with a capital (Ryan, 26 Oct).
      if (msg_text[0] >= 'a' && msg_text[0] <= 'z')
          msg_text[0] = (char)(msg_text[0] - 'a' + 'A');
@@ -176,7 +190,7 @@ index 4ef7eea..211e9c4 100644
      // With a fault latched the message is brief: the fault text is the one to read.
      msg_until = lv_tick_get() + (valve_fault_count() ? 2000 : 5000);
      if (!msg_until)
-@@ -664,6 +715,7 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
+@@ -664,6 +705,7 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
      line_kind = kind;
      line_icon = icon;
      lv_strlcpy(line_text, text, sizeof line_text);
@@ -184,15 +198,15 @@ index 4ef7eea..211e9c4 100644
  }
  
  void ui_strip_width(int32_t w) { strip_w = w; }
-@@ -833,22 +885,22 @@ static void frame_refresh(void)
+@@ -833,22 +875,18 @@ static void frame_refresh(void)
      int nf = valve_fault_count();
      valve_mode_t m = valve_mode();
  
 -    // Header.
-+    // Header: the same items in the same places on every screen, greyed
-+    // where they do nothing (common HMI template).
++    // Header: the same items in the same places on every screen (common
++    // HMI template): Back hidden on Home, Power greyed under a popup.
      bool home = cur == &ui_scr_home;
--    show(back_btn, !home || overlay);
+     show(back_btn, !home || overlay);
 -    // Home stays in place under a popup, greyed (0.12.18, Ryan: it seemed
 -    // to disappear); Back closes the popup.
 -    // A keypad is a page of its own: Home is there and works, on Home too
@@ -202,15 +216,10 @@ index 4ef7eea..211e9c4 100644
 -    if (home_dim != (overlay != NULL && !kp_open)) {
 -        home_dim = overlay != NULL && !kp_open;
 -        lv_obj_set_style_text_color(lv_obj_get_child(home_btn, 0), home_dim ? UI_IDLE : lv_color_white(), 0);
-+    static int hdr_dim = -1;
-+    int dim = (home && !overlay ? 1 : 0)                      // Back
-+            | ((home || overlay) && !kp_open ? 2 : 0)         // Home (works from a keypad, 0.13.18)
-+            | (overlay ? 4 : 0);                              // Power
-+    if (dim != hdr_dim) {
-+        hdr_dim = dim;
-+        lv_obj_set_style_text_color(lv_obj_get_child(back_btn, 0), dim & 1 ? UI_IDLE : lv_color_white(), 0);
-+        lv_obj_set_style_text_color(lv_obj_get_child(home_btn, 0), dim & 2 ? UI_IDLE : lv_color_white(), 0);
-+        lv_obj_set_style_text_color(lv_obj_get_child(pwr_btn, 0), dim & 4 ? UI_IDLE : lv_color_white(), 0);
++    static int pwr_dim = -1;
++    if (pwr_dim != (overlay != NULL)) {
++        pwr_dim = overlay != NULL;
++        lv_obj_set_style_text_color(lv_obj_get_child(pwr_btn, 0), pwr_dim ? UI_IDLE : lv_color_white(), 0);
      }
 -    show(pmc_lbl, home && !overlay);
 -    // A keypad's heading is its own title (0.13.18, Ryan: on Home the
@@ -221,7 +230,7 @@ index 4ef7eea..211e9c4 100644
      const char *ttl = kp_open ? kp_head : cur->title;
      show(title_lbl, !home || kp_open);
      const char *mode_txt = nf ? "FAULT" : valve_mode_name();
-@@ -860,11 +912,8 @@ static void frame_refresh(void)
+@@ -860,11 +898,8 @@ static void frame_refresh(void)
          lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : kind == 1 ? UI_MODE_AUTO : UI_MODE_PANEL, 0);
          ui_set_color(mode_lbl, kind == 1 ? UI_MODE_AUTO_TEXT : lv_color_white());
      }
@@ -234,7 +243,7 @@ index 4ef7eea..211e9c4 100644
      int32_t ux = mx - 48;
      show(unsaved_btn, uns);
      if (uns) {
-@@ -899,14 +948,12 @@ static void frame_refresh(void)
+@@ -899,14 +934,12 @@ static void frame_refresh(void)
          if (!home || kp_open) {
              lv_strlcpy(fit_title, ttl, sizeof fit_title);
              ui_set_text(title_lbl, ttl);
@@ -254,7 +263,7 @@ index 4ef7eea..211e9c4 100644
      }
      bool op = !valve_stop_latches();
      if (op != lv_obj_has_state(stop_btn, LV_STATE_USER_2)) {
-@@ -1108,7 +1155,14 @@ static lv_obj_t *overlay_new(void)
+@@ -1108,7 +1141,14 @@ static lv_obj_t *overlay_new(void)
      return overlay;
  }
  
@@ -270,17 +279,17 @@ index 4ef7eea..211e9c4 100644
  static struct {
      char entry[10];
      ui_kp_t k;
-@@ -1120,18 +1174,42 @@ static const char *fmt_dec(char *buf, size_t n, int64_t v, int dec)
+@@ -1120,21 +1160,67 @@ static const char *fmt_dec(char *buf, size_t n, int64_t v, int dec)
      return fixed_fmt(buf, n, v, dec);
  }
  
-+// The entry's height in its field: centred, or at the bottom under Min
-+// and Max (the field is 48 high with a 2 px edge).
++// The entry's height in its field: centred (the field is 48 high with a
++// 2 px edge).
 +static void kp_value_place(void)
 +{
 +    const lv_font_t *f = lv_obj_get_style_text_font(kp.value, 0);
 +    int32_t lh = lv_font_get_line_height(f);
-+    lv_obj_set_y(kp.value, kp.k.no_limits ? (44 - lh) / 2 : 44 - lh);   // 5 px under the figures, as over Min
++    lv_obj_set_y(kp.value, (44 - lh) / 2);
 +}
 +
 +// The present value line: "Valve now 0.00 %" from "Valve, %", "Now 0.8 mB"
@@ -305,6 +314,26 @@ index 4ef7eea..211e9c4 100644
 +    else
 +        lv_snprintf(t, sizeof t, "%s now %s%s%s", name, v, *unit ? " " : "", unit);
 +    ui_set_text(kp.live, t);
++}
++
++// Labels stacked from the top in order and centred together on the
++// entry field's middle (y 32 in the box); NULL entries are skipped.
++static void kp_centre(lv_obj_t *const *l, int n)
++{
++    int32_t h[3], total = 0;
++    for (int i = 0; i < n; i++) {
++        h[i] = 0;
++        if (!l[i]) continue;
++        lv_obj_update_layout(l[i]);
++        h[i] = lv_obj_get_height(l[i]);
++        total += h[i];
++    }
++    int32_t y = 32 - total / 2;
++    for (int i = 0; i < n; i++)
++        if (l[i]) {
++            lv_obj_set_y(l[i], y);
++            y += h[i];
++        }
  }
  
  static void kp_show_err(const char *why)
@@ -316,9 +345,24 @@ index 4ef7eea..211e9c4 100644
 +    if (kp.info)
 +        show(kp.info, why == NULL);
      show(kp.err, why != NULL);
-     if (why)
+-    if (why)
++    if (why) {
          ui_set_text(kp.err, why);
-@@ -1206,9 +1284,21 @@ static void kp_key(lv_event_t *e)
++        kp_centre(&kp.err, 1);
++    }
+ }
+ 
+ // The entry in 10^-dec units; false if empty or too large.
+@@ -1180,7 +1266,7 @@ static void kp_key(lv_event_t *e)
+         }
+         if (v < kp.k.min || v > kp.k.max) {
+             char a[16], b[16], t[48];
+-            lv_snprintf(t, sizeof t, "Outside %s to %s", fmt_dec(a, sizeof a, kp.k.min, kp.k.dec),
++            lv_snprintf(t, sizeof t, "Out of range: %s to %s", fmt_dec(a, sizeof a, kp.k.min, kp.k.dec),
+                         fmt_dec(b, sizeof b, kp.k.max, kp.k.dec));
+             kp_show_err(t);
+             return;
+@@ -1206,9 +1292,21 @@ static void kp_key(lv_event_t *e)
          kp.entry[n] = *k;
          kp.entry[n + 1] = '\0';
      }
@@ -340,7 +384,7 @@ index 4ef7eea..211e9c4 100644
  void ui_keypad_ex(const ui_kp_t *k)
  {
      lv_obj_t *o = overlay_new();
-@@ -1220,46 +1310,75 @@ void ui_keypad_ex(const ui_kp_t *k)
+@@ -1220,46 +1318,69 @@ void ui_keypad_ex(const ui_kp_t *k)
      if (comma)
          *comma = '\0';
  
@@ -354,31 +398,31 @@ index 4ef7eea..211e9c4 100644
 +    lv_obj_t *box = ui_card(o, 10, 8, 343, 216);
 +    lv_obj_set_style_radius(box, 8, 0);
 +
-+    // Left: the title (16 px, 12 px if it is too long), the range and the
-+    // present value, small.
++    // Left: the title (16 px, 12 px if it is too long), then the present
++    // value and any info line, small; the lines centred together on the
++    // entry field's middle (Ryan, 4 Nov).
 +    lv_point_t sz;
 +    lv_text_get_size(&sz, k->title ? k->title : "", &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 +    bool long_title = sz.x > 174;
-+    kp.title = ui_label(box, 12, long_title ? 9 : 6, 174, long_title ? &ui_font_12 : &ui_font_16, UI_TEXT,
++    kp.title = ui_label(box, 12, 0, 174, long_title ? &ui_font_12 : &ui_font_16, UI_TEXT,
 +                        LV_TEXT_ALIGN_LEFT, k->title);
 +    // Under the title the present value, then the info line (Ryan 4 Nov:
 +    // the present value straight under the title on every keypad).
-+    int32_t ly = 26;
 +    if (k->live_label) {
-+        kp.live = ui_label(box, 12, ly, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
++        kp.live = ui_label(box, 12, 0, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
 +        kp_side();
-+        ly += 15;
 +    } else if (k->side_text[0]) {
 +        char t[64];
 +        if (k->side_text[1])
 +            lv_snprintf(t, sizeof t, "%s %s   %s %s", k->side_label[0], k->side_text[0], k->side_label[1], k->side_text[1]);
 +        else
 +            lv_snprintf(t, sizeof t, "%s %s", k->side_label[0], k->side_text[0]);
-+        kp.live = ui_label(box, 12, ly, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, t);
-+        ly += 15;
++        kp.live = ui_label(box, 12, 0, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, t);
 +    }
 +    if (k->info && k->info[0])
-+        kp.info = ui_label(box, 12, ly, 174, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, k->info);
++        kp.info = ui_label(box, 12, 0, 174, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, k->info);
++    lv_obj_t *lines[3] = { kp.title, kp.live, kp.info };
++    kp_centre(lines, 3);
 +    // A refusal takes the place of the title and the lines under it.
 +    kp.err = ui_label(box, 12, 6, 174, &ui_font_12, UI_FAULT, LV_TEXT_ALIGN_LEFT, "");
      lv_label_set_long_mode(kp.err, LV_LABEL_LONG_WRAP);
@@ -392,13 +436,7 @@ index 4ef7eea..211e9c4 100644
 +    lv_obj_set_style_radius(field, 4, 0);
 +    lv_obj_set_style_border_width(field, 2, 0);
 +    lv_obj_set_style_border_color(field, UI_BLUE, 0);
-+    // The lower and upper limit in the field's top corners, small, the
-+    // numbers alone (Ryan, 4 Nov), the entry under them.
-+    if (!k->no_limits) {
-+        char a[24], b[24];
-+        ui_label(field, 6, 3, 60, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, fmt_dec(a, sizeof a, k->min, k->dec));
-+        ui_label(field, 6, 3, 125, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_RIGHT, fmt_dec(b, sizeof b, k->max, k->dec));
-+    }
++    // No range shown (Ryan, 4 Nov): an entry out of range says so on Set.
 +    kp.value = ui_label(field, 6, 9, 125, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "");
 +    kp_value_place();
 +
@@ -443,7 +481,7 @@ index 4ef7eea..211e9c4 100644
      frame_refresh();
  }
  
-@@ -1368,8 +1487,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
+@@ -1368,8 +1489,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
      confirm_cancel = on_cancel;
      confirm_mid = on_mid;
      confirm_mid2 = on_mid2;
@@ -455,7 +493,7 @@ index 4ef7eea..211e9c4 100644
      lv_obj_t *box = ui_card(o, (480 - bw) / 2, 0, bw, 100);
      lv_obj_set_style_radius(box, 8, 0);
      lv_obj_t *t = ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, text);
-@@ -1387,9 +1507,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
+@@ -1387,9 +1509,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
          dialog_btn(box, 214, by, 91, 48, mid2, confirm_event, (void *)3);
          ui_btn(box, 313, by, 91, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
      } else if (mid) {
@@ -468,7 +506,7 @@ index 4ef7eea..211e9c4 100644
      } else {
          dialog_btn(box, 16, by, 150, 48, cancel, confirm_event, NULL);
          ui_btn(box, 174, by, 150, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
-@@ -1437,15 +1557,17 @@ static void shut_ask(void)
+@@ -1437,15 +1559,17 @@ static void shut_ask(void)
  {
      shut_close = true;
      if (!valve_calibrated()) {
@@ -489,7 +527,7 @@ index 4ef7eea..211e9c4 100644
      lv_obj_t *box = ui_card(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
      lv_obj_set_style_radius(box, 8, 0);
      ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Shut down the controller?");
-@@ -1473,27 +1595,21 @@ static void shut_ask(void)
+@@ -1473,27 +1597,21 @@ static void shut_ask(void)
      ui_label(row, 46, 12, bw - 70, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Close the valve to 0 %");
      shut_box_show();
      int32_t by = 42 + 44 + 8;
@@ -524,7 +562,7 @@ index 4ef7eea..211e9c4 100644
  #define TV_STEP (TV_H - 38)   // a page less one line
  static lv_obj_t *tv_card, *tv_btn[2];
  
-@@ -1522,7 +1638,7 @@ void ui_text_view(const char *title, const char *text)
+@@ -1522,7 +1640,7 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_t *o = overlay_new();
      // Not clickable, so a touch on the text does nothing; it still scrolls
      // from the buttons and shows where it is with the scroll bar.
@@ -533,7 +571,7 @@ index 4ef7eea..211e9c4 100644
      tv_card = c;
      lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
      lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-@@ -1533,19 +1649,19 @@ void ui_text_view(const char *title, const char *text)
+@@ -1533,19 +1651,19 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_set_style_radius(c, 3, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_opa(c, LV_OPA_COVER, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_color(c, UI_IDLE, LV_PART_SCROLLBAR);
@@ -561,7 +599,7 @@ index 4ef7eea..211e9c4 100644
          lv_obj_add_event_cb(b, tv_page, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)i);
          tv_btn[i] = b;
 diff --git a/InitialTesting/ui.h b/InitialTesting/ui.h
-index 0de94c8..d915aef 100644
+index 0de94c8..2b39c66 100644
 --- a/InitialTesting/ui.h
 +++ b/InitialTesting/ui.h
 @@ -59,6 +59,7 @@ void ui_btn_enable(lv_obj_t *btn, bool on);
@@ -581,14 +619,7 @@ index 0de94c8..d915aef 100644
  // live_dec decimals) or up to two fixed rows (e.g. In use, Saved).
  typedef struct {
      const char *title, *info;
-@@ -139,12 +140,15 @@ typedef struct {
-     int live_dec;
-     const char *side_label[2], *side_text[2];
-     bool (*on_set)(int32_t v, const char **why);
-+    bool no_limits;   // no Min and Max in the entry field (a serial number's 1 to 99999999)
- } ui_kp_t;
- void ui_keypad_ex(const ui_kp_t *k);
- 
+@@ -145,6 +146,8 @@ void ui_keypad_ex(const ui_kp_t *k);
  // Confirm dialog: Cancel and OK (OK primary). Buttons sit inside x70-410,
  // clear of the Home mode button.
  void ui_confirm(const char *text, const char *ok, void (*on_ok)(void));
@@ -598,7 +629,7 @@ index 0de94c8..d915aef 100644
  void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void));
  // With a third button between them (NULL mid: as ui_ask).
 diff --git a/InitialTesting/ui_home.c b/InitialTesting/ui_home.c
-index 978094a..aff7a33 100644
+index 978094a..11e03d9 100644
 --- a/InitialTesting/ui_home.c
 +++ b/InitialTesting/ui_home.c
 @@ -32,7 +32,20 @@
@@ -680,6 +711,24 @@ index 978094a..aff7a33 100644
                    .max = valve_range_mmbar() / 100, .live_label = "Now, mB", .live_milli = pv_milli,
                    .live_dec = 1, .on_set = sp_set };
      ui_keypad_ex(&k);
+@@ -316,7 +323,7 @@ static void goto_event(lv_event_t *e)
+         ui_msg(not_manual_why());
+         return;
+     }
+-    ui_keypad("Go to, %", "0 closed, 100 open", 0, 10000, "Valve, %", valve_pct_milli, goto_set);
++    ui_keypad("Go to, %", NULL, 0, 10000, "Valve, %", valve_pct_milli, goto_set);   // no hint line (template)
+ }
+ 
+ static void calibrate(void)
+@@ -355,7 +362,7 @@ static bool set_position(int32_t v100, const char **why)
+  * not verified by homing. */
+ static void set_position_ask(void)
+ {
+-    ui_keypad("Set position, %", "0 closed, 100 open", 0, 10000, NULL, NULL, set_position);
++    ui_keypad("Set position, %", NULL, 0, 10000, NULL, NULL, set_position);
+ }
+ 
+ static void set_closed_ask(void)
 @@ -523,36 +530,13 @@ static void menu_event(lv_event_t *e)
      ui_open(&ui_scr_menu);
  }
@@ -786,7 +835,7 @@ index 978094a..aff7a33 100644
      for (int r = 0; r < 3; r++) {
          lv_obj_t *l = ui_label(scr, 10, 0, 111, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);
 diff --git a/InitialTesting/ui_settings.c b/InitialTesting/ui_settings.c
-index 9d69ab4..f446497 100644
+index 9d69ab4..f137aae 100644
 --- a/InitialTesting/ui_settings.c
 +++ b/InitialTesting/ui_settings.c
 @@ -244,8 +244,8 @@ static void ecard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, int32_t
@@ -800,7 +849,21 @@ index 9d69ab4..f446497 100644
      lv_label_set_long_mode(e->v, LV_LABEL_LONG_DOT);
      lv_obj_t *chev = ui_label(e->card, w - 20, 15, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT,
                                LV_SYMBOL_RIGHT);
-@@ -341,8 +341,8 @@ static void sensor_pick(int i);
+@@ -313,11 +313,10 @@ static void kp_rows(ui_kp_t *k, cfg_key_t key, char *now, char *sv, size_t n)
+ 
+ static void ed_turns_keypad(void)
+ {
+-    static char info[32], now[16], sv[16];
++    static char now[16], sv[16];
+     int32_t lo, hi, s;
+     cfg_range(CFG_POSMAX, &lo, &hi);
+-    lv_snprintf(info, sizeof info, "%d steps per output turn", STEPS_PER_TURN);
+-    ui_kp_t k = { .title = "100 % travel, output turns", .info = info, .dec = 2,
++    ui_kp_t k = { .title = "100 % travel, output turns", .dec = 2,   // no steps-per-turn hint (template)
+                   .min = (int32_t)(((int64_t)lo * 100 + STEPS_PER_TURN - 1) / STEPS_PER_TURN),
+                   .max = (int32_t)((int64_t)hi * 100 / STEPS_PER_TURN), .on_set = ed_turns };
+     kp_rows(&k, CFG_POSMAX, now, sv, sizeof now);
+@@ -341,8 +340,8 @@ static void sensor_pick(int i);
  
  static void edit(cfg_key_t k)
  {
@@ -811,7 +874,7 @@ index 9d69ab4..f446497 100644
      ed_key = k;
      if (F[k].kind == K_TURNS) {
          int32_t lo, hi, pos = stepper3_position() / stepper3_scale();
-@@ -379,9 +379,8 @@ static void edit(cfg_key_t k)
+@@ -379,9 +378,8 @@ static void edit(cfg_key_t k)
      } else {
          int32_t lo, hi, s;
          cfg_range(k, &lo, &hi);
@@ -823,7 +886,7 @@ index 9d69ab4..f446497 100644
                         .on_set = ed_set };
          kp_rows(&kp, k, now, sv, sizeof now);
          (void)s;
-@@ -524,7 +523,7 @@ static void side_refresh(void)
+@@ -524,7 +522,7 @@ static void side_refresh(void)
      else if (n)
          lv_snprintf(t, sizeof t, "%s in use, not saved.", plural(c, sizeof c, n, "change"));
      else if (cfg_rev(CFG_FROM_SAVED, &rev, &at))
@@ -832,7 +895,7 @@ index 9d69ab4..f446497 100644
      else
          lv_snprintf(t, sizeof t, "Factory settings, nothing saved yet.");
      ui_strip_set(UI_STRIP_INFO, save_icon(n), t);
-@@ -545,20 +544,9 @@ static void tile_cb(lv_event_t *e)
+@@ -545,20 +543,9 @@ static void tile_cb(lv_event_t *e)
      ui_open(lv_event_get_user_data(e));
  }
  
@@ -855,7 +918,7 @@ index 9d69ab4..f446497 100644
  // first, stops the valve (AUTO ends, homing is cancelled), then waits 2.5 s
  // so the valve position is saved at standstill (valvepos.h, 2 s) and
  // offered at start-up.
-@@ -584,34 +572,30 @@ static void do_restart(void)
+@@ -584,34 +571,30 @@ static void do_restart(void)
      lv_timer_set_repeat_count(t, 1);
  }
  
@@ -903,7 +966,7 @@ index 9d69ab4..f446497 100644
      side.save = side.discard = NULL;
  }
  
-@@ -619,12 +603,18 @@ static void settings_refresh(void)
+@@ -619,12 +602,18 @@ static void settings_refresh(void)
  {
      char t[48], p[32], d[24];
      cfg_sensor_t s;
@@ -925,7 +988,7 @@ index 9d69ab4..f446497 100644
      lv_snprintf(t, sizeof t, "%s turns", value_text(d, sizeof d, CFG_POSMAX, live(CFG_POSMAX)));
      ui_btn_text(st.tile[2], "Valve setup", t);
      {
-@@ -643,7 +633,7 @@ static void settings_refresh(void)
+@@ -643,7 +632,7 @@ static void settings_refresh(void)
      else if (n)
          lv_snprintf(t, sizeof t, "%s in use, not saved.", plural(c, sizeof c, n, "change"));
      else if (cfg_rev(CFG_FROM_SAVED, &rev, &at))
@@ -934,7 +997,7 @@ index 9d69ab4..f446497 100644
      else
          lv_snprintf(t, sizeof t, "Factory settings, nothing saved yet.");
      // An armed limit override shows over this, as on every screen.
-@@ -787,7 +777,7 @@ const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
+@@ -787,7 +776,7 @@ const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
   * from 0.14.9), the address in use, the MAC, the
   * firmware and its build date, and the Remote control switch.
   * ------------------------------------------------------------------------ */
@@ -943,7 +1006,7 @@ index 9d69ab4..f446497 100644
  
  static void nn_go(lv_event_t *e) { ui_open((const ui_screen_t *)lv_event_get_user_data(e)); }
  
-@@ -803,21 +793,29 @@ static void remote_cb(lv_event_t *e)
+@@ -803,21 +792,29 @@ static void remote_cb(lv_event_t *e)
  
  static void nn_build(lv_obj_t *scr)
  {
@@ -980,7 +1043,7 @@ index 9d69ab4..f446497 100644
      lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);   // the card takes the press
      lv_obj_set_style_bg_color(sw, lv_color_hex(0xC3CDD7), LV_PART_MAIN);
      lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
-@@ -837,10 +835,8 @@ static void nn_refresh(void)
+@@ -837,10 +834,8 @@ static void nn_refresh(void)
          *strchr(t, ' ') = '\0';   // the address; the mask is on its page
      ui_btn_text(nn.net, "IP address", t);
  #if PMC_LINK_ETHERNET
@@ -991,7 +1054,7 @@ index 9d69ab4..f446497 100644
      ui_set_text(nn.mac, "None, USB build");
  #endif
      ui_set_text(nn.fw, ui_fw_text());
-@@ -851,7 +847,7 @@ static void nn_refresh(void)
+@@ -851,7 +846,7 @@ static void nn_refresh(void)
                   ? "New IP address: Save settings, then restart." : "Static address, no DHCP.");
  }
  
@@ -1000,15 +1063,15 @@ index 9d69ab4..f446497 100644
  
  /* IP address: digits and dots for the address and the mask; Use puts
   * them in use for the next restart, unsaved until Save settings. */
-@@ -1094,7 +1090,7 @@ static void add_cb(lv_event_t *e)
+@@ -1093,7 +1088,7 @@ static void add_cb(lv_event_t *e)
+         ui_msg("Four sensors already on the board");
          return;
      }
-     ui_kp_t k = { .title = "New sensor serial number", .info = "On the Druck label", .dec = 0,
--                  .min = 1, .max = 99999999, .on_set = add_serial_set };
-+                  .min = 1, .max = 99999999, .on_set = add_serial_set, .no_limits = true };
+-    ui_kp_t k = { .title = "New sensor serial number", .info = "On the Druck label", .dec = 0,
++    ui_kp_t k = { .title = "New sensor serial number", .dec = 0,
+                   .min = 1, .max = 99999999, .on_set = add_serial_set };
      ui_keypad_ex(&k);
  }
- 
 diff --git a/InitialTesting/ui_trend.c b/InitialTesting/ui_trend.c
 index 8fd099e..2cee036 100644
 --- a/InitialTesting/ui_trend.c
