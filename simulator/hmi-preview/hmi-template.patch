@@ -1,5 +1,5 @@
 diff --git a/InitialTesting/ui.c b/InitialTesting/ui.c
-index ebad675..4650e30 100644
+index 4ef7eea..0c7acca 100644
 --- a/InitialTesting/ui.c
 +++ b/InitialTesting/ui.c
 @@ -184,8 +184,9 @@ void ui_set_color(lv_obj_t *o, lv_color_t c)
@@ -14,7 +14,7 @@ index ebad675..4650e30 100644
  }
  
  const char *ui_date(char *buf, size_t n, const char *iso)
-@@ -489,6 +490,36 @@ static void act_event(lv_event_t *e)
+@@ -482,6 +483,36 @@ static void act_event(lv_event_t *e)
          act_cb(e);
  }
  
@@ -51,7 +51,7 @@ index ebad675..4650e30 100644
  // The status line's drawn icons, 16 x 16, in the label colour.
  typedef enum { SHAPE_VALVE, SHAPE_TARGET } shape_t;
  static shape_t shape;
-@@ -645,6 +676,15 @@ static void show(lv_obj_t *o, bool on)
+@@ -639,6 +670,15 @@ static void show(lv_obj_t *o, bool on)
      else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
  }
  
@@ -67,7 +67,7 @@ index ebad675..4650e30 100644
  void ui_msg(const char *text)
  {
      msg_ok = true;
-@@ -653,6 +693,7 @@ void ui_msg(const char *text)
+@@ -647,6 +687,7 @@ void ui_msg(const char *text)
      // the screen every message starts with a capital (Ryan, 26 Oct).
      if (msg_text[0] >= 'a' && msg_text[0] <= 'z')
          msg_text[0] = (char)(msg_text[0] - 'a' + 'A');
@@ -75,7 +75,7 @@ index ebad675..4650e30 100644
      // With a fault latched the message is brief: the fault text is the one to read.
      msg_until = lv_tick_get() + (valve_fault_count() ? 2000 : 5000);
      if (!msg_until)
-@@ -670,6 +711,7 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
+@@ -664,6 +705,7 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
      line_kind = kind;
      line_icon = icon;
      lv_strlcpy(line_text, text, sizeof line_text);
@@ -83,7 +83,7 @@ index ebad675..4650e30 100644
  }
  
  void ui_strip_width(int32_t w) { strip_w = w; }
-@@ -1227,39 +1269,39 @@ void ui_keypad_ex(const ui_kp_t *k)
+@@ -1221,39 +1263,39 @@ void ui_keypad_ex(const ui_kp_t *k)
          *comma = '\0';
  
      lv_obj_t *card = ui_card(o, 10, 8, 343, 48);
@@ -133,7 +133,7 @@ index ebad675..4650e30 100644
                                     UI_TEXT, LV_TEXT_ALIGN_RIGHT, k->side_text[i]);
              (void)l;
          }
-@@ -1411,19 +1453,12 @@ void ui_confirm(const char *text, const char *ok, void (*on_ok)(void))
+@@ -1481,19 +1523,12 @@ static void shut_ask(void)
  // Text page over the screen (Help). Header Back closes it. No dragging (a
  // drag redraws the card every frame and crowded Back): small Up and Down
  // buttons on the right jump a page less one line, without animation.
@@ -157,7 +157,7 @@ index ebad675..4650e30 100644
  #define TV_STEP (TV_H - 38)   // a page less one line
  static lv_obj_t *tv_card, *tv_btn[2];
  
-@@ -1452,7 +1487,7 @@ void ui_text_view(const char *title, const char *text)
+@@ -1522,7 +1557,7 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_t *o = overlay_new();
      // Not clickable, so a touch on the text does nothing; it still scrolls
      // from the buttons and shows where it is with the scroll bar.
@@ -166,7 +166,7 @@ index ebad675..4650e30 100644
      tv_card = c;
      lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
      lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-@@ -1463,19 +1498,19 @@ void ui_text_view(const char *title, const char *text)
+@@ -1533,19 +1568,19 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_set_style_radius(c, 3, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_opa(c, LV_OPA_COVER, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_color(c, UI_IDLE, LV_PART_SCROLLBAR);
@@ -194,10 +194,10 @@ index ebad675..4650e30 100644
          lv_obj_add_event_cb(b, tv_page, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)i);
          tv_btn[i] = b;
 diff --git a/InitialTesting/ui.h b/InitialTesting/ui.h
-index e56ee45..a69fc01 100644
+index 0de94c8..347b22a 100644
 --- a/InitialTesting/ui.h
 +++ b/InitialTesting/ui.h
-@@ -57,6 +57,7 @@ void ui_btn_enable(lv_obj_t *btn, bool on);
+@@ -59,6 +59,7 @@ void ui_btn_enable(lv_obj_t *btn, bool on);
  void ui_btn_primary(lv_obj_t *btn, bool on);
  void ui_btn_outline(lv_obj_t *btn, bool on);   // white, blue edge and word
  bool ui_btn_disabled(lv_event_t *e);
@@ -206,10 +206,10 @@ index e56ee45..a69fc01 100644
  lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
  lv_obj_t *ui_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, const lv_font_t *font,
 diff --git a/InitialTesting/ui_home.c b/InitialTesting/ui_home.c
-index 7b75c60..ab2a127 100644
+index 978094a..dcb6a62 100644
 --- a/InitialTesting/ui_home.c
 +++ b/InitialTesting/ui_home.c
-@@ -30,7 +30,20 @@
+@@ -32,7 +32,20 @@
   * ------------------------------------------------------------------------ */
  #define TILE_W  167
  #define TILE_H  160
@@ -231,7 +231,7 @@ index 7b75c60..ab2a127 100644
  
  typedef struct {
      lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev, *sp_cap;
-@@ -195,17 +208,19 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
+@@ -197,17 +210,19 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
  {
      t->log = log;
      t->fill = -1;
@@ -255,7 +255,7 @@ index 7b75c60..ab2a127 100644
      lv_obj_set_size(t->bar, BAR_W, 30);
      lv_obj_add_event_cb(t->bar, bar_draw, LV_EVENT_DRAW_MAIN, t);
      // SP / Go to at the button text size, 16 px (Ryan, 4 Nov).
-@@ -213,7 +228,7 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
+@@ -215,7 +230,7 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
      t->box = lv_obj_create(t->tile);
      lv_obj_remove_style_all(t->box);
      lv_obj_remove_flag(t->box, LV_OBJ_FLAG_SCROLLABLE);
@@ -264,7 +264,7 @@ index 7b75c60..ab2a127 100644
      lv_obj_set_size(t->box, 88, 40);
      lv_obj_set_style_bg_opa(t->box, LV_OPA_COVER, 0);
      lv_obj_set_style_bg_color(t->box, lv_color_hex(0xEEF2F6), 0);
-@@ -548,11 +563,12 @@ static void home_build(lv_obj_t *scr)
+@@ -579,11 +594,12 @@ static void home_build(lv_obj_t *scr)
      // The mode buttons on the tiles' bottom rows, in place of the SP and Go
      // to boxes (0.15.3): Start AUTO outside AUTO, Stop AUTO in AUTO, both
      // outlined blue; Home valve while not homed, filled (what is expected).
@@ -280,7 +280,7 @@ index 7b75c60..ab2a127 100644
  }
  
  // Valve reading and bar, at 10 Hz.
-@@ -667,11 +683,13 @@ void ui_status_line(void)
+@@ -699,11 +715,13 @@ void ui_status_line(void)
  const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
  
  /* --------------------------------------------------------------------------
@@ -298,7 +298,7 @@ index 7b75c60..ab2a127 100644
  
  static void menu_tile_event(lv_event_t *e)
  {
-@@ -681,9 +699,9 @@ static void menu_tile_event(lv_event_t *e)
+@@ -713,9 +731,9 @@ static void menu_tile_event(lv_event_t *e)
  static void menu_build(lv_obj_t *scr)
  {
      // Grouped in rows with a caption on the left, as on Diagnostics.
@@ -707,10 +707,26 @@ index f61bfa9..d03eb00 100644
      ui_set_text(dp.v[8], any ? ui_fmt1(buf, sizeof buf, ms) : "--");
  
 diff --git a/simulator/tests/run.js b/simulator/tests/run.js
-index 0a74a95..fad46c3 100644
+index 640ffbb..e1a3522 100644
 --- a/simulator/tests/run.js
 +++ b/simulator/tests/run.js
-@@ -196,7 +196,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
+@@ -78,13 +78,13 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
+   check('Stop AUTO goes to MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n', s.cmd('MODE?'));
+   check('Stop AUTO leaves the valve', Math.abs(s.get(30) - at) < 330, at + ' -> ' + s.get(30));
+ }
+-{ // The IP tile on Home (0.15.6, in place of Trend) opens System setup, as Menu > Settings > System does.
++{ // The IP tile on Home (0.15.6, in place of Trend) opens System setup, as Menu > System does (template).
+   const hdr = (s) => Buffer.from(new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 40).slice().buffer).toString('base64');
+   const a = homed(load()), home = hdr(a);
+   shot(a, 'home-ip');
+   a.tap(415, 128); shot(a, 'home-ip-system');
+   const b = homed(load());
+-  b.tap(415, 184); b.tap(379, 184); b.tap(120, 72);
++  b.tap(415, 184); b.tap(386, 184);
+   check('Home IP tile opens System setup', hdr(a) === hdr(b) && hdr(a) !== home);
+ }
+ { // PID tile opens PID tuning; KD is a saved setting from its keypad.
+@@ -205,7 +205,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
  { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
    // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
    const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
@@ -719,7 +735,7 @@ index 0a74a95..fad46c3 100644
    s.set(7, 1); s.run(500);                                              // switch stuck pressed
    s.tap(186, 184, 1000);
    const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
-@@ -296,11 +296,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
+@@ -305,11 +305,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
    check('switch Off: PRES SP refused', s.cmd('PRES SP 5') === 'ERR 211 Read only over the network\r\n', s.cmd('PRES SP 5'));
    check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
    check('switch Off: queries answer', s.cmd('MODE?;PRES SP?') === 'MODE NOT HOMED;PRES SP NONE\r\n', s.cmd('MODE?;PRES SP?'));
