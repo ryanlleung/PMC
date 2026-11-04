@@ -567,14 +567,19 @@ static void build_frame(void)
     lv_label_set_long_mode(pmc_lbl, LV_LABEL_LONG_DOT);
     title_lbl = ui_label(hdr, 100, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
     lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_DOT);
-    // The mode, "MANUAL mode" or "AUTO mode" in plain lettering with no box,
-    // its right edge on the button column's (0.14.23, Ryan 4 Nov: his
-    // operator did not see the outlined badge as the status; a box reads as
-    // a button). Filled red only with a fault. Placed by its width (refresh).
-    mode_lbl = ui_label(hdr, 361, 5, 109, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
-    lv_obj_set_style_pad_ver(mode_lbl, 6, 0);
-    lv_obj_set_style_radius(mode_lbl, 4, 0);
-    lv_obj_set_style_bg_color(mode_lbl, UI_FAULT, 0);
+    // The mode panel (0.15.2, Ryan 4 Nov): the mode word on a flat block
+    // the header's full height, so it reads as part of the bar and not as a
+    // button (his operator took the outlined badge for one; "MANUAL mode"
+    // lettering without a box, 0.14.23, was not liked). Start AUTO's width
+    // and column (x 361, 109 px) for every mode; NOT HOMED, the longest
+    // word (104 px), just fits. Grey in MANUAL and the others, white in
+    // AUTO, red with a fault.
+    mode_lbl = ui_label(hdr, 361, 0, 109, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
+    lv_obj_set_height(mode_lbl, 40);
+    lv_obj_set_style_pad_top(mode_lbl, (40 - lv_font_get_line_height(&ui_font_16)) / 2, 0);
+    lv_obj_set_style_radius(mode_lbl, 0, 0);
+    lv_obj_set_style_bg_opa(mode_lbl, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(mode_lbl, UI_MODE_PANEL, 0);
     // Unsaved settings (0.12.19, Ryan 27 Oct): on every screen while a
     // setting in use differs from the newest save (cfg_unsaved), left of
     // the mode; grey outline to 0.13.18, warning yellow from 0.13.19. Opens Review
@@ -852,24 +857,16 @@ static void frame_refresh(void)
     // header was blank, elsewhere it kept the page's name).
     const char *ttl = kp_open ? kp_head : cur->title;
     show(title_lbl, !home || kp_open);
-    const char *mode_txt = nf ? "FAULT" : m == VALVE_MANUAL ? "MANUAL mode"
-                         : m == VALVE_AUTO ? "AUTO mode" : valve_mode_name();
-    // Filled red with a latched fault (its box's edge on the button
-    // column's, 470); otherwise plain white lettering ending 12 px from the
-    // screen's edge, as Home's title starts 12 px from the other. The
-    // mode's width sets where it starts; the save icon and the title keep
-    // 8 px clear of it.
+    const char *mode_txt = nf ? "FAULT" : valve_mode_name();
+    // The panel's colours by kind: 0 MANUAL and the rest, 1 AUTO, 2 FAULT.
+    int kind = nf ? 2 : m == VALVE_AUTO ? 1 : 0;
     static int badge_kind = -1;
-    if ((nf > 0) != badge_kind) {
-        badge_kind = nf > 0;
-        lv_obj_set_style_bg_opa(mode_lbl, nf ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_pad_hor(mode_lbl, nf ? 6 : 0, 0);
+    if (kind != badge_kind) {
+        badge_kind = kind;
+        lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : kind == 1 ? lv_color_white() : UI_MODE_PANEL, 0);
+        ui_set_color(mode_lbl, kind == 1 ? UI_TEXT : lv_color_white());
     }
-    const int32_t mw = text_w(mode_txt) + 1 + (nf ? 12 : 0), mx = (nf ? 470 : 469) - mw;   // +1: no wrap
-    if (lv_obj_get_x(mode_lbl) != mx || lv_obj_get_width(mode_lbl) != mw) {
-        lv_obj_set_x(mode_lbl, mx);
-        lv_obj_set_width(mode_lbl, mw);
-    }
+    const int32_t mx = 361;   // the panel's left edge, Start AUTO's
     bool uns = cfg_unsaved() > 0 && cur != &ui_scr_review;
     // The power icon (Shut down, 0.15.0) on Home, not under a popup, top
     // left (0.15.1), where Back is elsewhere.

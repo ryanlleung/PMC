@@ -38,6 +38,7 @@ extern lv_font_t ui_num_16, ui_num_26, ui_num_40;
 #define UI_BLUE    lv_color_hex(0x2D5877)
 #define UI_WARN    lv_color_hex(0x3F3F3F)
 #define UI_YELLOW  lv_color_hex(0xF2C230)   // warning yellow: the header's unsaved icon
+#define UI_MODE_PANEL lv_color_hex(0x384652)   // the header's mode panel outside AUTO
 #define UI_TRACK   lv_color_hex(0xE8EEF4)
 #define UI_FILL    lv_color_hex(0x7B8794)
 #define UI_TICK    lv_color_hex(0xA3AFBB)
