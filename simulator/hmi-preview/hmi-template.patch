@@ -1,5 +1,5 @@
 diff --git a/InitialTesting/ui.c b/InitialTesting/ui.c
-index 4ef7eea..c1e6611 100644
+index 4ef7eea..67c34e1 100644
 --- a/InitialTesting/ui.c
 +++ b/InitialTesting/ui.c
 @@ -184,8 +184,9 @@ void ui_set_color(lv_obj_t *o, lv_color_t c)
@@ -14,20 +14,33 @@ index 4ef7eea..c1e6611 100644
  }
  
  const char *ui_date(char *buf, size_t n, const char *iso)
-@@ -385,8 +386,10 @@ bool ui_btn_disabled(lv_event_t *e)
+@@ -385,7 +386,9 @@ bool ui_btn_disabled(lv_event_t *e)
  /* --------------------------------------------------------------------------
   * Frame on lv_layer_top(): header, status strip, STOP
   * ------------------------------------------------------------------------ */
 -#define HDR_BTN_W 48  // Back and Home, icons only
--static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
-+#define HDR_BTN_W 44  // Power and Back, icons only (Back 48 to 0.15.7)
++#define HDR_BTN_W 44  // Home (Power on Home) and Back, icons only (48 to 0.15.7)
 +#define HDR_TITLE_X (2 * HDR_BTN_W + 8)   // every title starts here (common HMI template)
 +#define HDR_MODE_X 357   // the mode panel's left edge: mid-gap between the columns below
-+static lv_obj_t *frame, *hdr, *back_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
+ static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
  static lv_obj_t *strip, *strip_icon, *strip_shape, *strip_text, *strip_ok, *strip_act, *strip_spark;
  static lv_obj_t *stop_btn;
+@@ -426,6 +429,14 @@ static void back_event(lv_event_t *e)
+     ui_back();
+ }
  
-@@ -437,19 +440,13 @@ void ui_back(void)
++static void home_event(lv_event_t *e)
++{
++    (void)e;
++    if (overlay)
++        return;   // greyed under a popup: Back (or Cancel) closes it first
++    ui_home();
++}
++
+ void ui_back(void)
+ {
+     if (overlay) {
+@@ -437,19 +448,13 @@ void ui_back(void)
          ui_home();
  }
  
@@ -49,7 +62,7 @@ index 4ef7eea..c1e6611 100644
      shut_ask();
  }
  
-@@ -482,6 +479,36 @@ static void act_event(lv_event_t *e)
+@@ -482,6 +487,36 @@ static void act_event(lv_event_t *e)
          act_cb(e);
  }
  
@@ -86,7 +99,7 @@ index 4ef7eea..c1e6611 100644
  // The status line's drawn icons, 16 x 16, in the label colour.
  typedef enum { SHAPE_VALVE, SHAPE_TARGET } shape_t;
  static shape_t shape;
-@@ -539,36 +566,42 @@ static void build_frame(void)
+@@ -539,36 +574,45 @@ static void build_frame(void)
      lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
      lv_obj_set_style_bg_color(hdr, UI_TEXT, 0);
      lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);    // touches on the header stop here
@@ -95,32 +108,31 @@ index 4ef7eea..c1e6611 100644
 -    // closes the popup.
 -    back_btn = ui_btn(hdr, 0, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_LEFT, back_event, NULL);
 -    home_btn = ui_btn(hdr, HDR_BTN_W, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_HOME, home_event, NULL);
+-    // A touch in the 8 px gap under the header is Back's, not the page's.
 +    // One header on every screen (common HMI template, Ryan 4 Nov: Home's
-+    // and the other screens' headers differed, and only Home had the power
-+    // icon; then "too noisy" with three icons, option A): Power and Back,
-+    // icons only, 44 px each, then the title from x 96 on the left, the
-+    // unsaved icon and the mode panel. No Home icon: pages are at most
-+    // three Backs deep, and a keypad closes with Cancel or Back. Back is
-+    // hidden on Home (shown there only to close a popup); Power is greyed
-+    // under a popup.
++    // and the other screens' headers differed; then "too noisy" with three
++    // icons, option A; then Home is the more useful): the first slot is
++    // Home on every page and Power on Home, Back beside it, icons only,
++    // 44 px each, then the title from x 96 on the left, the unsaved icon
++    // and the mode panel. Back is hidden on Home (shown there only to close
++    // a popup); Home and Power are greyed under a popup.
++    home_btn = ui_btn(hdr, 0, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_HOME, home_event, NULL);
 +    back_btn = ui_btn(hdr, HDR_BTN_W, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_LEFT, back_event, NULL);
-     // A touch in the 8 px gap under the header is Back's, not the page's.
++    // A touch in the 8 px gap under the header is the icon's, not the page's.
      lv_obj_set_ext_click_area(hdr, 8);
-     lv_obj_set_ext_click_area(back_btn, 8);
--    lv_obj_set_ext_click_area(home_btn, 8);
+-    lv_obj_set_ext_click_area(back_btn, 8);
+     lv_obj_set_ext_click_area(home_btn, 8);
 -    // The fault rule runs the full width, over Back and Home (not clickable,
--    // so their touches still reach them).
--    for (int i = 0; i < 2; i++) {
++    lv_obj_set_ext_click_area(back_btn, 8);
++    // The fault rule runs the full width, over the icons (not clickable,
+     // so their touches still reach them).
+     for (int i = 0; i < 2; i++) {
 -        lv_obj_t *l = lv_obj_get_child(i ? home_btn : back_btn, 0);
--        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
--        lv_obj_center(l);
--    }
++        lv_obj_t *l = lv_obj_get_child(i ? back_btn : home_btn, 0);
+         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+         lv_obj_center(l);
+     }
 -    pmc_lbl = ui_label(hdr, 10, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER,
-+    // The fault rule runs the full width, over Back (not clickable, so its
-+    // touches still reach it).
-+    lv_obj_t *bl = lv_obj_get_child(back_btn, 0);
-+    lv_obj_set_style_text_align(bl, LV_TEXT_ALIGN_CENTER, 0);
-+    lv_obj_center(bl);
 +    pmc_lbl = ui_label(hdr, HDR_TITLE_X, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_LEFT,
                         "Pressure controller");
      lv_label_set_long_mode(pmc_lbl, LV_LABEL_LONG_DOT);
@@ -148,15 +160,15 @@ index 4ef7eea..c1e6611 100644
      lv_obj_set_height(mode_lbl, 40);
      lv_obj_set_style_pad_top(mode_lbl, (40 - lv_font_get_line_height(&ui_font_16)) / 2, 0);
      lv_obj_set_style_radius(mode_lbl, 0, 0);
-@@ -589,15 +622,13 @@ static void build_frame(void)
+@@ -589,15 +633,13 @@ static void build_frame(void)
      lv_obj_set_style_border_color(unsaved_btn, UI_YELLOW, 0);
      lv_obj_set_ext_click_area(unsaved_btn, 6);
      lv_obj_add_flag(unsaved_btn, LV_OBJ_FLAG_HIDDEN);
 -    // Shut down (0.15.0): a power icon on Home only (Ryan 4 Nov; a third
 -    // System button on Menu made Diagnostics wrap). Top left from 0.15.1
 -    // (Ryan), where Back is on the other screens.
-+    // Shut down (0.15.0): the power icon, top left (0.15.1, Ryan), on every
-+    // screen in the template (Ryan 4 Nov); it asks Shut down or Restart.
++    // Shut down (0.15.0): the power icon, top left on Home (0.15.1, Ryan),
++    // where Home is on the other pages; it asks Shut down or Restart.
      pwr_btn = ui_btn(hdr, 0, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_POWER, pwr_event, NULL);
      lv_obj_set_ext_click_area(pwr_btn, 8);
      lv_obj_t *pl = lv_obj_get_child(pwr_btn, 0);
@@ -166,7 +178,7 @@ index 4ef7eea..c1e6611 100644
  
      strip = plain(frame);
      lv_obj_set_pos(strip, 10, 216);
-@@ -639,6 +670,15 @@ static void show(lv_obj_t *o, bool on)
+@@ -639,6 +681,15 @@ static void show(lv_obj_t *o, bool on)
      else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
  }
  
@@ -182,7 +194,7 @@ index 4ef7eea..c1e6611 100644
  void ui_msg(const char *text)
  {
      msg_ok = true;
-@@ -647,6 +687,7 @@ void ui_msg(const char *text)
+@@ -647,6 +698,7 @@ void ui_msg(const char *text)
      // the screen every message starts with a capital (Ryan, 26 Oct).
      if (msg_text[0] >= 'a' && msg_text[0] <= 'z')
          msg_text[0] = (char)(msg_text[0] - 'a' + 'A');
@@ -190,7 +202,7 @@ index 4ef7eea..c1e6611 100644
      // With a fault latched the message is brief: the fault text is the one to read.
      msg_until = lv_tick_get() + (valve_fault_count() ? 2000 : 5000);
      if (!msg_until)
-@@ -664,6 +705,7 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
+@@ -664,6 +716,7 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
      line_kind = kind;
      line_icon = icon;
      lv_strlcpy(line_text, text, sizeof line_text);
@@ -198,14 +210,17 @@ index 4ef7eea..c1e6611 100644
  }
  
  void ui_strip_width(int32_t w) { strip_w = w; }
-@@ -833,22 +875,18 @@ static void frame_refresh(void)
+@@ -833,22 +886,22 @@ static void frame_refresh(void)
      int nf = valve_fault_count();
      valve_mode_t m = valve_mode();
  
 -    // Header.
-+    // Header: the same items in the same places on every screen (common
-+    // HMI template): Back hidden on Home, Power greyed under a popup.
++    // Header: the same places on every screen (common HMI template): Power
++    // on Home and Home elsewhere in the first slot, Back hidden on Home, the
++    // first slot greyed under a popup.
      bool home = cur == &ui_scr_home;
++    show(pwr_btn, home);
++    show(home_btn, !home);
      show(back_btn, !home || overlay);
 -    // Home stays in place under a popup, greyed (0.12.18, Ryan: it seemed
 -    // to disappear); Back closes the popup.
@@ -216,10 +231,11 @@ index 4ef7eea..c1e6611 100644
 -    if (home_dim != (overlay != NULL && !kp_open)) {
 -        home_dim = overlay != NULL && !kp_open;
 -        lv_obj_set_style_text_color(lv_obj_get_child(home_btn, 0), home_dim ? UI_IDLE : lv_color_white(), 0);
-+    static int pwr_dim = -1;
-+    if (pwr_dim != (overlay != NULL)) {
-+        pwr_dim = overlay != NULL;
-+        lv_obj_set_style_text_color(lv_obj_get_child(pwr_btn, 0), pwr_dim ? UI_IDLE : lv_color_white(), 0);
++    static int slot_dim = -1;
++    if (slot_dim != (overlay != NULL)) {
++        slot_dim = overlay != NULL;
++        lv_obj_set_style_text_color(lv_obj_get_child(pwr_btn, 0), slot_dim ? UI_IDLE : lv_color_white(), 0);
++        lv_obj_set_style_text_color(lv_obj_get_child(home_btn, 0), slot_dim ? UI_IDLE : lv_color_white(), 0);
      }
 -    show(pmc_lbl, home && !overlay);
 -    // A keypad's heading is its own title (0.13.18, Ryan: on Home the
@@ -230,7 +246,7 @@ index 4ef7eea..c1e6611 100644
      const char *ttl = kp_open ? kp_head : cur->title;
      show(title_lbl, !home || kp_open);
      const char *mode_txt = nf ? "FAULT" : valve_mode_name();
-@@ -860,11 +898,8 @@ static void frame_refresh(void)
+@@ -860,11 +913,8 @@ static void frame_refresh(void)
          lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : kind == 1 ? UI_MODE_AUTO : UI_MODE_PANEL, 0);
          ui_set_color(mode_lbl, kind == 1 ? UI_MODE_AUTO_TEXT : lv_color_white());
      }
@@ -243,7 +259,7 @@ index 4ef7eea..c1e6611 100644
      int32_t ux = mx - 48;
      show(unsaved_btn, uns);
      if (uns) {
-@@ -899,14 +934,12 @@ static void frame_refresh(void)
+@@ -899,14 +949,12 @@ static void frame_refresh(void)
          if (!home || kp_open) {
              lv_strlcpy(fit_title, ttl, sizeof fit_title);
              ui_set_text(title_lbl, ttl);
@@ -263,7 +279,7 @@ index 4ef7eea..c1e6611 100644
      }
      bool op = !valve_stop_latches();
      if (op != lv_obj_has_state(stop_btn, LV_STATE_USER_2)) {
-@@ -1108,7 +1141,14 @@ static lv_obj_t *overlay_new(void)
+@@ -1108,7 +1156,14 @@ static lv_obj_t *overlay_new(void)
      return overlay;
  }
  
@@ -279,7 +295,7 @@ index 4ef7eea..c1e6611 100644
  static struct {
      char entry[10];
      ui_kp_t k;
-@@ -1120,21 +1160,67 @@ static const char *fmt_dec(char *buf, size_t n, int64_t v, int dec)
+@@ -1120,21 +1175,67 @@ static const char *fmt_dec(char *buf, size_t n, int64_t v, int dec)
      return fixed_fmt(buf, n, v, dec);
  }
  
@@ -353,7 +369,7 @@ index 4ef7eea..c1e6611 100644
  }
  
  // The entry in 10^-dec units; false if empty or too large.
-@@ -1180,7 +1266,7 @@ static void kp_key(lv_event_t *e)
+@@ -1180,7 +1281,7 @@ static void kp_key(lv_event_t *e)
          }
          if (v < kp.k.min || v > kp.k.max) {
              char a[16], b[16], t[48];
@@ -362,7 +378,7 @@ index 4ef7eea..c1e6611 100644
                          fmt_dec(b, sizeof b, kp.k.max, kp.k.dec));
              kp_show_err(t);
              return;
-@@ -1206,9 +1292,21 @@ static void kp_key(lv_event_t *e)
+@@ -1206,9 +1307,21 @@ static void kp_key(lv_event_t *e)
          kp.entry[n] = *k;
          kp.entry[n + 1] = '\0';
      }
@@ -384,7 +400,7 @@ index 4ef7eea..c1e6611 100644
  void ui_keypad_ex(const ui_kp_t *k)
  {
      lv_obj_t *o = overlay_new();
-@@ -1220,46 +1318,69 @@ void ui_keypad_ex(const ui_kp_t *k)
+@@ -1220,46 +1333,69 @@ void ui_keypad_ex(const ui_kp_t *k)
      if (comma)
          *comma = '\0';
  
@@ -481,7 +497,7 @@ index 4ef7eea..c1e6611 100644
      frame_refresh();
  }
  
-@@ -1368,8 +1489,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
+@@ -1368,8 +1504,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
      confirm_cancel = on_cancel;
      confirm_mid = on_mid;
      confirm_mid2 = on_mid2;
@@ -493,7 +509,7 @@ index 4ef7eea..c1e6611 100644
      lv_obj_t *box = ui_card(o, (480 - bw) / 2, 0, bw, 100);
      lv_obj_set_style_radius(box, 8, 0);
      lv_obj_t *t = ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, text);
-@@ -1387,9 +1509,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
+@@ -1387,9 +1524,9 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
          dialog_btn(box, 214, by, 91, 48, mid2, confirm_event, (void *)3);
          ui_btn(box, 313, by, 91, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
      } else if (mid) {
@@ -506,7 +522,7 @@ index 4ef7eea..c1e6611 100644
      } else {
          dialog_btn(box, 16, by, 150, 48, cancel, confirm_event, NULL);
          ui_btn(box, 174, by, 150, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
-@@ -1437,15 +1559,17 @@ static void shut_ask(void)
+@@ -1437,15 +1574,17 @@ static void shut_ask(void)
  {
      shut_close = true;
      if (!valve_calibrated()) {
@@ -527,7 +543,7 @@ index 4ef7eea..c1e6611 100644
      lv_obj_t *box = ui_card(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
      lv_obj_set_style_radius(box, 8, 0);
      ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Shut down the controller?");
-@@ -1473,27 +1597,21 @@ static void shut_ask(void)
+@@ -1473,27 +1612,21 @@ static void shut_ask(void)
      ui_label(row, 46, 12, bw - 70, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Close the valve to 0 %");
      shut_box_show();
      int32_t by = 42 + 44 + 8;
@@ -562,7 +578,7 @@ index 4ef7eea..c1e6611 100644
  #define TV_STEP (TV_H - 38)   // a page less one line
  static lv_obj_t *tv_card, *tv_btn[2];
  
-@@ -1522,7 +1640,7 @@ void ui_text_view(const char *title, const char *text)
+@@ -1522,7 +1655,7 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_t *o = overlay_new();
      // Not clickable, so a touch on the text does nothing; it still scrolls
      // from the buttons and shows where it is with the scroll bar.
@@ -571,7 +587,7 @@ index 4ef7eea..c1e6611 100644
      tv_card = c;
      lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
      lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-@@ -1533,19 +1651,19 @@ void ui_text_view(const char *title, const char *text)
+@@ -1533,19 +1666,19 @@ void ui_text_view(const char *title, const char *text)
      lv_obj_set_style_radius(c, 3, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_opa(c, LV_OPA_COVER, LV_PART_SCROLLBAR);
      lv_obj_set_style_bg_color(c, UI_IDLE, LV_PART_SCROLLBAR);

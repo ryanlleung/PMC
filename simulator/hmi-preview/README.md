@@ -21,8 +21,8 @@ Screens follow the template's grid: four columns at x 10, 127, 244 and 361, each
 
 | Screen | Change |
 |---|---|
-| Header | The same on every screen (Ryan, 4 Nov), option A after "too noisy": Power and Back icons 44 wide at the left, then the title from x 96, left-aligned. No Home icon (pages are at most three Backs deep; a keypad closes with Cancel or Back). Back is hidden on Home except to close a popup; Power is greyed under a popup. Home's title falls back to the cryostat name alone if "<name> pressure controller" does not fit. The mode panel starts at x 357, the middle of the gap between the columns below (was 351). |
-| Power | On every screen. Its question has Cancel, Restart and Shut down (Ryan: Restart in the power button as well); Restart asks its own question, as on System. Three-button questions are 376 wide so "Shut down" fits on one line. |
+| Header | The same on every screen (Ryan, 4 Nov): two icons 44 wide at the left, then the title from x 96, left-aligned. The first slot is Home on every page and Power on Home (Ryan: Home is the more useful); Back beside it, hidden on Home except to close a popup. Home and Power are greyed under a popup. Home's title falls back to the cryostat name alone if "<name> pressure controller" does not fit. The mode panel starts at x 357, the middle of the gap between the columns below (was 351). |
+| Power | On Home, top left. Its question has Cancel, Restart and Shut down (Ryan: Restart in the power button as well); Restart asks its own question, as on System. Three-button questions are 376 wide so "Shut down" fits on one line. |
 | Home | Cards 168 + 8 + 167, as the other halved pages (was 167 + 9 + 167). Start AUTO, Stop AUTO and Home valve sit under the bar, as wide as it. Start AUTO filled dark blue with white lettering (Ryan, 4 Nov; was outlined). Trend back in the right column in place of the IP tile (Ryan, 4 Nov); the address is on System. |
 | Menu | Rows Records (Trend, Events), Service (Valve position, Diagnostics), Setup (Settings, System). |
 | Settings | Navigation tiles only: Choose sensor, Calibrate sensor, Valve setup, PID tuning, Review and save. |
