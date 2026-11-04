@@ -162,6 +162,18 @@ static uint32_t crc32(const void *data, size_t len)
     return ~c;
 }
 
+// A version 7 record (0.14.21) in buf made a version 6 one: tune[6], KD,
+// taken out (after the 16-byte header, mot[7], valve[7] and tune[0..5]).
+// Returns the version 6 size; the CRC is left for the caller.
+static uint32_t as_v6(uint8_t *buf, uint32_t size7)
+{
+    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 6 * 4, six = 6, size6 = size7 - 4;
+    memmove(buf + at, buf + at + 4, size7 - at - 4);
+    memcpy(buf + 4, &six, 4);
+    memcpy(buf + 8, &size6, 4);
+    return size6;
+}
+
 // A version 6 record (0.13.6) in buf made a version 5 one: valve[6], the
 // return, taken out (after the 16-byte header, mot[7] and valve[0..5]).
 // Returns the version 5 size; the CRC is left for the caller.
@@ -279,7 +291,7 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_PREVIOUS, &rev, &at) && rev == 5);
     uint32_t ver;
     memcpy(&ver, flash + 0x7FE004, 4);
-    CHECK(ver == 6);   // the save went to B, the v1 record in A is kept
+    CHECK(ver == 7);   // the save went to B, the v1 record in A is kept
     memcpy(&ver, flash + 0x7FD004, 4);
     CHECK(ver == 1);
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
@@ -438,13 +450,13 @@ static void test_name(void)
             memcpy(&r3, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             uint32_t v3;
             memcpy(&v3, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (v3 == 6 && r3 >= a3) { a3 = r3; sl = i; }
+            if (v3 == 7 && r3 >= a3) { a3 = r3; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size4, flash + base + 8, 4);
         static uint8_t buf[4096];
         memcpy(buf, flash + base, size4);
-        size4 = as_v5(buf, size4);
+        size4 = as_v5(buf, as_v6(buf, size4));
         uint32_t size2 = size4 - 4 - 8 - (CFG_NAME_LEN + 4);   // size4: the version 5 size
         uint32_t two = 2;
         memcpy(buf + 4, &two, 4);
@@ -499,13 +511,13 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 6 && r >= a4) { a4 = r; sl = i; }
+            if (ver == 7 && r >= a4) { a4 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, three = 3;
         memcpy(&size4, flash + base + 8, 4);
         static uint8_t buf[4096];
         memcpy(buf, flash + base, size4);
-        size4 = as_v5(buf, size4);
+        size4 = as_v5(buf, as_v6(buf, size4));
         uint32_t size3 = size4 - 4 - 8;   // size4: the version 5 size
         memcpy(buf + 4, &three, 4);
         memcpy(buf + 8, &size3, 4);
@@ -539,13 +551,13 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 6 && r >= a5) { a5 = r; sl = i; }
+            if (ver == 7 && r >= a5) { a5 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, four = 4;
         memcpy(&size5, flash + base + 8, 4);
         static uint8_t buf[4096];
         memcpy(buf, flash + base, size5);
-        size5 = as_v5(buf, size5);
+        size5 = as_v5(buf, as_v6(buf, size5));
         uint32_t size4 = size5 - 4;
         memcpy(buf + 4, &four, 4);
         memcpy(buf + 8, &size4, 4);
@@ -576,13 +588,13 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 6 && r >= a6) { a6 = r; sl = i; }
+            if (ver == 7 && r >= a6) { a6 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size6, flash + base + 8, 4);
         static uint8_t buf[4096];
         memcpy(buf, flash + base, size6);
-        uint32_t size5 = as_v5(buf, size6);
+        uint32_t size5 = as_v5(buf, as_v6(buf, size6));
         uint32_t c = crc32(buf, size5 - 4);
         memcpy(buf + size5 - 4, &c, 4);
         extflash_erase_4k(base);
@@ -593,6 +605,50 @@ static void test_net(void)
         CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a6);
         CHECK(cfg_value(CFG_FROM_LIVE, CFG_BACKOFF, &bo) && bo == 300 && cfg_value(CFG_FROM_LIVE, CFG_RETURN, &rt) && rt == 300);
     }
+}
+
+// KD (0.14.21): a saved setting from version 7; a version 6 record loads
+// KD 0 (the loop as it ran) and keeps the rest of its tuning.
+static void test_kd(void)
+{
+    int32_t v[CFG_N] = { 0 }, lo, hi;
+    bool set[CFG_N] = { false };
+    const char *why;
+    cfg_range(CFG_KD, &lo, &hi);
+    CHECK(lo == 0 && hi == 10000 && cfg_tune(CFG_KD) == 0);
+    v[CFG_KD] = 150; set[CFG_KD] = true;
+    v[CFG_KP] = 40; set[CFG_KP] = true;
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_KD) == 150);
+    reboot();
+    CHECK(cfg_tune(CFG_KD) == 150 && cfg_tune(CFG_KP) == 40);
+    {
+        uint32_t size7, a7 = 0;
+        int sl = 0;
+        for (int i = 0; i < 2; i++) {
+            uint32_t r, ver;
+            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+            if (ver == 7 && r >= a7) { a7 = r; sl = i; }
+        }
+        uint32_t base = 0x7FD000 + sl * 0x1000;
+        memcpy(&size7, flash + base + 8, 4);
+        static uint8_t buf[4096];
+        memcpy(buf, flash + base, size7);
+        uint32_t size6 = as_v6(buf, size7);
+        uint32_t c = crc32(buf, size6 - 4);
+        memcpy(buf + size6 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size6);
+        reboot();
+        uint32_t rev;
+        const char *at;
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a7);
+        CHECK(cfg_tune(CFG_KD) == 0 && cfg_tune(CFG_KP) == 40);
+    }
+    v[CFG_KD] = 10001;
+    set[CFG_KP] = false;
+    CHECK(!cfg_save_with(v, set, &why));
+    CHECK(cfg_tune(CFG_KD) == 0);
 }
 
 static void tick(uint32_t ms)
@@ -854,6 +910,7 @@ int main(int argc, char **argv)
     test_capture();
     test_name();
     test_net();
+    test_kd();
     test_valvepos();
     test_trend();
     test_auto();

@@ -7,10 +7,16 @@
 #include "valvepos.h"
 #include "trend.h"
 #include "ui.h"
+#include "cfg.h"
+#include "fixed.h"
 
 /* --------------------------------------------------------------------------
  * Home (simulator v63 buildCtrl). Pressure and Valve tiles, the mode button,
- * Valve and Menu. AUTO (stage 8): the first Start AUTO asks for a target and
+ * Menu and the PID tile (KP, TI and KD in use; a tap opens PID tuning), in
+ * place of the Valve button, whose page went in 0.14.21 (Ryan, 4 Nov, from
+ * his user: the operator does not tune, but wants to see the values).
+ * In MANUAL the Pressure tile's SP row is Maintain: AUTO at the pressure
+ * shown, no question. AUTO (stage 8): the first Start AUTO asks for a target and
  * Set starts AUTO; later ones confirm the target kept or offer New target.
  * In AUTO the Target box opens the keypad (changes over 5 mB ask first) and
  * the Go to box reads "AUTO", flat. The strip shows the status line, with
@@ -22,13 +28,13 @@
 #define BAR_W   143
 
 typedef struct {
-    lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev;
+    lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev, *sp_cap;
     int32_t fill;             // bar fill to here, px; -1 no value (no marker)
     bool log;                 // pressure: decade lines; valve: 0/50/100
 } tile_t;
 
 static tile_t pt, vt;
-static lv_obj_t *mode_btn, *valve_btn;
+static lv_obj_t *mode_btn, *pid_btn, *pid_val[3], *keep_btn;
 
 // log2 in Q8 (as main_screen.c), for the log pressure bar.
 static int32_t log2_q8(uint32_t v)
@@ -190,7 +196,7 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
     lv_obj_set_size(t->bar, BAR_W, 30);
     lv_obj_add_event_cb(t->bar, bar_draw, LV_EVENT_DRAW_MAIN, t);
     // SP / Go to at the button text size, 16 px (Ryan, 4 Nov).
-    ui_label(t->tile, 12, 126, 54, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, sp);
+    t->sp_cap = ui_label(t->tile, 12, 126, 54, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, sp);
     t->box = lv_obj_create(t->tile);
     lv_obj_remove_style_all(t->box);
     lv_obj_remove_flag(t->box, LV_OBJ_FLAG_SCROLLABLE);
@@ -497,14 +503,71 @@ static void mode_event(lv_event_t *e)
         ui_position_ask();
 }
 
-static void valve_event_cb(lv_event_t *e)
+// PID tile ---------------------------------------------------------------
+static void pid_event(lv_event_t *e)
 {
-    // Greyed and not opened until the valve is homed or set (Ryan, 24 Oct).
-    if (ui_btn_disabled(e)) {
-        ui_msg("Home the valve or set its position first");
+    (void)e;
+    ui_open(&ui_scr_tune);   // on its PID tab
+}
+
+// Three figures, four characters at most: 0.40, 4.00, 12.5, 100.
+static const char *fmt3(char *b, size_t n, int32_t v100)
+{
+    if (v100 < 1000) return fixed_fmt(b, n, v100, 2);
+    if (v100 < 10000) return fixed_fmt(b, n, (v100 + 5) / 10, 1);
+    return fixed_fmt(b, n, (v100 + 50) / 100, 0);
+}
+
+// Three columns, the name over the value, 12 px (16 px values run
+// together in a 35 px column), thin rules between.
+static void pid_make(lv_obj_t *scr, int32_t y)
+{
+    static const char *const nm[3] = { "KP", "TI", "KD" };
+    pid_btn = ui_btn(scr, 361, y, 109, 48, UI_SECONDARY, "", pid_event, NULL);
+    for (int i = 0; i < 3; i++) {
+        int32_t x = 1 + i * 36;
+        ui_label(pid_btn, x, 8, 35, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, nm[i]);
+        pid_val[i] = ui_label(pid_btn, x, 25, 35, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
+        if (i) {
+            lv_obj_t *r = lv_obj_create(pid_btn);
+            lv_obj_remove_style_all(r);
+            lv_obj_remove_flag(r, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_pos(r, x - 1, 9);
+            lv_obj_set_size(r, 1, 28);
+            lv_obj_set_style_bg_opa(r, LV_OPA_COVER, 0);
+            lv_obj_set_style_bg_color(r, UI_TICK, 0);
+        }
+    }
+}
+
+static void pid_refresh(void)
+{
+    static const cfg_key_t key[3] = { CFG_KP, CFG_TI, CFG_KD };
+    char b[16];
+    for (int i = 0; i < 3; i++)
+        ui_set_text(pid_val[i], fmt3(b, sizeof b, cfg_tune(key[i])));
+}
+
+// Maintain ---------------------------------------------------------------
+static bool reading_ok(void)
+{
+    const clicks_state_t *s = clicks_state();
+    return s->pm_found && s->reading_ok && !s->boost_tripped;
+}
+
+// AUTO at the pressure as shown (0.1 mB), from where the valve is, with no
+// question (Ryan, 4 Nov).
+static void keep_event(lv_event_t *e)
+{
+    const char *why;
+    if (ui_btn_disabled(e) || valve_mode() != VALVE_MANUAL) {
+        ui_msg(valve_auto() ? "Already in AUTO" : !reading_ok() ? "No pressure reading"
+               : valve_fault_count() ? "Reset the fault first" : not_manual_why());
+        ui_refresh_soon();
         return;
     }
-    ui_open(&ui_scr_valve);
+    if (!valve_start_auto_at(p_shown(clicks_state()->p_mmbar), &why))
+        ui_msg(why);
 }
 
 static void menu_event(lv_event_t *e)
@@ -530,8 +593,12 @@ static void home_build(lv_obj_t *scr)
     make_tile(scr, &pt, 10, "Pressure", "mB", "SP", true, target_event);
     make_tile(scr, &vt, 186, "Valve", "%", "Go to", false, goto_event);
     mode_btn = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Home valve", mode_event, NULL);
-    valve_btn = ui_btn(scr, 361, 104, 109, 48, UI_NAV, "Valve", valve_event_cb, NULL);
-    ui_btn(scr, 361, 160, 109, 48, UI_NAV, "Menu", menu_event, NULL);
+    // Menu above the PID tile (Ryan, 4 Nov).
+    ui_btn(scr, 361, 104, 109, 48, UI_NAV, "Menu", menu_event, NULL);
+    pid_make(scr, 160);
+    // Maintain on the SP row outside AUTO, outlined blue as Switch to MANUAL.
+    keep_btn = ui_btn(pt.tile, 12, 116, 143, 40, UI_SECONDARY, "Maintain", keep_event, NULL);
+    ui_btn_outline(keep_btn, true);
 }
 
 // Valve reading and bar, at 10 Hz.
@@ -557,7 +624,7 @@ static void home_fast(void)
 
 static void home_refresh(void)
 {
-    ui_btn_enable(valve_btn, valve_mode() != VALVE_NOT_CAL);
+    pid_refresh();
     const clicks_state_t *s = clicks_state();
     valve_mode_t m = valve_mode();
     char buf[32];
@@ -571,13 +638,23 @@ static void home_refresh(void)
     int32_t sp;
     bool auto_on = valve_auto();
     box_set(&pt, auto_on, valve_target(&sp) ? ui_fmt1(buf, sizeof buf, sp) : "Not set");
+    // AUTO: the SP field. Otherwise Maintain, greyed while Start AUTO would
+    // be refused (a press says why).
+    lv_obj_t *const on[2] = { pt.box, pt.sp_cap };
+    for (int i = 0; i < 2; i++) {
+        if (auto_on) lv_obj_remove_flag(on[i], LV_OBJ_FLAG_HIDDEN);
+        else         lv_obj_add_flag(on[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (auto_on) lv_obj_add_flag(keep_btn, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_remove_flag(keep_btn, LV_OBJ_FLAG_HIDDEN);
+    ui_btn_enable(keep_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
 
     home_fast();
     alarm_set(&vt, valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") ||
                    valve_fault_is("F-6"));
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
     // Where the valve is going, greyed when not editable (in AUTO the
-    // position AUTO sends it to, as the Valve page); "----" until homed.
+    // position AUTO sends it to); "----" until homed.
     bool have = valve_calibrated() && m != VALVE_CALIBRATING;
     box_set(&vt, manual, have ? ui_fmt2(buf, sizeof buf, valve_target_pct_milli()) : "----");
 

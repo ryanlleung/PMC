@@ -464,7 +464,7 @@ void valve_task(void)
  * AUTO (stage 8): ctrl.c works out the command, this runs it.
  * ------------------------------------------------------------------------ */
 // The tuning from cfg.c (CFG TUNE units: 0.01 %/mbar, 0.01 min, 0.1 %,
-// steps, +-1, 0.01 mbar).
+// steps, +-1, 0.01 mbar, 0.01 % per mbar/s).
 static ctrl_tune_t tune_now(void)
 {
     ctrl_tune_t k;
@@ -474,6 +474,7 @@ static ctrl_tune_t tune_now(void)
     k.db = sc(cfg_tune(CFG_DB));   // full steps, in motor counts (HALF doubles)
     k.kdir = (int)cfg_tune(CFG_KDIR);
     k.band = (float)cfg_tune(CFG_BAND) / 100.0f;
+    k.kd = (float)cfg_tune(CFG_KD) / 100.0f;
     k.pos_max = pm();
     k.steps = stepper3_scale();
     return k;
@@ -594,7 +595,7 @@ const char *valve_warning(void) { return warn[0] ? warn : NULL; }
 void valve_warning_clear(void) { warn[0] = 0; }
 
 // A screen button is driving the valve while pressed (Close or Open held
-// on the Valve page or Motor override): its move has no real end, so AUTO
+// on Motor override): its move has no real end, so AUTO
 // and remote moves wait for the release. Only while that move runs.
 void valve_hold(bool on) { hold_on = on; }
 static bool holding(void) { return hold_on && stepper3_busy(); }
@@ -1007,17 +1008,6 @@ bool valve_goto_pct100(int32_t pct100, const char **why)
     if (to < 0) to = 0;
     if (to > pm()) to = pm();
     if (!stepper3_goto(to))         { *why = stepper3_refusal(); return false; }
-    return true;
-}
-
-bool valve_move_steps(int32_t steps, const char **why)
-{
-    if (mode == VALVE_CALIBRATING)  { *why = "Homing: STOP to cancel"; return false; }
-    if (any_latched())              { *why = "Reset the fault first"; return false; }
-    if (is_auto())                  { *why = "Switch to MANUAL first"; return false; }
-    if (holding())                  { *why = "Valve being moved on the screen"; return false; }
-    int32_t from = stepper3_busy() ? stepper3_target() : stepper3_position();
-    if (!stepper3_goto(from + steps)) { *why = stepper3_refusal(); return false; }
     return true;
 }
 

@@ -16,7 +16,7 @@
 
 /* --------------------------------------------------------------------------
  * Settings (stage 6, simulator v63): Settings, Choose sensor, Valve
- * setup, Control tuning, Review and save, and Calibrate sensor (Menu >
+ * setup, PID tuning, Review and save, and Calibrate sensor (Menu >
  * Calibrate > Transducer).
  *
  * An edit is a draft (dark edge) until Save settings, which
@@ -131,12 +131,13 @@ static const field_t F[CFG_N] = {
     [CFG_RATE]    = { "Run speed", "steps/s", 0, K_NUM, "Normal move speed" },
     [CFG_START]   = { "Start speed", "steps/s", 0, K_NUM, "Speed at the start and end of a move" },
     [CFG_ACCEL]   = { "Acceleration", "steps/s/s", 0, K_NUM, "Ramp between start and run" },
-    [CFG_KP]      = { "Gain", "%/mB", 2, K_NUM, "% open per mB of error" },
-    [CFG_TI]      = { "Integral time", "min", 2, K_NUM, "Integral time, 0 is off" },
+    [CFG_KP]      = { "KP", "%/mB", 2, K_NUM, "gain, % open per mB of error" },
+    [CFG_TI]      = { "TI", "min", 2, K_NUM, "integral time, min; 0 is off" },
     [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "AUTO never closes the valve below this" },
     [CFG_DB]      = { "Deadband", "steps", 0, K_NUM, "AUTO skips moves smaller than this" },
     [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "How the pressure moves when the valve opens; a needle valve feeding the pot normally raises it" },
     [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Within this of the setpoint reads Within setpoint band" },
+    [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "derivative, % open per mB/s the pressure changes; 0 is off" },
     [CFG_SENSOR]  = { "Sensor in use", NULL, 0, K_CHOICE, "The sensor read for the pressure" },
 };
 
@@ -592,7 +593,7 @@ static void restart_cb(lv_event_t *e)
 static void settings_build(lv_obj_t *scr)
 {
     // Review and save with the save icon in front (0.13.19, Ryan 28 Oct).
-    static const char *const names[5] = { "System setup", "Choose sensor", "Valve setup", "Control tuning",
+    static const char *const names[5] = { "System setup", "Choose sensor", "Valve setup", "PID tuning",
                                           LV_SYMBOL_SAVE "  Review and save" };
     const ui_screen_t *const to[5] = { &ui_scr_namenet, &ui_scr_sensor_set, &ui_scr_valve_set, &ui_scr_tune,
                                        &ui_scr_review };
@@ -626,8 +627,12 @@ static void settings_refresh(void)
     ui_btn_text(st.tile[0], "System setup", cfg_name()[0] ? cfg_name() : "None");
     lv_snprintf(t, sizeof t, "%s turns", value_text(d, sizeof d, CFG_POSMAX, live(CFG_POSMAX)));
     ui_btn_text(st.tile[2], "Valve setup", t);
-    lv_snprintf(t, sizeof t, "Gain %s", fixed_fmt(d, sizeof d, live(CFG_KP), 2));
-    ui_btn_text(st.tile[3], "Control tuning", t);
+    {
+        char a[16], b[16];
+        lv_snprintf(t, sizeof t, "KP %s, TI %s, KD %s", fixed_fmt(d, sizeof d, live(CFG_KP), 2),
+                    fixed_fmt(a, sizeof a, live(CFG_TI), 2), fixed_fmt(b, sizeof b, live(CFG_KD), 2));
+    }
+    ui_btn_text(st.tile[3], "PID tuning", t);
     // Without side buttons: the strip only.
     char c[32], w[24];
     uint32_t rev;
@@ -1162,13 +1167,14 @@ static void ps_refresh(void)
 const ui_screen_t ui_scr_sensor_set = { "Choose sensor", ps_build, ps_refresh, NULL };
 
 /* --------------------------------------------------------------------------
- * Valve setup (three tabs) and Control tuning
+ * Valve setup (three tabs) and PID tuning (two)
  * ------------------------------------------------------------------------ */
 typedef struct {
     const char *label;
     cfg_key_t keys[6];
     int n;
     const char *note;
+    bool tall;                // the keys as three tall cards (PID tuning's PID tab)
 } tab_t;
 
 static const tab_t valve_tabs[3] = {
@@ -1176,10 +1182,36 @@ static const tab_t valve_tabs[3] = {
     { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4, NULL },
     { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Used by manual and AUTO moves. Saved when the valve is stopped." },
 };
-static const tab_t tune_tab[1] = {
-    { "Control", { CFG_KP, CFG_TI, CFG_OUTMIN, CFG_DB, CFG_KDIR, CFG_BAND }, 6,
+// PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
+// name on their own tab, the rest of AUTO's settings on the other.
+static const tab_t tune_tabs[2] = {
+    { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3, "Used by AUTO from the next control step. Save to keep them.", true },
+    { "AUTO limits", { CFG_OUTMIN, CFG_DB, CFG_KDIR, CFG_BAND }, 4,
       "Used by AUTO from the next control step. Save to keep them." },
 };
+
+// Tall card for KP, TI and KD: the name 26 px, what it is and its unit
+// 12 px, the value 26 px, the chevron; the draft edge as an editable card.
+static void tcard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, cfg_key_t k)
+{
+    static const char *const what[3] = { "Gain", "Integral time", "Derivative" };
+    const int i = k == CFG_KP ? 0 : k == CFG_TI ? 1 : 2;
+    e->card = ui_card(scr, x, y, 109, 104);
+    lv_obj_add_flag(e->card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_border_width(e->card, 1, 0);
+    lv_obj_set_style_border_color(e->card, UI_TICK, 0);
+    lv_obj_set_style_bg_color(e->card, UI_TRACK, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(e->card, field_event, LV_EVENT_CLICKED, (void *)(intptr_t)k);
+    ui_label(e->card, 12, 6, 85, &ui_font_26, UI_TEXT, LV_TEXT_ALIGN_LEFT, F[k].cap);
+    ui_label(e->card, 12, 36, 85, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, what[i]);
+    ui_label(e->card, 12, 50, 85, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, F[k].unit);
+    e->v = ui_label(e->card, 12, 69, 72, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+    ui_label(e->card, 109 - 22, 73, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
+    e->edge = ui_card(e->card, -1, 5, 3, 94);
+    lv_obj_set_style_radius(e->edge, 0, 0);
+    lv_obj_set_style_border_width(e->edge, 0, 0);
+    lv_obj_set_style_bg_opa(e->edge, LV_OPA_TRANSP, 0);
+}
 
 static struct {
     const tab_t *tabs;
@@ -1200,7 +1232,9 @@ static void pg_fields(void)
     const tab_t *t = &pg.tabs[pg.tab];
     int y0 = pg.ntabs > 1 ? 1 : 0;
     char cap[40];
-    for (int i = 0; i < t->n; i++)
+    for (int i = 0; i < t->n && t->tall; i++)
+        tcard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0], t->keys[i]);
+    for (int i = 0; i < t->n && !t->tall; i++)
         ecard_make(&pg.f[i], pg.scr, C2X[i % 2], RY[y0 + i / 2], C2W[i % 2], caption(cap, sizeof cap, t->keys[i]),
                    field_event, (void *)(intptr_t)t->keys[i]);
 }
@@ -1273,10 +1307,10 @@ static void pg_refresh(void)
 }
 
 static void valve_set_build(lv_obj_t *scr) { pg_build(scr, "Valve setup", valve_tabs, 3); }
-static void tune_build(lv_obj_t *scr) { pg_build(scr, "Control tuning", tune_tab, 1); }
+static void tune_build(lv_obj_t *scr) { pg_build(scr, "PID tuning", tune_tabs, 2); }
 
 const ui_screen_t ui_scr_valve_set = { "Valve setup", valve_set_build, pg_refresh, NULL };
-const ui_screen_t ui_scr_tune = { "Control tuning", tune_build, pg_refresh, NULL };
+const ui_screen_t ui_scr_tune = { "PID tuning", tune_build, pg_refresh, NULL };
 
 /* --------------------------------------------------------------------------
  * Review and save

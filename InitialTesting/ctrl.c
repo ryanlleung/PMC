@@ -111,7 +111,7 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     const float pf = c->pv_f;
     const float e = (float)k->kdir * (c->sp - pf);
     const float kp = kp_steps(k), ki = k->ti > 0 ? kp / (60.0f * k->ti) : 0;
-    const float d = -(CTRL_KD / 100.0f * pos_max) * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
+    const float d = -(k->kd / 100.0f * pos_max) * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
     c->prev_pv = pf;
     if (kp != c->kp_used || k->kdir != c->kdir_used) {
         // Tuning changed in AUTO: keep the output where it is, as on entry,

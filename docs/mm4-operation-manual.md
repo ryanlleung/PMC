@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision D, 3 November 2026. Firmware 0.14.20. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12). It does not add hardware bench verification.
+Revision E, 4 November 2026. Firmware 0.14.21. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, and the removal of the Valve page (0.14.21). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.20: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.21: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -27,7 +27,7 @@ What the operator does:
 - Watches the trend. A steady pressure matters more than the exact value. The sample temperature is watched on another instrument.
 - Clears faults after fixing their cause.
 
-What the operator does not do: tune the control loop. The gain and integral time are set once at commissioning (Settings > Control tuning) and are not part of normal operation.
+What the operator does not do: tune the control loop. KP, TI and KD are set once at commissioning (Settings > PID tuning) and are not part of normal operation. Home shows them so the operator can see what the loop is using.
 
 The controller has four modes, shown in the header of every screen:
 
@@ -100,7 +100,7 @@ After a restart the target is not kept, so the first Start AUTO asks for it agai
 
 The real-time clock keeps time through a reset. If the dates on saves and events are wrong, set the clock over the text link with the TIME SET command (section 11). There is no clock page on the screen.
 
-First use of a new board or a new Druck sensor also needs: the sensor added under Settings > Choose sensor with its serial number and range, a two-point calibration (section 8), the valve travel and motor direction checked under Settings > Valve setup, the pressure response direction set under Settings > Control tuning, and Save settings. These are commissioning steps, done once.
+First use of a new board or a new Druck sensor also needs: the sensor added under Settings > Choose sensor with its serial number and range, a two-point calibration (section 8), the valve travel and motor direction checked under Settings > Valve setup, the pressure response direction set under Settings > PID tuning > AUTO limits, and Save settings. These are commissioning steps, done once.
 
 ## 5. Screens
 
@@ -108,15 +108,15 @@ Every screen has the same frame: a header with Back and Home buttons, the title,
 
 | Screen | How to reach it | What it shows and does |
 | --- | --- | --- |
-| Home | Home button | Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar, SP (setpoint) box) and Valve tile (reading in %, bar, Go to box). The mode button reads Home valve, Start AUTO or Switch to MANUAL as the mode allows. Valve and Menu buttons. A tap on the sparkline opens Trend |
-| Valve | Home > Valve | MANUAL moves: hold Close or Open, -1 %, +1 %, -5 %, +5 %, Fully close, Fully open, and the Go to box for a typed % (white with a blue underline when it takes a tap). In AUTO the buttons are grey and Go to shows where AUTO is sending the valve; a tap asks to switch to MANUAL |
+| Home | Home button | Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar; in AUTO the SP (setpoint) box, in MANUAL the Maintain button) and Valve tile (reading in %, bar, Go to box for a typed %). The mode button reads Home valve, Start AUTO or Switch to MANUAL as the mode allows. Menu button. The PID tile shows the KP, TI and KD in use; a tap opens PID tuning. A tap on the sparkline opens Trend |
 | Menu | Home > Menu | Records: Trend, Events. Calibrate: Valve position, Transducer. System: Diagnostics, Settings |
 | Trend | Menu > Records > Trend | Pressure (left axis), the target while in AUTO (dashed) and valve % (right axis) over 1, 2, 5, 10, 30 min or 1 hour |
 | Events | Menu > Records > Events | Latched faults, with Reset fault. Tap a fault for its detail and help. The event log (last 100 events) |
 | Valve position | Menu > Calibrate > Valve position | One page with Home valve, Set as 0 %, Set as other % and Use last saved, plus Help. Shows the position reference and output turns; during homing it shows the current stage |
 | Calibrate sensor | Menu > Calibrate > Transducer | The two-point calibration: Capture vacuum, Capture air, and the saved and captured readings side by side |
 | Diagnostics | Menu > System > Diagnostics | Live readings: Druck signal, pressure before calibration, the room sensor (Pressure 21), motor steps, limit switch and last move, board temperature, excitation and how long the last move took |
-| Settings | Menu > System > Settings | System setup, Choose sensor, Valve setup, Control tuning, Review and save (with Load settings), Motor override and Restart (section 10) |
+| PID tuning | Home > PID tile, or Settings > PID tuning | PID tab: KP, TI and KD, each on its own card with its name, unit and value. AUTO limits tab: AUTO min, deadband, pressure response and target band (section 10) |
+| Settings | Menu > System > Settings | System setup, Choose sensor, Valve setup, PID tuning, Review and save (with Load settings), Motor override and Restart (section 10) |
 
 Display formats: pressure to 1 decimal in mbar, valve position and keypad entries to 2 decimals in %, dates DD/MM/YY.
 
@@ -130,11 +130,11 @@ Short messages: a refused action puts its reason in the strip for a few seconds,
 
 In MANUAL the operator positions the valve and watches the pressure. Position is in percent of full travel: 0 % is just above the seat, 100 % is 4 output turns open by default.
 
-- On the Valve page, hold Close or Open to move while pressed, or tap -1 %, +1 %, -5 % or +5 % to step from where the valve is going.
-- Tap the Go to box (on Home or the Valve page) to type a position, then Set. Fully close and Fully open go to 0 % and 100 %.
+- Tap the Go to box on Home to type a position, then Set. 0 and 100 close and open the valve fully.
 - Moves run at the drive's run speed (Settings > Valve setup > Drive). A new Go to during a move retargets it: further on extends the move, behind it ramps down and turns round.
 - The limit switch stops any closing move. If it trips away from 0 % the controller asks Set as seat or Skip (W-1, section 9).
-- All normal Valve-page moves, including Close, Open and the step buttons, need the valve homed or its position set. Before that the controls are grey. Settings > Motor override can move the motor by steps without a position reference.
+- Go to needs the valve homed or its position set. Before that a tap says why and nothing moves. Settings > Motor override can move the motor by steps without a position reference.
+- Maintain (in place of the SP box in MANUAL) starts AUTO at the pressure shown, with no question. The valve starts from where it is. It is grey until the valve is homed, with a valid reading and no fault.
 
 ### Starting AUTO
 
@@ -152,7 +152,7 @@ Once a second, after the pressure reading, the controller works out a new valve 
 
 - Change the target from the SP (setpoint) box on Home. A change of more than 5 mbar asks "Change setpoint to X mB?" first. Smaller changes apply at once.
 - The valve moves in short bursts rather than continuously. Small reversals are held until the command is at least 0.1 % of travel from the valve, so the reading's noise does not turn the motor round inside the drive's backlash (firmware 0.12.12). The motion is still less smooth than the Mercury iTC's; this is a known difference (26 October 2026).
-- The Valve page is locked: the move buttons are grey and a tap on Go to asks to switch to MANUAL. Homing and changes to valve settings are refused in AUTO with "Switch to MANUAL first". Control-tuning drafts can be saved and take effect from the next control step; changed valve or sensor-selection drafts must wait for MANUAL.
+- Go to on Home shows where AUTO is sending the valve; a tap asks to switch to MANUAL. Homing and changes to valve settings are refused in AUTO with "Switch to MANUAL first". PID tuning drafts can be saved and take effect from the next control step; changed valve or sensor-selection drafts must wait for MANUAL.
 - The controller watches for a pressure that does not respond to valve moves (F-6), a pressure that does not settle in 30 min (W-2), a pressure above the sensor range (W-5) and the valve pinned at an end the wrong way (W-6). Each of these ends AUTO; section 9 says what to do.
 
 ### Leaving AUTO
@@ -242,7 +242,7 @@ Warnings do not latch. W-2, W-4, W-5 and W-6 show on the strip until OK is press
 | W-3 Controller hot | Power Monitor die at or above 55 °C | Nothing blocked. Shown until it cools below 50 °C | Check the enclosure ventilation |
 | W-4 Switch pressed off the seat | The switch reads pressed with the valve well off the seat, two reads in a row | In AUTO: AUTO ended, valve idle. In MANUAL: a strip warning | Check the switch, its wiring and the valve position. Home again when the switch is free |
 | W-5 Over range in AUTO | The pressure is above the sensor range, two reads in a row | AUTO ended, MANUAL, valve idle | The line is at or near atmosphere. Pump down, then start AUTO |
-| W-6 Driven the wrong way | The valve was stationary at AUTO min or on the closed switch with pressure below the target band, or fully open above it, for more than 60 s | AUTO ended, valve idle | The pressure response setting is the wrong way round for this valve. Check Settings > Control tuning > Pressure response |
+| W-6 Driven the wrong way | The valve was stationary at AUTO min or on the closed switch with pressure below the target band, or fully open above it, for more than 60 s | AUTO ended, valve idle | The pressure response setting is the wrong way round for this valve. Check Settings > PID tuning > AUTO limits > Pressure response |
 
 Other strip messages:
 
@@ -253,7 +253,7 @@ The event log (Menu > Records > Events) keeps the last 100 events with a time st
 
 ## 10. Settings
 
-Settings are commissioning items, not daily operation. Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. The name, IP address, Remote control switch, sensor operations and captured calibration take effect before saving and remain unsaved until Save settings; a changed IP address is used after a restart. The text link does not change settings. In AUTO, Save settings accepts control-tuning drafts; changed valve or sensor-selection drafts answer "Switch to MANUAL first". Live changes such as the name and Remote control switch are also included in the saved record. The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
+Settings are commissioning items, not daily operation. Numeric valve and tuning edits are drafts until Save settings, which checks them together and saves all or nothing. The name, IP address, Remote control switch, sensor operations and captured calibration take effect before saving and remain unsaved until Save settings; a changed IP address is used after a restart. The text link does not change settings. In AUTO, Save settings accepts PID tuning drafts; changed valve or sensor-selection drafts answer "Switch to MANUAL first". Live changes such as the name and Remote control switch are also included in the saved record. The board keeps the last two saves, in two flash sectors in turn, and reads a save back before it counts.
 
 | Page | Settings | Notes |
 | --- | --- | --- |
@@ -262,7 +262,8 @@ Settings are commissioning items, not daily operation. Numeric valve and tuning 
 | Valve setup, Valve tab | 100 % travel in output turns (4 by default, 16512 steps per turn). Motor direction | Changing the direction clears the homing. Home again after saving |
 | Valve setup, Homing tab | Back-off (400 full steps), Return (400 full steps), fast close speed (400 steps/s), slow close speed (25 steps/s) | Back-off follows the fast close; Return follows the slow close and defines 0 %. The distances are independent |
 | Valve setup, Drive tab | Run speed (400 steps/s), start speed (200 steps/s), acceleration (3200 steps/s²), by default | Used by MANUAL and AUTO moves. Saved when the valve is stopped |
-| Control tuning | Gain (% open per mbar, 4.00), integral time (min, 0.25; 0 is off), AUTO min (%), deadband (steps, 8), pressure response (opening raises or lowers the pressure), target band (mbar, 0.10) | Set at commissioning. Operators do not change these. A wrong pressure response gives W-6 |
+| PID tuning, PID tab | KP, gain (% open per mbar, 4.00). TI, integral time (min, 0.25; 0 is off). KD, derivative (% open per mbar/s of pressure change, 0.00; 0 is off) | Set at commissioning. Operators do not change these. KD acts on the pressure's rate of change, not the error, so a setpoint change gives no kick. Settings saved before 0.14.21 load with KD 0 |
+| PID tuning, AUTO limits tab | AUTO min (%), deadband (steps, 8), pressure response (opening raises or lowers the pressure), target band (mbar, 0.10) | Set at commissioning. A wrong pressure response gives W-6 |
 | Review and save | Last save and previous save by date. Unsaved changes list. Save settings. Discard changes. Load settings: last save, previous save or factory defaults | A loaded save is in use at once, sensors and calibrations included. Factory defaults come in as drafts and keep the sensors. Load is refused while the valve moves or in AUTO |
 | Restart | Stops the valve, ends AUTO or homing, then restarts after about 2.5 s | Asks first. Saved settings are loaded and the valve starts NOT HOMED |
 | Motor override | Move tab: step size 1 to 10 000 or Hold, Close and Open, Zero, Limit override. Speed tab: run, start and acceleration rates. Coils tab: step mode (wave, full, half), hold torque, coils off, coil order, direction | Engineering page. It drives the motor by steps past the valve's checks. Coil order, direction and Zero clear the homing and ask first. The strip reads the motor state and the limit switch |
@@ -361,3 +362,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | B | 2 November 2026 | Firmware 0.14.8: the text link takes the remote command set only (engineering commands, the step test and the typed calibration table removed) |
 | C | 3 November 2026 | Checked against firmware 0.14.8 on main: corrected movement prerequisites, independent homing Return and four stages, motor-supply behaviour and legacy status bit, tuning saves in AUTO, motor defaults, current screens and labels, remote refusals and version references. Historical bench status retained separately |
 | D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %). Firmware 0.14.15: the Valve position state reads Set by hand or Last saved, not homed. Firmware 0.14.16: a STOP on the screen no longer holds remote moves (no Allow on the strip). Firmware 0.14.17: the limit switch question's button reads Set as seat. Firmware 0.14.18: the Valve screen's buttons use the same column widths as the other screens. Firmware 0.14.19: a tap during a slow redraw (Trend) no longer leaves the button lit without acting. Firmware 0.14.20: on Home, the Setpoint label reads SP, and SP and Go to are at the button text size |
+| E | 4 November 2026 | Firmware 0.14.21: on Home, the Valve button is replaced by the PID tile (KP, TI and KD in use, a tap opens PID tuning) and Menu moves up a row; Maintain replaces the grey SP box in MANUAL and starts AUTO at the pressure shown; Control tuning is renamed PID tuning, with PID and AUTO limits tabs; KD is a saved setting (0 by default); the Valve page is removed, Go to on Home stays |

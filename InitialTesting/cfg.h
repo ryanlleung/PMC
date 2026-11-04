@@ -81,7 +81,7 @@ bool cfg_net_restart_due(void);   // the live address differs from the one in us
 bool cfg_remote(void);
 void cfg_set_remote(bool on);
 
-// Settings with a field on the screens. CFG_KP to CFG_BAND stay in order.
+// Settings with a field on the screens. CFG_KP to CFG_KD stay in order.
 typedef enum {
     CFG_POSMAX,    // steps for 100 %
     CFG_REVERSE,   // motor direction, 0 / 1 (a change clears the calibration)
@@ -98,6 +98,7 @@ typedef enum {
     CFG_DB,        // deadband, steps
     CFG_KDIR,      // pressure response, +1 opening raises pressure, -1 lowers
     CFG_BAND,      // target band, 0.01 mbar
+    CFG_KD,        // derivative, 0.01 % per mbar/s (0 = off; settings record version 7)
     CFG_SENSOR,    // serial number of the sensor in use
     CFG_N
 } cfg_key_t;

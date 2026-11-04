@@ -71,5 +71,5 @@ function load(file) {
 }
 // cfg_key_t (InitialTesting/cfg.h), for save() and setting().
 const CFG = { POSMAX: 0, REVERSE: 1, BACKOFF: 2, RETURN: 3, FHOME: 4, FCREEP: 5, RATE: 6, START: 7, ACCEL: 8,
-  KP: 9, TI: 10, OUTMIN: 11, DB: 12, KDIR: 13, BAND: 14, SENSOR: 15 };
+  KP: 9, TI: 10, OUTMIN: 11, DB: 12, KDIR: 13, BAND: 14, KD: 15, SENSOR: 16 };
 module.exports = { load, CFG };

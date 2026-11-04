@@ -41,7 +41,7 @@ Rewriting the target with the value it already has changes nothing (no event; th
 | 10-11 | F32 | Pressure | mbar absolute. NaN without a valid reading |
 | 12-13 | F32 W | Target | mbar, kept to 0.1 mbar, 0 to the sensor range. NaN until set. Write: as Set target on the screen, in any mode |
 | 14-15 | F32 | Valve position | % open. NaN when the position is not set |
-| 16-17 | F32 W | Valve going to | % open, where the valve is going. Write: as Go to % on the Valve page, 0 to 100, MANUAL only |
+| 16-17 | F32 W | Valve going to | % open, where the valve is going. Write: as Go to % on Home, 0 to 100, MANUAL only |
 | 18-19 | F32 | Sensor range | mbar, full scale of the sensor in use |
 | 20-21 | F32 | Excitation | V, the Druck supply. NaN if the Power Monitor does not answer |
 | 22-23 | F32 | Controller temperature | degC, Power Monitor die. NaN if it does not answer |

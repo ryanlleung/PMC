@@ -119,10 +119,6 @@ uint32_t valve_cal_elapsed_s(void);              // into the calibration running
 int valve_cal_step(void);    // -1 not calibrating, 0 moving off the switch, 1-4 step
 bool valve_goto_pct10(int32_t pct10, const char **why);   // VALVE SET, 0.1 %
 bool valve_goto_pct100(int32_t pct100, const char **why); // the same in 0.01 % (keypad)
-// A move by steps from where the valve is (or is going), calibrated or not:
-// the Valve page's Close, Open, -5 % and +5 % before a calibration. A
-// closing move still stops at the switch (no question without a zero).
-bool valve_move_steps(int32_t steps, const char **why);
 int32_t valve_target_pct10(void);                // where the valve is going
 int32_t valve_pct_milli(void);                   // position in 0.001 % (for 2 dp on screen)
 int32_t valve_target_pct_milli(void);

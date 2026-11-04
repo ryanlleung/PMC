@@ -37,10 +37,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('boot NOT HOMED', st === 'MODE NOT HOMED;VALV NONE;VALV MOVING 0;ALRM NONE\r\n', st);
   check('boot no motion', s.get(5) === 40000);
   shot(s, 'boot');
-  s.tap(415, 126);   // Valve page: normal moves are disabled before a reference is set.
-  for (const [x, y] of [[63, 140], [181, 140], [299, 140], [417, 140],
-    [63, 188], [181, 188], [299, 188], [417, 188]]) s.tap(x, y);
-  check('Valve-page moves blocked before homing', s.get(5) === 40000 && s.get(30) === 0 && !s.busy());
+  // Home: Maintain is greyed and Go to moves nothing before a reference is set.
+  s.tap(93, 184); s.run(1000); s.tap(297, 184); s.run(1000);
+  check('Home moves blocked before homing', s.get(5) === 40000 && s.get(30) === 0 && !s.busy() &&
+    s.cmd('MODE?') === 'MODE NOT HOMED\r\n', s.cmd('MODE?'));
 }
 { // Homing from the screen: Home valve, then Home in the question.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
@@ -50,6 +50,28 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const off = s.get(5) / 2 - s.get(30);
   check('home from the screen', /Homed in/.test(s.out) && s.get(30) === 0 && off === s.setting(CFG.RETURN), s.out.slice(-400));
   shot(s, 'homed');
+}
+{ // Maintain in MANUAL: AUTO at the pressure as shown, from where the valve is, no question.
+  const s = homed(load());
+  s.cmd('VALV SET 30', 60000); s.run(400000);
+  const p = s.cmd('PRES?').match(/PRES ([\d.]+) mbar/)[1], before = s.get(30);
+  s.tap(93, 184); s.run(1000);
+  const sp = s.cmd('PRES SP?'), shown = (Math.round(parseFloat(p) * 10) / 10).toFixed(1);
+  check('Maintain starts AUTO at the shown pressure', s.cmd('MODE?') === 'MODE AUTO\r\n' &&
+    sp === 'PRES SP ' + shown + ' mbar\r\n', p + ' ' + sp);
+  // Bumpless: only the loop's own small correction, under 0.5 % of travel.
+  check('Maintain does not jump the valve', Math.abs(s.get(30) - before) < 330, before + ' -> ' + s.get(30));
+  shot(s, 'maintain');
+  s.run(300000);
+  check('Maintain holds the pressure', s.reg() >= 2, 'regulation ' + s.reg());
+}
+{ // PID tile opens PID tuning; KD is a saved setting from its keypad.
+  const s = homed(load());
+  shot(s, 'home-pid');
+  s.tap(415, 184); shot(s, 'pid-tuning');
+  s.tap(298, 156); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // KD 1.5, Set
+  s.tap(415, 128); s.tap(319, 138);   // Save settings, then Save in the question
+  check('KD saves from the PID tuning page', s.setting(CFG.KD) === 150, 'KD ' + s.setting(CFG.KD));
 }
 { // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
   const s = load(); s.boot(); s.run(2000);
@@ -121,7 +143,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('F-6 no response', /F-6/.test(ev), ev);
   shot(s, 'f06');
   // Fault detail: its buttons sit in the strip's row, so the strip hides (0.14.13).
-  s.tap(415, 184); s.tap(386, 72); s.tap(180, 72);
+  s.tap(415, 128); s.tap(386, 72); s.tap(180, 72);
   shot(s, 'f06-detail');
   s.tap(181, 240);   // Reset fault
   check('fault detail Reset fault works', s.cmd('ALRM?') === 'ALRM NONE\r\n', s.cmd('ALRM?'));
@@ -152,7 +174,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  s.tap(415, 184); s.tap(379, 184); s.tap(298, 184); s.tap(318, 147);   // Menu > Settings > Motor override > Open
+  s.tap(415, 128); s.tap(379, 184); s.tap(298, 184); s.tap(318, 147);   // Menu > Settings > Motor override > Open
   s.set(7, 1); s.run(500);                                              // switch stuck pressed
   s.tap(186, 184, 1000);
   const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
@@ -252,7 +274,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('switch Off: PRES SP refused', s.cmd('PRES SP 5') === 'ERR 211 Read only over the network\r\n', s.cmd('PRES SP 5'));
   check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: queries answer', s.cmd('MODE?;PRES SP?') === 'MODE NOT HOMED;PRES SP NONE\r\n', s.cmd('MODE?;PRES SP?'));
-  s.tap(415, 184); s.tap(379, 184); s.tap(120, 72); s.tap(357, 184);   // Menu, Settings, System, Remote control
+  s.tap(415, 128); s.tap(379, 184); s.tap(120, 72); s.tap(357, 184);   // Menu, Settings, System, Remote control
   check('switch On from the screen: PRES SP taken', s.cmd('PRES SP 5;PRES SP?') === 'PRES SP 5.0 mbar\r\n', s.cmd('PRES SP?'));
   check('switch On is a NET event', /NET,Remote control on \(screen\)/.test(events(s, 5)), events(s, 5));
   shot(s, 'system');
