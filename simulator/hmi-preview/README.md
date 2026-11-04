@@ -30,7 +30,7 @@ Screens follow the template's grid: four columns at x 10, 127, 244 and 361, each
 | Diagnostics | Caption column 109, tiles in columns 2 to 4. Captions Nominal, mB (was Before cal, mB) and Board, °C (was Temperature, °C) to fit 85 px. A long Last move result drops to 12 px. |
 | Help | Text card 343 x 160, Up and Down 109 x 76 in the right column. |
 | Up and Down | Drawn 21 x 12 chevrons (3 px stroke) on Trend, Events and Help. |
-| Keypad | Last column 63 wide, so the keys end at x 353. |
+| Keypad | A popup over the dimmed page (Ryan, 4 Nov: an operator took the large present value for the entry): box 343 x 216 on columns 1 to 3, STOP beside it. Title, range and present value in small text on the left ("Valve now 0.00 %"), the entry in a blue-edged field on the right, keys 56 x 44, Cancel over Set. The header keeps the keypad's title and Home. An entry too long for 26 px (8-figure serial numbers) drops to 16 px. |
 | Padding | 12 px inside read-only tiles, settings fields, keypad cards, valve reading cards, fault detail, Events, Remote control, Help and the Trend legend and time labels. |
 | Status strip | No full stop after a single phrase; "All settings saved 24/10/26 14:02" without the comma. |
 
