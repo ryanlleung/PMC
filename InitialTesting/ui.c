@@ -550,16 +550,17 @@ static void build_frame(void)
     lv_label_set_long_mode(pmc_lbl, LV_LABEL_LONG_DOT);
     title_lbl = ui_label(hdr, 100, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
     lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_DOT);
-    // Mode badge, as wide as the button column under it (x 361, 109 px;
-    // Ryan, 22 Oct): filled white in AUTO, outlined otherwise, red with a fault.
+    // The mode, "MANUAL mode" or "AUTO mode" in plain lettering with no box,
+    // its right edge on the button column's (0.14.23, Ryan 4 Nov: his
+    // operator did not see the outlined badge as the status; a box reads as
+    // a button). Filled red only with a fault. Placed by its width (refresh).
     mode_lbl = ui_label(hdr, 361, 5, 109, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
-    lv_obj_set_style_pad_ver(mode_lbl, 4, 0);
+    lv_obj_set_style_pad_ver(mode_lbl, 6, 0);
     lv_obj_set_style_radius(mode_lbl, 4, 0);
-    lv_obj_set_style_border_width(mode_lbl, 2, 0);
-    lv_obj_set_style_border_color(mode_lbl, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(mode_lbl, UI_FAULT, 0);
     // Unsaved settings (0.12.19, Ryan 27 Oct): on every screen while a
     // setting in use differs from the newest save (cfg_unsaved), left of
-    // the mode badge; grey outline to 0.13.18, warning yellow from 0.13.19. Opens Review
+    // the mode; grey outline to 0.13.18, warning yellow from 0.13.19. Opens Review
     // and save. The save icon, not the word, from 0.13.8 (Ryan 28 Oct).
     unsaved_btn = ui_btn(hdr, 0, 6, 40, 28, UI_DARK, LV_SYMBOL_SAVE, unsaved_event, NULL);
     lv_obj_t *ul = lv_obj_get_child(unsaved_btn, 0);
@@ -567,7 +568,7 @@ static void build_frame(void)
     lv_obj_center(ul);
     lv_obj_set_style_radius(unsaved_btn, 4, 0);
     lv_obj_set_style_border_side(unsaved_btn, LV_BORDER_SIDE_FULL, 0);
-    // As thick as the mode badge's edge, in warning yellow (0.13.19, Ryan 28 Oct).
+    // A 2 px edge (the mode badge's, to 0.14.22), in warning yellow (0.13.19, Ryan 28 Oct).
     lv_obj_set_style_border_width(unsaved_btn, 2, 0);
     lv_obj_set_style_border_color(unsaved_btn, UI_YELLOW, 0);
     lv_obj_set_ext_click_area(unsaved_btn, 6);
@@ -825,11 +826,26 @@ static void frame_refresh(void)
     // header was blank, elsewhere it kept the page's name).
     const char *ttl = kp_open ? kp_head : cur->title;
     show(title_lbl, !home || kp_open);
-    const char *mode_txt = nf ? "FAULT" : valve_mode_name();
-    // NOT HOMED is wider than the button column: the badge grows left.
-    bool wide = m == VALVE_NOT_CAL && !nf;
+    const char *mode_txt = nf ? "FAULT" : m == VALVE_MANUAL ? "MANUAL mode"
+                         : m == VALVE_AUTO ? "AUTO mode" : valve_mode_name();
+    // Filled red with a latched fault (its box's edge on the button
+    // column's, 470); otherwise plain white lettering ending 12 px from the
+    // screen's edge, as Home's title starts 12 px from the other. The
+    // mode's width sets where it starts; the save icon and the title keep
+    // 8 px clear of it.
+    static int badge_kind = -1;
+    if ((nf > 0) != badge_kind) {
+        badge_kind = nf > 0;
+        lv_obj_set_style_bg_opa(mode_lbl, nf ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_pad_hor(mode_lbl, nf ? 6 : 0, 0);
+    }
+    const int32_t mw = text_w(mode_txt) + 1 + (nf ? 12 : 0), mx = (nf ? 470 : 469) - mw;   // +1: no wrap
+    if (lv_obj_get_x(mode_lbl) != mx || lv_obj_get_width(mode_lbl) != mw) {
+        lv_obj_set_x(mode_lbl, mx);
+        lv_obj_set_width(mode_lbl, mw);
+    }
     bool uns = cfg_unsaved() > 0 && cur != &ui_scr_review;
-    int32_t ux = (wide ? 341 : 361) - 48;
+    int32_t ux = mx - 48;
     show(unsaved_btn, uns);
     if (uns) {
         if (lv_obj_get_x(unsaved_btn) != ux)
@@ -841,7 +857,7 @@ static void frame_refresh(void)
             lv_obj_set_style_border_color(unsaved_btn, uns_dim ? UI_IDLE : UI_YELLOW, 0);
         }
     }
-    int32_t right = uns ? ux - 8 : 353;   // the mode badge starts at 361
+    int32_t right = uns ? ux - 8 : mx - 8;
     static int32_t fit_right;
     static const char *fit_mode;
     static char fit_title[40];
@@ -876,26 +892,6 @@ static void frame_refresh(void)
         if (op) lv_obj_add_state(stop_btn, LV_STATE_USER_2);
         else    lv_obj_remove_state(stop_btn, LV_STATE_USER_2);
     }
-    // Mode badge: red and filled with a latched fault, filled white in
-    // AUTO (dark lettering), outlined white in MANUAL and while homing.
-    static int badge_kind = -1;
-    // NOT HOMED in plain lettering, no outline (Ryan, 28 Oct; outlined
-    // from 24 Oct).
-    int kind = nf ? 2 : m == VALVE_AUTO ? 1 : wide ? 3 : 0;
-    if (kind != badge_kind) {
-        badge_kind = kind;
-        lv_obj_set_style_border_width(mode_lbl, kind == 3 ? 0 : 2, 0);
-        lv_obj_set_style_bg_opa(mode_lbl, kind == 1 || kind == 2 ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : lv_color_white(), 0);
-        lv_obj_set_style_border_color(mode_lbl, kind == 2 ? UI_FAULT : lv_color_white(), 0);
-        ui_set_color(mode_lbl, kind == 1 ? UI_TEXT : lv_color_white());
-    }
-    if ((lv_obj_get_width(mode_lbl) > 109) != wide) {
-        lv_obj_set_x(mode_lbl, wide ? 341 : 361);
-        lv_obj_set_width(mode_lbl, wide ? 129 : 109);
-    }
-
-
     question_check();
 
     // The screen's own line and Home's action, then the frame's priorities.

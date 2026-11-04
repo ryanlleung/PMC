@@ -127,7 +127,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 
 ## Screens
 
-480x272, ISA-101 style: grey for normal, colour only for abnormal states. Every screen has a header (Back and Home, the title, the mode badge: filled white in AUTO, outlined in other modes, red with a fault), a status strip and STOP on the bottom row. Under a popup the strip stays, updating and greyed. A keypad is its own page with its title in the header. On Home and the operator screens the strip shows the status line with the 5 min pressure sparkline; prompts, faults and messages take the whole strip, and every fault strip has Reset fault. A save icon in the header shows while a setting in use differs from the newest save; tapping it opens Review and save.
+480x272, ISA-101 style: grey for normal, colour only for abnormal states. Every screen has a header (Back and Home, the title, the mode on the right in plain lettering: MANUAL mode, AUTO mode, NOT HOMED or HOMING, and FAULT filled red), a status strip and STOP on the bottom row. Under a popup the strip stays, updating and greyed. A keypad is its own page with its title in the header. On Home and the operator screens the strip shows the status line with the 5 min pressure sparkline; prompts, faults and messages take the whole strip, and every fault strip has Reset fault. A save icon in the header shows while a setting in use differs from the newest save; tapping it opens Review and save.
 
 At power-up the MercShore iPC logo shows on white with a bar that fills as the board starts, then Home; the firmware version and build date are in the corner.
 
