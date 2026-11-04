@@ -51,7 +51,6 @@
 #define CTRL_LEAD_MAX   3000    // travel anti-windup, steps
 #define CTRL_TLAG_S     40      // process lag for the response monitor, s
 #define CTRL_STABLE_S   60      // in band this long reads Stable, s
-#define CTRL_SP_CONFIRM 5.0f    // target changes larger than this ask first, mbar
 #ifndef CTRL_PV_TAU_S
 #define CTRL_PV_TAU_S   0.0f    // pressure filter for the PI, s (ctrl_t pv_tau); off, see below
 #endif

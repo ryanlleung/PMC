@@ -406,7 +406,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "keypad")) { tap(300, 184); tap(41, 184); tap(111, 240); tap(251, 240); tap(111, 184); tap(111, 184); }
     if (!strcmp(st, "confirm")) tap(415, 72);
     if (!strcmp(st, "autofirst") || !strcmp(st, "autoask") || !strcmp(st, "automan") || !strcmp(st, "paused2")) tap(415, 72);
-    if (!strcmp(st, "autosp")) { tap(115, 184); tap(41, 240); tap(111, 240); tap(321, 184); }   // Target 12: asks
+    if (!strcmp(st, "autosp")) { tap(115, 184); tap(41, 240); tap(111, 240); tap(321, 184); }   // Setpoint 12: applies at once
     if (!strcmp(st, "limithit")) v_q = true;
     if (!strcmp(st, "svc")) {
         size_t a = heap_used();

@@ -125,6 +125,15 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('control tuning saves in AUTO', s.save(CFG.KP, 300) && s.setting(CFG.KP) === 300 &&
     s.cmd('MODE?') === 'MODE AUTO\r\n', s.why());
 }
+{ // A large setpoint change in AUTO applies at once from the SP keypad: no question (0.14.22).
+  const s = homed(load());
+  s.cmd('PRES SP 5;MODE AUTO'); s.run(5000);
+  s.tap(121, 184); s.tap(40, 239); s.tap(110, 183); s.tap(320, 212);   // SP box, 1, 5, Set
+  s.run(500);
+  shot(s, 'sp-change');
+  const st = s.cmd('PRES SP?;MODE?');
+  check('SP 5 to 15 mbar in AUTO applies without a question', st === 'PRES SP 15.0 mbar;MODE AUTO\r\n', st);
+}
 { // The motor supply is no longer sensed: counted moves can continue without physical motion.
   const s = homed(load());
   s.cmd('PRES SP 5;MODE AUTO'); s.run(400000);

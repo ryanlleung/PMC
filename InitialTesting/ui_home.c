@@ -18,7 +18,8 @@
  * In MANUAL the Pressure tile's SP row is Maintain: AUTO at the pressure
  * shown, no question. AUTO (stage 8): the first Start AUTO asks for a target and
  * Set starts AUTO; later ones confirm the target kept or offer New target.
- * In AUTO the Target box opens the keypad (changes over 5 mB ask first) and
+ * In AUTO the SP box opens the keypad; Set applies it at once (no question
+ * since 0.14.22) and
  * the Go to box reads "AUTO", flat. The strip shows the status line, with
  * the 5 min pressure sparkline on its right as on the operator screens
  * (ui.c, Ryan 21 Oct). A tap on the sparkline opens Trend.
@@ -259,8 +260,7 @@ static void to_manual(void)
 static bool sp_set(int32_t v10, const char **why);
 
 // Typed target, then AUTO at it with no second question (simulator keypadStart).
-// If AUTO started meanwhile (the network), a setpoint change, with its
-// confirm for a large one.
+// If AUTO started meanwhile (the network), a setpoint change.
 static bool start_set(int32_t v10, const char **why)
 {
     if (valve_auto())
@@ -276,28 +276,10 @@ static void keypad_start(void)
     ui_keypad_ex(&k);
 }
 
-static int32_t sp_pending;   // 0.1 mbar, waiting for Change target
-
-static void sp_change(void)
-{
-    const char *why;
-    if (!valve_set_target(sp_pending * 100, &why))
-        ui_msg(why);
-}
-
+// A typed setpoint applies at once, however large the change: no "Change
+// setpoint to X mB?" question (Ryan, 4 Nov, 0.14.22).
 static bool sp_set(int32_t v10, const char **why)
 {
-    int32_t now;
-    valve_target(&now);
-    now /= 100;
-    sp_pending = v10;
-    if (v10 - now > (int32_t)(CTRL_SP_CONFIRM * 10) || now - v10 > (int32_t)(CTRL_SP_CONFIRM * 10)) {
-        static char q[64];
-        char b[16];
-        lv_snprintf(q, sizeof q, "Change setpoint to %s mB?", ui_fmt1(b, sizeof b, (int64_t)v10 * 100));
-        ui_confirm(q, "Change\nsetpoint", sp_change);
-        return true;
-    }
     return valve_set_target(v10 * 100, why);
 }
 

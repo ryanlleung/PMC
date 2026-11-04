@@ -643,8 +643,7 @@ bool valve_start_auto(const char **why)
 
 bool valve_start_auto_at(int32_t mmbar, const char **why)
 {
-    // In AUTO a new target goes through the setpoint keypad, which asks
-    // before a large change (CTRL_SP_CONFIRM).
+    // In AUTO a new target goes through the setpoint keypad.
     if (mode == VALVE_AUTO) { *why = "Already in AUTO: change the setpoint"; return false; }
     // Checked with the new target in place, then put back: it is only set
     // (and logged) if AUTO will start.
