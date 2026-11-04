@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision I, 4 November 2026. Firmware 0.15.3. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23); revision F adds Shut down and the OFF state (0.15.0); revision G covers Shut down to 0 %, every start in OFF and the power icon at the top left (0.15.1); revision H covers the mode panel in the header (0.15.2); revision I covers Home without the mode button (0.15.3). It does not add hardware bench verification.
+Revision J, 4 November 2026. Firmware 0.15.4. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23); revision F adds Shut down and the OFF state (0.15.0); revision G covers Shut down to 0 %, every start in OFF and the power icon at the top left (0.15.1); revision H covers the mode panel in the header (0.15.2); revision I covers Home without the mode button (0.15.3); revision J the dark blue AUTO panel and the faster Start AUTO / Stop AUTO (0.15.4). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.15.3: power-up, Shut down, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.15.4: power-up, Shut down, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -30,7 +30,7 @@ What the operator does:
 
 What the operator does not do: tune the control loop. KP, TI and KD are set once at commissioning (Settings > PID tuning) and are not part of normal operation. Home shows them so the operator can see what the loop is using.
 
-The controller has six modes, shown at the right of the header on every screen, on a flat panel the header's height and as wide as the buttons below it (grey, white in AUTO; with a latched fault it reads FAULT, in red):
+The controller has six modes, shown at the right of the header on every screen, on a flat panel the header's height and as wide as the buttons below it (grey, dark blue in AUTO; with a latched fault it reads FAULT, in red):
 
 | Mode | Meaning |
 | --- | --- |
@@ -123,7 +123,7 @@ First use of a new board or a new Druck sensor also needs: the sensor added unde
 
 ## 5. Screens
 
-Every screen has the same frame: a header with Back and Home buttons, the title, and the mode on the right on a flat panel the header's height, as wide as the buttons below it (MANUAL, NOT HOMED or HOMING on grey, AUTO on white, FAULT on red); a status strip; and STOP on the bottom row. On Home a power icon at the top left, where Back is on the other screens, opens Shut down. While shutting down and while OFF the whole screen is black (section 4). On Home and the operator pages the strip shows the valve's state (Valve idle, Moving to X %, or in AUTO Regulating to, In band or Stable at the setpoint) with the 5 minute pressure sparkline, and takes over for prompts, faults and messages. Under a popup the strip stays visible and greyed. Colour follows the ISA-101 convention: grey when normal, colour only for an abnormal state.
+Every screen has the same frame: a header with Back and Home buttons, the title, and the mode on the right on a flat panel the header's height, as wide as the buttons below it (MANUAL, NOT HOMED or HOMING on grey, AUTO on dark blue, FAULT on red); a status strip; and STOP on the bottom row. On Home a power icon at the top left, where Back is on the other screens, opens Shut down. While shutting down and while OFF the whole screen is black (section 4). On Home and the operator pages the strip shows the valve's state (Valve idle, Moving to X %, or in AUTO Regulating to, In band or Stable at the setpoint) with the 5 minute pressure sparkline, and takes over for prompts, faults and messages. Under a popup the strip stays visible and greyed. Colour follows the ISA-101 convention: grey when normal, colour only for an abnormal state.
 
 | Screen | How to reach it | What it shows and does |
 | --- | --- | --- |
@@ -387,3 +387,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | G | 4 November 2026 | Firmware 0.15.1: Shut down moves the valve to 0 % instead of closing onto the limit switch (the 1 % seat check is gone); not homed, it turns OFF without moving the valve. Every power-up and restart starts OFF, black from the first frame; the start-up logo and bar show when it is turned on. After Shut down the position is kept at power-up if the limit switch reads released. The power icon moves to the top left of Home |
 | H | 4 November 2026 | Firmware 0.15.2: the header shows the mode word again (MANUAL, AUTO, NOT HOMED, HOMING, FAULT) on a flat panel the full height of the header, as wide as Start AUTO below it: grey, white in AUTO, red with a fault. It replaces the plain MANUAL mode / AUTO mode lettering of 0.14.23 and does not look like a button |
 | I | 4 November 2026 | Firmware 0.15.3: Home has no mode button. Start AUTO (was Maintain) is in the Pressure tile and starts AUTO at the pressure shown; Stop AUTO is in the Valve tile in AUTO and goes to MANUAL; Home valve is in the Valve tile while not homed. The right column reads PID tile, Trend, Menu, STOP. Screen messages say "Stop AUTO first" (the network keeps ERR 202 "Switch to MANUAL first") |
+| J | 4 November 2026 | Firmware 0.15.4: the header's AUTO panel is dark blue with white lettering (white with dark lettering in 0.15.2 and 0.15.3). Home redraws at once after Start AUTO or Stop AUTO instead of at the next half-second refresh |

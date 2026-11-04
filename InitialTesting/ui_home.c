@@ -432,6 +432,7 @@ static void stop_event(lv_event_t *e)
         return;
     }
     to_manual();
+    ui_refresh_soon();   // the tiles and header at once, not at the next 0.5 s refresh
 }
 
 // Home valve (the Valve tile, not homed).
@@ -511,6 +512,7 @@ static void start_event(lv_event_t *e)
     }
     if (!valve_start_auto_at(p_shown(clicks_state()->p_mmbar), &why))
         ui_msg(why);
+    ui_refresh_soon();   // the tiles and header at once, not at the next 0.5 s refresh (Ryan, 4 Nov)
 }
 
 static void menu_event(lv_event_t *e)

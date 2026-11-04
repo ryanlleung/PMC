@@ -55,7 +55,13 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const s = homed(load());
   s.cmd('VALV SET 30', 60000); s.run(400000);
   const p = s.cmd('PRES?').match(/PRES ([\d.]+) mbar/)[1], before = s.get(30);
-  s.tap(93, 184); s.run(1000);
+  // The tiles and header follow within 0.15 s of the release (0.15.4; the 0.5 s refresh was too slow).
+  const hdrPx = () => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[3 * 480 + 415];
+  const press = (x, y) => { s.x.sim_touch(x, y, 1); s.run(120); s.x.sim_touch(x, y, 0); s.run(150); };
+  const manualPx = hdrPx();
+  press(93, 184);
+  check('Start AUTO shows within 0.15 s', hdrPx() !== manualPx);
+  s.run(850);
   const sp = s.cmd('PRES SP?'), shown = (Math.round(parseFloat(p) * 10) / 10).toFixed(1);
   check('Start AUTO starts AUTO at the shown pressure', s.cmd('MODE?') === 'MODE AUTO\r\n' &&
     sp === 'PRES SP ' + shown + ' mbar\r\n', p + ' ' + sp);
@@ -65,8 +71,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.run(300000);
   check('Start AUTO holds the pressure', s.reg() >= 2, 'regulation ' + s.reg());
   // Stop AUTO (the Valve tile, AUTO): MANUAL, the valve stays where it is, no question.
-  const at = s.get(30);
-  s.tap(269, 184); s.run(2000);
+  const at = s.get(30), autoPx = hdrPx();
+  press(269, 184);
+  check('Stop AUTO shows within 0.15 s', hdrPx() !== autoPx && hdrPx() === manualPx);
+  s.run(2000);
   check('Stop AUTO goes to MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n', s.cmd('MODE?'));
   check('Stop AUTO leaves the valve', Math.abs(s.get(30) - at) < 330, at + ' -> ' + s.get(30));
 }

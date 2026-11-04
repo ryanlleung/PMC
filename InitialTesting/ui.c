@@ -572,8 +572,8 @@ static void build_frame(void)
     // button (his operator took the outlined badge for one; "MANUAL mode"
     // lettering without a box, 0.14.23, was not liked). Start AUTO's width
     // and column (x 361, 109 px) for every mode; NOT HOMED, the longest
-    // word (104 px), just fits. Grey in MANUAL and the others, white in
-    // AUTO, red with a fault.
+    // word (104 px), just fits. Grey in MANUAL and the others, dark blue in
+    // AUTO (0.15.4, Ryan: not white), red with a fault; white lettering.
     mode_lbl = ui_label(hdr, 361, 0, 109, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
     lv_obj_set_height(mode_lbl, 40);
     lv_obj_set_style_pad_top(mode_lbl, (40 - lv_font_get_line_height(&ui_font_16)) / 2, 0);
@@ -863,8 +863,8 @@ static void frame_refresh(void)
     static int badge_kind = -1;
     if (kind != badge_kind) {
         badge_kind = kind;
-        lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : kind == 1 ? lv_color_white() : UI_MODE_PANEL, 0);
-        ui_set_color(mode_lbl, kind == 1 ? UI_TEXT : lv_color_white());
+        lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : kind == 1 ? UI_MODE_AUTO : UI_MODE_PANEL, 0);
+        ui_set_color(mode_lbl, kind == 1 ? UI_MODE_AUTO_TEXT : lv_color_white());
     }
     const int32_t mx = 361;   // the panel's left edge, Start AUTO's
     bool uns = cfg_unsaved() > 0 && cur != &ui_scr_review;
