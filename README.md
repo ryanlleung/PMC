@@ -203,6 +203,7 @@ Error codes: 100 unknown command (anything not in the table above when network w
 ## Tools
 
 - `tools/logger/log_druck.py <IP or COM>` polls pressure, target, valve, mode, alarms and room pressure once a second into a CSV and reconnects on its own.
+- `tools/gain-schedule/pmc_gains.py` measures KP and TI at a few setpoints with step tests (`tune`), then keeps the board's KP and TI matched to its setpoint over the text port (`run`). Python 3 only, no pip.
 - `tools/ui-preview/build.sh` renders the screens to PNG on a PC with the real settings store over a flash held in RAM, and checks the LVGL heap returns after opening and leaving screens.
 - `tools/ctrl-test/run.sh` runs `ctrl.c` on a PC against a model of the flow line (helium pot, needle valve, pump, motor ramp, closed switch): setpoint steps, helium off (F-6), pump off (W-2), a slipping drive (F-6), and the entry refusals.
 - `tools/cfg-test/run.sh` tests the settings store and the saved valve position against a flash held in RAM.
