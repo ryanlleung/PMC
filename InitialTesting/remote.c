@@ -213,6 +213,10 @@ static bool query(const char *c)
             reply("TIME NONE");
     } else if (strcmp(c, "*IDN?") == 0) {
         idn_query();
+    } else if (strcmp(c, "PID?") == 0) {
+        char kp[16], ti[16];
+        reply("PID %s,%s,%s", fixed_fmt(kp, sizeof kp, cfg_tune(CFG_KP), 2),
+              fixed_fmt(ti, sizeof ti, cfg_tune(CFG_TI), 2), fixed_fmt(v, sizeof v, cfg_tune(CFG_KD), 2));
     } else {
         return false;
     }
@@ -231,6 +235,49 @@ static bool number(const char *s, int dec, int64_t *v)
     while (*s == ' ')
         s++;
     return *s == '\0';
+}
+
+// PID SET <kp>,<ti>[,<kd>] (0.15.8, for a PC gain schedule): what the PID
+// tab's Save does, so it works in AUTO and the loop takes the gains at its
+// next step (cfg_save_with, tuning only). KP %/mB, TI min, KD %/(mB/s), 2 dp.
+// Each change is a settings save in flash: unchanged gains write nothing.
+static void pid_set(const char *c)
+{
+    static const cfg_key_t key[3] = { CFG_KP, CFG_TI, CFG_KD };
+    static const char *const nm[3] = { "KP", "TI", "KD" };
+    int32_t v[CFG_N] = { 0 };
+    bool on[CFG_N] = { false }, same = true;
+    char buf[LINK_LINE_MAX + 1], a[16], b[16];
+    int n = 0;
+    lv_strlcpy(buf, c, sizeof buf);
+    for (char *p = buf, *e; n <= 3; p = e + 1, n++) {
+        e = strchr(p, ',');
+        if (e)
+            *e = '\0';
+        int64_t x;
+        if (n == 3 || !number(p, 2, &x)) {
+            refuse(101, "Expected: PID SET <kp>,<ti>[,<kd>]");
+            return;
+        }
+        int32_t lo, hi;
+        cfg_range(key[n], &lo, &hi);
+        if (x < lo || x > hi) {
+            refuse(102, "Outside %s to %s for %s", fixed_fmt(a, sizeof a, lo, 2), fixed_fmt(b, sizeof b, hi, 2), nm[n]);
+            return;
+        }
+        v[key[n]] = (int32_t)x;
+        on[key[n]] = true;
+        same = same && x == cfg_tune(key[n]);
+        if (!e)
+            break;
+    }
+    if (n < 1) {   // one number: KP alone is not the form
+        refuse(101, "Expected: PID SET <kp>,<ti>[,<kd>]");
+        return;
+    }
+    const char *why;
+    if (!same && !cfg_save_with(v, on, &why))
+        refuse_why(why);
 }
 
 static bool set(const char *c)
@@ -280,6 +327,8 @@ static bool set(const char *c)
             valve_event("OK", "Warning OK (link): %s", w);
             valve_warning_clear();
         }
+    } else if (strncmp(c, "PID SET", 7) == 0 && (c[7] == ' ' || c[7] == '\0')) {
+        pid_set(c + 7);
     } else if (strncmp(c, "TIME SET", 8) == 0 && (c[8] == ' ' || c[8] == '\0')) {
         why = rtclock_set_text(c[8] ? c + 9 : "");
         if (why && strncmp(why, "Expected", 8) == 0)
