@@ -93,8 +93,10 @@ void application_init()
     // Initialize board peripherals and LVGL drivers.
     board_init();
     // Every start is OFF (0.15.1, Ryan 4 Nov): the OFF screen from the
-    // first frame; a double tap turns it on once ui_init has run.
+    // first frame; a double tap turns it on once ui_init has run. The
+    // backlight comes on only once it is drawn (0.15.7: no white flash).
     ui_splash();
+    lv_port_disp_light();
 
     // Druck calibration from the on-board serial flash (nominal if none stored).
     cal_init();

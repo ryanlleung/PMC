@@ -142,8 +142,10 @@ bool valve_answer(bool set_zero, const char **why);   // VALVE SETZERO / VALVE S
  * still read); a double tap on the screen turns it on (MANUAL, or NOT
  * HOMED). STOP cancels a shut down under way (MANUAL, the valve where it
  * stopped); so does the limit switch before 0 % (MANUAL and the switch
- * question). Every start is OFF (0.15.1). */
-bool valve_shutdown(const char **why);
+ * question). Every start is OFF (0.15.1). close false (0.15.7, Ryan: a
+ * choice on the Shut down question): OFF at once, the valve left where it
+ * is, its count kept as at 0 %. A latched fault refuses only a close. */
+bool valve_shutdown(bool close, const char **why);
 bool valve_turn_on(const char **why);            // OFF -> MANUAL (NOT HOMED if not homed)
 // valvepos.c at start-up: the count kept at the last Shut down, the limit
 // switch released. homed: the valve was homed (PARKED), else SAVED. Stays

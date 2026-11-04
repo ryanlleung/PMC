@@ -8,8 +8,11 @@ extern "C"
 
 #include "lvgl.h"
 
-/* Initialize low level display driver */
+/* Initialize low level display driver: the backlight stays off. */
 void lv_port_disp_init(void);
+
+/* The backlight on, once the first screen is drawn (0.15.7). */
+void lv_port_disp_light(void);
 
 /* Enable updating the screen (the flushing process) when disp_flush() is called by LVGL
  */

@@ -55,7 +55,13 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const s = homed(load());
   s.cmd('VALV SET 30', 60000); s.run(400000);
   const p = s.cmd('PRES?').match(/PRES ([\d.]+) mbar/)[1], before = s.get(30);
-  s.tap(93, 184); s.run(1000);
+  // The tiles and header follow within 0.15 s of the release (0.15.4; the 0.5 s refresh was too slow).
+  const hdrPx = () => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[3 * 480 + 415];
+  const press = (x, y) => { s.x.sim_touch(x, y, 1); s.run(120); s.x.sim_touch(x, y, 0); s.run(150); };
+  const manualPx = hdrPx();
+  press(93, 184);
+  check('Start AUTO shows within 0.15 s', hdrPx() !== manualPx);
+  s.run(850);
   const sp = s.cmd('PRES SP?'), shown = (Math.round(parseFloat(p) * 10) / 10).toFixed(1);
   check('Start AUTO starts AUTO at the shown pressure', s.cmd('MODE?') === 'MODE AUTO\r\n' &&
     sp === 'PRES SP ' + shown + ' mbar\r\n', p + ' ' + sp);
@@ -65,18 +71,21 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.run(300000);
   check('Start AUTO holds the pressure', s.reg() >= 2, 'regulation ' + s.reg());
   // Stop AUTO (the Valve tile, AUTO): MANUAL, the valve stays where it is, no question.
-  const at = s.get(30);
-  s.tap(269, 184); s.run(2000);
+  const at = s.get(30), autoPx = hdrPx();
+  press(269, 184);
+  check('Stop AUTO shows within 0.15 s', hdrPx() !== autoPx && hdrPx() === manualPx);
+  s.run(2000);
   check('Stop AUTO goes to MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n', s.cmd('MODE?'));
   check('Stop AUTO leaves the valve', Math.abs(s.get(30) - at) < 330, at + ' -> ' + s.get(30));
 }
-{ // Trend on Home (0.15.3) opens Trend, as Menu > Trend does; Menu sits above STOP.
+{ // The IP tile on Home (0.15.6, in place of Trend) opens System setup, as Menu > Settings > System does.
   const hdr = (s) => Buffer.from(new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 40).slice().buffer).toString('base64');
   const a = homed(load()), home = hdr(a);
-  a.tap(415, 128); shot(a, 'home-trend');
+  shot(a, 'home-ip');
+  a.tap(415, 128); shot(a, 'home-ip-system');
   const b = homed(load());
-  b.tap(415, 184); const menu = hdr(b); b.tap(210, 72);
-  check('Home Trend opens Trend', hdr(a) === hdr(b) && hdr(a) !== home && menu !== home);
+  b.tap(415, 184); b.tap(379, 184); b.tap(120, 72);
+  check('Home IP tile opens System setup', hdr(a) === hdr(b) && hdr(a) !== home);
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
   const s = homed(load());
@@ -335,7 +344,7 @@ let parkedFlash;
   const s = homed(load());
   s.cmd('VALV SET 30', 60000); s.run(2000);
   s.tap(24, 20); shot(s, 'shutdown-ask');
-  s.tap(318, 138, 3000);
+  s.tap(318, 165, 3000);
   const during = s.cmd('MODE?;VALV MOVING?');
   check('shut down: to 0 %', during === 'MODE SHUTDOWN;VALV MOVING 1\r\n', during);
   check('shut down: ERR 213 while moving', s.cmd('VALV SET 10') === 'ERR 213 Shutting down, STOP to cancel\r\n' &&
@@ -360,6 +369,21 @@ let parkedFlash;
   shot(s, 'on-again');
   s.cmd('VALV SET 5', 15000);
   check('on again: moves', s.cmd('VALV?') === 'VALV 5.00 %\r\n', s.cmd('VALV?'));
+}
+{ // Close the valve unticked (0.15.7): OFF at once, the valve left open, its count kept.
+  const s = homed(load());
+  s.cmd('VALV SET 30', 60000); s.run(2000);
+  const needle = s.get(5);
+  s.tap(24, 20); s.tap(240, 111); shot(s, 'shutdown-leave');
+  s.tap(318, 165, 1000);
+  check('shut down, valve left: OFF at 30 %', s.cmd('MODE?;VALV?;VALV MOVING?') === 'MODE OFF;VALV 30.00 %;VALV MOVING 0\r\n' &&
+    s.get(5) === needle && s.get(15) === 0, s.cmd('MODE?;VALV?') + ' needle ' + s.get(5) + ' coils ' + s.get(15));
+  check('shut down, valve left: event', /OFF,Shut down, valve left at 30\.0 %: coils off, OFF/.test(events(s, 5)), events(s, 5));
+  const t = load(); t.boot(s.flash(), { off: true }); t.set(5, needle); t.run(2000);
+  check('shut down, valve left: kept at the next start', t.cmd('MODE?;VALV?') === 'MODE OFF;VALV 30.00 %\r\n', t.cmd('MODE?;VALV?'));
+  const u = homed(load());
+  u.tap(24, 20); u.tap(240, 111); u.tap(240, 111); u.tap(318, 165, 1000);
+  check('ticked again: closes', u.cmd('MODE?') === 'MODE OFF\r\n' && /at 0 %: coils off, OFF/.test(events(u, 5)), events(u, 5));
 }
 { // Power-up after Shut down, the switch released: OFF, the count kept; on, it moves at once.
   for (const r of [0, 1, 2]) {

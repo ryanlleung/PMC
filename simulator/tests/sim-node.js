@@ -62,7 +62,7 @@ function load(file) {
     why: () => cstr(x.sim_why()),
     home(ms = 120000) { const ok = x.sim_home(); sim.run(ms); return ok; },
     setClosed() { const ok = x.sim_set_closed(); sim.run(300); return ok; },
-    shutdown(ms = 300) { const ok = x.sim_shutdown(); sim.run(ms); return ok; },   // Shut down, confirmed
+    shutdown(ms = 300, close = true) { const ok = x.sim_shutdown(close ? 1 : 0); sim.run(ms); return ok; },   // Shut down, confirmed
     turnOn(ms = 300) { const ok = x.sim_turn_on(); sim.run(ms); return ok; },
     cal(what, mbar, ms = 15000) { const ok = x.sim_cal(what, mbar); sim.run(ms); return ok; },   // 1 vacuum, 2 air; mbar < 0: room sensor
     save(key = -1, value = 0) { const ok = x.sim_save(key, value); sim.run(1000); return ok; },

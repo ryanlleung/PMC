@@ -54,7 +54,7 @@ const char *valve_mode_name(void)
          : v_mode == VALVE_OFF ? "OFF" : "NOT HOMED";
 }
 // Shut down (0.15.0).
-bool valve_shutdown(const char **why) { (void)why; v_mode = VALVE_SHUTDOWN; return true; }
+bool valve_shutdown(bool close, const char **why) { (void)why; v_mode = close ? VALVE_SHUTDOWN : VALVE_OFF; return true; }
 bool valve_turn_on(const char **why) { (void)why; v_mode = VALVE_MANUAL; return true; }
 bool valve_shutdown_progress(int *left, int *secs)
 {
@@ -365,12 +365,14 @@ int main(int argc, char **argv)
 
     // Heap check: Menu open and back ten times.
     size_t before = heap_used();
+    // Home (72, 20), not Back: where Menu does not open (homing), Back's
+    // place on Home is the power icon (0.15.1).
     for (int i = 0; i < 10; i++) {
         tap(415, 184);          // Menu
-        tap(24, 20);            // Back
+        tap(72, 20);            // Home
     }
     tap(300, 184);              // Go to box (opens the keypad in MANUAL)
-    tap(24, 20);                // Back closes it
+    tap(72, 20);                // Home closes it
     for (int i = 0; i < 5; i++) {
         // The 0.6.0 motor screen first (review, 16 Oct: it stayed built and
         // a settings keypad after it ran the heap out). Its Back opens
@@ -421,6 +423,8 @@ int main(int argc, char **argv)
     if (!strcmp(st, "shutask")) tap(24, 20);                      // the power icon (top left): confirm
     if (!strcmp(st, "shutting")) { tap(24, 20); tap(250, 180); }   // Shut down: black, closing
     if (!strcmp(st, "off")) v_mode = VALVE_OFF;
+    if (!strcmp(st, "shutclose") || !strcmp(st, "shutleave")) { v_mode = VALVE_MANUAL; v_cal = true; v_pct10 = 342; tap(24, 20); }
+    if (!strcmp(st, "shutleave")) tap(240, 111);                    // Close the valve unticked
     if (!strcmp(st, "svc")) {
         size_t a = heap_used();
         tap(415, 184); tap(300, 240);     // Menu, Service (0.6.0 screens built)
@@ -483,7 +487,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-saved")) tap(249, 136 + 40);
     if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) tap(120, 184);
     if (!strcmp(st, "set-load")) tap(120, 184);
-    if (strstr(st, "trend")) tap(415, 128);   // Trend on Home (0.15.3)
+    if (strstr(st, "trend")) { tap(415, 184); tap(210, 72); }   // Menu, Trend
     if (!strcmp(st, "trend1h")) { tap(415, 72); tap(415, 72); }
     if (!strcmp(st, "trend1m")) { tap(415, 128); tap(415, 184); tap(415, 184); }
     if (!strcmp(st, "calsensor") || !strcmp(st, "calvac")) { tap(415, 184); tap(379, 128); }
