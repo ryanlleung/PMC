@@ -4,6 +4,8 @@
 
 #include "lvgl.h"        // lv_tick_get
 #include "link.h"
+#include "limit.h"
+#include "sysinfo.h"
 #include "extflash.h"
 #include "fixed.h"
 #include "stepper3.h"
@@ -17,6 +19,7 @@
 #define VP_SAFE      0x45464153UL   // "SAFE": at standstill
 #define VP_MOVING    0x45564F4DUL   // "MOVE": during a move, within MOVE_MS of travel
 #define VP_UNSAFE    0UL            // not calibrated: nothing to offer
+#define VP_PARKED    0x4B524150UL   // "PARK": closed on the switch at Shut down, OFF (0.15.0)
 #define STILL_MS     2000
 #define MOVE_MS      2000           // a moving entry at most this often (Ryan, 22 Oct)
 
@@ -41,6 +44,8 @@ static uint32_t writes;
 static bool warned;            // withdraw failure logged
 static bool failed;            // the last put() did not take
 static uint32_t failed_at;     // tick of that put()
+static bool parked_boot;       // the newest entry is PARKED: taken once the switch is read
+static bool unparked;          // the offer is from a power-up without Shut down
 
 /* The direction and coil order the count was saved under (0 for the
  * factory ones). A count saved under another direction or order is no
@@ -61,12 +66,13 @@ static uint32_t state_of(const vp_entry_t *e)
 {
     return e->state & VP_REF ? (e->state & ~VP_REF) ^ ref_sig() : e->state;
 }
-// SAFE or MOVING under whatever direction and order it was saved: it could
-// be offered at a restart under those, so a withdrawal must cover it.
+// SAFE, MOVING or PARKED under whatever direction and order it was saved:
+// it could be used at a restart under those, so a withdrawal must cover it.
 static bool live(const vp_entry_t *e)
 {
     uint32_t s = e->state & ~VP_REF;   // the reference bits stay below 0x200
-    return e->seq && (((s ^ VP_SAFE) & ~0x1FFu) == 0 || ((s ^ VP_MOVING) & ~0x1FFu) == 0);
+    return e->seq && (((s ^ VP_SAFE) & ~0x1FFu) == 0 || ((s ^ VP_MOVING) & ~0x1FFu) == 0 ||
+                      ((s ^ VP_PARKED) & ~0x1FFu) == 0);
 }
 
 static bool good(const vp_entry_t *e)
@@ -185,6 +191,8 @@ void valvepos_init(void)
     // As after a reset, also when called again (the host tests).
     memset(&last, 0, sizeof last);
     offer = false;
+    parked_boot = false;
+    unparked = false;
     still = false;
     warned = false;
     failed = false;
@@ -212,11 +220,22 @@ void valvepos_init(void)
             at = used;
         }
     }
-    if (offerable(&last)) {
+    // A power-up (not a restart) with a safe or moving entry: switched off
+    // without Shut down (0.15.0). Said on the start-up question.
+    const char *rr = sysinfo_reset_reason();
+    bool power = !strcmp(rr, "power-on") || !strcmp(rr, "brown-out");
+    if (state_of(&last) == VP_PARKED && last.seq) {
+        // Closed on the switch at Shut down: taken in valvepos_task once the
+        // switch reads steadily, if it is still pressed.
+        parked_boot = true;
+    } else if (offerable(&last)) {
         offer = true;
+        unparked = power;
         boot_count = last.count;
         boot_moving = state_of(&last) == VP_MOVING;
         char p[16];
+        if (unparked)
+            valve_event("REF", "Last power-off without Shut down");
         valve_event("REF", "Saved position on offer: count %ld (%s %%)%s, use it or calibrate",
                     (long)boot_count, fixed_fmt(p, sizeof p,
                     fixed_round((int64_t)boot_count * stepper3_scale() * 10000 / valve_pos_max(), 1), 1),
@@ -227,13 +246,49 @@ void valvepos_init(void)
     }
 }
 
+// The parked entry at start-up: the switch still pressed means the needle
+// is still on the seat (MANUAL, or OFF again after a restart while off,
+// not a power-up); released, it was moved: not homed, and the entry is
+// withdrawn by valvepos_task.
+static void parked_check(void)
+{
+    limit_state_t l = limit_state();
+    if (l == LIMIT_UNKNOWN)
+        return;
+    parked_boot = false;
+    if (l != LIMIT_OPEN) {
+        valve_event("REF", "Parked at the last shut down, but the limit switch is released: home the valve");
+        return;
+    }
+    const char *rr = sysinfo_reset_reason(), *why;
+    bool off = strcmp(rr, "power-on") != 0;
+    if (!valve_restore_parked(last.count * stepper3_scale(), off, &why))
+        valve_event("REF", "Parked position not used: %s", why);
+}
+
 void valvepos_task(void)
 {
     if (!ok)
         return;
-    bool moving = stepper3_busy() || valve_mode() == VALVE_CALIBRATING;
+    if (parked_boot) {
+        parked_check();
+        if (parked_boot)
+            return;   // the switch not read yet: nothing written meanwhile
+    }
+    valve_mode_t m = valve_mode();
+    bool moving = stepper3_busy() || m == VALVE_CALIBRATING || m == VALVE_SHUTDOWN;
     bool cal = valve_calibrated();
     int32_t pos = stepper3_position() / stepper3_scale();   // saved in full steps
+    if (m == VALVE_OFF && cal) {
+        // On the switch, coils off: parked, at once (the supply may be
+        // switched off any moment now). Tried again after MOVE_MS if the
+        // write fails.
+        if ((state_of(&last) != VP_PARKED || last.count != pos) &&
+            (!failed || lv_tick_elaps(failed_at) >= MOVE_MS) && !put2(pos, VP_PARKED))
+            valve_event("REF", "Parked position could not be written (flash)");
+        still = false;
+        return;
+    }
     if (moving) {
         still = false;
     } else if (!still) {
@@ -250,6 +305,12 @@ void valvepos_task(void)
     // can take an erase (up to 100 ms) and uses up a slot.
     if (failed && lv_tick_elaps(failed_at) < MOVE_MS)
         return;
+    if (cal && !moving && state_of(&last) == VP_PARKED && last.seq) {
+        // Turned on again: safe at once, so a restart now is not taken as
+        // a restart while off.
+        (void)put(pos, VP_SAFE);
+        return;
+    }
     if (!cal) {
         (void)withdraw(pos);
     } else if (moving) {
@@ -284,6 +345,11 @@ bool valvepos_offer(int32_t *count)
     if (offer_stands())
         *count = boot_count * stepper3_scale();
     return offer;
+}
+
+bool valvepos_offer_unparked(void)
+{
+    return offer_stands() && unparked;
 }
 
 bool valvepos_offer_moving(int32_t *steps)

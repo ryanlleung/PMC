@@ -73,6 +73,8 @@ static void refuse(int err, const char *fmt, ...)
  *                                 212 the valve cannot move now (the
  *                                     switch, a move running), or the
  *                                     clock is not running
+ *                                 213 controller off or shutting down
+ *                                     (0.15.0): turned on at the screen
  */
 static const struct { const char *head; int num; const char *text; } why_codes[] = {
     { "Homing", 201, "Homing, STOP to cancel" },
@@ -85,6 +87,8 @@ static const struct { const char *head; int num; const char *text; } why_codes[]
     { "Pressure above", 208, "Pressure above the sensor range" },
     { "Pressure response", 209, "Control settings not set" },
     { "Tuning not set", 209, "Control settings not set" },
+    { "Controller is off", 213, "Controller is off" },
+    { "Shutting down", 213, "Shutting down, STOP to cancel" },
     { "Expected", 101, NULL },
     { "Outside", 102, NULL },
 };
@@ -247,7 +251,10 @@ static bool set(const char *c)
             refuse_why(why);
     } else if (strcmp(c, "MODE MANUAL") == 0) {
         // Outside AUTO there is nothing to end; the valve stays where it is.
-        if (valve_auto() && !valve_to_manual(&why))
+        // Off or shutting down it is refused: only the screen turns it on.
+        if (valve_off_why())
+            refuse_why(valve_off_why());
+        else if (valve_auto() && !valve_to_manual(&why))
             refuse_why(why);
     } else if (strncmp(c, "MODE", 4) == 0 && (c[4] == ' ' || c[4] == '\0')) {
         refuse(101, "Expected: MODE AUTO or MODE MANUAL");

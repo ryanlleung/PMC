@@ -151,6 +151,8 @@ static void calib_refresh(void)
         lv_strlcpy(st, "Set by hand, not homed", sizeof st);
     else if (how == VALVE_REF_SAVED)
         lv_strlcpy(st, "Last saved, not homed", sizeof st);
+    else if (how == VALVE_REF_PARKED)
+        lv_strlcpy(st, "Set at shut down", sizeof st);
     else
         lv_strlcpy(st, "Not homed", sizeof st);
     ui_set_text(cp.state, st);
@@ -240,6 +242,8 @@ static const char *mode_word(valve_mode_t m)
     case VALVE_CALIBRATING: return "HOMING";
     case VALVE_MANUAL:      return "MANUAL";
     case VALVE_AUTO:        return "AUTO";
+    case VALVE_SHUTDOWN:    return "SHUTDOWN";
+    case VALVE_OFF:         return "OFF";
     default:                return "NOT HOMED";
     }
 }

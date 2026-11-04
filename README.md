@@ -91,7 +91,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | `sense.c` | The once-a-second read and the controller temperature warning |
 | `limit.c` | Limit switch input: a trip counts at once, the release is debounced (20 ms) |
 | `stepper3.c` | Step sequences (wave, full, half), ramps, absolute moves with retarget, the limit stop, motion timeout |
-| `valve.c` | Modes (NOT HOMED, HOMING, MANUAL, AUTO), homing, % position, STOP, fault latches, the event log (100 kept), runs AUTO |
+| `valve.c` | Modes (NOT HOMED, HOMING, MANUAL, AUTO, SHUTDOWN, OFF), homing, Shut down, % position, STOP, fault latches, the event log (100 kept), runs AUTO |
 | `ctrl.c` | AUTO control step: PI, anti-windup, deadband, response monitor and settling checks (no hardware calls; `tools/ctrl-test` runs it on a PC) |
 | `valvepos.c` | Saves the step count at standstill and every 2 s while moving, so a restart can offer it |
 | `cfg.c` | Settings record in serial flash, two sectors in turn, CRC32, read back before it counts |
@@ -115,19 +115,20 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 
 `docs/mm4-operation-manual.md` is the operator's description. In short:
 
-- **Nothing moves at power-up.** The valve is NOT HOMED until it is homed or the operator sets the position. With a saved position the start-up screen asks "Home / Set position / Use X %"; the saved position is never used on its own. Menu > Calibrate > Valve position is one page with Home valve, Set as 0 %, Set as other % and Use last saved. It shows whether the position was homed, entered by hand or restored from a save.
+- **Nothing moves at power-up.** The valve is NOT HOMED until it is homed or the operator sets the position. With a saved position the start-up screen asks "Home / Set position / Use X %" (it starts "Switched off without Shut down." after a power-off without Shut down); the saved position is never used on its own, except after Shut down (below). Menu > Calibrate > Valve position is one page with Home valve, Set as 0 %, Set as other % and Use last saved. It shows whether the position was homed, entered by hand or restored from a save.
 - **Homing** (Home valve): if the switch is pressed, move off it first; close fast to the switch; back off; close slowly onto the switch (the seat); return off the switch by the Return setting (400 steps by default) with the switch released. That last point is 0 %, so the seat reads about -0.6 % with the defaults. STOP cancels homing and keeps the earlier homing.
 - **MANUAL**: tap the Go to box on Home to type a %. Position is in % of the valve travel (66048 steps, 4 turns, by default). All normal moves need the valve homed or its position set. Motor override can move by steps without a position reference. Maintain (in place of the SP box in MANUAL) starts AUTO at the pressure shown, with no question, from where the valve is.
 - **Limit switch** is the closing stop, read in firmware before every closing step. A trip during a normal move stops it and asks "Set as seat / Skip" (W-1; the seat reads about -0.6 %, as after homing); the count is never zeroed on its own. On the Motor override screen, Limit override is a two-finger deadman: while it is held, Close pressed with a second finger closes past the switch, and the move stops when either finger lifts.
 - **AUTO** (Start AUTO): needs the valve homed or its position set, no fault, a valid reading and a setpoint. The first Start AUTO asks for the setpoint; later ones confirm it or offer a new one. Once a second `ctrl.c` works out the valve command: PID in position form (KD on the pressure's rate of change, 0 by default), bumpless entry, no integration past 100 % or AUTO min, while the switch blocks closing, or while the valve lags far behind the last command; commands inside the deadband are held, and a reversal is held until the command is 0.1 % of travel from the valve, so the motor does not turn round inside the drive's backlash. The status line reads Regulating to X, In band, or Stable (60 s in the band). Switch to MANUAL ramps the valve down and holds it where it stops.
 - **Motor supply** is not measured by the firmware (sensing was removed in 0.14.3). Loss of the motor 12 V does not directly end AUTO or stop the step count; the count can then disagree with the valve. The legacy Modbus supply bit is always 1.
 - **STOP** stops and holds the valve with no latch; in AUTO it also drops to MANUAL.
+- **Shut down** (0.15.0, the power icon on Home, left of the mode): ends AUTO, closes the valve onto the limit switch at the fast close speed, takes the switch point as the seat (about -0.6 %), switches the coils off and turns the controller OFF. The whole screen is black while it closes (the start-up bar empties, with the seconds left, and STOP cancels to MANUAL) and while OFF ("Double tap to turn on"; two taps anywhere within 0.6 s show the start-up logo, then Home in MANUAL). OFF refuses moves, AUTO and homing (`ERR 213`); the pressure is still read. With a homed count the close goes at most 1 % of travel past the seat, and a switch more than 1 % above it is not taken (strip warning, MANUAL); not homed, it closes up to 1.1 times the travel to find the switch. A switch already pressed is taken only at a homed seat. A parked entry in the saved-position log means that at the next power-up, if the switch still reads pressed, the controller starts in MANUAL at the seat without asking; a watchdog or software restart while OFF comes back OFF; a released switch means NOT HOMED and nothing offered. There is no remote Shut down or turn on.
 - **Faults** latch until Reset fault, which clears only those whose cause has gone: F-1 no pressure signal, F-2 excitation outside 9.5 to 10.5 V, F-3 switch not found while homing, F-4 switch still pressed after moving off it or pressed during an opening move, F-5 motion timeout, F-6 no pressure response in AUTO (five 30 s windows). F-3 to F-6 block moves until reset; F-1 and F-2 do not. Any fault in AUTO stops the valve and drops to MANUAL.
 - **Warnings**: W-1 the limit switch question; W-2 outside the target band for 30 min in AUTO; W-3 controller hot (board temperature 55 °C, clears below 50 °C); W-4 switch pressed away from the seat; W-5 pressure above the sensor range in AUTO; W-6 AUTO driving the wrong way (valve at a limit with the pressure off the setpoint the wrong way for 60 s). W-2, W-4, W-5 and W-6 end AUTO, MANUAL with the valve idle.
 
 ## Screens
 
-480x272, ISA-101 style: grey for normal, colour only for abnormal states. Every screen has a header (Back and Home, the title, the mode on the right in plain lettering: MANUAL mode, AUTO mode, NOT HOMED or HOMING, and FAULT filled red), a status strip and STOP on the bottom row. Under a popup the strip stays, updating and greyed. A keypad is its own page with its title in the header. On Home and the operator screens the strip shows the status line with the 5 min pressure sparkline; prompts, faults and messages take the whole strip, and every fault strip has Reset fault. A save icon in the header shows while a setting in use differs from the newest save; tapping it opens Review and save.
+480x272, ISA-101 style: grey for normal, colour only for abnormal states. Every screen has a header (Back and Home, the title, the mode on the right in plain lettering: MANUAL mode, AUTO mode, NOT HOMED or HOMING, and FAULT filled red), a status strip and STOP on the bottom row. Under a popup the strip stays, updating and greyed. A keypad is its own page with its title in the header. On Home and the operator screens the strip shows the status line with the 5 min pressure sparkline; prompts, faults and messages take the whole strip, and every fault strip has Reset fault. A save icon in the header shows while a setting in use differs from the newest save; tapping it opens Review and save. On Home a power icon left of the mode opens Shut down ("Close the valve and shut down?"); while shutting down and while OFF the whole screen is black (see Operation).
 
 At power-up the MercShore iPC logo shows on white with a bar that fills as the board starts, then Home; the firmware version and build date are in the corner.
 
@@ -179,14 +180,14 @@ Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in
 | Command | Reply or action |
 | --- | --- |
 | `PRES SP <mbar>` | Target, 0 to the sensor range, kept to 0.1 mbar. Does not start AUTO |
-| `MODE AUTO` / `MODE MANUAL` | Start regulating after the entry checks / stop regulating, the valve stays where it is |
+| `MODE AUTO` / `MODE MANUAL` | Start regulating after the entry checks / stop regulating, the valve stays where it is. Both refused (`ERR 213`) while OFF or shutting down: only the screen turns it on |
 | `VALV SET <%>` | Move the valve, 0 to 100 % in 0.1 steps; MANUAL only, valve homed |
-| `STOP` | Stop the valve now; in AUTO it also ends AUTO. Cancels homing. The only stop |
+| `STOP` | Stop the valve now; in AUTO it also ends AUTO. Cancels homing and a shut down. The only stop |
 | `ALRM RESET` / `ALRM OK` | Clear the latched faults whose cause has gone / acknowledge the warning, as the screen's OK |
 | `TIME SET <YYYY-MM-DD> <HH:MM:SS>` | Set the clock |
 | `PRES?` | `PRES 4.625 mbar` or `PRES NONE` |
 | `PRES SP?` | `PRES SP 5.0 mbar` or `PRES SP NONE` |
-| `MODE?` | `MODE MANUAL`, `MODE AUTO`, `MODE HOMING` or `MODE NOT HOMED` |
+| `MODE?` | `MODE MANUAL`, `MODE AUTO`, `MODE HOMING`, `MODE NOT HOMED`, `MODE SHUTDOWN` (closing for Shut down) or `MODE OFF` |
 | `VALV?` / `VALV MOVING?` | `VALV 34.12 %` or `VALV NONE` / `VALV MOVING 1` while moving or homing, else 0 |
 | `BARO?` | `BARO 1013.25 mbar` or `BARO NONE` (Pressure 21 Click not fitted or not reading) |
 | `ALRM?` | `ALRM NONE`, or the active alarms joined by `\|`, faults first: `<tag>,<0\|1>,<text>`. For a fault, 1 when `ALRM RESET` clears it now; for a warning, 1 when `ALRM OK` clears it |
@@ -195,7 +196,7 @@ Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in
 | `TIME?` | `TIME 2026-10-27 11:05:00` or `TIME NONE` |
 | `*IDN?` | `MercShore,iPC,<chip id>,<version>` |
 
-Error codes: 100 unknown command (anything not in the table above when network writes are enabled; with writes off, unrecognised input also gets 211), 101 expected form, 102 outside range, 103 line too long, 104 `EVNT?` not on its own line, 201 homing, STOP to cancel, 202 switch to MANUAL first, 203 reset the fault first, 204 home the valve first, 205 no valid pressure, 206 set a target first, 207 target outside the sensor range, 208 pressure above the sensor range, 209 control settings not set, 210 not reset, cause still present, 211 read only over the network, 212 the valve cannot move now (the limit switch, Close or Open held on the screen, the switch question waiting, a calibration point being taken) or the clock is not running.
+Error codes: 100 unknown command (anything not in the table above when network writes are enabled; with writes off, unrecognised input also gets 211), 101 expected form, 102 outside range, 103 line too long, 104 `EVNT?` not on its own line, 201 homing, STOP to cancel, 202 switch to MANUAL first, 203 reset the fault first, 204 home the valve first, 205 no valid pressure, 206 set a target first, 207 target outside the sensor range, 208 pressure above the sensor range, 209 control settings not set, 210 not reset, cause still present, 211 read only over the network, 212 the valve cannot move now (the limit switch, Close or Open held on the screen, the switch question waiting, a calibration point being taken) or the clock is not running, 213 controller off or shutting down (turned on at the screen).
 
 ## Tools
 

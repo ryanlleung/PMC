@@ -50,8 +50,19 @@ valve_mode_t valve_mode(void) { return v_mode; }
 const char *valve_mode_name(void)
 {
     return v_mode == VALVE_CALIBRATING ? "HOMING" : v_mode == VALVE_MANUAL ? "MANUAL"
-         : v_mode == VALVE_AUTO ? "AUTO" : "NOT HOMED";
+         : v_mode == VALVE_AUTO ? "AUTO" : v_mode == VALVE_SHUTDOWN ? "SHUTDOWN"
+         : v_mode == VALVE_OFF ? "OFF" : "NOT HOMED";
 }
+// Shut down (0.15.0).
+bool valve_shutdown(const char **why) { (void)why; v_mode = VALVE_SHUTDOWN; return true; }
+bool valve_turn_on(const char **why) { (void)why; v_mode = VALVE_MANUAL; return true; }
+bool valve_shutdown_progress(int *left, int *secs)
+{
+    if (v_mode != VALVE_SHUTDOWN) return false;
+    *left = 60; *secs = 34;
+    return true;
+}
+const char *valve_off_why(void) { return v_mode == VALVE_OFF ? "Controller is off" : NULL; }
 // AUTO (stage 8).
 static bool v_sp_set;
 static int32_t v_sp = 5000;
@@ -175,6 +186,7 @@ bool valvepos_offer(int32_t *c) { if (vp_offer) *c = 33880; return vp_offer; }
 bool valvepos_use(const char **why) { (void)why; vp_offer = false; v_cal = true; v_ref = VALVE_REF_SAVED; v_mode = VALVE_MANUAL; return true; }
 void valvepos_decline(void) { vp_offer = false; }
 bool valvepos_offer_moving(int32_t *s) { *s = 400; return vp_offer && vp_moving; }
+bool valvepos_offer_unparked(void) { return false; }
 
 static uint32_t crc32(const void *data, size_t len)
 {
@@ -408,6 +420,9 @@ int main(int argc, char **argv)
     if (!strcmp(st, "autofirst") || !strcmp(st, "autoask") || !strcmp(st, "automan") || !strcmp(st, "paused2")) tap(415, 72);
     if (!strcmp(st, "autosp")) { tap(115, 184); tap(41, 240); tap(111, 240); tap(321, 184); }   // Setpoint 12: applies at once
     if (!strcmp(st, "limithit")) v_q = true;
+    if (!strcmp(st, "shutask")) tap(329, 20);                      // the power icon: confirm
+    if (!strcmp(st, "shutting")) { tap(329, 20); tap(250, 180); }   // Shut down: black, closing
+    if (!strcmp(st, "off")) v_mode = VALVE_OFF;
     if (!strcmp(st, "svc")) {
         size_t a = heap_used();
         tap(415, 128); tap(300, 240);     // Menu, Service (0.6.0 screens built)

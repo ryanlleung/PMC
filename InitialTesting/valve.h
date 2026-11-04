@@ -16,7 +16,8 @@
  *
  * Modes: NOT CALIBRATED (boot, watchdog reset, after F-3/F-4 or an
  * aborted calibration), CALIBRATING, MANUAL and AUTO (stage 8,
- * ctrl.c). Nothing moves at boot.
+ * ctrl.c), SHUTDOWN and OFF (0.15.0, Shut down below). Nothing moves at
+ * boot.
  *
  * AUTO (from MANUAL) after the entry checks (ctrl_check), with
  * the target set; bumpless from where the valve is going. Every second,
@@ -52,7 +53,8 @@
  * Events go to the log only; nothing is sent unasked.
  */
 
-typedef enum { VALVE_NOT_CAL, VALVE_CALIBRATING, VALVE_MANUAL, VALVE_AUTO } valve_mode_t;
+// The numbers are the Modbus mode register (docs/modbus-register-map.md).
+typedef enum { VALVE_NOT_CAL, VALVE_CALIBRATING, VALVE_MANUAL, VALVE_AUTO, VALVE_SHUTDOWN, VALVE_OFF } valve_mode_t;
 
 void valve_init(void);           // after stepper3_init(); logs BOOT power-up
 void valve_task(void);           // every main-loop pass: calibration, limit hits
@@ -63,8 +65,9 @@ const char *valve_mode_name(void);
 bool valve_calibrated(void);
 // How the position was last set: homed on the switch, or set by the
 // operator (closed or a typed %) or from the saved position, neither
-// checked against the switch. NONE when not homed.
-typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED } valve_ref_t;
+// checked against the switch, or on the switch at Shut down (PARKED, also
+// after a power-up with the switch still pressed). NONE when not homed.
+typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
 int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
@@ -131,6 +134,28 @@ bool valve_fault_first(const char **tag, const char **text);   // highest priori
 bool valve_fault_is(const char *tag);            // e.g. "F-5" latched
 bool valve_question(int32_t *pct10);             // switch question waiting, where
 bool valve_answer(bool set_zero, const char **why);   // VALVE SETZERO / VALVE SKIP
+
+/* Shut down (0.15.0, Ryan 4 Nov): AUTO ends, the valve closes onto the
+ * limit switch at the homing rate, the switch point becomes the seat and
+ * the coils go off: OFF. Moves, AUTO and homing are refused while OFF
+ * (pressure is still read); the screen turns it on (MANUAL). STOP cancels
+ * a shut down under way (MANUAL, the valve where it stopped). With the
+ * count proven (homed, or parked before) the close goes at most 1 % of
+ * travel past the seat and a switch more than 1 % above it is not taken
+ * (warning, MANUAL); otherwise it searches as homing's fast close does.
+ * A switch already pressed is only taken near a proven seat. */
+bool valve_shutdown(const char **why);
+bool valve_turn_on(const char **why);            // OFF -> MANUAL
+// valvepos.c at start-up: parked at the last Shut down and the switch still
+// pressed. The count is the seat's; off: back to OFF (a restart while off),
+// else MANUAL (switched on).
+bool valve_restore_parked(int32_t count, bool off, const char **why);
+// While shutting down: how much of the close is left (100 at the start,
+// 0 at the seat) and the seconds left (-1 if not known: not homed).
+bool valve_shutdown_progress(int *left_pct, int *secs);
+// Why moves and mode changes are refused now: off or shutting down; NULL
+// otherwise.
+const char *valve_off_why(void);
 
 // Latched fault i (0 = highest priority, below valve_fault_count()).
 typedef struct {

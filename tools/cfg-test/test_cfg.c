@@ -22,6 +22,8 @@
 #include "cfg.h"
 #include "clicks.h"
 #include "extflash.h"
+#include "limit.h"
+#include "sysinfo.h"
 #include "stepper3.h"
 #include "valve.h"
 #include "valvepos.h"
@@ -136,6 +138,19 @@ bool valve_restore(int32_t count, const char **why)
 {
     if (v_cal) { *why = "already calibrated"; return false; }
     m_pos = count; v_cal = true; v_mode = VALVE_MANUAL;
+    return true;
+}
+// Shut down (0.15.0): the parked entry at start-up.
+static const char *reset_why = "power-on";
+const char *sysinfo_reset_reason(void) { return reset_why; }
+static limit_state_t lim = LIMIT_OPEN;
+limit_state_t limit_state(void) { return lim; }
+static int parked_calls;
+bool valve_restore_parked(int32_t count, bool off, const char **why)
+{
+    if (v_cal) { *why = "already calibrated"; return false; }
+    m_pos = count; v_cal = true; v_mode = off ? VALVE_OFF : VALVE_MANUAL;
+    parked_calls++;
     return true;
 }
 void valve_event(const char *tag, const char *fmt, ...)
@@ -837,6 +852,58 @@ static void test_valvepos(void)
     CHECK(valvepos_offer(&c) && c == 12345);
     valvepos_decline();
     m_rev = false;
+
+    // Shut down (0.15.0): OFF writes a parked entry at once. A power-up
+    // with the switch pressed takes it without asking (MANUAL); a restart
+    // while off goes back to OFF; the switch released: nothing taken or
+    // offered, the entry withdrawn.
+    v_cal = true; v_mode = VALVE_MANUAL; m_pos = 30000;
+    tick(2500);
+    m_pos = -400; v_mode = VALVE_OFF;
+    tick(10);
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0;
+    reset_why = "power-on"; lim = LIMIT_UNKNOWN; parked_calls = 0;
+    valvepos_init();
+    CHECK(!valvepos_offer(&c));
+    tick(50);
+    CHECK(parked_calls == 0 && !v_cal);         // waits for a steady switch reading
+    lim = LIMIT_OPEN;
+    tick(10);
+    CHECK(parked_calls == 1 && v_cal && v_mode == VALVE_MANUAL && m_pos == -400);
+    tick(10);                                   // turned on: safe at once
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0; reset_why = "watchdog";
+    valvepos_init();
+    tick(10);
+    CHECK(parked_calls == 1 && !v_cal && valvepos_offer(&c) && c == -400 && !valvepos_offer_unparked());
+    valvepos_decline();
+    // OFF again, then a watchdog reset: OFF.
+    v_cal = true; v_mode = VALVE_OFF; m_pos = -400;
+    tick(10);
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0;
+    valvepos_init();
+    tick(10);
+    CHECK(parked_calls == 2 && v_cal && v_mode == VALVE_OFF && m_pos == -400);
+    // The needle moved while the power was off: the switch released.
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0; reset_why = "power-on"; lim = LIMIT_CLOSED;
+    valvepos_init();
+    tick(10);
+    CHECK(parked_calls == 2 && !v_cal && !valvepos_offer(&c));
+    lim = LIMIT_OPEN;
+    valvepos_init();                            // withdrawn: nothing next time either
+    tick(10);
+    CHECK(parked_calls == 2 && !v_cal && !valvepos_offer(&c));
+    // Switched off without Shut down: offered, and said so.
+    v_cal = true; v_mode = VALVE_MANUAL; m_pos = 22000;
+    tick(2500);
+    v_cal = false; v_mode = VALVE_NOT_CAL; m_pos = 0;
+    valvepos_init();
+    CHECK(valvepos_offer(&c) && c == 22000 && valvepos_offer_unparked());
+    valvepos_decline();
+    reset_why = "watchdog";
+    valvepos_init();
+    CHECK(valvepos_offer(&c) && !valvepos_offer_unparked());
+    valvepos_decline();
+    reset_why = "power-on";
 }
 
 // Trend slots are fixed one-second boundaries: a late poll fills its own

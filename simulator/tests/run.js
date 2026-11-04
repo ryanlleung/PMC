@@ -297,5 +297,108 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const ev = events(s, 3);
   check('homed with the switch 150 steps below 0 %', /Homed in \d+ s, switch at -150, 0 % at 0/.test(ev) && s.get(5) === 300, ev + ' needle ' + s.get(5));
 }
+// Shut down and OFF (0.15.0): the valve closes onto the switch, the switch
+// point is the seat, coils off; moves refused until a double tap on the
+// screen. A power-up with the switch still pressed starts in MANUAL there.
+let parkedFlash;
+{ // From the screen: the power icon, Shut down, the black screen, OFF, a double tap.
+  const s = homed(load());
+  s.cmd('VALV SET 30', 60000); s.run(2000);
+  s.tap(309, 20); shot(s, 'shutdown-ask');
+  s.tap(318, 138, 3000);
+  const during = s.cmd('MODE?;VALV MOVING?');
+  check('shut down: closing', during === 'MODE SHUTDOWN;VALV MOVING 1\r\n', during);
+  check('shut down: ERR 213 while closing', s.cmd('VALV SET 10') === 'ERR 213 Shutting down, STOP to cancel\r\n' &&
+    s.cmd('MODE MANUAL') === 'ERR 213 Shutting down, STOP to cancel\r\n', s.cmd('VALV SET 10'));
+  shot(s, 'shutting-down');
+  s.run(60000);
+  const st = s.cmd('MODE?;VALV?;VALV MOVING?');
+  check('shut down: OFF at the seat', st === 'MODE OFF;VALV -0.61 %;VALV MOVING 0\r\n', st);
+  check('shut down: needle on the switch, coils off', s.get(5) <= 0 && s.get(15) === 0, 'needle ' + s.get(5) + ' coils ' + s.get(15));
+  check('OFF: ERR 213', s.cmd('VALV SET 10') === 'ERR 213 Controller is off\r\n' && s.cmd('MODE AUTO') === 'ERR 213 Controller is off\r\n' &&
+    s.cmd('MODE MANUAL') === 'ERR 213 Controller is off\r\n', s.cmd('MODE AUTO'));
+  check('OFF: pressure still read', /^PRES [\d.]+ mbar/.test(s.cmd('PRES?')), s.cmd('PRES?'));
+  check('shut down event', /OFF,Valve closed on the switch at count -?\d+, now the seat -400; coils off, OFF/.test(events(s, 5)), events(s, 5));
+  shot(s, 'off');
+  parkedFlash = s.flash();
+  s.tap(240, 136, 1500);
+  check('OFF: one tap does nothing', s.cmd('MODE?') === 'MODE OFF\r\n', s.cmd('MODE?'));
+  s.tap(240, 136, 100); s.tap(240, 136, 300); shot(s, 'turning-on');
+  s.run(1500);
+  check('OFF: a double tap turns it on, MANUAL', s.cmd('MODE?;VALV?') === 'MODE MANUAL;VALV -0.61 %\r\n', s.cmd('MODE?;VALV?'));
+  shot(s, 'on-again');
+  s.cmd('VALV SET 5', 15000);
+  check('on again: moves', s.cmd('VALV?') === 'VALV 5.00 %\r\n', s.cmd('VALV?'));
+}
+{ // Power-up after Shut down, the switch still pressed: MANUAL at the seat, nothing asked.
+  const s = load(); s.boot(parkedFlash); s.run(2000);
+  check('power-up after Shut down: MANUAL at the seat', s.cmd('MODE?;VALV?') === 'MODE MANUAL;VALV -0.61 %\r\n' &&
+    s.offer() === -2147483648, s.cmd('MODE?;VALV?') + ' offer ' + s.offer());
+  check('power-up after Shut down: event', /Parked at the last shut down, switch still pressed/.test(events(s, 5)), events(s, 5));
+  s.cmd('VALV SET 20', 60000);
+  check('power-up after Shut down: moves at once', s.cmd('VALV?') === 'VALV 20.00 %\r\n' && s.get(5) / 2 === 400 + Math.round(66048 * 0.2),
+    s.cmd('VALV?') + ' needle ' + s.get(5));
+  shot(s, 'power-up-parked');
+}
+{ // A restart while off (watchdog, Restart): OFF again.
+  for (const r of [1, 2]) {
+    const s = load(); s.boot(parkedFlash, { reset: r }); s.run(2000);
+    check('restart while off (' + (r === 1 ? 'watchdog' : 'software') + '): OFF', s.cmd('MODE?;VALV?') === 'MODE OFF;VALV -0.61 %\r\n', s.cmd('MODE?;VALV?'));
+  }
+}
+{ // The needle moved while the power was off: the switch released, not homed, nothing offered.
+  const s = load(); s.boot(parkedFlash); s.set(5, 40000); s.run(2000);
+  check('parked but switch released: NOT HOMED', s.cmd('MODE?;VALV?') === 'MODE NOT HOMED;VALV NONE\r\n' && s.offer() === -2147483648,
+    s.cmd('MODE?') + ' offer ' + s.offer());
+  const t = load(); t.boot(s.flash()); t.run(2000);
+  check('parked entry withdrawn', t.cmd('MODE?') === 'MODE NOT HOMED\r\n' && t.offer() === -2147483648, t.cmd('MODE?') + ' offer ' + t.offer());
+}
+{ // Switched off without Shut down: the saved position offered, and the log says so.
+  const s = homed(load());
+  s.cmd('VALV SET 30', 60000); s.run(3000);
+  const t = load(); t.boot(s.flash()); t.set(5, 40000); t.run(2000);
+  check('switched off without Shut down', t.offer() === Math.round(66048 * 0.3) && /Last power-off without Shut down/.test(events(t, 5)),
+    t.offer() + '\n' + events(t, 5));
+  shot(t, 'unparked-ask');
+}
+{ // STOP cancels: MANUAL, the valve where it stopped.
+  const s = homed(load());
+  s.cmd('VALV SET 50', 90000); s.run(2000);
+  s.shutdown(5000);
+  s.cmd('STOP', 1000);
+  const v = parseFloat(s.cmd('VALV?').match(/VALV ([-\d.]+)/)[1]);
+  check('STOP cancels shut down: MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n' && v > 40 && v < 48 && !s.busy(), s.cmd('MODE?;VALV?'));
+  check('STOP cancels shut down: event', /shut down cancelled/.test(events(s, 5)), events(s, 5));
+}
+{ // From AUTO: AUTO ends, then the same close.
+  const s = homed(load());
+  s.cmd('VALV SET 30', 60000);
+  s.cmd('PRES SP 3;MODE AUTO', 20000);
+  check('in AUTO before shut down', s.cmd('MODE?') === 'MODE AUTO\r\n', s.cmd('MODE?'));
+  check('shut down from AUTO', s.shutdown(1000) && s.cmd('MODE?') === 'MODE SHUTDOWN\r\n', s.why() + s.cmd('MODE?'));
+  s.run(90000);
+  check('shut down from AUTO: OFF at the seat', s.cmd('MODE?;VALV?') === 'MODE OFF;VALV -0.61 %\r\n', s.cmd('MODE?;VALV?'));
+}
+{ // Not homed: closes until it finds the switch, which becomes the seat.
+  const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
+  check('shut down not homed', s.shutdown(80000) && s.cmd('MODE?;VALV?') === 'MODE OFF;VALV -0.61 %\r\n', s.why() + s.cmd('MODE?;VALV?'));
+}
+{ // The switch trips early (ice) with a homed count: not taken as the seat, MANUAL, a warning.
+  const s = homed(load());
+  s.cmd('VALV SET 30', 60000);
+  s.set(18, 4000); s.set(7, 3);   // trips 2000 full steps above the seat
+  s.shutdown(60000);
+  const st = s.cmd('MODE?;VALV?');
+  check('early switch: MANUAL, count kept', /^MODE MANUAL;VALV 2\.\d\d %/.test(st), st);
+  check('early switch: event', /over 1 % above the seat/.test(events(s, 5)), events(s, 5));
+  shot(s, 'early-switch');
+}
+{ // Already on the switch: parks at once at a proven seat; refused when not homed.
+  const s = load(); s.boot(parkedFlash); s.run(2000);   // MANUAL on the switch at the seat
+  check('on the switch at the seat: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALV?') === 'MODE OFF;VALV -0.61 %\r\n',
+    s.why() + s.cmd('MODE?;VALV?'));
+  const t = load(); t.boot(); t.run(2000);   // the bench starts on the switch, not homed
+  check('on the switch, not homed: refused', !t.shutdown() && t.why() === 'Limit switch pressed: home the valve first', t.why());
+}
 console.log(failed ? failed + ' failed' : 'all passed');
 process.exit(failed ? 1 : 0);

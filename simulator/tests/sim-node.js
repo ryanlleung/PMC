@@ -22,7 +22,8 @@ function load(file) {
     version: () => cstr(x.sim_version()),
     out: '',
     // opts.remote: false turns Remote control Off; otherwise it is On, the
-    // default from 0.13.7, so the link takes set commands.
+    // default from 0.13.7, so the link takes set commands. opts.reset: 0
+    // power-on (default), 1 watchdog, 2 software (Restart).
     boot(flash, opts = {}) {
       // application_init() runs once per instance, as on the board: use a new load() per boot.
       if (sim.booted) throw new Error('boot() twice on one instance: use a new load()');
@@ -31,7 +32,7 @@ function load(file) {
       const f = new Uint8Array(x.memory.buffer, x.sim_flash(), x.sim_flash_size());
       if (flash) f.set(flash); else f.fill(0xff);
       const d = new Date(2026, 9, 24, 14, 0, 0);
-      x.sim_boot(0, d.getTime() / 1000 - d.getTimezoneOffset() * 60);
+      x.sim_boot(opts.reset || 0, d.getTime() / 1000 - d.getTimezoneOffset() * 60);
       if (opts.remote === false) x.sim_remote(0);
     },
     run(ms) { for (let t = 0; t < ms; t += 100) { x.sim_run(Math.min(100, ms - t)); sim.drain(); } },
@@ -59,6 +60,8 @@ function load(file) {
     why: () => cstr(x.sim_why()),
     home(ms = 120000) { const ok = x.sim_home(); sim.run(ms); return ok; },
     setClosed() { const ok = x.sim_set_closed(); sim.run(300); return ok; },
+    shutdown(ms = 300) { const ok = x.sim_shutdown(); sim.run(ms); return ok; },   // Shut down, confirmed
+    turnOn(ms = 300) { const ok = x.sim_turn_on(); sim.run(ms); return ok; },
     cal(what, mbar, ms = 15000) { const ok = x.sim_cal(what, mbar); sim.run(ms); return ok; },   // 1 vacuum, 2 air; mbar < 0: room sensor
     save(key = -1, value = 0) { const ok = x.sim_save(key, value); sim.run(1000); return ok; },
     setting: key => x.sim_setting(key),

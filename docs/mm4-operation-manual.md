@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision E, 4 November 2026. Firmware 0.14.23. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23). It does not add hardware bench verification.
+Revision F, 4 November 2026. Firmware 0.15.0. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23); revision F adds Shut down and the OFF state (0.15.0). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.14.23: power-up, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.15.0: power-up, Shut down, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -26,10 +26,11 @@ What the operator does:
 - Switches between MANUAL (the operator positions the valve in percent open) and AUTO (the controller regulates the pressure to the target).
 - Watches the trend. A steady pressure matters more than the exact value. The sample temperature is watched on another instrument.
 - Clears faults after fixing their cause.
+- Shuts the controller down with the power icon on Home before switching it off (section 4).
 
 What the operator does not do: tune the control loop. KP, TI and KD are set once at commissioning (Settings > PID tuning) and are not part of normal operation. Home shows them so the operator can see what the loop is using.
 
-The controller has four modes, shown at the right of the header on every screen (MANUAL and AUTO read "MANUAL mode" and "AUTO mode"; with a latched fault it reads FAULT, filled red):
+The controller has six modes, shown at the right of the header on every screen (MANUAL and AUTO read "MANUAL mode" and "AUTO mode"; with a latched fault it reads FAULT, filled red):
 
 | Mode | Meaning |
 | --- | --- |
@@ -37,6 +38,8 @@ The controller has four modes, shown at the right of the header on every screen 
 | HOMING | The valve is finding the closed limit switch |
 | MANUAL | The operator positions the valve. The pressure is shown but not regulated |
 | AUTO | The controller moves the valve once a second to hold the target pressure |
+| SHUTTING DOWN | Shut down is closing the valve onto the limit switch. The screen is black with a bar and STOP |
+| OFF | The valve is closed on the limit switch and the motor coils are off. The screen is black: a double tap turns the controller on |
 
 A red header with FAULT means a fault is latched (section 9).
 
@@ -48,7 +51,8 @@ The controller has no hardware interlock. The closing stop is the firmware readi
 
 - **The limit switch can trip early.** It is a force-actuated normally closed contact. Ice on the valve, or a stiff drive, can press it before the needle reaches the seat. The controller cannot tell an early trip from the seat. When the switch trips during a normal move the controller stops and asks the operator (W-1, section 9). Only a person at the cryostat can judge which it was.
 - **STOP** on the bottom row of every screen stops the valve at once and holds it. In AUTO it also switches to MANUAL. Nothing latches, so operation can resume straight away from the screen. STOP works with any finger, even with another one on the glass.
-- **Nothing moves at power-up.** The valve is NOT HOMED until the operator homes it or sets its position. The controller never uses a saved position on its own.
+- **Nothing moves at power-up.** The valve is NOT HOMED until the operator homes it or sets its position. The controller never uses a saved position on its own, with one exception: after Shut down, if the limit switch still reads pressed at power-up, the valve is known to be on the seat and the controller starts in MANUAL there (section 4). The valve does not move either way.
+- **Shut down before switching off.** Shut down closes the valve onto the limit switch and records it, so the next power-up needs no homing. Switching off without it is safe (the valve stays where it is) but the next power-up asks for the position or a homing.
 - **Limit override** (Settings > Motor override) drives the valve closed past an open limit switch. It takes two fingers: hold Limit override, then press Close with another finger. Holding Limit override alone does nothing. A closing override moves only while both fingers are held and stops immediately when either lifts. Open also works while Limit override is held; an opening move ramps down when either finger lifts. Use it only when the switch is known to be stuck and the valve is known to be off the seat.
 - **Motor supply.** The Stepper 3 Click has no current limit. The motor supply must be a regulated 12 V. The firmware does not measure it: losing motor power does not directly end AUTO, and the counted position can keep changing while the motor is stationary. Check the supply and home again if position is in doubt. Do not feed 12 V into the Boost 10 Click, which takes 5 V from the board and makes the 10 V Druck excitation.
 - **Remote control.** While Settings > System setup > Remote control is On (the default), anyone who can reach the controller's IP address on port 8888 or port 502 can set the target, move the valve in MANUAL, start AUTO and stop. With it Off the network can only read, and a network STOP is refused too. Keep the controller on the instrument network only.
@@ -96,15 +100,30 @@ At power-up the controller loads the newest saved settings, starts the pressure 
 4. Home the valve (section 7). This takes up to a few minutes. The header then reads MANUAL and the valve reading is 0.00 % and the strip reads "Valve idle" once it has stopped.
 5. Set the valve where the cryostat needs it, in MANUAL, or start AUTO with a target (section 6).
 
+If the controller was shut down with Shut down and the limit switch still reads pressed, it skips all of this: Home opens in MANUAL with the valve at the seat (about -0.61 %), nothing is asked, and it can be moved or put in AUTO at once. If the switch reads released (the valve was moved while the power was off), it starts NOT HOMED with nothing on offer: home the valve. After switching off without Shut down, the start-up question in step 3 begins "Switched off without Shut down." instead of "Valve position unknown."
+
 After a restart the target is not kept, so the first Start AUTO asks for it again. The settings, calibration and tuning saved with Save settings are kept. The trend and the event log are in RAM and start empty.
 
 The real-time clock keeps time through a reset. If the dates on saves and events are wrong, set the clock over the text link with the TIME SET command (section 11). There is no clock page on the screen.
+
+### Shut down and switching off
+
+Before switching the controller off, tap the power icon on Home (left of the mode in the header). The question "Close the valve and shut down?" has Cancel and Shut down.
+
+1. Shut down ends AUTO and closes the valve onto the limit switch at the fast close speed (400 steps/s by default, about 50 s from 30 % open).
+2. While it closes the whole screen is black: "Shutting down", the start-up bar emptying as the valve closes and the seconds left. STOP, in its usual place, cancels it: MANUAL, the valve where it stopped.
+3. On the switch, the switch point becomes the seat (about -0.61 %), the motor coils switch off and the controller is OFF. The screen stays black with a grey power symbol and "Double tap to turn on". It is now safe to switch off.
+4. While OFF the controller still reads the pressure and answers queries, but refuses moves, AUTO and homing. Two taps anywhere on the screen within 0.6 s turn it on: the start-up logo and bar, then Home in MANUAL, the valve still at the seat. One tap does nothing.
+
+When the valve was homed, Shut down expects the switch within 1 % of the travel of the seat. If the switch is pressed more than 1 % above the seat (ice, a stiff drive), the controller does not take it as the seat: it stops in MANUAL and the strip reads "Shut down stopped: switch pressed at X %, above the seat". If the switch is not found within 1 % past the seat, the strip reads "Shut down stopped: limit switch not found" and the valve is NOT HOMED. Check the switch and home the valve. When the valve was not homed, Shut down closes up to 1.1 times the travel to find the switch, as homing does. If the switch is already pressed and the valve was not homed (or the count is not near the seat), Shut down is refused: "Limit switch pressed: home the valve first". With a fault latched it is refused: reset the fault first.
+
+A watchdog or software restart while OFF comes back OFF. Shut down and turning on are on the screen only; the network cannot do either. The screen backlight stays on while OFF.
 
 First use of a new board or a new Druck sensor also needs: the sensor added under Settings > Choose sensor with its serial number and range, a two-point calibration (section 8), the valve travel and motor direction checked under Settings > Valve setup, the pressure response direction set under Settings > PID tuning > AUTO limits, and Save settings. These are commissioning steps, done once.
 
 ## 5. Screens
 
-Every screen has the same frame: a header with Back and Home buttons, the title, and the mode on the right in plain lettering (MANUAL mode, AUTO mode, NOT HOMED, HOMING, or FAULT filled red); a status strip; and STOP on the bottom row. On Home and the operator pages the strip shows the valve's state (Valve idle, Moving to X %, or in AUTO Regulating to, In band or Stable at the setpoint) with the 5 minute pressure sparkline, and takes over for prompts, faults and messages. Under a popup the strip stays visible and greyed. Colour follows the ISA-101 convention: grey when normal, colour only for an abnormal state.
+Every screen has the same frame: a header with Back and Home buttons, the title, and the mode on the right in plain lettering (MANUAL mode, AUTO mode, NOT HOMED, HOMING, or FAULT filled red); a status strip; and STOP on the bottom row. On Home a power icon left of the mode opens Shut down. While shutting down and while OFF the whole screen is black (section 4). On Home and the operator pages the strip shows the valve's state (Valve idle, Moving to X %, or in AUTO Regulating to, In band or Stable at the setpoint) with the 5 minute pressure sparkline, and takes over for prompts, faults and messages. Under a popup the strip stays visible and greyed. Colour follows the ISA-101 convention: grey when normal, colour only for an abnormal state.
 
 | Screen | How to reach it | What it shows and does |
 | --- | --- | --- |
@@ -248,6 +267,7 @@ Other strip messages:
 
 - **Limit override held / closing past the switch**: the override from Settings > Motor override is in use. Release either finger to stop a closing override; there is no Cancel button on the strip.
 - **Valve not homed**: the valve position is not known.
+- **Shut down stopped: switch pressed at X %, above the seat** and **Shut down stopped: limit switch not found**: Shut down did not take the switch as the seat (section 4). OK clears them.
 
 The event log (Menu > Records > Events) keeps the last 100 events with a time stamp: faults, warnings, mode changes, moves, settings saves, calibration captures and remote commands with the client's IP address. It is in RAM and empties at a restart.
 
@@ -265,7 +285,7 @@ Settings are commissioning items, not daily operation. Numeric valve and tuning 
 | PID tuning, PID tab | KP, gain (% open per mbar, 4.00). TI, integral time (min, 0.25; 0 is off). KD, derivative (% open per mbar/s of pressure change, 0.00; 0 is off) | Set at commissioning. Operators do not change these. KD acts on the pressure's rate of change, not the error, so a setpoint change gives no kick. Settings saved before 0.14.21 load with KD 0 |
 | PID tuning, AUTO limits tab | AUTO min (%), deadband (steps, 8), pressure response (opening raises or lowers the pressure), target band (mbar, 0.10) | Set at commissioning. A wrong pressure response gives W-6 |
 | Review and save | Last save and previous save by date. Unsaved changes list. Save settings. Discard changes. Load settings: last save, previous save or factory defaults | A loaded save is in use at once, sensors and calibrations included. Factory defaults come in as drafts and keep the sensors. Load is refused while the valve moves or in AUTO |
-| Restart | Stops the valve, ends AUTO or homing, then restarts after about 2.5 s | Asks first. Saved settings are loaded and the valve starts NOT HOMED |
+| Restart | Stops the valve, ends AUTO or homing, then restarts after about 2.5 s | Asks first. Saved settings are loaded and the valve starts NOT HOMED, or OFF after a restart while OFF |
 | Motor override | Move tab: step size 1 to 10 000 or Hold, Close and Open, Zero, Limit override. Speed tab: run, start and acceleration rates. Coils tab: step mode (wave, full, half), hold torque, coils off, coil order, direction | Engineering page. It drives the motor by steps past the valve's checks. Coil order, direction and Zero clear the homing and ask first. The strip reads the motor state and the limit switch |
 
 Factory defaults for the valve and the loop are for the PK22 344:1 stepper on the Oxford Instruments needle valve. The CF-11 on the bench ran at about 1.6 K with 3 to 8 mbar, the valve around 34 % open, on the Mercury iTC's P 20 % and I 0.1 min. The mm4's equivalent gain and integral time for each cryostat are set at commissioning.
@@ -289,10 +309,10 @@ Port 8888 takes the remote command set in plain text, one command per line (uppe
 
 | Group | Commands |
 | --- | --- |
-| Reading | PRES? the pressure. PRES SP? the target. MODE? MANUAL, AUTO, HOMING or NOT HOMED. VALV? the position; VALV MOVING? 1 while moving or homing. ALRM? the latched faults and the warnings. EVNT? followed by a number, the last events (on a line of its own). BARO? the room pressure. NETW? the address in use. TIME? the clock. *IDN? the identity and firmware version |
-| Control | PRES SP followed by the target in mbar (does not start AUTO). MODE AUTO starts AUTO with the same checks as the screen; MODE MANUAL ends it, the valve stays where it is. VALV SET followed by a % moves the valve in MANUAL. STOP stops the valve and ends AUTO; it is the only stop. ALRM RESET clears the faults whose cause has gone; ALRM OK acknowledges a strip warning. TIME SET 2026-10-27 09:00:00 sets the clock |
+| Reading | PRES? the pressure. PRES SP? the target. MODE? MANUAL, AUTO, HOMING, NOT HOMED, SHUTDOWN or OFF. VALV? the position; VALV MOVING? 1 while moving or homing. ALRM? the latched faults and the warnings. EVNT? followed by a number, the last events (on a line of its own). BARO? the room pressure. NETW? the address in use. TIME? the clock. *IDN? the identity and firmware version |
+| Control | PRES SP followed by the target in mbar (does not start AUTO). MODE AUTO starts AUTO with the same checks as the screen; MODE MANUAL ends it, the valve stays where it is. VALV SET followed by a % moves the valve in MANUAL. STOP stops the valve and ends AUTO or a shut down; it is the only stop. ALRM RESET clears the faults whose cause has gone; ALRM OK acknowledges a strip warning. TIME SET 2026-10-27 09:00:00 sets the clock |
 
-Set commands need Remote control On (Settings > System setup); with it Off they answer ERR 211, STOP included. Homing, calibration, settings, tuning and the motor are on the touchscreen only. In AUTO, VALV SET answers "Switch to MANUAL first". The error codes and the full table are in the README. With network writes enabled, any other command answers ERR 100. With writes off, queries still work but other input, including an unknown command, answers ERR 211. The USB build is local and is not gated by the Remote control switch.
+Set commands need Remote control On (Settings > System setup); with it Off they answer ERR 211, STOP included. Homing, calibration, settings, tuning and the motor are on the touchscreen only. In AUTO, VALV SET answers "Switch to MANUAL first". While OFF or shutting down, VALV SET, MODE AUTO and MODE MANUAL answer ERR 213; the controller is turned on at the screen only. The error codes and the full table are in the README. With network writes enabled, any other command answers ERR 100. With writes off, queries still work but other input, including an unknown command, answers ERR 211. The USB build is local and is not gated by the Remote control switch.
 
 Tools in the repository: tools/logger/log_druck.py polls the pressure, target, valve, mode and alarms once a second and logs them to CSV, from an IP address or a COM port, and reconnects on its own.
 
@@ -307,7 +327,7 @@ The Modbus server is for a supervisory system. It reads 26 holding registers (0 
 
 | Address | Content |
 | --- | --- |
-| Register 2 | Mode: 0 NOT HOMED, 1 HOMING, 2 MANUAL, 3 AUTO |
+| Register 2 | Mode: 0 NOT HOMED, 1 HOMING, 2 MANUAL, 3 AUTO, 4 SHUTTING DOWN, 5 OFF |
 | Register 3 | Status bits: reading valid, position set, homed, moving, switch pressed, fault, warning, target set, writes on, legacy motor-supply bit (always 1; supply is not measured) |
 | Register 4 | Regulation in AUTO: 1 Regulating, 2 In band, 3 Stable |
 | Registers 5, 6 | Faults latched (bit 0 F-1 to bit 5 F-6) and warnings showing (bit 0 W-1 to bit 5 W-6) |
@@ -327,7 +347,7 @@ The Modbus read test passed on the bench on 26 October 2026. The write test has 
 | Task | When | How |
 | --- | --- | --- |
 | Check the pressure reading against the reference gauge | At each cool-down, and whenever the reading looks wrong | Compare the controller's reading with the Pfeiffer gauge at vacuum and at air. Recalibrate (section 8) if either point is off by more than the sensor's accuracy |
-| Home the valve | After every power-up, after a direction or coil order change, and when the position is in doubt | Section 7 |
+| Home the valve | After every power-up that does not start in MANUAL after Shut down, after a direction or coil order change, and when the position is in doubt | Section 7 |
 | Check the limit switch | When F-3, F-4 or W-4 appears, and at each warm-up | The Valve position page or Diagnostics shows pressed or free. Press the switch by hand and watch it change. Look for ice on the switch and the valve drive |
 | Check the Druck excitation | When F-2 appears | Diagnostics shows the excitation. It should be 9.5 to 10.5 V. A Boost 10 trip needs a power cycle |
 | Check the motor supply | When moves are slow, F-5 appears or the motor is noisy | Measure the 12 V at the Stepper 3 Click. The controller does not measure it |
@@ -335,11 +355,11 @@ The Modbus read test passed on the bench on 26 October 2026. The write test has 
 | Save the settings | After any commissioning change | Settings > Review and save > Save settings. Review and save shows the date of the last save |
 | Set the clock | When the dates on saves and events are wrong | TIME SET over the link, in the form TIME SET 2026-10-27 09:00:00 |
 | Update the firmware | When a new version is released | Flash over USB-C with mikroBootloader. The settings, calibration and saved position are in serial flash and survive reflashing. Check Settings > System setup, or *IDN? over the link, afterwards |
-| Clean the touchscreen | As needed | Switch off first, or the taps will act on the screen. A soft cloth, no solvents |
+| Clean the touchscreen | As needed | Shut down and switch off first, or the taps will act on the screen (a double tap on the OFF screen turns it on). A soft cloth, no solvents |
 
 The controller has no fuse, battery or filter to replace. The real-time clock runs from the board supply; a cell in the BAT1 holder keeps it through a power-off.
 
-If the controller stops responding, the independent watchdog restarts it within about 4 s. The current Diagnostics page does not display the reset cause; it shows raw readings only. The valve does not move after the restart until it is homed or its position is set, and a position saved before the reset is offered.
+If the controller stops responding, the independent watchdog restarts it within about 4 s. The current Diagnostics page does not display the reset cause; it shows raw readings only. The valve does not move after the restart until it is homed or its position is set, and a position saved before the reset is offered. A restart while OFF comes back OFF.
 
 ## 13. Items not yet benched
 
@@ -353,6 +373,7 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | W-5 Over range and W-6 Driven the wrong way | Checked on the PC control-loop test, not provoked on the bench |
 | Loss of polling from the supervisory system | No behaviour defined yet. Waiting on the owner of that system |
 | Earth bond in the enclosure | Found on the bench 21 October; not yet in the enclosure drawings |
+| Shut down, OFF and the power-up after it (0.15.0) | Checked in the simulator only. To check on the bench: the close onto the real switch, the parked power-up with the switch pressed and released, the double tap on the real touch panel |
 
 ## 14. Revision history
 
@@ -363,3 +384,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | C | 3 November 2026 | Checked against firmware 0.14.8 on main: corrected movement prerequisites, independent homing Return and four stages, motor-supply behaviour and legacy status bit, tuning saves in AUTO, motor defaults, current screens and labels, remote refusals and version references. Historical bench status retained separately |
 | D | 3 November 2026 | Firmware 0.14.9 to 0.14.11: Ethernet on a static IP address only, no DHCP, default 192.168.1.100/24. Firmware 0.14.12: the Faults and log screen is renamed Events. Firmware 0.14.13: the fault detail's Next fault, Reset fault and Close buttons show (they were hidden under the status strip). Firmware 0.14.14: Set as 0 % reads 0.00 %, not the seat (about -0.6 %). Firmware 0.14.15: the Valve position state reads Set by hand or Last saved, not homed. Firmware 0.14.16: a STOP on the screen no longer holds remote moves (no Allow on the strip). Firmware 0.14.17: the limit switch question's button reads Set as seat. Firmware 0.14.18: the Valve screen's buttons use the same column widths as the other screens. Firmware 0.14.19: a tap during a slow redraw (Trend) no longer leaves the button lit without acting. Firmware 0.14.20: on Home, the Setpoint label reads SP, and SP and Go to are at the button text size |
 | E | 4 November 2026 | Firmware 0.14.21: on Home, the Valve button is replaced by the PID tile (KP, TI and KD in use, a tap opens PID tuning) and Menu moves up a row; Maintain replaces the grey SP box in MANUAL and starts AUTO at the pressure shown; Control tuning is renamed PID tuning, with PID and AUTO limits tabs; KD is a saved setting (0 by default); the Valve page is removed, Go to on Home stays. Firmware 0.14.22: a new setpoint in AUTO applies at once; the "Change setpoint to X mB?" question for changes over 5 mbar is removed. Firmware 0.14.23: the header shows the mode as MANUAL mode or AUTO mode in plain lettering, with no box, so it is not taken for a button |
+| F | 4 November 2026 | Firmware 0.15.0: Shut down (the power icon on Home) closes the valve onto the limit switch, takes it as the seat, switches the coils off and turns the controller OFF (black screen, double tap to turn on). A power-up after Shut down with the switch still pressed starts in MANUAL at the seat. New modes SHUTTING DOWN and OFF (MODE? SHUTDOWN and OFF, Modbus mode 4 and 5) and ERR 213. The start-up question says when the controller was switched off without Shut down |
