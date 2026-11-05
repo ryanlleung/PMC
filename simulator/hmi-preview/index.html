@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PMC simulator, HMI template preview</title>
+<style>
+:root {
+  --bg: #DCE3EA; --card: #FFFFFF; --text: #1F2933; --label: #546374; --line: #C3CDD7;
+  --primary: #2D5877; --field: #E9F0F6; --dark: #3F3F3F; --red: #D63031;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { background: #1F2933; color: #fff; padding: 8px 16px; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+header span { color: #C3CDD7; font-size: 13px; }
+main { display: grid; grid-template-columns: minmax(0, 900px) minmax(400px, 1fr); gap: 16px; padding: 16px; align-items: start; }
+@media (max-width: 1100px) { main { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--card); border-radius: 6px; padding: 12px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--label); margin: 0 0 8px; font-weight: 600; }
+#bezel { background: #2B3138; padding: 10px; border-radius: 10px; }
+#screen { display: block; width: 100%; aspect-ratio: 480 / 272; image-rendering: pixelated; touch-action: none; cursor: pointer; background: #000; }
+#halt { display: none; background: #000; color: #fff; border: 3px solid var(--red); padding: 8px 12px; margin-top: 10px; border-radius: 4px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.row label { min-width: 170px; color: var(--label); }
+.row .val { font-variant-numeric: tabular-nums; min-width: 90px; }
+button, select, input { font: inherit; }
+button { background: var(--card); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 4px 10px; cursor: pointer; color: var(--text); }
+button:hover { background: var(--field); }
+button.on { background: var(--primary); color: #fff; border-color: var(--primary); }
+button.bad.on { background: var(--dark); border-color: var(--dark); }
+input[type=number] { width: 90px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; }
+input[type=range] { width: 160px; }
+select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } main { padding: 8px; } }
+#console { background: #11161B; color: #D8E0E8; font: 12px/1.35 ui-monospace, Consolas, monospace; height: 300px; overflow: auto; padding: 8px; white-space: pre-wrap; border-radius: 4px; margin: 0; }
+#cmd { flex: 1; min-width: 160px; padding: 4px 8px; font-family: ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-radius: 4px; }
+.note { color: var(--label); font-size: 12px; margin: 6px 0 0; }
+.warn { color: #fff; background: var(--dark); padding: 1px 6px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PMC simulator, HMI template preview</h1>
+  <span id="ver">firmware loading</span>
+  <span id="clock"></span>
+</header>
+<main>
+  <section>
+    <div id="bezel"><canvas id="screen" width="480" height="272"></canvas></div>
+    <div id="halt"></div>
+    <div class="card" style="margin-top:12px">
+      <h2>Text console (as port 8888)</h2>
+      <pre id="console"></pre>
+      <div class="row">
+        <input id="cmd" placeholder="Command, e.g. PRES?;MODE?, PRES SP 5, MODE AUTO" autocomplete="off" spellcheck="false">
+        <button id="send">Send</button>
+        <button data-cmd="PRES?;PRES SP?;MODE?;VALV?;ALRM?">Poll</button>
+        <button data-cmd="EVNT? 10">EVNT? 10</button>
+        <button data-cmd="*IDN?">*IDN?</button>
+        <button id="clear">Clear</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>Run</h2>
+      <div class="row">
+        <label>Speed</label>
+        <select id="speed">
+          <option value="0">Paused</option>
+          <option value="1" selected>Real time</option>
+          <option value="10">10 x</option>
+          <option value="60">60 x</option>
+          <option value="600">As fast as possible</option>
+        </select>
+        <span class="val" id="simtime"></span>
+      </div>
+      <div class="row">
+        <button id="power">Power cycle</button>
+        <button id="fresh">New board (erase settings)</button>
+      </div>
+      <p class="note">The screen and the serial commands are the mm4 firmware itself, built for the browser. Settings and the saved valve position are kept in this browser between visits, as the board's serial flash keeps them.</p>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>Cryostat</h2>
+      <div class="row"><label>Helium supply</label><button id="he" class="tg" data-id="3">On</button></div>
+      <div class="row"><label>Rotary pump</label><button id="pump" class="tg" data-id="4">On</button></div>
+      <div class="row"><label>Line pressure (true)</label><span class="val" id="p"></span></div>
+      <div class="row"><label>Pot temperature</label><span class="val" id="t"></span></div>
+      <div class="row"><label>Pot liquid</label><span class="val" id="ml"></span></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>Druck and Power Monitor</h2>
+      <div class="row"><label>Druck plugged in</label><button class="tg" data-id="8">Yes</button></div>
+      <div class="row"><label>Druck open to room air</label><button class="tg" data-id="11">No</button>
+        <input type="number" id="room" step="0.1" value="1013.2"> mbar</div>
+      <div class="row"><label>Power Monitor answering</label><button class="tg" data-id="9">Yes</button></div>
+      <div class="row"><label>Druck excitation</label>
+        <select id="exc"><option value="10.051">10.05 V (normal)</option><option value="9.2">9.2 V (low)</option><option value="0">None (Boost 10 off)</option></select></div>
+      <div class="row"><label>Controller temperature</label>
+        <input type="range" id="die" min="15" max="70" step="0.5" value="31"><span class="val" id="dieval"></span></div>
+      <p class="note">The Druck reads about 5 % low through the Power Monitor input, as on the bench, until it is calibrated (Calibrate sensor: vacuum with the valve closed, then room air).</p>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <h2>Valve drive</h2>
+      <div class="row"><label>Motor 12 V supply</label>
+        <input type="range" id="sup" min="0" max="16" step="0.1" value="12.1"><span class="val" id="supval"></span></div>
+      <div class="row"><label></label>
+        <button data-sup="0">Off</button><button data-sup="10">10 V</button><button data-sup="12.1">12.1 V</button><button data-sup="14.5">14.5 V</button></div>
+      <div class="row"><label>Needle coupled to the drive</label><button class="tg" data-id="6">Yes</button></div>
+      <div class="row"><label>Limit switch</label>
+        <select id="limf">
+          <option value="0">Normal</option>
+          <option value="1">Broken wire (always tripped)</option>
+          <option value="2">Stuck (never trips)</option>
+          <option value="3">Trips early (ice)</option>
+        </select></div>
+      <div class="row"><label>Needle (full steps)</label><span class="val" id="needle"></span>
+        <input type="number" id="needleset" step="100" value="20000"><button id="turn">Turn by hand to</button></div>
+      <div class="row"><label>Switch / coils</label><span class="val" id="lim"></span></div>
+      <div class="row"><label>Steps lost</label><span class="val" id="lost"></span></div>
+      <p class="note">Full steps from the switch point; the needle seats 30 steps past the switch, 16512 steps a turn. The motor follows the four Stepper 3 outputs, so MOT MODE, DIR and ORDER act as on the bench, and below 8 V it does not turn.</p>
+    </div>
+  </section>
+</main>
+
+<script src="pmc-wasm.js"></script>
+<script>
+'use strict';
+const STORE = 'pmc-sim-board';
+const $ = id => document.getElementById(id);
+const cv = $('screen'), ctx = cv.getContext('2d'), img = ctx.createImageData(480, 272);
+const bytes = Uint8Array.from(atob(window.PMC_WASM), c => c.charCodeAt(0));
+const module = new WebAssembly.Module(bytes);
+let x = null, halted = null, lastFrames = -1, flashTimer = 0;
+
+function store() { try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch (e) { return {}; } }
+function save(o) { try { localStorage.setItem(STORE, JSON.stringify(o)); } catch (e) {} }
+const mem8 = () => new Uint8Array(x.memory.buffer);
+const cstr = p => { const m = mem8(); let e = p; while (m[e]) e++; return new TextDecoder().decode(m.subarray(p, e)); };
+
+// The serial flash, kept as the 4 KB sectors that are not blank.
+function flashSave() {
+  const f = new Uint8Array(x.memory.buffer, x.sim_flash(), x.sim_flash_size());
+  const sectors = {};
+  for (let s = 0; s < f.length; s += 4096) {
+    let blank = true;
+    for (let i = s; i < s + 4096; i += 4) if (f[i] !== 0xff || f[i + 1] !== 0xff || f[i + 2] !== 0xff || f[i + 3] !== 0xff) { blank = false; break; }
+    if (!blank) { let b = ''; for (let i = s; i < s + 4096; i++) b += String.fromCharCode(f[i]); sectors[s] = btoa(b); }
+  }
+  const o = store(); o.flash = sectors; o.needle = x.sim_get(5); save(o);
+}
+function flashLoad(o) {
+  const f = new Uint8Array(x.memory.buffer, x.sim_flash(), x.sim_flash_size());
+  f.fill(0xff);
+  for (const [s, b64] of Object.entries(o.flash || {})) { const b = atob(b64); for (let i = 0; i < b.length; i++) f[+s + i] = b.charCodeAt(i); }
+}
+
+// Bench switches survive a power cycle (they are the bench, not the board).
+let bench = null;
+function benchSnapshot() {
+  const ids = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 18, 19];
+  const o = {}; ids.forEach(i => o[i] = x.sim_get(i)); o[40] = x.sim_get(0); o[41] = x.sim_get(1); o[42] = x.sim_get(2);
+  return o;
+}
+
+function boot(watchdog) {
+  if (x) bench = benchSnapshot();
+  const inst = new WebAssembly.Instance(module, {
+    env: { js_halt: p => { halted = cstr(p); } },
+    wasi_snapshot_preview1: { random_get: (p, n) => { crypto.getRandomValues(new Uint8Array(x.memory.buffer, p, n)); return 0; } },
+  });
+  x = inst.exports; x._initialize(); halted = null;
+  x.sim_bench_init();
+  const o = store();
+  flashLoad(o);
+  if (bench) Object.entries(bench).forEach(([k, v]) => x.sim_set(+k, v));
+  else if (o.needle !== undefined) x.sim_set(5, o.needle);
+  else x.sim_set(5, 40000);   // first visit: the needle a little open
+  const d = new Date();
+  x.sim_boot(watchdog ? 1 : 0, Math.floor(d.getTime() / 1000) - d.getTimezoneOffset() * 60);
+  $('ver').textContent = 'firmware ' + cstr(x.sim_version());
+  lastFrames = -1;
+  syncControls();
+}
+
+function draw() {
+  const f = x.sim_frames();
+  if (f === lastFrames) return;
+  lastFrames = f;
+  const fb = new Uint16Array(x.memory.buffer, x.sim_fb(), 480 * 272), d = img.data;
+  for (let i = 0, j = 0; i < fb.length; i++, j += 4) {
+    const c = fb[i];
+    d[j] = ((c >> 11) & 31) * 255 / 31; d[j + 1] = ((c >> 5) & 63) * 255 / 63; d[j + 2] = (c & 31) * 255 / 31; d[j + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// Console
+const con = $('console');
+let conText = '';
+function conAdd(s) {
+  conText += s.replace(/\r/g, '');
+  if (conText.length > 200000) conText = conText.slice(-150000);
+  const atEnd = con.scrollTop + con.clientHeight >= con.scrollHeight - 20;
+  con.textContent = conText;
+  if (atEnd) con.scrollTop = con.scrollHeight;
+}
+function drain() {
+  const n = x.sim_tx_len();
+  if (!n) return;
+  conAdd(new TextDecoder().decode(new Uint8Array(x.memory.buffer, x.sim_tx(), n)));
+  x.sim_tx_clear();
+}
+function send(line) {
+  conAdd('> ' + line + '\n');   // the board does not echo (0.13.0): the page shows what was sent
+  const b = new TextEncoder().encode(line + '\r');
+  for (let i = 0; i < b.length; i += 256) {
+    const part = b.subarray(i, i + 256);
+    new Uint8Array(x.memory.buffer, x.sim_rx_buf(), part.length).set(part);
+    x.sim_rx(part.length);
+  }
+}
+$('send').onclick = () => { const v = $('cmd').value.trim(); if (v) { send(v.toUpperCase()); cmdHist.unshift(v); hi = -1; } $('cmd').value = ''; };
+const cmdHist = []; let hi = -1;
+$('cmd').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('send').onclick();
+  else if (e.key === 'ArrowUp' && cmdHist.length) { hi = Math.min(hi + 1, cmdHist.length - 1); $('cmd').value = cmdHist[hi]; e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { hi = Math.max(hi - 1, -1); $('cmd').value = hi < 0 ? '' : cmdHist[hi]; e.preventDefault(); }
+});
+document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => send(b.dataset.cmd));
+$('clear').onclick = () => { conText = ''; con.textContent = ''; };
+
+// Touch. A press is held for at least 80 ms of simulated time, so a quick
+// click is not lost between two reads of the touch panel (every 30 ms).
+// A second finger (Limit override, 0.13.7) is the board's second touch: on a
+// touchscreen, put a second finger down; with a mouse, Shift+click holds a
+// press down (until the next Shift+click) and a plain click is the second.
+let p1 = null, p2 = null, pressAt = 0, releaseDue = false, tx = 0, ty = 0;
+function touchPos(e) {
+  const r = cv.getBoundingClientRect();
+  return [Math.max(0, Math.min(479, Math.round((e.clientX - r.left) * 480 / r.width))),
+          Math.max(0, Math.min(271, Math.round((e.clientY - r.top) * 272 / r.height)))];
+}
+function touchRelease() {
+  if (releaseDue && x.sim_ms() - pressAt >= 80) { releaseDue = false; x.sim_touch(tx, ty, 0); }
+}
+cv.addEventListener('pointerdown', e => {
+  cv.setPointerCapture(e.pointerId);
+  const [px, py] = touchPos(e);
+  if (e.shiftKey && e.pointerType === 'mouse') {
+    if (p1 === 'held') { p1 = null; releaseDue = true; touchRelease(); return; }
+    if (p1 !== null) return;
+    p1 = 'held';
+  } else if (p1 === null) {
+    p1 = e.pointerId;
+  } else {
+    if (p2 === null) { p2 = e.pointerId; x.sim_touch2(px, py, 1); }
+    return;
+  }
+  releaseDue = false; tx = px; ty = py; pressAt = x.sim_ms(); x.sim_touch(tx, ty, 1);
+});
+cv.addEventListener('pointermove', e => {
+  if (e.pointerId === p1) { [tx, ty] = touchPos(e); x.sim_touch(tx, ty, 1); }
+  else if (e.pointerId === p2) { const [px, py] = touchPos(e); x.sim_touch2(px, py, 1); }
+});
+const up = e => {
+  if (e.pointerId === p2) { p2 = null; const [px, py] = touchPos(e); x.sim_touch2(px, py, 0); }
+  else if (e.pointerId === p1) { p1 = null; [tx, ty] = touchPos(e); releaseDue = true; touchRelease(); }
+};
+cv.addEventListener('pointerup', up);
+cv.addEventListener('pointercancel', up);
+
+// Bench controls
+function syncControls() {
+  document.querySelectorAll('.tg').forEach(b => {
+    const on = !!x.sim_get(+b.dataset.id);
+    const yesNo = b.textContent === 'Yes' || b.textContent === 'No';
+    b.textContent = yesNo ? (on ? 'Yes' : 'No') : (on ? 'On' : 'Off');
+    b.classList.toggle('on', on);
+  });
+  $('sup').value = x.sim_get(12); $('die').value = x.sim_get(13); $('limf').value = x.sim_get(7);
+  $('room').value = x.sim_get(19).toFixed(1);
+  $('exc').value = String(x.sim_get(10));
+}
+document.querySelectorAll('.tg').forEach(b => b.onclick = () => { x.sim_set(+b.dataset.id, x.sim_get(+b.dataset.id) ? 0 : 1); syncControls(); });
+$('sup').oninput = () => x.sim_set(12, +$('sup').value);
+document.querySelectorAll('[data-sup]').forEach(b => b.onclick = () => { x.sim_set(12, +b.dataset.sup); syncControls(); });
+$('die').oninput = () => x.sim_set(13, +$('die').value);
+$('limf').onchange = () => x.sim_set(7, +$('limf').value);
+$('exc').onchange = () => x.sim_set(10, +$('exc').value);
+$('room').onchange = () => x.sim_set(19, +$('room').value);
+$('turn').onclick = () => { x.sim_set(5, 2 * Math.round(+$('needleset').value)); };
+$('power').onclick = () => { flashSave(); conAdd('\n--- power cycle ---\n'); boot(false); };
+$('fresh').onclick = () => {
+  if (!confirm('Erase the simulated serial flash (settings, calibration, saved valve position) and power up?')) return;
+  const o = store(); o.flash = {}; save(o); bench = null; x = null; conAdd('\n--- new board ---\n'); boot(false);
+};
+
+function fmt(v, dp) { return Number.isFinite(v) ? v.toFixed(dp) : '----'; }
+function readouts() {
+  $('p').textContent = fmt(x.sim_get(0), 2) + ' mbar';
+  $('t').textContent = fmt(x.sim_get(1), 2) + ' K';
+  $('ml').textContent = fmt(x.sim_get(2), 1) + ' g';
+  $('needle').textContent = (x.sim_get(5) / 2).toFixed(1);
+  const c = x.sim_get(15);
+  $('lim').textContent = (x.sim_get(14) ? 'switch pressed' : 'switch free') + ', coils ' + (c ? c.toString(2).padStart(4, '0') : 'off');
+  $('lost').textContent = 'slipped ' + x.sim_get(16) / 2 + ', stalled ' + x.sim_get(17) / 2;
+  $('supval').textContent = x.sim_get(12).toFixed(1) + ' V';
+  $('dieval').textContent = x.sim_get(13).toFixed(1) + ' C';
+  const s = Math.floor(x.sim_ms() / 1000);
+  $('simtime').textContent = 'up ' + Math.floor(s / 3600) + ':' + String(Math.floor(s / 60) % 60).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+// Main loop: simulated time follows real time times the speed, within a
+// budget per frame so the page stays responsive.
+let last = performance.now(), debt = 0, slow = false;
+function frame(now) {
+  // A finger on the screen runs at real time, so holds and long presses
+  // last as long as the finger does.
+  let speed = +$('speed').value;
+  if (speed > 1 && (p1 !== null || releaseDue)) { speed = 1; debt = Math.min(debt, 100); }
+  const dt = Math.min(now - last, 100);
+  last = now;
+  if (x && !halted && speed > 0) {
+    debt += speed >= 600 ? 1e9 : dt * speed;
+    const t0 = performance.now();
+    try {
+      while (debt >= 1 && performance.now() - t0 < 12) {
+        const n = Math.min(Math.floor(debt), 50);
+        x.sim_run(n); debt -= n;
+        drain(); touchRelease();
+      }
+      slow = debt > 2000 && speed < 600;
+      if (speed >= 600 || debt > 5000) debt = 0;
+    } catch (e) {
+      drain();
+      halted = halted || String(e);
+    }
+    if (halted) {
+      $('halt').style.display = 'block';
+      $('halt').textContent = 'The firmware stopped (' + halted + '). The watchdog resets the board.';
+      flashSave();
+      setTimeout(() => { $('halt').style.display = 'none'; conAdd('\n--- watchdog reset ---\n'); boot(true); }, 1500);
+    }
+  }
+  if (x) {
+    draw(); readouts(); drain();
+    if (x.sim_flash_take_dirty()) flashTimer = now;
+    if (flashTimer && now - flashTimer > 500) { flashTimer = 0; flashSave(); }
+  }
+  $('clock').textContent = slow ? 'running slower than asked' : '';
+  requestAnimationFrame(frame);
+}
+addEventListener('beforeunload', () => { if (x) flashSave(); });
+setInterval(() => { if (x) { const o = store(); o.needle = x.sim_get(5); save(o); } }, 2000);
+boot(false);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
