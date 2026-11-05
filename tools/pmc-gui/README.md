@@ -30,6 +30,7 @@ Then open the address it prints, normally http://localhost:8080. If Windows refu
 ## Before you start
 
 - Settings > System setup > Remote control On, or every button answers ERR 211.
+- If the link drops, the page says so in the top bar and reconnects every 2 s by itself. A gain table run waits up to 2 minutes for the link to come back and then carries on; after that it stops and says so. The board itself carries on in the mode it was in (a run that stops mid-step leaves the valve in MANUAL where it was).
 - The board takes one text-port connection at a time, and a new one replaces the old. Close PuTTY, the logger, `pmc_gains.py` and `sp_step.py` first.
 - STOP on the page and on the screen both end AUTO. If the board leaves AUTO during a step test (a fault, W-2, W-4, W-5 or STOP), the test ends and says why.
 - Every Set and save that changes a gain is written to flash, and so is every setpoint change while the schedule is on (only when the gains differ). Set gains when they change, not in a loop.

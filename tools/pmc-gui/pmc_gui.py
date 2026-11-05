@@ -83,6 +83,9 @@ class Stopped(Exception):
     """Stop test pressed while the tuner was running."""
 
 
+RIDE_S = 120   # a gain table run waits this long for the link to come back
+
+
 class ViaBoard:
     """pmc_gains.Link's ask/do, through the GUI's one connection."""
 
@@ -90,11 +93,21 @@ class ViaBoard:
         self.b = board
 
     def ask(self, line):
-        if self.b.stop_job:
-            raise Stopped()
-        r = self.b.raw(line)
-        if r.startswith('LINK '):
-            raise ConnectionError(r[5:])
+        # A short drop of the link (a cable knocked, the switch, the board's
+        # Ethernet restarting) should not end a run of hours: wait up to
+        # RIDE_S for the reconnect, then send the line again. Every line a
+        # run sends is a query or a set to an absolute value, so sending it
+        # twice does no harm.
+        give_up = time.monotonic() + RIDE_S / self.b.speed
+        while True:
+            if self.b.stop_job:
+                raise Stopped()
+            r = self.b.raw(line)
+            if not r.startswith('LINK '):
+                break
+            if time.monotonic() > give_up:
+                raise ConnectionError('%s (no link for %d s)' % (r[5:], RIDE_S))
+            time.sleep(1 / self.b.speed)
         parts = r.split(';')
         if parts[0].startswith('ERR'):
             raise Refused(parts[0])
@@ -139,7 +152,25 @@ class Board:
     def connect(self):
         self.sock = socket.create_connection(self.addr, timeout=5)
         self.buf = b''
-        self.state['idn'] = self.ask('*IDN?')
+        # After a drop the board can still send the answer to a line from
+        # the old connection down this new one. Throw away whatever comes in
+        # the first half second, then skip any line that is not the *IDN?
+        # answer, so every later reply lines up with its question.
+        self.sock.settimeout(0.5)
+        try:
+            while self.sock.recv(4096):
+                pass
+        except socket.timeout:
+            pass
+        self.sock.settimeout(5)
+        self.sock.sendall(b'*IDN?\n')
+        for _ in range(6):
+            r = self.line()
+            if r.count(',') >= 3 and ';' not in r and not r.startswith('ERR'):
+                break
+        else:
+            raise ConnectionError('no *IDN? answer after connecting')
+        self.state['idn'] = r
         self.state['link'] = 'connected'
 
     def line(self):
