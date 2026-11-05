@@ -546,10 +546,13 @@ static void ip_event(lv_event_t *e)
 static void ip_make(lv_obj_t *scr, int32_t y)
 {
     lv_obj_t *b = ui_btn(scr, 361, y, 109, 48, UI_SECONDARY, "", ip_event, NULL);
-    // Left-aligned at the template's 12 px padding, as Menu (Ryan 5 Nov, 0.15.10).
-    ui_label(b, 12, 8, 95, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "IP address");
-    ip_val = ui_label(b, 12, 25, 95, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
-    lv_obj_set_width(ip_val, LV_SIZE_CONTENT);   // a long address moves left instead of wrapping
+    // Centred (Ryan 5 Nov: left-aligned in 0.15.10, back to centred in 0.15.12).
+    ui_label(b, 1, 8, 107, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "IP address");
+    ip_val = ui_label(b, 1, 25, 107, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
+    // As wide as its text and centred on the tile, so 192.168.100.200/24
+    // (a pixel wider than the tile's inside) runs to the edges, not wraps.
+    lv_obj_set_width(ip_val, LV_SIZE_CONTENT);
+    lv_obj_align(ip_val, LV_ALIGN_TOP_MID, 0, 25);
 }
 
 // Prefix length of a dotted mask: 255.255.255.0 is 24.
@@ -573,14 +576,7 @@ static void ip_refresh(void)
     char ip[16], mask[16], t[24];
     cfg_net_boot(ip, mask);
     lv_snprintf(t, sizeof t, "%s/%d", ip, ip_prefix(mask));
-    if (strcmp(lv_label_get_text(ip_val), t) != 0) {
-        lv_label_set_text(ip_val, t);
-        // 192.168.100.200/24 is wider than the 95 px after the padding:
-        // centre it in the tile instead.
-        lv_obj_update_layout(ip_val);
-        int32_t w = lv_obj_get_width(ip_val);
-        lv_obj_set_x(ip_val, w > 95 ? LV_MAX(1, (109 - 2 - w) / 2 + 1) : 12);
-    }
+    ui_set_text(ip_val, t);
 #else
     ui_set_text(ip_val, "USB build");
 #endif
