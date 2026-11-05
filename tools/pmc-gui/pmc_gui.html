@@ -6,78 +6,151 @@
 <title>iPC Control Test</title>
 <style>
   :root { --bg: #e4e8ec; --card: #fff; --text: #1d2226; --muted: #5a646c; --line: #c9d0d6;
-          --blue: #2d5877; --red: #c0392b; --amber: #b7791f; }
+          --blue: #2d5877; --red: #c0392b; --amber: #b7791f; --green: #2e7d4f; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, "Segoe UI", sans-serif; }
-  header { background: #1d2226; color: #fff; padding: 0 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; min-height: 48px; }
+  header { background: #1d2226; color: #fff; padding: 0 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; min-height: 48px; }
   header b { font-size: 17px; }
-  #link { font-size: 13px; color: #c9d0d6; }
-  nav { display: flex; gap: 2px; margin-left: 12px; }
+  nav { display: flex; gap: 2px; }
   nav button { background: transparent; color: #c9d0d6; border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 13px 14px 10px; }
   nav button:hover { background: #2a3238; }
   nav button.on { color: #fff; border-bottom-color: #8db8da; font-weight: 600; }
-  #mode { margin-left: auto; padding: 4px 14px; background: #384652; font-weight: 600; min-width: 110px; text-align: center; }
+  .pills { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; padding: 6px 0; }
+  .pill { font-size: 12px; background: #2a3238; color: #dfe5ea; border: 0; padding: 4px 10px; border-radius: 12px; max-width: 300px;
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pill:hover { background: #384652; }
+  .pill i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #6b757d; margin-right: 6px; }
+  .pill.ok i { background: #4caf7a; } .pill.bad i { background: #e05a4b; }
+  .pill.rec i { background: #e05a4b; animation: blink 1.6s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  #mode { padding: 4px 14px; background: #384652; font-weight: 600; min-width: 110px; text-align: center; }
   #mode.auto { background: var(--blue); } #mode.fault { background: var(--red); }
-  main { padding: 12px 16px; display: grid; grid-template-columns: 1fr 320px; gap: 12px; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } nav { margin-left: 0; } }
+
+  #runbar { margin: 12px 16px 0; background: var(--card); border-radius: 4px; padding: 10px 14px; display: flex; gap: 18px;
+            flex-wrap: wrap; border-left: 6px solid #9aa6b0; }
+  #runbar.running { border-left-color: var(--blue); }
+  #runbar.waiting { border-left-color: var(--amber); }
+  .rb-main { flex: 1; min-width: 260px; }
+  .tag { font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 2px 7px; border-radius: 3px; background: #9aa6b0; color: #fff; vertical-align: 2px; margin-right: 6px; }
+  .running .tag { background: var(--blue); } .waiting .tag { background: var(--amber); }
+  #rbName { font-size: 16px; } #rbStep { color: var(--muted); margin-left: 8px; }
+  #rbStage { color: var(--text); font-size: 14px; margin: 3px 0 7px; }
+  .waiting #rbStage { color: var(--amber); font-weight: 600; }
+  .bar { height: 8px; background: #e3e9ef; border-radius: 4px; overflow: hidden; }
+  .bar div { height: 100%; background: var(--blue); width: 0; transition: width .6s; }
+  .steps { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .steps li { font-size: 12px; padding: 3px 8px; border-radius: 3px; background: #f0f3f5; color: var(--muted); }
+  .steps li.done { background: #e4f1e8; color: #1f5a38; }
+  .steps li.now { background: var(--blue); color: #fff; font-weight: 600; }
+  .steps li.failed, .steps li.stopped { background: #fbe9e7; color: var(--red); }
+  .steps li span { font-weight: 400; opacity: .85; }
+  .rb-side { display: grid; grid-template-columns: auto auto; gap: 2px 12px; align-content: start; font-variant-numeric: tabular-nums; }
+  .rb-side .k { color: var(--muted); font-size: 13px; }
+  .rb-side button { grid-column: 1 / 3; margin-top: 6px; }
+  .idle .rb-side, .idle .bar { display: none; }
+  #rbDir { font-size: 12px; color: var(--muted); margin-top: 6px; word-break: break-all; }
+
+  main { padding: 12px 16px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } .pills { margin-left: 0; } }
   .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
   .card { background: var(--card); border-radius: 4px; padding: 10px 12px; }
   .card h2 { font-size: 13px; color: var(--muted); font-weight: 600; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .04em; }
+  .card.running { outline: 2px solid var(--blue); }
+  .badge { display: none; font-size: 11px; background: var(--blue); color: #fff; padding: 1px 6px; border-radius: 3px; margin-left: 8px; letter-spacing: .04em; }
+  .card.running .badge { display: inline; }
+  .stopbtn { display: none; } .card.running .stopbtn { display: inline-block; }
   .hint { font-size: 13px; color: var(--muted); }
-  .readings { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-  .reading .v { font-size: 34px; font-variant-numeric: tabular-nums; }
+  .est { font-size: 13px; color: var(--text); margin: -2px 0 8px; }
+  .info { font-size: 13px; margin-bottom: 8px; word-break: break-all; }
+  .readings { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+  .reading .v { font-size: 32px; font-variant-numeric: tabular-nums; }
   .reading .u { color: var(--muted); font-size: 14px; }
-  #chart { width: 100%; height: 320px; display: block; }
+  .reading.temp .v { font-size: 26px; }
+  .reading h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #chart { width: 100%; height: 300px; display: block; }
+  .tchart { width: 100%; height: 110px; display: block; margin-top: 6px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
   label { font-size: 13px; color: var(--muted); }
-  .w { width: 60px; }
+  .w { width: 64px; }
   input[type=number], input[type=text] { width: 80px; padding: 6px; border: 1px solid var(--line); border-radius: 3px; font: inherit; }
-  input.wide { width: 100%; flex: 1; }
-  button { padding: 7px 12px; border: 1px solid var(--line); background: #f4f6f8; border-radius: 3px; font: inherit; cursor: pointer; }
+  input.wide { flex: 1; min-width: 120px; }
+  input.changed { border-color: var(--amber); background: #fff8e6; }
+  button { padding: 7px 12px; border: 1px solid var(--line); background: #f4f6f8; border-radius: 3px; font: inherit; cursor: pointer; color: var(--text); }
   button:hover { background: #e9edf0; }
-  button:disabled { opacity: .5; cursor: default; }
+  button:disabled { opacity: .45; cursor: default; }
   button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
-  button.stop { background: var(--red); color: #fff; border-color: var(--red); font-weight: 600; width: 100%; padding: 12px; font-size: 18px; }
+  button.busy { cursor: progress; opacity: .6; }
+  button.okflash { box-shadow: 0 0 0 3px #7cc49a; }
+  button.badflash { box-shadow: 0 0 0 3px #e58b80; }
+  button.stop { background: var(--red); color: #fff; border-color: var(--red); font-weight: 700; width: 100%; padding: 12px; font-size: 20px; }
+  button.stoptest { border-color: var(--red); color: var(--red); background: #fff; font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; min-width: 88px; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--blue); color: #fff; font-weight: 600; }
   #alarm { color: var(--red); font-weight: 600; min-height: 20px; }
-  #msg { min-height: 20px; font-size: 13px; color: var(--amber); }
   table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 600; }
   .mono { font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
-  #log { color: var(--muted); max-height: 220px; overflow-y: auto; }
-  .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
+  #log { color: var(--muted); max-height: 260px; overflow-y: auto; }
+  .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
   .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 4px; }
   select { padding: 5px; font: inherit; }
   .tab { display: none; } .tab.on { display: flex; }
-  .state { font-size: 13px; color: var(--blue); font-weight: 600; min-height: 18px; }
   .scroll { max-height: 320px; overflow-y: auto; }
+  #toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: #1d2226; color: #fff; padding: 8px 14px;
+           border-radius: 4px; font-size: 14px; opacity: 0; transition: opacity .3s; pointer-events: none; max-width: 92vw; }
+  #toast.show { opacity: .96; } #toast.bad { background: var(--red); }
 </style>
 </head>
 <body>
 <header>
   <b>iPC control test</b>
   <nav><button data-tab="live" class="on">Live</button><button data-tab="tests">Tests</button><button data-tab="gains">Gains</button><button data-tab="board">Board</button></nav>
-  <span id="link">connecting</span><span id="mode">--</span>
+  <div class="pills">
+    <button class="pill" id="pBoard" onclick="go('board')"><i></i><span id="link">Board: connecting</span></button>
+    <button class="pill" id="pLs" onclick="go('live', 'lsCard')"><i></i><span id="lsPill">Lake Shore off</span></button>
+    <button class="pill" id="pLog" onclick="go('live', 'logCard')"><i></i><span id="logPill">Logger</span></button>
+  </div>
+  <span id="mode">--</span>
 </header>
+
+<section id="runbar" class="idle">
+  <div class="rb-main">
+    <div><span class="tag" id="rbTag">IDLE</span><b id="rbName">No test running</b><span id="rbStep"></span></div>
+    <div id="rbStage"></div>
+    <div class="bar"><div id="rbBar"></div></div>
+    <ol id="rbSteps" class="steps"></ol>
+    <div id="rbDir"></div>
+  </div>
+  <div class="rb-side">
+    <span class="k">Elapsed</span><b id="rbEl">--</b>
+    <span class="k">Left</span><b id="rbLeft">--</b>
+    <span class="k">Done at</span><b id="rbEta">--</b>
+    <button class="stoptest" onclick="stopTest(this)" title="Ends the test and puts back the setpoint and mode it found">Stop test</button>
+  </div>
+</section>
+
 <main>
   <div class="col">
-    <div class="card readings">
+    <div class="card readings" id="readings">
       <div class="reading"><h2>Pressure</h2><span class="v" id="p">--</span> <span class="u">mbar</span></div>
       <div class="reading"><h2>Setpoint</h2><span class="v" id="sp">--</span> <span class="u">mbar</span></div>
       <div class="reading"><h2>Valve</h2><span class="v" id="v">--</span> <span class="u">%</span></div>
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div class="legend"><span><i style="background:#2d5877"></i>Pressure</span><span><i style="background:#3f3f3f"></i>Setpoint</span><span><i style="background:#9aa6b0"></i>Valve (right axis)</span></div>
-        <div><label>Show</label> <select id="win"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="3600">1 hour</option><option value="14400">4 hours</option></select>
-          <button onclick="location.href='/api/csv'">Download CSV</button></div>
+        <div class="legend"><span><i style="background:#2d5877"></i>Pressure</span><span><i style="background:#3f3f3f"></i>Setpoint</span><span><i style="background:#9aa6b0"></i>Valve (right axis)</span><span><i style="background:#b9c9d6"></i>Test stage</span></div>
+        <div><label>Show</label> <select id="win"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="3600">1 hour</option><option value="14400">4 hours</option></select></div>
       </div>
       <canvas id="chart"></canvas>
+      <div id="tWrap"></div>
       <div id="alarm"></div>
     </div>
 
     <div class="tab col on" data-tab="live">
-      <div class="card"><h2>Log</h2><div id="log" class="mono"></div></div>
+      <div class="card"><h2>Activity, newest first</h2><div id="log" class="mono"></div></div>
     </div>
     <div class="tab col" data-tab="tests">
       <div class="card">
@@ -101,6 +174,10 @@
     </div>
     <div class="tab col" data-tab="board">
       <div class="card">
+        <h2>Board</h2>
+        <div id="idn" class="info"></div>
+      </div>
+      <div class="card">
         <h2>Event log, newest first</h2>
         <div class="scroll"><table><thead><tr><th>Age</th><th>Tag</th><th>Event</th></tr></thead><tbody id="evRows"><tr><td colspan="3" class="hint">Press Read events</td></tr></tbody></table></div>
       </div>
@@ -112,167 +189,317 @@
   </div>
 
   <div class="col">
-    <button class="stop" onclick="cmd('STOP')">STOP</button>
+    <div>
+      <button class="stop" onclick="stopAll(this)">STOP</button>
+      <div class="hint" style="margin-top:4px">The valve stops where it is and any test ends. Nothing is put back.</div>
+    </div>
 
     <div class="tab col on" data-tab="live">
       <div class="card">
         <h2>Control</h2>
-        <div class="row"><label>Setpoint</label><input id="spIn" type="number" step="0.1" min="0" value="5"><button onclick="cmd('PRES SP ' + val('spIn'))">Set</button></div>
-        <div class="row"><button class="primary" onclick="cmd('MODE AUTO')">Start AUTO</button><button onclick="cmd('MODE MANUAL')">MANUAL</button></div>
-        <div class="row"><label>Valve</label><input id="vIn" type="number" step="0.1" min="0" max="100" value="10"><button onclick="cmd('VALV SET ' + val('vIn'))">Go to %</button></div>
+        <div class="row"><label class="w">Mode</label><div class="seg"><button id="mAuto" onclick="cmd('MODE AUTO', this)">AUTO</button><button id="mMan" onclick="cmd('MODE MANUAL', this)">MANUAL</button></div></div>
+        <div class="row"><label class="w">Setpoint</label><input id="spIn" type="number" step="0.1" min="0" value="5" onkeydown="if(event.key==='Enter')$('spBtn').click()"><label>mbar</label><button id="spBtn" onclick="cmd('PRES SP ' + val('spIn'), this)">Set</button></div>
+        <div class="row"><label class="w">Valve</label><input id="vIn" type="number" step="0.1" min="0" max="100" value="10" onkeydown="if(event.key==='Enter')$('vBtn').click()"><label>%</label><button id="vBtn" onclick="cmd('VALV SET ' + val('vIn'), this)">Go to</button></div>
+        <div class="hint">The filled mode button is the mode the board is in now.</div>
       </div>
-      <div class="card" id="pidCard">
+      <div class="card">
         <h2>PID gains</h2>
         <div class="row"><label style="width:28px">KP</label><input id="kp" type="number" step="0.01"><label>% per mbar</label></div>
         <div class="row"><label style="width:28px">TI</label><input id="ti" type="number" step="0.01"><label>min, 0 off</label></div>
         <div class="row"><label style="width:28px">KD</label><input id="kd" type="number" step="0.01"><label>% per mbar/s</label></div>
-        <div class="row"><button class="primary" onclick="setPid()">Set and save</button><button onclick="pidLoaded=false">Read back</button></div>
+        <div class="row"><button class="primary" onclick="setPid(this)">Set and save</button><button onclick="readBack(this)">Read back</button></div>
         <div class="hint" id="pidNow"></div>
+      </div>
+      <div class="card" id="logCard">
+        <h2>Logger</h2>
+        <div id="logInfo" class="info"></div>
+        <div class="row"><button id="logBtn" onclick="toggleLog(this)">Stop logging</button><button onclick="post('/api/log', { new: true }, this, 'New log file')">New file</button><button onclick="location.href='/api/csv'">Download session CSV</button></div>
+        <div class="hint">Every sample, one a second, is written to the file as it comes, with the temperatures and the test stage. Each test also saves its own folder beside it: its samples, its results after every step and its messages, so a test that stops or stalls keeps everything up to there.</div>
+      </div>
+      <div class="card" id="lsCard">
+        <h2>Lake Shore 336</h2>
+        <div class="row"><label class="w">IP</label><input id="lsHost" type="text" class="wide" placeholder="the 336's IP address"></div>
+        <div class="row"><label class="w">Inputs</label><input id="lsIn" type="text" class="wide" value="A=Heat exchanger, D=Cold head"></div>
+        <div class="row"><button class="primary" onclick="lsConnect(this)">Connect</button><button onclick="post('/api/ls', { host: '' }, this, 'Disconnect Lake Shore')">Disconnect</button></div>
+        <div id="lsInfo" class="info"></div>
+        <div class="hint">TCP port 7777, KRDG? for each input once a second. Its own link: the temperatures keep logging when the board's link is down.</div>
       </div>
     </div>
 
     <div class="tab col" data-tab="tests">
-      <div class="state" id="tState"></div>
-      <div class="card">
-        <h2>1. Valve step test (MANUAL)</h2>
+      <div class="card" data-kind="valve">
+        <h2>1. Valve step test (MANUAL)<span class="badge">Running</span></h2>
         <div class="row"><label class="w">At</label><input id="vAt" type="number" step="0.1" value="35"><label>% open</label></div>
         <div class="row"><label class="w">Step</label><input id="vStep" type="number" step="0.1" value="1"><label>%, then back</label></div>
         <div class="row"><label class="w">Settle</label><input id="vHold" type="number" value="180"><label>s before the step</label></div>
         <div class="row"><label class="w">Record</label><input id="vRec" type="number" value="600"><label>s per step</label></div>
-        <div class="row"><button class="primary run" onclick="startVtest()">Run</button><button onclick="post('/api/test/stop', {})">Stop test</button></div>
+        <div class="est" id="vEst"></div>
+        <div class="row"><button class="primary run" onclick="startVtest(this)">Run valve test</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
         <div class="hint">MANUAL, the valve to At, a wait, then open by Step and close back, each recorded and fitted. Start At near where AUTO holds your setpoint.</div>
       </div>
-      <div class="card">
-        <h2>2. Setpoint step test (AUTO)</h2>
+      <div class="card" data-kind="setpoint">
+        <h2>2. Setpoint step test (AUTO)<span class="badge">Running</span></h2>
         <div class="row"><label class="w">From</label><input id="tFrom" type="number" step="0.1" value="3"><label>mbar</label></div>
         <div class="row"><label class="w">To</label><input id="tTo" type="number" step="0.1" value="5"><label>mbar</label></div>
         <div class="row"><label class="w">Record</label><input id="tRec" type="number" value="600"><label>s per step</label></div>
         <div class="row"><label class="w">Band</label><input id="tBand" type="number" step="0.01" value="0.1"><label>mbar, settled</label></div>
         <div class="row"><label><input id="tBack" type="checkbox" checked> Step back afterwards</label></div>
-        <div class="row"><button class="primary run" onclick="startTest()">Run</button><button onclick="post('/api/test/stop', {})">Stop test</button></div>
+        <div class="est" id="tEst"></div>
+        <div class="row"><button class="primary run" onclick="startTest(this)">Run setpoint test</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
         <div class="hint">AUTO at From, 2 min within the band, then the step, with the gains on the board (the scheduled ones when the gain schedule is on).</div>
       </div>
     </div>
 
     <div class="tab col" data-tab="gains">
-      <div class="state" id="gState"></div>
-      <div class="card">
-        <h2>Make a gain table</h2>
-        <div class="row"><label class="w">Setpoints</label><input id="gSps" type="text" value="2 5 10" style="width:140px"><label>mbar</label></div>
+      <div class="card" data-kind="gains">
+        <h2>Make a gain table<span class="badge">Running</span></h2>
+        <div class="row"><label class="w">Setpoints</label><input id="gSps" type="text" class="wide" value="1 2 3 5 8 12 18 25 50"><label>mbar</label></div>
         <div class="row"><label class="w">First step</label><input id="gStep" type="number" step="0.1" value="0.5"><label>% valve</label></div>
         <div class="row"><label class="w">Speed</label><select id="gTc"><option value="0.7">Faster (tc 0.7)</option><option value="1" selected>Normal (tc 1)</option><option value="1.5">Calmer (tc 1.5)</option></select></div>
-        <div class="row"><button class="primary run" onclick="startTune()">Run</button><button onclick="post('/api/test/stop', {})">Stop</button></div>
-        <div class="hint">At each setpoint: AUTO until it holds, then MANUAL valve steps up and back, fitted to a KP and TI. 10 to 20 min a setpoint. At the end it puts back the setpoint and mode it found, with the valve where the last setpoint held.</div>
+        <div class="est" id="gEst"></div>
+        <div class="row"><button class="primary run" onclick="startTune(this)">Run gain table</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
+        <div class="hint">At each setpoint: AUTO until it holds, then MANUAL valve steps up and back, fitted to a KP and TI. A setpoint that gives no usable step is skipped and the run carries on. The table is saved after every setpoint. At the end it puts back the setpoint and mode it found, with the valve where the last setpoint held.</div>
       </div>
       <div class="card">
         <h2>Table file</h2>
-        <div class="row"><button onclick="location.href='/api/table.csv'">Download table</button><label><input type="file" id="tFile" accept=".csv" style="width:180px"></label></div>
+        <div class="row"><button onclick="location.href='/api/table.csv'">Download table</button><label><input type="file" id="tFile" accept=".csv" style="width:190px"></label></div>
         <div class="hint">A table from pmc_gains.py tune works too. Only sp_mbar, kp and ti_min are used.</div>
       </div>
       <div class="card">
         <h2>Gain schedule</h2>
-        <div class="row"><button class="primary" id="schOn" onclick="post('/api/schedule', {on: true})">Start schedule</button><button onclick="post('/api/schedule', {on: false})">Stop schedule</button></div>
-        <div class="hint" id="schState">Off. When on, each setpoint change sets KP and TI from the table (also during setpoint step tests; paused while a gain table is made).</div>
+        <div class="row"><div class="seg"><button id="schOn" onclick="post('/api/schedule', { on: true }, this, 'Gain schedule on')">On</button><button id="schOff" onclick="post('/api/schedule', { on: false }, this, 'Gain schedule off')">Off</button></div></div>
+        <div class="hint" id="schState"></div>
       </div>
     </div>
 
     <div class="tab col" data-tab="board">
       <div class="card">
         <h2>Alarms</h2>
-        <div class="row"><button onclick="cmd('ALRM RESET')">Reset faults</button><button onclick="cmd('ALRM OK')">OK warning</button></div>
+        <div class="row"><button onclick="cmd('ALRM RESET', this)">Reset faults</button><button onclick="cmd('ALRM OK', this)">OK warning</button></div>
       </div>
       <div class="card">
         <h2>Event log</h2>
-        <div class="row"><label>Last</label><input id="evN" type="number" value="30" min="1" max="100"><button onclick="readEvents()">Read events</button></div>
+        <div class="row"><label>Last</label><input id="evN" type="number" value="30" min="1" max="100"><button onclick="readEvents(this)">Read events</button></div>
       </div>
       <div class="card">
         <h2>Board clock</h2>
-        <div class="row"><button onclick="post('/api/time', {})">Set to this PC's time</button></div>
+        <div class="row"><button onclick="post('/api/time', {}, this, 'Board clock set')">Set to this PC's time</button></div>
       </div>
       <div class="card">
         <h2>Command</h2>
-        <div class="row"><input id="raw" type="text" class="wide" placeholder="e.g. PRES?;MODE?" onkeydown="if(event.key==='Enter')sendRaw()"><button onclick="sendRaw()">Send</button></div>
+        <div class="row"><input id="raw" type="text" class="wide" placeholder="e.g. PRES?;MODE?" onkeydown="if(event.key==='Enter')$('rawBtn').click()"><button id="rawBtn" onclick="sendRaw(this)">Send</button></div>
         <div class="hint">Any text port command. Commands share a line with ;. NETW? and *IDN? identify the board.</div>
       </div>
     </div>
-
-    <div id="msg"></div>
   </div>
 </main>
+<div id="toast"></div>
 <script>
 const $ = id => document.getElementById(id);
-const val = id => $(id).value;
-const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
-let rows = [], last = -1, pidLoaded = false, tab = 'live';
+const val = id => $(id).value.trim();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+const TCOL = ['#b5541c', '#6b4fa0', '#2e7d4f', '#8a6d1d'];
+let rows = [], last = -1, pidLoaded = false, lsLoaded = false, tab = 'live', S = null, inFlight = false, tKey = '';
 
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-  tab = b.dataset.tab;
-  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
-  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === tab));
+function go(t, card) {
+  tab = t;
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x.dataset.tab === t));
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.dataset.tab === t));
+  if (card) $(card).scrollIntoView({ behavior: 'smooth', block: 'center' });
   draw();
-});
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => go(b.dataset.tab));
 
-async function post(url, body) {
+// Every button says what happened: it flashes green or red, and a line at
+// the bottom of the page names the action and the board's answer.
+let toastT;
+function toast(text, bad) {
+  const t = $('toast'); t.textContent = text; t.className = 'show' + (bad ? ' bad' : '');
+  clearTimeout(toastT); toastT = setTimeout(() => t.className = bad ? 'bad' : '', bad ? 7000 : 3500);
+}
+const hhmmss = () => new Date().toTimeString().slice(0, 8);
+async function post(url, body, btn, what, okText) {
+  if (btn) { btn.classList.add('busy'); btn.disabled = true; }
+  let j;
   try {
     const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const j = await r.json();
-    $('msg').textContent = j.reply || '';
-    return j;
-  } catch (e) { $('msg').textContent = 'No answer from pmc_gui.py: is it still running?'; return {}; }
+    j = await r.json();
+  } catch (e) { j = { reply: 'no answer from pmc_gui.py: is it still running?' }; }
+  if (btn) {
+    btn.classList.remove('busy'); btn.disabled = false;
+    const c = j.reply ? 'badflash' : 'okflash'; btn.classList.add(c); setTimeout(() => btn.classList.remove(c), 1500);
+  }
+  toast(hhmmss() + '  ' + (what || (btn ? btn.textContent.trim() : url)) + ': ' + (j.reply || okText || 'done'), !!j.reply);
+  refresh();
+  return j;
 }
-const cmd = line => post('/api/cmd', { line }).then(j => j.reply);
-function setPid() {
+const cmd = (line, btn) => post('/api/cmd', { line }, btn, line).then(j => j.reply);
+const stopAll = btn => post('/api/stop', {}, btn, 'STOP', 'valve stopped');
+const stopTest = btn => post('/api/test/stop', {}, btn, 'Stop test', 'stopping');
+function setPid(btn) {
   const kd = val('kd');
-  cmd('PID SET ' + val('kp') + ',' + val('ti') + (kd !== '' ? ',' + kd : '')).then(r => { if (!r) pidLoaded = false; });
+  cmd('PID SET ' + val('kp') + ',' + val('ti') + (kd !== '' ? ',' + kd : ''), btn).then(r => { if (!r) pidLoaded = false; });
 }
-const startVtest = () => post('/api/vtest', { at: +val('vAt'), step: +val('vStep'), hold: +val('vHold'), record: +val('vRec') });
-const startTest = () => post('/api/test', { start: +val('tFrom'), to: +val('tTo'), record: +val('tRec'), band: +val('tBand'), back: $('tBack').checked, hold: 120 });
-const startTune = () => post('/api/tune', { sps: val('gSps'), step: +val('gStep'), tc: +val('gTc') });
+function readBack(btn) { pidLoaded = false; toast(hhmmss() + '  PID boxes read back from the board'); refresh(); }
+const startVtest = btn => post('/api/vtest', { at: +val('vAt'), step: +val('vStep'), hold: +val('vHold'), record: +val('vRec') }, btn, 'Valve step test', 'started');
+const startTest = btn => post('/api/test', { start: +val('tFrom'), to: +val('tTo'), record: +val('tRec'), band: +val('tBand'), back: $('tBack').checked, hold: 120 }, btn, 'Setpoint step test', 'started');
+const startTune = btn => post('/api/tune', { sps: val('gSps'), step: +val('gStep'), tc: +val('gTc') }, btn, 'Gain table', 'started');
+const toggleLog = btn => post('/api/log', { on: !(S && S.logger.on) }, btn, S && S.logger.on ? 'Logging stopped' : 'Logging started');
+function lsConnect(btn) {
+  if (!val('lsHost')) { toast('Type the 336 IP address first', true); return; }
+  post('/api/ls', { host: val('lsHost'), inputs: val('lsIn') }, btn, 'Lake Shore 336', 'connecting');
+}
 function useGains(kp, ti) {
   $('kp').value = kp.toFixed(2); $('ti').value = ti.toFixed(2); pidLoaded = true;
-  $('msg').textContent = 'KP and TI filled in on the Live tab: press Set and save to use them.';
+  go('live'); toast('KP and TI filled in: press Set and save to use them');
 }
 $('tFile').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
-  await post('/api/table', { csv: await f.text(), name: f.name }); e.target.value = '';
+  await post('/api/table', { csv: await f.text(), name: f.name }, null, 'Load ' + f.name, 'loaded'); e.target.value = '';
 };
-async function readEvents() {
-  const j = await post('/api/events', { n: +val('evN') });
+async function readEvents(btn) {
+  const j = await post('/api/events', { n: +val('evN') }, btn, 'Read events', 'read');
   const ls = (j.lines || []).slice(1).map(l => { const a = l.split(','); return [a[0], a[1], a.slice(2).join(',')]; });
   $('evRows').innerHTML = ls.length ? ls.map(r => `<tr><td>${esc(fmtAge(+r[0]))}</td><td>${esc(r[1])}</td><td>${esc(r[2])}</td></tr>`).join('')
     : `<tr><td colspan="3" class="hint">${esc((j.lines || [''])[0] || 'No events')}</td></tr>`;
 }
 function fmtAge(s) { return !isFinite(s) ? '' : s < 120 ? s.toFixed(0) + ' s' : s < 7200 ? (s / 60).toFixed(0) + ' min' : (s / 3600).toFixed(1) + ' h'; }
-async function sendRaw() {
-  const line = val('raw').trim(); if (!line) return;
-  const j = await post('/api/raw', { line });
+async function sendRaw(btn) {
+  const line = val('raw'); if (!line) return;
+  const j = await post('/api/raw', { line }, btn, line, 'sent');
   $('cmdOut').textContent = '> ' + line + '\n' + (j.lines || []).join('\n') + '\n\n' + $('cmdOut').textContent;
 }
 const fmt = (x, d) => x === null || x === undefined ? '--' : x.toFixed(d);
+const fmtK = x => x === null || x === undefined ? '--' : x.toFixed(x < 10 ? 3 : 2);
 const none = n => `<tr><td colspan="${n}" class="hint">None yet</td></tr>`;
+function fmtDur(s) {
+  if (s === null || s === undefined || !isFinite(s)) return '--';
+  s = Math.max(0, Math.round(s));
+  if (s < 90) return s + ' s';
+  const m = Math.round(s / 60);
+  return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + String(m % 60).padStart(2, '0') + ' min';
+}
+function fmtClock(s) {
+  s = Math.max(0, Math.round(s));
+  return Math.floor(s / 3600) + ':' + String(Math.floor(s % 3600 / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+function setPill(id, cls, text, title) { $(id).className = 'pill ' + cls; $(id).lastElementChild.textContent = text; $(id).title = title || text; }
+
+// What each test will take, from its boxes.
+function estimates() {
+  const hold = +val('vHold') || 0, rec = +val('vRec') || 0;
+  $('vEst').textContent = `Takes ${fmtDur(hold + 2 * rec)}: ${hold} s settling, then 2 steps of ${rec} s.`;
+  const n = $('tBack').checked ? 2 : 1, tr = +val('tRec') || 0;
+  $('tEst').textContent = `Takes ${fmtDur(n * tr)} once the pressure holds at From for 2 min (${n} step${n > 1 ? 's' : ''} of ${tr} s).`;
+  const k = val('gSps').split(/[\s,]+/).filter(x => +x > 0).length;
+  $('gEst').textContent = k ? `${k} setpoint${k > 1 ? 's' : ''}: about ${fmtDur(k * 600)} to ${fmtDur(k * 1200)} (10 to 20 min each).` : 'Give at least one setpoint.';
+}
+document.querySelectorAll('#vHold,#vRec,#tRec,#tBack,#gSps').forEach(e => e.addEventListener('input', estimates));
+estimates();
+
+const ICON = { done: '✓', now: '▶', todo: '○', failed: '✗', stopped: '■' };
+function stepsHtml(steps) {
+  return steps.map(s => `<li class="${s.state}">${ICON[s.state] || ''} ${esc(s.label)}` +
+    (s.note ? ` <span>· ${esc(s.note)}</span>` : '') +
+    (s.took_s !== null && s.took_s !== undefined && s.state !== 'todo' ? ` <span>· ${fmtDur(s.took_s)}</span>` : '') + '</li>').join('');
+}
+function runbar(s) {
+  const P = s.prog, rb = $('runbar');
+  if (!P) {
+    rb.className = 'idle';
+    $('rbTag').textContent = 'IDLE'; $('rbName').textContent = 'No test running'; $('rbStep').textContent = '';
+    const L = s.last_prog;
+    $('rbStage').textContent = L ? `Last: ${L.name}, ${L.outcome}, at ${L.at}.` : 'Start a test on the Tests or Gains tab. The logger records either way.';
+    $('rbSteps').innerHTML = L ? stepsHtml(L.steps) : '';
+    $('rbDir').textContent = L && L.dir ? 'Saved in ' + L.dir : '';
+    return;
+  }
+  rb.className = P.wait ? 'running waiting' : 'running';
+  $('rbTag').textContent = P.wait ? 'WAITING' : 'RUNNING';
+  $('rbName').textContent = P.name;
+  const cur = P.i !== null ? P.steps[P.i] : null;
+  $('rbStep').textContent = cur ? `step ${P.i + 1} of ${P.steps.length}: ${cur.label}` : '';
+  $('rbStage').textContent = P.wait ? P.wait.charAt(0).toUpperCase() + P.wait.slice(1) :
+    (P.stage.charAt(0).toUpperCase() + P.stage.slice(1)) + `, ${fmtDur(P.stage_s)}` + (P.stage_max ? ` of at most ${fmtDur(P.stage_max)}` : '');
+  $('rbSteps').innerHTML = stepsHtml(P.steps);
+  $('rbEl').textContent = fmtClock(P.elapsed_s);
+  $('rbLeft').textContent = (P.how ? P.how + ' ' : '') + fmtDur(P.left_s);
+  $('rbEta').textContent = P.how === 'at least' ? 'after ' + P.done_at : P.done_at;
+  $('rbBar').style.width = Math.min(100, 100 * P.elapsed_s / Math.max(1, P.elapsed_s + P.left_s)).toFixed(1) + '%';
+  $('rbDir').textContent = P.dir ? 'Saving in ' + P.dir : '';
+}
 
 async function refresh() {
+  if (inFlight) return;
+  inFlight = true;
   let s;
   try { s = await (await fetch('/api/state?since=' + last)).json(); }
-  catch (e) { $('link').textContent = 'No answer from pmc_gui.py: is it still running?'; return; }
+  catch (e) { setPill('pBoard', 'bad', 'pmc_gui.py not answering: is it still running?'); inFlight = false; return; }
+  inFlight = false;
+  S = s;
   rows = rows.concat(s.rows);
   if (rows.length > 14400) rows = rows.slice(-14400);
   if (rows.length) last = rows[rows.length - 1][0];
-  $('link').textContent = s.link === 'connected' ? s.idn : s.link;
+  const on = s.link === 'connected';
+  setPill('pBoard', on ? 'ok' : 'bad', on ? 'Board connected' : 'Board: ' + s.link, s.idn);
+  $('idn').textContent = (on ? 'Connected: ' : 'No link. Last seen: ') + (s.idn || '--') + (on ? '' : ' (' + s.link + ')');
   const r = rows[rows.length - 1];
   if (r) {
     $('sp').textContent = fmt(r[1], 1); $('p').textContent = fmt(r[2], 3); $('v').textContent = fmt(r[3], 2);
-    $('mode').textContent = r[4] || '--';
-    $('mode').className = r[4] === 'AUTO' ? 'auto' : /F-/.test(r[5] || '') ? 'fault' : '';
-    $('alarm').textContent = r[5] && r[5] !== 'NONE' ? 'Alarms: ' + r[5] : '';
   }
+  const m = on && r ? r[4] : '';
+  $('mode').textContent = on ? m || '--' : 'NO LINK';
+  $('mode').className = m === 'AUTO' ? 'auto' : !on || /F-/.test((r && r[5]) || '') ? 'fault' : '';
+  $('mAuto').classList.toggle('on', m === 'AUTO'); $('mMan').classList.toggle('on', m === 'MANUAL');
+  $('alarm').textContent = r && r[5] && r[5] !== 'NONE' ? 'Alarms: ' + r[5] : '';
+
+  // Lake Shore: header pill, readings tiles, the box on the Live tab.
+  const L = s.ls, lsOn = L && L.host;
+  if (L && !lsLoaded) { $('lsHost').value = L.host; if (L.inputs.length) $('lsIn').value = L.inputs.map(x => x[0] + '=' + x[1]).join(', '); lsLoaded = true; }
+  const key = lsOn ? JSON.stringify(L.inputs) : '';
+  if (key !== tKey) {
+    tKey = key;
+    document.querySelectorAll('.reading.temp').forEach(e => e.remove());
+    if (lsOn) L.inputs.forEach((x, k) => $('readings').insertAdjacentHTML('beforeend',
+      `<div class="reading temp"><h2 title="${esc(x[1])}, input ${esc(x[0])}" style="color:${TCOL[k % 4]}">${esc(x[1])} (${esc(x[0])})</h2><span class="v" id="temp${k}">--</span> <span class="u">K</span></div>`));
+    $('tWrap').innerHTML = lsOn ? L.inputs.map((x, k) => `<canvas class="tchart" id="tc${k}"></canvas>`).join('') : '';
+  }
+  if (lsOn) {
+    L.inputs.forEach((x, k) => { const e = $('temp' + k); if (e) e.textContent = fmtK(L.temps[k]); });
+    const ok = L.state === 'connected';
+    setPill('pLs', ok ? 'ok' : 'bad', ok ? 'Lake Shore ' + L.inputs.map((x, k) => x[0] + ' ' + fmtK(L.temps[k]) + ' K').join(', ') : 'Lake Shore: ' + L.state);
+    $('lsInfo').textContent = ok ? 'Connected to ' + L.host + ': ' + L.idn : L.host + ': ' + L.state;
+  } else {
+    setPill('pLs', '', 'Lake Shore off', 'No Lake Shore 336: give its IP on the Live tab');
+    $('lsInfo').textContent = 'Not connected.';
+  }
+
+  // Logger
+  const g = s.logger;
+  if (g.err) setPill('pLog', 'bad', 'Log error: ' + g.err);
+  else if (g.on) setPill('pLog', 'rec', g.path ? 'Logging, ' + g.rows.toLocaleString() + ' rows' : 'Logging, waiting for a sample', g.path);
+  else setPill('pLog', '', 'Not logging');
+  $('logInfo').innerHTML = g.err ? `<span style="color:var(--red)">Cannot write the log: ${esc(g.err)}</span>` :
+    !g.on ? `Not logging. Files go to ${esc(g.folder)}` :
+    g.path ? `Writing <b>${esc(g.path)}</b><br>${g.rows.toLocaleString()} rows, last at ${esc(g.last)}` : `Waiting for the first sample. Files go to ${esc(g.folder)}`;
+  $('logBtn').textContent = g.on ? 'Stop logging' : 'Start logging';
+  $('logBtn').classList.toggle('primary', !g.on);
+
+  // PID boxes: the board's gains, and an amber edge on a box changed here but not sent.
   if (s.pid) {
-    $('pidNow').textContent = 'In use: KP ' + s.pid[0].toFixed(2) + ', TI ' + s.pid[1].toFixed(2) + ', KD ' + s.pid[2].toFixed(2);
     if (!pidLoaded) { $('kp').value = s.pid[0].toFixed(2); $('ti').value = s.pid[1].toFixed(2); $('kd').value = s.pid[2].toFixed(2); pidLoaded = true; }
+    let edited = false;
+    ['kp', 'ti', 'kd'].forEach((id, k) => { const c = $(id).value !== '' && Math.abs(+$(id).value - s.pid[k]) > 0.004; $(id).classList.toggle('changed', c); edited = edited || c; });
+    $('pidNow').textContent = 'On the board: KP ' + s.pid[0].toFixed(2) + ', TI ' + s.pid[1].toFixed(2) + ', KD ' + s.pid[2].toFixed(2) +
+      (edited ? '. The amber boxes are not sent until Set and save.' : '.');
   }
-  const busy = s.test ? 'Running: ' + (s.test === 'settle' ? 'setpoint test, settling at From' : s.test === 'valve settle' ? 'valve test, settling' : s.test) : '';
-  $('tState').textContent = $('gState').textContent = busy;
-  document.querySelectorAll('button.run').forEach(b => b.disabled = !!s.test);
+
+  // Tests: the running one is outlined, the others wait.
+  runbar(s);
+  const kind = s.prog ? s.prog.kind : '';
+  document.querySelectorAll('.card[data-kind]').forEach(c => c.classList.toggle('running', c.dataset.kind === kind));
+  document.querySelectorAll('button.run').forEach(b => { b.disabled = !!kind; b.title = kind ? s.prog.name + ' is running' : ''; });
+
   $('log').textContent = s.log.slice().reverse().join('\n');
   $('vres').innerHTML = s.vresults.length ? s.vresults.slice().reverse().map(m =>
     `<tr><td>${m.from.toFixed(1)} to ${m.to.toFixed(1)}</td><td>${m.p0.toFixed(3)}</td><td>${m.dp === null ? '--' : (m.dp > 0 ? '+' : '') + m.dp.toFixed(3) + ' mbar'}</td>` +
@@ -284,47 +511,91 @@ async function refresh() {
     `<td>${m.overshoot_pct} %</td><td>${m.settle_s === null ? 'not settled' : m.settle_s + ' s'}</td>` +
     `<td>${m.mean.toFixed(3)} ± ${m.spread.toFixed(3)}</td></tr>`).join('') : none(5);
   $('tName').textContent = s.table_name ? '(' + s.table_name + ')' : '';
-  const g = (o, k, d) => o[k] === undefined || o[k] === null ? '--' : (+o[k]).toFixed(d);
-  $('tRows').innerHTML = s.table.length ? s.table.map(t => `<tr><td>${g(t, 'sp_mbar', 1)}</td><td>${g(t, 'kp', 2)}</td><td>${g(t, 'ti_min', 2)}</td>` +
-    `<td>${g(t, 'K_mbar_per_pct', 3)}</td><td>${g(t, 'delay_s', 0)}</td><td>${g(t, 'tau_s', 0)}</td><td>${g(t, 'valve_pct', 1)}</td></tr>`).join('') : none(7);
+  const gv = (o, k, d) => o[k] === undefined || o[k] === null ? '--' : (+o[k]).toFixed(d);
+  $('tRows').innerHTML = s.table.length ? s.table.map(t => `<tr><td>${gv(t, 'sp_mbar', 1)}</td><td>${gv(t, 'kp', 2)}</td><td>${gv(t, 'ti_min', 2)}</td>` +
+    `<td>${gv(t, 'K_mbar_per_pct', 3)}</td><td>${gv(t, 'delay_s', 0)}</td><td>${gv(t, 'tau_s', 0)}</td><td>${gv(t, 'valve_pct', 1)}</td></tr>`).join('') : none(7);
   $('tBlend').innerHTML = s.blended.length ? s.blended.map(b => `<tr><td>${b[0]}</td><td>${b[1].toFixed(2)}</td><td>${b[2].toFixed(2)}</td></tr>`).join('') : none(3);
-  $('schState').textContent = s.schedule ? 'On: each setpoint change sets KP and TI from the table (also during setpoint step tests; paused while a gain table is made).'
-    : 'Off. When on, each setpoint change sets KP and TI from the table (also during setpoint step tests; paused while a gain table is made).';
-  $('schOn').disabled = s.schedule || !s.table.length;
+  $('schOn').classList.toggle('on', s.schedule); $('schOff').classList.toggle('on', !s.schedule);
+  $('schOn').disabled = !s.table.length && !s.schedule;
+  $('schState').textContent = (s.schedule ? 'On: each setpoint change sets KP and TI from the table.' :
+    s.table.length ? 'Off. On sets KP and TI from the table at each setpoint change.' : 'Off. Make or load a gain table first.') +
+    ' It also runs during setpoint step tests and pauses while a gain table is made.';
   draw();
 }
 
-function draw() {
-  const c = $('chart'), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
-  if (!W) return;
+function nice(lo, hi, minSpan, ticks) {
+  if (!isFinite(lo)) { lo = 0; hi = 10; }
+  const span = Math.max(hi - lo, minSpan), mid = (hi + lo) / 2; lo = mid - span * 0.6; hi = mid + span * 0.6;
+  const steps = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
+  const st = steps.find(s => (hi - lo) / s <= (ticks || 6)) || 200;
+  return { lo: Math.floor(lo / st) * st, hi: Math.ceil(hi / st) * st, st, d: st >= 1 ? 0 : st >= 0.1 ? 1 : st >= 0.01 ? 2 : 3 };
+}
+function canvas(c) {
+  const dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  if (!W) return null;
   c.width = W * dpr; c.height = H * dpr;
   const g = c.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
-  const L = 54, R = 44, T = 10, B = 24, w = W - L - R, h = H - T - B;
+  g.font = '12px system-ui, sans-serif';
+  return { g, W, H };
+}
+function draw() {
   const win = +val('win'), now = rows.length ? rows[rows.length - 1][0] : 0, t0 = now - win;
   const vis = rows.filter(r => r[0] >= t0);
-  let lo = Infinity, hi = -Infinity;
-  vis.forEach(r => [r[1], r[2]].forEach(x => { if (x !== null) { lo = Math.min(lo, x); hi = Math.max(hi, x); } }));
-  if (!isFinite(lo)) { lo = 0; hi = 10; }
-  const span = Math.max(hi - lo, 0.5), mid = (hi + lo) / 2; lo = mid - span * 0.6; hi = mid + span * 0.6;
-  const steps = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
-  const st = steps.find(s => (hi - lo) / s <= 6) || 200;
-  lo = Math.floor(lo / st) * st; hi = Math.ceil(hi / st) * st;
-  const X = t => L + (t - t0) / win * w, Y = p => T + (1 - (p - lo) / (hi - lo)) * h, YV = v => T + (1 - v / 100) * h;
-  g.font = '12px system-ui, sans-serif'; g.fillStyle = '#5a646c'; g.strokeStyle = '#e3e9ef'; g.lineWidth = 1;
-  for (let p = lo; p <= hi + 1e-9; p += st) {
-    g.beginPath(); g.moveTo(L, Y(p)); g.lineTo(L + w, Y(p)); g.stroke();
-    g.textAlign = 'right'; g.fillText(p.toFixed(st < 1 ? (st < 0.1 ? 2 : 1) : 0), L - 6, Y(p) + 4);
-  }
-  g.textAlign = 'left';
-  for (let v = 0; v <= 100; v += 25) g.fillText(v, L + w + 6, YV(v) + 4);
-  g.fillText('-' + (win >= 3600 ? win / 3600 + ' h' : win / 60 + ' min'), L, H - 6);
-  g.textAlign = 'right'; g.fillText('now', L + w, H - 6);
-  const pen = (k, y, col, wid, dash) => {
+  const L = 54, R = 44, T = 10, B = 24;
+  const pen = (g, X, k, y, col, wid, dash) => {
     g.strokeStyle = col; g.lineWidth = wid; g.setLineDash(dash || []); g.beginPath(); let on = false;
-    vis.forEach(r => { if (r[k] === null) { on = false; return; } const x = X(r[0]), yy = y(r[k]); on ? g.lineTo(x, yy) : g.moveTo(x, yy); on = true; });
+    vis.forEach(r => { const v = r[k]; if (v === null || v === undefined) { on = false; return; } const x = X(r[0]), yy = y(v); on ? g.lineTo(x, yy) : g.moveTo(x, yy); on = true; });
     g.stroke(); g.setLineDash([]);
   };
-  pen(3, YV, '#9aa6b0', 1.5); pen(1, Y, '#3f3f3f', 1.5, [5, 4]); pen(2, Y, '#2d5877', 2);
+  const grid = (g, a, Y, x0, x1) => {
+    g.fillStyle = '#5a646c'; g.strokeStyle = '#e3e9ef'; g.lineWidth = 1;
+    for (let p = a.lo; p <= a.hi + 1e-9; p += a.st) {
+      g.beginPath(); g.moveTo(x0, Y(p)); g.lineTo(x1, Y(p)); g.stroke();
+      g.textAlign = 'right'; g.fillText(p.toFixed(a.d), x0 - 6, Y(p) + 4);
+    }
+  };
+  // Pressure, setpoint, valve, and a dotted line where each test stage starts.
+  let c = canvas($('chart'));
+  if (c) {
+    const { g, W, H } = c, w = W - L - R, h = H - T - B;
+    let lo = Infinity, hi = -Infinity;
+    vis.forEach(r => [r[1], r[2]].forEach(x => { if (x !== null) { lo = Math.min(lo, x); hi = Math.max(hi, x); } }));
+    const a = nice(lo, hi, 0.5);
+    const X = t => L + (t - t0) / win * w, Y = p => T + (1 - (p - a.lo) / (a.hi - a.lo)) * h, YV = v => T + (1 - v / 100) * h;
+    grid(g, a, Y, L, L + w);
+    g.textAlign = 'left';
+    for (let v = 0; v <= 100; v += 25) g.fillText(v, L + w + 6, YV(v) + 4);
+    g.fillText('-' + (win >= 3600 ? win / 3600 + ' h' : win / 60 + ' min'), L, H - 6);
+    g.textAlign = 'right'; g.fillText('now', L + w, H - 6);
+    let prev = null, lab = -1e9;
+    g.font = '11px system-ui, sans-serif'; g.textAlign = 'left';
+    vis.forEach(r => {
+      const ph = r[6] || '';
+      if (prev !== null && ph && ph !== prev) {
+        const x = X(r[0]);
+        g.strokeStyle = '#b9c9d6'; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + h); g.stroke(); g.setLineDash([]);
+        if (x - lab > 110) { g.fillStyle = '#5a646c'; g.fillText(ph.length > 28 ? ph.slice(0, 27) + '…' : ph, x + 3, T + 11); lab = x; }
+      }
+      prev = ph;
+    });
+    pen(g, X, 3, YV, '#9aa6b0', 1.5); pen(g, X, 1, Y, '#3f3f3f', 1.5, [5, 4]); pen(g, X, 2, Y, '#2d5877', 2);
+  }
+  // Each 336 input on its own strip and its own scale, so a few mK of
+  // change in one shows up beside kelvins in another.
+  if (!S || !S.ls || !S.ls.host) return;
+  S.ls.inputs.forEach((x, k) => {
+    const c = $('tc' + k) && canvas($('tc' + k));
+    if (!c) return;
+    const { g, W, H } = c, Tt = 18, w = W - L - R, h = H - Tt - 6;
+    let lo = Infinity, hi = -Infinity;
+    vis.forEach(r => { const v = r[7 + k]; if (v !== null && v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+    const a = nice(lo, hi, 0.02, 3);
+    const X = t => L + (t - t0) / win * w, Y = p => Tt + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
+    grid(g, a, Y, L, L + w);
+    g.textAlign = 'left'; g.fillStyle = TCOL[k % 4]; g.font = '600 12px system-ui, sans-serif';
+    g.fillText(`${x[1]} (${x[0]}), K`, L, 12);
+    pen(g, X, 7 + k, Y, TCOL[k % 4], 2);
+  });
 }
 setInterval(refresh, 1000); refresh();
 window.addEventListener('resize', draw); $('win').addEventListener('change', draw);

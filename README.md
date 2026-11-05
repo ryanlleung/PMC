@@ -203,8 +203,8 @@ Error codes: 100 unknown command (anything not in the table above when network w
 
 ## Tools
 
-- `tools/pmc-gui/pmc_gui.py <IP>` serves the board's PC tools on one page at http://localhost:8080: live chart, setpoint, AUTO / MANUAL / STOP, PID gains, valve and setpoint step tests, making and running the gain schedule, the event log, the clock and a command line. Standard library Python, nothing to install.
-- `tools/lakeshore/ls336_log.py <IP>` logs Lake Shore 336 temperatures (inputs A and D by default) over Ethernet to a CSV. Standard library Python.
+- `tools/pmc-gui/pmc_gui.py <IP> [--ls336 <IP>]` serves the board's PC tools on one page at http://localhost:8080: live chart, setpoint, AUTO / MANUAL / STOP, PID gains, valve and setpoint step tests, making and running the gain schedule, the event log, the clock and a command line, with the Lake Shore 336 temperatures beside the pressure. Every sample and every test result is saved to `pmc-logs` as it comes. Standard library Python, nothing to install.
+- `tools/lakeshore/ls336_log.py <IP>` logs Lake Shore 336 temperatures (A heat exchanger and D cold head by default) over Ethernet to a CSV, without the GUI. Standard library Python.
 - `tools/logger/log_druck.py <IP or COM>` polls pressure, target, valve, mode, alarms and room pressure once a second into a CSV and reconnects on its own.
 - `tools/gain-schedule/pmc_gains.py` measures KP and TI at a few setpoints with step tests (`tune`), then keeps the board's KP and TI matched to its setpoint over the text port (`run`). Python 3 only, no pip.
 - `tools/ui-preview/build.sh` renders the screens to PNG on a PC with the real settings store over a flash held in RAM, and checks the LVGL heap returns after opening and leaving screens.
