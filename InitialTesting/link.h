@@ -40,6 +40,19 @@ bool link_chip_ok(void);
 const char *link_status(void);
 
 /*
+ * Remote traffic, for the header's remote light (0.15.14, Ryan 5 Nov):
+ * requests in and replies out, text port and Modbus, counted since start.
+ * remote.c counts the text port's lines in, link_write its replies out,
+ * ethlink.c the Modbus requests and replies.
+ */
+void link_count(bool out);
+void link_traffic(uint32_t *in, uint32_t *out);
+// Milliseconds since the last request or reply; UINT32_MAX before the first.
+uint32_t link_quiet_ms(void);
+// A remote client is connected (Ethernet: the text port or Modbus). USB: false.
+bool link_client(void);
+
+/*
  * Line assembly, shared by the USB and Ethernet code. CR, LF or CRLF end a
  * line (terminals differ) and empty lines are ignored. A line of up to
  * LINK_LINE_MAX characters is taken; a longer one comes out as

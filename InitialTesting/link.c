@@ -47,7 +47,35 @@ bool link_line_idle(link_line_t *l, uint32_t idle_ms, char *out, size_t n)
 
 static void link_send(const char *s);
 
-void link_write(const char *s) { link_send(s); }
+static uint32_t n_in, n_out, last_ms;
+static bool counted;
+
+void link_count(bool out)
+{
+    if (out)
+        n_out++;
+    else
+        n_in++;
+    last_ms = lv_tick_get();
+    counted = true;
+}
+
+void link_traffic(uint32_t *in, uint32_t *out)
+{
+    *in = n_in;
+    *out = n_out;
+}
+
+uint32_t link_quiet_ms(void)
+{
+    return counted ? lv_tick_elaps(last_ms) : UINT32_MAX;
+}
+
+void link_write(const char *s)
+{
+    link_count(true);
+    link_send(s);
+}
 
 #if PMC_LINK_ETHERNET
 
@@ -59,6 +87,7 @@ bool link_chip_ok(void)                      { return ethlink_link_up() && ethli
 
 const char *link_chip_text(void)            { return ethlink_chip_text(); }
 size_t link_tx_room(void)                    { return ethlink_tx_room(); }
+bool link_client(void)                       { return ethlink_client_connected() || ethlink_modbus_clients() > 0; }
 
 static void link_send(const char *s)        { ethlink_printf("%s", s); }
 
@@ -72,6 +101,7 @@ const char *link_chip_text(void)              { return "USB"; }
 size_t link_tx_room(void)                    { return usb_serial_tx_room(); }
 
 bool link_chip_ok(void)                      { return !strstr(usb_serial_status(), "not enumerated"); }
+bool link_client(void)                       { return false; }
 
 static void link_send(const char *s)        { usb_serial_printf("%s", s); }
 

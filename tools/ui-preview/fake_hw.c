@@ -108,6 +108,9 @@ bool sysinfo_reset_abnormal(void) { return fake_wdt; }
 const char *sysinfo_line(void) { return "PMC firmware 0.3.0 (preview), last reset: power-on"; }
 void sysinfo_restart(void) {}
 void link_write(const char *s) { fputs(s, stderr); }   // TREND DUMP (trend.c)
+void link_traffic(uint32_t *in, uint32_t *out) { *in = *out = 0; }
+uint32_t link_quiet_ms(void) { return UINT32_MAX; }
+bool link_client(void) { return false; }
 bool rtclock_valid(void) { return !st.cal_nominal; }
 const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "08 Oct  12:34"; }
 

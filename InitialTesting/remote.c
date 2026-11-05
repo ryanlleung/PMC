@@ -376,6 +376,7 @@ static void part(const char *c, bool chained)
 
 void remote_line(const char *line)
 {
+    link_count(false);   // the header's remote light (link_write counts the reply)
     out_len = 0;
     out[0] = '\0';
     refused = false;

@@ -14,6 +14,7 @@
 #include "trend.h"
 #include "ui.h"
 #include "lv_port_indev.h"   // touch_watch: STOP for any finger
+#include "link.h"            // the remote light
 
 /* --------------------------------------------------------------------------
  * Fonts: tabular digits. Every digit takes the width of the widest, so a
@@ -390,6 +391,17 @@ bool ui_btn_disabled(lv_event_t *e)
 #define HDR_TITLE_X (2 * HDR_BTN_W + 8)   // every title starts here (common HMI template)
 #define HDR_MODE_X 353   // the mode panel's left edge: the third column's right edge (Ryan 5 Nov)
 static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
+// The remote light (0.15.14, Ryan 5 Nov: show that remote communication is
+// being received and sent): an arrow down for each request in and an arrow
+// up for each reply out, text port and Modbus, left of the mode panel.
+#define COMM_W 30
+#define COMM_LIT_TICKS 3       // lit for up to 300 ms a message (fast timer, 100 ms)
+#define COMM_SHOW_MS 10000     // shown this long after the last message with no client
+#define COMM_IDLE lv_color_hex(0x5A6670)
+static lv_obj_t *comm_obj;
+static uint32_t comm_n[2];     // requests in, replies out, as last seen
+static uint8_t comm_lit[2];
+static bool comm_on[2], comm_shown;
 static lv_obj_t *strip, *strip_icon, *strip_shape, *strip_text, *strip_ok, *strip_act, *strip_spark;
 static lv_obj_t *stop_btn;
 
@@ -563,6 +575,37 @@ static void shape_draw(lv_event_t *e)
 
 
 
+static void comm_draw(lv_event_t *e)
+{
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_area_t a;
+    lv_obj_get_coords(lv_event_get_target_obj(e), &a);
+    int32_t x = a.x1, y = a.y1;
+    lv_draw_rect_dsc_t r;
+    lv_draw_rect_dsc_init(&r);
+    lv_draw_triangle_dsc_t t;
+    lv_draw_triangle_dsc_init(&t);
+    // In: an arrow down on the left. Out: an arrow up on the right.
+    r.bg_color = t.color = comm_on[0] ? lv_color_white() : COMM_IDLE;
+    lv_area_t s = { x + 8, y + 12, x + 10, y + 20 };
+    lv_draw_rect(layer, &r, &s);
+    t.p[0].x = x + 4;  t.p[0].y = y + 20; t.p[1].x = x + 14; t.p[1].y = y + 20; t.p[2].x = x + 9;  t.p[2].y = y + 27;
+    lv_draw_triangle(layer, &t);
+    r.bg_color = t.color = comm_on[1] ? lv_color_white() : COMM_IDLE;
+    lv_area_t u = { x + 20, y + 20, x + 22, y + 28 };
+    lv_draw_rect(layer, &r, &u);
+    t.p[0].x = x + 16; t.p[0].y = y + 20; t.p[1].x = x + 26; t.p[1].y = y + 20; t.p[2].x = x + 21; t.p[2].y = y + 13;
+    lv_draw_triangle(layer, &t);
+}
+
+static void comm_event(lv_event_t *e)
+{
+    (void)e;
+    if (overlay)
+        return;   // as the other header icons under a popup
+    ui_open(&ui_scr_namenet);   // System setup: Remote control and the address
+}
+
 static void build_frame(void)
 {
     frame = plain(lv_layer_top());
@@ -634,6 +677,17 @@ static void build_frame(void)
     lv_obj_set_style_border_color(unsaved_btn, UI_YELLOW, 0);
     lv_obj_set_ext_click_area(unsaved_btn, 6);
     lv_obj_add_flag(unsaved_btn, LV_OBJ_FLAG_HIDDEN);
+    // The remote light: shown while a remote client is connected, or for
+    // 10 s after a message (the USB build has no client to see). Grey
+    // arrows, each white for a moment with every request in or reply out.
+    // A tap opens System setup.
+    comm_obj = plain(hdr);
+    lv_obj_set_size(comm_obj, COMM_W, 40);
+    lv_obj_add_flag(comm_obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(comm_obj, comm_draw, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_event_cb(comm_obj, comm_event, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_ext_click_area(comm_obj, 6);
+    lv_obj_add_flag(comm_obj, LV_OBJ_FLAG_HIDDEN);
     // Shut down (0.15.0): the power icon, top left on Home (0.15.1, Ryan),
     // where Home is on the other pages; it asks Shut down or Restart.
     pwr_btn = ui_btn(hdr, 0, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_POWER, pwr_event, NULL);
@@ -915,8 +969,13 @@ static void frame_refresh(void)
         ui_set_color(mode_lbl, kind == 1 ? UI_MODE_AUTO_TEXT : lv_color_white());
     }
     const int32_t mx = HDR_MODE_X;
+    // Right to left from the mode panel: the remote light, the unsaved icon.
+    int32_t cx = comm_shown ? mx - 8 - COMM_W : mx;
+    show(comm_obj, comm_shown);
+    if (comm_shown && lv_obj_get_x(comm_obj) != cx)
+        lv_obj_set_x(comm_obj, cx);
     bool uns = cfg_unsaved() > 0 && cur != &ui_scr_review;
-    int32_t ux = mx - 48;
+    int32_t ux = cx - 48;
     show(unsaved_btn, uns);
     if (uns) {
         if (lv_obj_get_x(unsaved_btn) != ux)
@@ -928,7 +987,7 @@ static void frame_refresh(void)
             lv_obj_set_style_border_color(unsaved_btn, uns_dim ? UI_IDLE : UI_YELLOW, 0);
         }
     }
-    int32_t right = uns ? ux - 8 : mx - 8;
+    int32_t right = uns ? ux - 8 : cx - 8;
     static int32_t fit_right;
     static const char *fit_mode;
     static char fit_title[40];
@@ -1020,9 +1079,39 @@ static bool frame_due;
 
 void ui_refresh_soon(void) { frame_due = true; }
 
+// The remote light, every 100 ms: an arrow lit for each new request or
+// reply, and shown or hidden (the title's room changes with it).
+static void comm_tick(void)
+{
+    uint32_t n[2];
+    link_traffic(&n[0], &n[1]);
+    bool redraw = false;
+    for (int i = 0; i < 2; i++) {
+        if (n[i] != comm_n[i]) {
+            comm_n[i] = n[i];
+            comm_lit[i] = COMM_LIT_TICKS;
+        } else if (comm_lit[i]) {
+            comm_lit[i]--;
+        }
+        bool on = comm_lit[i] > 0;
+        if (on != comm_on[i]) {
+            comm_on[i] = on;
+            redraw = true;
+        }
+    }
+    bool shown = link_client() || link_quiet_ms() < COMM_SHOW_MS;
+    if (shown != comm_shown) {
+        comm_shown = shown;
+        frame_due = true;
+    }
+    if (redraw && comm_shown)
+        lv_obj_invalidate(comm_obj);
+}
+
 static void fast_timer(lv_timer_t *t)
 {
     (void)t;
+    comm_tick();
     // STOP for any finger: a tap on STOP that LVGL does not follow (another
     // contact on the glass) stops the valve as the button does.
     // Shutting down, the STOP on the black screen; off, none.
