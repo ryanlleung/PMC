@@ -23,6 +23,13 @@
  * 0 % below the seat). The slot stays so records keep their layout; it is
  * written 0, and a saved value is dropped when read (an event says so).
  *
+ * Version 8 (0.15.15) adds PID sets 2 and 3, the gain schedule (type, B1,
+ * B2, hysteresis) and the closing deadband at the end of tune[]. Older
+ * records load with sets 2 and 3 as set 1, the schedule Off and the closing
+ * deadband as the deadband, so AUTO runs as it did until they are changed.
+ *
+ * Version 7 (0.14.21) adds KD at the end of tune[]; older records load KD 0.
+ *
  * Version 6 (0.13.6) adds the homing return (valve[6], RETURN: steps off
  * the switch after the slow close); older records load it as their
  * back-off, which homing used for that step until then.
@@ -46,23 +53,38 @@
 #define CFG_ADDR_A   0x7FD000UL
 #define CFG_ADDR_B   0x7FE000UL
 #define CFG_MAGIC    0x47464350UL   // "PCFG"
-#define CFG_VERSION  7
+#define CFG_VERSION  8
 #define OLD_VALVE_N  6       // valve[] in records before version 6
 
 enum { M_RATE, M_START, M_ACCEL, M_MODE, M_HOLD, M_DIR, M_ORDER, M_N };
 static const char *const mot_name[M_N] = { "RATE", "START", "ACCEL", "MODE", "HOLD", "DIR", "ORDER" };
 
-// Control tuning, used from stage 8 (AUTO). Fixed point as noted. KD
-// (0.14.21, Ryan 4 Nov) is last so older records keep their order; they
-// have the first six (OLD_TUNE_N) and load KD 0, as the loop ran before.
-enum { T_KP, T_TI, T_OUTMIN, T_DB, T_KDIR, T_BAND, T_KD, T_N };
+// Control tuning, used from stage 8 (AUTO). Fixed point as noted. New
+// values go last so older records keep their order: KD (0.14.21, Ryan 4 Nov;
+// records before version 7 have the first six, OLD_TUNE_N, and load KD 0),
+// then PID sets 2 and 3, the gain schedule and the closing deadband
+// (0.15.15, Ryan 5 Nov; version 7 records have the first seven, V7_TUNE_N).
+// KP, TI and KD are set 1; DB is the opening deadband.
+enum { T_KP, T_TI, T_OUTMIN, T_DB, T_KDIR, T_BAND, T_KD,
+       T_KP2, T_TI2, T_KD2, T_KP3, T_TI3, T_KD3, T_SCHED, T_B1, T_B2, T_HYST, T_DBC, T_N };
 #define OLD_TUNE_N  6        // tune[] in records before version 7
-static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", "BAND", "KD" };
-static const int32_t tune_def[T_N] = { 400, 25, 0, 8, 1, 10, 0 };
-static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 10,   0 };
-static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000 };
-static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10, 0 };
-// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar, 0.01 % per mbar/s.
+#define V7_TUNE_N   7        // tune[] in version 7 records
+static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", "BAND", "KD",
+                                            "KP2", "TI2", "KD2", "KP3", "TI3", "KD3", "SCHED", "B1", "B2", "HYST", "DBC" };
+// Factory: one PID (sets 2 and 3 the same) and the schedule Off, so a new
+// board runs as before; B1 6 and B2 20 mbar with 15 % hysteresis are ready
+// for when it is turned on.
+static const int32_t tune_def[T_N] = { 400, 25, 0, 8, 1, 10, 0,
+                                       400, 25, 0, 400, 25, 0, 0, 60, 200, 15, 8 };
+static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 10,   0,
+                                       1,     0,     0,     1,     0,     0,     0, 1,     1,     0,  0 };
+static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
+                                       10000, 10000, 10000, 10000, 10000, 10000, 2, 10000, 10000, 40, 2000 };
+static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10, 0,
+                             400, 25, 0, 400, 25, 0, 0, 60, 200, 15, 8 };
+// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar, 0.01 % per mbar/s;
+// sets 2 and 3 as set 1; schedule 0 Off, 1 setpoint, 2 pressure; B1 and B2
+// 0.1 mbar; hysteresis % of the boundary; closing deadband steps.
 
 typedef struct {
     uint32_t serial;
@@ -88,6 +110,22 @@ typedef struct {
     uint32_t remote;             // Remote control: 0 Off, 1 On (version 5)
     uint32_t crc;
 } cfg_rec_t;
+
+// Version 7 (0.14.21 to 0.15.14), read only: version 8 with the first
+// seven tuning values.
+typedef struct {
+    uint32_t magic, version, size, rev;
+    int32_t mot[M_N];
+    int32_t valve[VALVE_N_SETTINGS];
+    int32_t tune[V7_TUNE_N];
+    uint32_t nsens, active;
+    cfg_sens_t sens[CFG_SENS_MAX];
+    char saved_at[20];
+    char name[CFG_NAME_LEN + 4];
+    uint32_t net_ip, net_mask;
+    uint32_t remote;
+    uint32_t crc;
+} cfg_rec_v7_t;
 
 // Version 6 (0.13.6 to 0.14.20), read only: version 7 without KD.
 typedef struct {
@@ -277,6 +315,15 @@ static void capture(cfg_rec_t *r)
         memset(&a->cal, 0, sizeof a->cal);
 }
 
+// The schedule's boundaries: B2 above B1, with the hysteresis bands apart
+// (B1 + H below B2 - H), so a set change one way cannot undo itself.
+static const char *bounds_why(const int32_t *t)
+{
+    if ((int64_t)t[T_B1] * (100 + t[T_HYST]) >= (int64_t)t[T_B2] * (100 - t[T_HYST]))
+        return "B2 must be above B1, by more than the hysteresis either side";
+    return NULL;
+}
+
 // NULL if every value can be applied, else the first that cannot.
 static const char *values_why(const cfg_rec_t *r)
 {
@@ -300,6 +347,8 @@ static const char *values_why(const cfg_rec_t *r)
     for (int i = 0; i < T_N; i++)
         if (r->tune[i] < tune_lo[i] || r->tune[i] > tune_hi[i] || (i == T_KDIR && r->tune[i] == 0))
             return tune_name[i];
+    if (bounds_why(r->tune))
+        return "B2";
     if (r->nsens < 1 || r->nsens > CFG_SENS_MAX || r->active >= r->nsens)
         return "SENSOR";
     if (!cfg_name_ok(r->name))
@@ -319,7 +368,7 @@ static const char *values_why(const cfg_rec_t *r)
     return NULL;
 }
 
-// A version 1 record as version 7: one sensor, default tuning, the return
+// A version 1 record as version 8: one sensor, default tuning, the return
 // as the back-off.
 static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
 {
@@ -341,34 +390,50 @@ static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
     r->remote = 1;
 }
 
-// A version 2 to 6 record as version 7. They have the first six tuning
-// values (KD reads 0, the loop as it ran) and none of the fields after
-// crc_at. Versions 2 to 5 also lack the return (valve[6]): it is their
-// back-off, so homing ends where it did. Fields they lack are 0 (the
-// build's address), except Remote control, On as the default; versions 5
-// and 6 have their own.
-static void from_old(const void *v, size_t tune_at, size_t crc_at, bool has_return, cfg_rec_t *r)
+// A version 2 to 7 record as version 8. They have the first ntune tuning
+// values (six to version 6: KD reads 0, the loop as it ran; seven in
+// version 7) and none of the fields after crc_at. The values added since
+// keep the loop as it ran: sets 2 and 3 as set 1, the schedule Off (B1, B2
+// and H at their factory values), the closing deadband as the deadband.
+// Versions 2 to 5 also lack the return (valve[6]): it is their back-off, so
+// homing ends where it did. Fields they lack are 0 (the build's address),
+// except Remote control, On as the default; versions 5 to 7 have their own.
+static void from_old(const void *v, size_t tune_at, int ntune, size_t crc_at, bool has_return, cfg_rec_t *r)
 {
     const uint8_t *b = v;
-    const size_t old_tune = OLD_TUNE_N * sizeof(int32_t);
+    const size_t old_tune = (size_t)ntune * sizeof(int32_t);
     memset(r, 0, sizeof *r);
-    r->remote = 1;                                                 // versions 5 and 6 overwrite it
+    r->remote = 1;                                                 // versions 5 to 7 overwrite it
     memcpy(r, b, tune_at);                                         // header, mot, valve
-    memcpy(r->tune, b + tune_at, old_tune);                        // KP to BAND
+    memcpy(r->tune, b + tune_at, old_tune);                        // KP to BAND (and KD)
     memcpy(&r->nsens, b + tune_at + old_tune, crc_at - tune_at - old_tune);   // nsens on
     if (!has_return)
         r->valve[6] = r->valve[3];
+    for (int s = 0; s < 2; s++) {
+        r->tune[T_KP2 + 3 * s] = r->tune[T_KP];
+        r->tune[T_TI2 + 3 * s] = r->tune[T_TI];
+        r->tune[T_KD2 + 3 * s] = r->tune[T_KD];
+    }
+    r->tune[T_SCHED] = 0;
+    r->tune[T_B1] = tune_def[T_B1];
+    r->tune[T_B2] = tune_def[T_B2];
+    r->tune[T_HYST] = tune_def[T_HYST];
+    r->tune[T_DBC] = r->tune[T_DB];
     r->version = CFG_VERSION;
     r->size = sizeof *r;
 }
 _Static_assert(offsetof(cfg_rec_v5_t, tune) == offsetof(cfg_rec_t, valve) + OLD_VALVE_N * 4, "old valve[] then tune");
 _Static_assert(offsetof(cfg_rec_v6_t, tune) == offsetof(cfg_rec_t, tune), "v6 has the whole valve[]");
+_Static_assert(offsetof(cfg_rec_v7_t, tune) == offsetof(cfg_rec_t, tune), "v7 has the whole valve[]");
 _Static_assert(offsetof(cfg_rec_t, nsens) == offsetof(cfg_rec_t, tune) + T_N * 4, "tune then nsens");
 _Static_assert(offsetof(cfg_rec_v6_t, crc) - offsetof(cfg_rec_v6_t, tune) - OLD_TUNE_N * 4 ==
-               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v6 is v7 from nsens on");
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v6 is v8 from nsens on");
+_Static_assert(offsetof(cfg_rec_v7_t, crc) - offsetof(cfg_rec_v7_t, tune) - V7_TUNE_N * 4 ==
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v7 is v8 from nsens on");
 _Static_assert(offsetof(cfg_rec_v5_t, crc) - offsetof(cfg_rec_v5_t, tune) ==
                offsetof(cfg_rec_v6_t, crc) - offsetof(cfg_rec_v6_t, tune), "v5 is v6 from tune on");
-#define FROM_OLD(T, v, ret, r) from_old((v), offsetof(T, tune), offsetof(T, crc), (ret), (r))
+#define FROM_OLD(T, v, ret, r) from_old((v), offsetof(T, tune), \
+                                       (int)(sizeof ((T *)0)->tune / sizeof(int32_t)), offsetof(T, crc), (ret), (r))
 
 // Reads one sector into slot[i]; NULL if usable, else why not.
 static const char *read_slot(int i)
@@ -380,6 +445,7 @@ static const char *read_slot(int i)
         cfg_rec_v4_t v4;
         cfg_rec_v5_t v5;
         cfg_rec_v6_t v6;
+        cfg_rec_v7_t v7;
     } old;
     cfg_rec_t *r = &slot[i];
     extflash_read(slot_addr[i], r, sizeof *r);
@@ -417,6 +483,11 @@ static const char *read_slot(int i)
         if (old.v6.crc != crc32_ieee(&old.v6, offsetof(cfg_rec_v6_t, crc)))
             return "CRC mismatch";
         FROM_OLD(cfg_rec_v6_t, &old.v6, true, r);
+    } else if (r->magic == CFG_MAGIC && r->version == 7 && r->size == sizeof old.v7) {
+        memcpy(&old.v7, r, sizeof old.v7);
+        if (old.v7.crc != crc32_ieee(&old.v7, offsetof(cfg_rec_v7_t, crc)))
+            return "CRC mismatch";
+        FROM_OLD(cfg_rec_v7_t, &old.v7, true, r);
     } else if (r->magic != CFG_MAGIC || r->version != CFG_VERSION || r->size != sizeof *r) {
         return "not a settings record of this version";
     } else if (r->crc != rec_crc(r)) {
@@ -721,14 +792,9 @@ static int32_t *key_ref(cfg_rec_t *r, cfg_key_t k)
     case CFG_RATE:    return &r->mot[M_RATE];
     case CFG_START:   return &r->mot[M_START];
     case CFG_ACCEL:   return &r->mot[M_ACCEL];
-    case CFG_KP:      return &r->tune[T_KP];
-    case CFG_TI:      return &r->tune[T_TI];
-    case CFG_OUTMIN:  return &r->tune[T_OUTMIN];
-    case CFG_DB:      return &r->tune[T_DB];
-    case CFG_KDIR:    return &r->tune[T_KDIR];
-    case CFG_BAND:    return &r->tune[T_BAND];
-    case CFG_KD:      return &r->tune[T_KD];
-    default:          return NULL;
+    default:
+        // The tuning keys run in tune[] order (cfg.h).
+        return k >= CFG_KP && k <= CFG_TUNE_LAST ? &r->tune[k - CFG_KP] : NULL;
     }
 }
 _Static_assert(VALVE_N_SETTINGS == 7, "key_ref() valve indices");
@@ -775,7 +841,7 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
     static const int32_t vlo[] = { 1000, 16, 16, 10, 10, 0, 10 }, vhi[] = { 300000, 1000, 1000, 5000, 10000, 0, 5000 };
     _Static_assert(sizeof vlo / sizeof vlo[0] == VALVE_N_SETTINGS, "valve ranges");
     *lo = 0; *hi = 0;
-    if (k >= CFG_KP && k <= CFG_KD) {
+    if (k >= CFG_KP && k <= CFG_TUNE_LAST) {
         *lo = tune_lo[k - CFG_KP]; *hi = tune_hi[k - CFG_KP];
     } else if (k == CFG_RATE || k == CFG_START) {
         *lo = STEPPER3_RATE_MIN; *hi = STEPPER3_RATE_MAX;
@@ -788,11 +854,20 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
         *lo = vlo[i]; *hi = vhi[i];   // the indices key_ref() uses
     }
 }
-_Static_assert(CFG_KP + T_N - 1 == CFG_KD, "tuning keys in tune[] order");
+_Static_assert(CFG_KP + T_N - 1 == CFG_TUNE_LAST, "tuning keys in tune[] order");
+_Static_assert(CFG_KD - CFG_KP == T_KD && CFG_KP2 - CFG_KP == T_KP2 && CFG_SCHED - CFG_KP == T_SCHED &&
+               CFG_DBC - CFG_KP == T_DBC, "tuning keys in tune[] order");
 
 int32_t cfg_tune(cfg_key_t k)
 {
-    return k >= CFG_KP && k <= CFG_KD ? tune[k - CFG_KP] : 0;
+    return k >= CFG_KP && k <= CFG_TUNE_LAST ? tune[k - CFG_KP] : 0;
+}
+
+cfg_key_t cfg_pid_key(int set, int which)
+{
+    static const cfg_key_t key[3][3] = { { CFG_KP, CFG_TI, CFG_KD }, { CFG_KP2, CFG_TI2, CFG_KD2 },
+                                         { CFG_KP3, CFG_TI3, CFG_KD3 } };
+    return key[set >= 1 && set <= 3 ? set - 1 : 0][which >= 0 && which <= 2 ? which : 0];
 }
 
 static cfg_rec_t cand;   // cfg_save_with, cfg_sensor_use and cfg_load_live (never at once)
@@ -807,7 +882,7 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     for (int k = 0; k < CFG_N; k++) {
         if (!set[k])
             continue;
-        if (tune_only && (k < CFG_KP || k > CFG_KD)) {
+        if (tune_only && (k < CFG_KP || k > CFG_TUNE_LAST)) {
             // cand holds the live values here (only tuning keys are written).
             bool same = k == CFG_SENSOR ? (uint32_t)v[k] == cand.sens[cand.active].serial
                                         : v[k] == *key_ref(&cand, (cfg_key_t)k);
@@ -836,6 +911,7 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
         *key_ref(&cand, (cfg_key_t)k) = v[k];
     }
     if (cand.mot[M_START] > cand.mot[M_RATE]) { *why = "Start speed must not exceed Run speed"; return false; }
+    if ((*why = bounds_why(cand.tune)) != NULL) return false;
     if (values_why(&cand)) { *why = "a value is out of range, nothing saved"; return false; }
     if (!tune_only && (*why = mode_why(&cand)) != NULL) return false;
     // Written first, then put in use: a failed write changes nothing, so

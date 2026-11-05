@@ -6,12 +6,17 @@
 #   mb.sh <ip> [port] valve <pct>     move the valve (MANUAL only)
 #   mb.sh <ip> [port] auto | manual | stop | reset | ok
 #                                     the command coils 0-3
+#   mb.sh <ip> [port] pid <set> <kp> <ti> <kd>
+#                                     one PID set's gains (map version 2)
+#   mb.sh <ip> [port] sched <off|sp|pv> <b1> <b2> <h>
+#                                     the gain schedule: boundaries in mbar,
+#                                     hysteresis in %
 #   mb.sh <ip> [port] writetest  write target 4.8 and the AUTO coil, then an
 #                                unsupported code and a read past the map
 #   mb.sh <ip> [port] raw <pdu>  send one PDU in hex (e.g. 03 00 0a 00 02)
 #                                and print the reply PDU in hex
 # Register map: docs/modbus-register-map.md.
-IP=${1:?usage: mb.sh <ip> [port] [target <mbar> | valve <pct> | auto | manual | stop | reset | ok | writetest | raw <hex bytes>]}
+IP=${1:?usage: mb.sh <ip> [port] [target <mbar> | valve <pct> | auto | manual | stop | reset | ok | pid <set> <kp> <ti> <kd> | sched <off|sp|pv> <b1> <b2> <h> | writetest | raw <hex bytes>]}
 shift
 PORT=502
 if [[ $1 =~ ^[0-9]+$ ]]; then PORT=$1; shift; fi
@@ -78,6 +83,18 @@ manual) wr 05 00 00 00 00 ;;
 stop)   wr 05 00 01 ff 00 ;;
 reset)  wr 05 00 02 ff 00 ;;
 ok)     wr 05 00 03 ff 00 ;;
+pid)
+    # Registers 33 + 6 x (set - 1): KP, TI, KD as floats.
+    n=${1:?pid <set> <kp> <ti> <kd>}
+    [[ $n =~ ^[123]$ ]] || { echo "set 1, 2 or 3"; exit 1; }
+    wr 10 00 $(printf %02x $(( 33 + 6 * (n - 1) ))) 00 06 0c $(f32 "${2:?kp}") $(f32 "${3:?ti}") $(f32 "${4:?kd}")
+    ;;
+sched)
+    # Registers 27-32: type (0 off, 1 setpoint, 2 pressure), B1, B2, H.
+    case ${1:?sched <off|sp|pv> <b1> <b2> <h>} in off) t=0 ;; sp) t=1 ;; pv) t=2 ;; *) echo "off, sp or pv"; exit 1 ;; esac
+    h=${4:?h}
+    wr 10 00 1b 00 06 0c 00 $(printf %02x $t) $(f32 "${2:?b1}") $(f32 "${3:?b2}") $(printf '%02x %02x' $(( h >> 8 )) $(( h & 255 )))
+    ;;
 raw)
     req "$@"
     ;;
@@ -86,10 +103,10 @@ writetest)
     r=$(req 10 00 0c 00 02 04 40 99 99 9a); printf 'write target 4.8: %s  ' "$r"; ex "$r" && echo "accepted"
     r=$(req 05 00 00 ff 00);                printf 'AUTO coil on:     %s  ' "$r"; ex "$r" && echo "accepted"
     r=$(req 04 00 00 00 01);                printf 'FC4 (unsupported): %s  ' "$r"; ex "$r" && echo "accepted"
-    r=$(req 03 00 14 00 0a);                printf 'read past the map: %s  ' "$r"; ex "$r" && echo "accepted"
+    r=$(req 03 00 2e 00 0a);                printf 'read past the map: %s  ' "$r"; ex "$r" && echo "accepted"
     ;;
 map)
-    regs=$(req 03 00 00 00 1a) || exit 1
+    regs=$(req 03 00 00 00 33) || exit 1
     ex "$regs" || exit 1
     coils=$(req 01 00 00 00 04)
     echo "$regs" | awk -v coils="$coils" '
@@ -117,6 +134,10 @@ map)
         printf "excitation    %s V\n", f32(20)
         printf "temperature   %s C\n", f32(22)
         printf "uptime        %d s\n", reg(24) * 65536 + reg(25)
+        split("off,setpoint,pressure", sch, ",")
+        printf "gain schedule %s, B1 %s mbar, B2 %s mbar, hysteresis %d %%, set in use %d\n", (reg(27) < 3 ? sch[reg(27) + 1] : reg(27)), f32(28), f32(30), reg(32), reg(26)
+        for (k = 0; k < 3; k++)
+            printf "set %d        KP %s, TI %s, KD %s\n", k + 1, f32(33 + 6 * k), f32(35 + 6 * k), f32(37 + 6 * k)
         split(coils, c, " ")
         printf "coils 0-3 (AUTO, STOP, RESET, OK): %d%d%d%d\n", hex(c[3]) % 2, int(hex(c[3]) / 2) % 2, int(hex(c[3]) / 4) % 2, int(hex(c[3]) / 8) % 2
     }'

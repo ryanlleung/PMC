@@ -96,6 +96,7 @@ bool valve_target(int32_t *mmbar);               // false: no target set yet
 int32_t valve_range_mmbar(void);                 // sensor in use, full scale
 int32_t valve_band_mmbar(void);                  // target band (BAND)
 ctrl_reg_t valve_regulation(void);               // status words, in AUTO
+int valve_pid_set(void);                         // PID set in use (AUTO) or AUTO would start with, 1 to 3
 
 // Settings, in the order POSMAX FHOME FCREEP BACKOFF CLEAR (unused, was
 // OFFSET: always 0) RETURN

@@ -569,13 +569,19 @@ class Board:
             self.add_row([self.now(), None, None, None, '', '', self.phase] + vals)
 
     def poll(self):
-        r = self.ask('PRES SP?;PRES?;VALV?;MODE?;ALRM?;PID?')
-        sp, p, v, m, a, pid = (r.split(';') + [''] * 6)[:6]
+        # SCHED? and PIDS? last: firmware before 0.15.15 refuses them (ERR 100),
+        # which ends the line there.
+        r = self.ask('PRES SP?;PRES?;VALV?;MODE?;ALRM?;PID?;SCHED?;PIDS?')
+        sp, p, v, m, a, pid, sch, pids = (r.split(';') + [''] * 8)[:8]
         row = [self.now(), num(sp), num(p), num(v), m[5:], a[5:], self.phase] + (self.ls.now() if self.ls else [])
         self.add_row(row)
         if pid.startswith('PID '):
             with self.lock:
                 self.state['pid'] = [float(x) for x in pid[4:].split(',')]
+        # The board's own gain schedule (0.15.15): which set PID? is, and on what.
+        with self.lock:
+            self.state['board_sched'] = sch[6:].split(',')[0] if sch.startswith('SCHED ') else None
+            self.state['pid_set'] = int(pids[5:].split(',')[0]) if pids.startswith('PIDS ') else None
         self.schedule_tick(row)      # first: a step below sets its own setpoint's gains
         with self.tlock:
             if self.test:
@@ -1037,6 +1043,12 @@ class Board:
         flash write)."""
         if not self.schedule or not self.table:
             return
+        if self.state.get('board_sched') in ('SP', 'PV'):
+            # The board picks its own PID set: a PID SET here would overwrite
+            # the set in use.
+            self.note('gain schedule off: the board has its own (SCHED %s)' % self.state['board_sched'])
+            self.schedule = False
+            return
         kp, ti = gains_for(self.table, sp)
         now = self.state['pid']
         if not now or (round(now[0], 2), round(now[1], 2)) != (kp, ti):
@@ -1075,6 +1087,7 @@ class Board:
             rows = [r for r in self.hist if r[0] > since]
             blended = [[sp] + list(gains_for(self.table, sp)) for sp in SHOW_SP] if self.table else []
             return {'link': self.state['link'], 'idn': self.state['idn'], 'pid': self.state['pid'],
+                    'board_sched': self.state.get('board_sched'), 'pid_set': self.state.get('pid_set'),
                     'log': self.state['log'], 'rows': rows, 'results': self.results, 'vresults': self.vresults,
                     'prog': self.prog_view(), 'last_prog': self.last_prog,
                     'table': self.table_rows, 'table_name': self.table_name, 'blended': blended,

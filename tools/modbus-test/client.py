@@ -47,7 +47,7 @@ if writes is not None:
         global ok
         print(("ok   " if cond else "FAIL ") + what)
         ok &= bool(cond)
-    check(r[0] == 1 and abs(f32(r, 10) - 4.625) < 1e-4, "map version and pressure")
+    check(r[0] == 2 and abs(f32(r, 10) - 4.625) < 1e-4, "map version and pressure")
     payload = list(struct.unpack(">HH", struct.pack(">f", 4.8)))
     w = c.write_registers(12, payload)
     if writes == "1":

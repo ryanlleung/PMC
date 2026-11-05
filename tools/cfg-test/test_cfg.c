@@ -183,11 +183,25 @@ static uint32_t crc32(const void *data, size_t len)
     return ~c;
 }
 
-// A version 7 record (0.14.21) in buf made a version 6 one: tune[6], KD,
+// A version 8 record (0.15.15) in buf made a version 7 one: tune[7..17],
+// the PID sets 2 and 3, the schedule and the closing deadband, taken out
+// (after the 16-byte header, mot[7], valve[7] and tune[0..6]). Returns the
+// version 7 size; the CRC is left for the caller.
+static uint32_t as_v7(uint8_t *buf, uint32_t size8)
+{
+    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 7 * 4, seven = 7, size7 = size8 - 11 * 4;
+    memmove(buf + at, buf + at + 11 * 4, size8 - at - 11 * 4);
+    memcpy(buf + 4, &seven, 4);
+    memcpy(buf + 8, &size7, 4);
+    return size7;
+}
+
+// A version 8 record in buf made a version 6 one: as_v7, then tune[6], KD,
 // taken out (after the 16-byte header, mot[7], valve[7] and tune[0..5]).
 // Returns the version 6 size; the CRC is left for the caller.
-static uint32_t as_v6(uint8_t *buf, uint32_t size7)
+static uint32_t as_v6(uint8_t *buf, uint32_t size8)
 {
+    const uint32_t size7 = as_v7(buf, size8);
     const uint32_t at = 16 + 7 * 4 + 7 * 4 + 6 * 4, six = 6, size6 = size7 - 4;
     memmove(buf + at, buf + at + 4, size7 - at - 4);
     memcpy(buf + 4, &six, 4);
@@ -312,7 +326,7 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_PREVIOUS, &rev, &at) && rev == 5);
     uint32_t ver;
     memcpy(&ver, flash + 0x7FE004, 4);
-    CHECK(ver == 7);   // the save went to B, the v1 record in A is kept
+    CHECK(ver == 8);   // the save went to B, the v1 record in A is kept
     memcpy(&ver, flash + 0x7FD004, 4);
     CHECK(ver == 1);
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
@@ -471,7 +485,7 @@ static void test_name(void)
             memcpy(&r3, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             uint32_t v3;
             memcpy(&v3, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (v3 == 7 && r3 >= a3) { a3 = r3; sl = i; }
+            if (v3 == 8 && r3 >= a3) { a3 = r3; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size4, flash + base + 8, 4);
@@ -532,7 +546,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 7 && r >= a4) { a4 = r; sl = i; }
+            if (ver == 8 && r >= a4) { a4 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, three = 3;
         memcpy(&size4, flash + base + 8, 4);
@@ -572,7 +586,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 7 && r >= a5) { a5 = r; sl = i; }
+            if (ver == 8 && r >= a5) { a5 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, four = 4;
         memcpy(&size5, flash + base + 8, 4);
@@ -609,7 +623,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 7 && r >= a6) { a6 = r; sl = i; }
+            if (ver == 8 && r >= a6) { a6 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size6, flash + base + 8, 4);
@@ -649,13 +663,13 @@ static void test_kd(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 7 && r >= a7) { a7 = r; sl = i; }
+            if (ver == 8 && r >= a7) { a7 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size7, flash + base + 8, 4);
         static uint8_t buf[4096];
         memcpy(buf, flash + base, size7);
-        uint32_t size6 = as_v6(buf, size7);
+        uint32_t size6 = as_v6(buf, size7);   // size7: the version 8 record's
         uint32_t c = crc32(buf, size6 - 4);
         memcpy(buf + size6 - 4, &c, 4);
         extflash_erase_4k(base);
@@ -670,6 +684,75 @@ static void test_kd(void)
     set[CFG_KP] = false;
     CHECK(!cfg_save_with(v, set, &why));
     CHECK(cfg_tune(CFG_KD) == 0);
+}
+
+// Gain schedule (0.15.15, version 8): PID sets 2 and 3, the schedule and
+// the closing deadband are saved settings; a version 7 record loads with
+// sets 2 and 3 as set 1, the schedule Off and the closing deadband as the
+// deadband, so AUTO runs as it did.
+static void test_sched(void)
+{
+    int32_t v[CFG_N] = { 0 }, lo, hi;
+    bool set[CFG_N] = { false };
+    const char *why;
+    CHECK(cfg_pid_key(1, 0) == CFG_KP && cfg_pid_key(2, 1) == CFG_TI2 && cfg_pid_key(3, 2) == CFG_KD3);
+    cfg_range(CFG_SCHED, &lo, &hi);
+    CHECK(lo == 0 && hi == 2);
+    cfg_range(CFG_HYST, &lo, &hi);
+    CHECK(lo == 0 && hi == 40);
+    // Boundaries too close for the hysteresis: refused, nothing changes.
+    v[CFG_B1] = 200; set[CFG_B1] = true;
+    v[CFG_B2] = 250; set[CFG_B2] = true;
+    v[CFG_HYST] = 15; set[CFG_HYST] = true;
+    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B2 must be above B1"));
+    CHECK(cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 200);
+    // The 5 Nov proposal for CF-11, on the pressure.
+    memset(set, 0, sizeof set);
+    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST, CFG_DB, CFG_DBC };
+    const int32_t x[] = { 10, 40, 80, 30, 120, 30, 2, 60, 200, 15, 200, 8 };
+    for (int i = 0; i < 12; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
+    CHECK(cfg_save_with(v, set, &why));
+    reboot();
+    bool all = true;
+    for (int i = 0; i < 12; i++) all &= cfg_tune(k[i]) == x[i];
+    CHECK(all && cfg_unsaved() == 0);
+    // In AUTO the schedule is tuning too: taken without leaving AUTO.
+    v_auto = true;
+    memset(set, 0, sizeof set);
+    v[CFG_SCHED] = 1; set[CFG_SCHED] = true;
+    v[CFG_KP3] = 150; set[CFG_KP3] = true;
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 1 && cfg_tune(CFG_KP3) == 150);
+    v_auto = false;
+    // The same record as version 7.
+    {
+        uint32_t size8, a8 = 0;
+        int sl = 0;
+        for (int i = 0; i < 2; i++) {
+            uint32_t r, ver;
+            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+            if (ver == 8 && r >= a8) { a8 = r; sl = i; }
+        }
+        uint32_t base = 0x7FD000 + sl * 0x1000;
+        memcpy(&size8, flash + base + 8, 4);
+        static uint8_t buf[4096];
+        memcpy(buf, flash + base, size8);
+        uint32_t size7 = as_v7(buf, size8);
+        uint32_t c = crc32(buf, size7 - 4);
+        memcpy(buf + size7 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size7);
+        reboot();
+        uint32_t rev;
+        const char *at;
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
+        CHECK(cfg_tune(CFG_KP) == 10 && cfg_tune(CFG_TI) == 40 && cfg_tune(CFG_DB) == 200);
+        CHECK(cfg_tune(CFG_KP2) == 10 && cfg_tune(CFG_TI2) == 40 && cfg_tune(CFG_KP3) == 10 && cfg_tune(CFG_TI3) == 40 &&
+              cfg_tune(CFG_KD2) == cfg_tune(CFG_KD) && cfg_tune(CFG_KD3) == cfg_tune(CFG_KD));
+        CHECK(cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 200 && cfg_tune(CFG_HYST) == 15 &&
+              cfg_tune(CFG_DBC) == 200);
+        CHECK(cfg_unsaved() == 0);
+    }
 }
 
 static void tick(uint32_t ms)
@@ -994,6 +1077,7 @@ int main(int argc, char **argv)
     test_name();
     test_net();
     test_kd();
+    test_sched();
     test_valvepos();
     test_trend();
     test_auto();

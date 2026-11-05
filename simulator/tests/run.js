@@ -95,6 +95,14 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(298, 156); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // KD 1.5, Set
   s.tap(415, 128); s.tap(319, 138);   // Save settings, then Save in the question
   check('KD saves from the PID tuning page', s.setting(CFG.KD) === 150, 'KD ' + s.setting(CFG.KD));
+  // Gain schedule on (0.15.15): the PID tab shows the set row; Set 3's KP from its card.
+  s.cmd('SCHED SET PV,6,20,15', 1000); s.run(1000);
+  shot(s, 'pid-tuning-sets');
+  s.tap(294, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // Set 3, KP 1.5, Set
+  s.tap(415, 128); s.tap(319, 138);
+  check('Set 3 KP saves from the set row', s.setting(CFG.KP3) === 150 && s.setting(CFG.KP) === 400 && s.setting(CFG.KP2) === 400,
+    [s.setting(CFG.KP), s.setting(CFG.KP2), s.setting(CFG.KP3)].join());
+  shot(s, 'pid-tuning-set3');
 }
 { // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
   const s = load(); s.boot(); s.run(2000);
@@ -314,6 +322,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('switch Off again: refused', s.cmd('PRES SP 6') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('PID?') === 'PID 4.00,0.25,0.00\r\n', s.cmd('PID?'));
+  check('switch Off: PIDS SET and SCHED SET refused, PIDS? and SCHED? answer',
+    s.cmd('PIDS SET 2,3,0.5') === 'ERR 211 Read only over the network\r\n' &&
+    s.cmd('SCHED SET PV,6,20,15') === 'ERR 211 Read only over the network\r\n' &&
+    s.cmd('PIDS?;SCHED?') === 'PIDS 1,4.00,0.25,0.00,4.00,0.25,0.00,4.00,0.25,0.00;SCHED OFF,6.0,20.0,15\r\n', s.cmd('PIDS?;SCHED?'));
 }
 { // Homing return: its own setting, the step 4 move off the switch; 0 % is there.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
@@ -487,6 +499,73 @@ let parkedFlash;
   s.cmd('PRES SP 3;MODE AUTO', 20000);
   check('PID SET in AUTO, AUTO kept', one('PID SET 2,0.4;PID?;MODE?') === 'PID 2.00,0.40,1.25;MODE AUTO\r\n', one('PID?;MODE?'));
   check('PID SET in AUTO saves', s.setting(CFG.KP) === 200 && s.setting(CFG.TI) === 40, s.setting(CFG.KP) + ' ' + s.setting(CFG.TI));
+}
+{ // Gain schedule (0.15.15, Ryan 5 Nov "build like industry ones"): PIDS?, PIDS SET, SCHED?, SCHED SET,
+  // PID? and PID SET on the set in use, and AUTO switching sets on the pressure with hysteresis.
+  const s = homed(load());
+  const one = c => s.cmd(c, 1000);
+  check('PIDS? defaults: three sets as set 1', one('PIDS?') === 'PIDS 1,4.00,0.25,0.00,4.00,0.25,0.00,4.00,0.25,0.00\r\n', one('PIDS?'));
+  check('SCHED? defaults: Off, 6 and 20 mbar, 15 %', one('SCHED?') === 'SCHED OFF,6.0,20.0,15\r\n', one('SCHED?'));
+  check('PIDS SET silent, PIDS? confirms', one('PIDS SET 2,5,0.3') === '' && one('PIDS SET 3, 6, 0.35, 0.5') === '' &&
+    one('PIDS?') === 'PIDS 1,4.00,0.25,0.00,5.00,0.30,0.00,6.00,0.35,0.50\r\n', one('PIDS?'));
+  check('PIDS SET saves the settings', s.setting(CFG.KP2) === 500 && s.setting(CFG.TI2) === 30 && s.setting(CFG.KD3) === 50,
+    [s.setting(CFG.KP2), s.setting(CFG.TI2), s.setting(CFG.KD3)].join());
+  const bad = [['PIDS SET', 101], ['PIDS SET 2', 101], ['PIDS SET 2,1', 101], ['PIDS SET x,1,1', 101], ['PIDS SET 2,1,1,1,1', 101],
+    ['PIDS SET 0,1,1', 102], ['PIDS SET 4,1,1', 102], ['PIDS SET 2,0,1', 102], ['PIDS SET 3,1,-1', 102],
+    ['SCHED SET', 101], ['SCHED SET ON,6,20,15', 101], ['SCHED SET PV,6,20', 101], ['SCHED SET PV,6,20,15,1', 101],
+    ['SCHED SET PV,x,20,15', 101], ['SCHED SET PV,0,20,15', 102], ['SCHED SET PV,6,20,41', 102], ['SCHED SET PV,20,6,15', 102],
+    ['SCHED SET PV,10,11,15', 102]];
+  const wrong = bad.map(([c, n]) => [c, n, one(c)]).filter(([c, n, r]) => !new RegExp('^ERR ' + n + ' [A-Z][^;\\r\\n]*\\r\\n$').test(r))
+    .map(([c, n, r]) => c + ' -> ' + JSON.stringify(r) + ' (want ' + n + ')');
+  check('PIDS SET and SCHED SET refusals', wrong.length === 0, wrong.join('\n     '));
+  check('SCHED SET boundaries text', one('SCHED SET PV,20,6,15') === 'ERR 102 B2 must be above B1, by more than the hysteresis either side\r\n',
+    one('SCHED SET PV,20,6,15'));
+  check('refusals change nothing', one('SCHED?;PIDS?') === 'SCHED OFF,6.0,20.0,15;PIDS 1,4.00,0.25,0.00,5.00,0.30,0.00,6.00,0.35,0.50\r\n',
+    one('SCHED?;PIDS?'));
+  check('SCHED SET PV', one('SCHED SET PV,6,20,15') === '' && one('SCHED?') === 'SCHED PV,6.0,20.0,15\r\n' &&
+    s.setting(CFG.SCHED) === 2 && s.setting(CFG.B1) === 60 && s.setting(CFG.B2) === 200, one('SCHED?'));
+  // The sim plant runs about 0.8 to 12.5 mbar (20 to 100 % open), so the
+  // boundaries here are 3 and 8 mbar: up at 3.45 and 9.2, down at 6.8 and 2.55.
+  // Sim-plant gains, a different set each so PID? shows which is in use.
+  one('SCHED SET PV,3,8,15;PIDS SET 1,6,0.25;PIDS SET 2,5,0.25,0;PIDS SET 3,4,0.25,0');
+  // The set changes so far, oldest first (EVNT? lists the newest first).
+  const sws = () => [...events(s, 100).matchAll(/AUTO PID set (\d) to (\d), pressure ([\d.]+) mbar/g)].map(m => [+m[1], +m[2], +m[3]]).reverse();
+  s.cmd('VALV SET 40', 60000);
+  s.run(240000);
+  s.cmd('PRES SP 10;MODE AUTO', 1000);
+  check('AUTO starts on the set for the pressure (3.8 mbar: set 2)', /Auto at setpoint 10\.0 mbar, valve [\d.]+ %, PID set 2/.test(events(s, 3)),
+    events(s, 3));
+  s.run(600000);
+  check('PV schedule: set 3 at 10 mbar', /^PIDS 3,/.test(one('PIDS?')) && one('PID?') === 'PID 4.00,0.25,0.00\r\n',
+    one('PRES?;PIDS?;PID?'));
+  const first = sws();
+  check('then 2 to 3 over 9.2 mbar (B2 x 1.15), once', first.length === 1 && first[0][0] === 2 && first[0][1] === 3 && first[0][2] >= 9.2 &&
+    first[0][2] < 10.5, JSON.stringify(first));
+  // PID SET edits the set in use.
+  check('PID SET edits the set in use', one('PID SET 4.5,0.25;PID?') === 'PID 4.50,0.25,0.00\r\n' && s.setting(CFG.KP3) === 450 &&
+    s.setting(CFG.KP) === 600, s.setting(CFG.KP3) + ' ' + s.setting(CFG.KP));
+  s.cmd('PRES SP 2', 1000);
+  s.run(900000);
+  const sw = sws().slice(1);
+  check('10 -> 2: set 3 to 2 under 6.8 mbar (B2 x 0.85)', sw.length >= 1 && sw[0][0] === 3 && sw[0][1] === 2 && sw[0][2] <= 6.8 &&
+    sw[0][2] > 5.5, JSON.stringify(sw));
+  check('10 -> 2: then set 2 to 1 under 2.55 mbar (B1 x 0.85), no other change', sw.length === 2 && sw[1][0] === 2 && sw[1][1] === 1 &&
+    sw[1][2] <= 2.6 && sw[1][2] > 2.0, JSON.stringify(sw));
+  check('10 -> 2: AUTO kept, near 2 mbar, set 1', one('MODE?') === 'MODE AUTO\r\n' && Math.abs(parseFloat(one('PRES?').slice(5)) - 2) < 0.3 &&
+    /^PIDS 1,/.test(one('PIDS?')) && one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('MODE?;PRES?;PIDS?;PID?'));
+  s.cmd('PRES SP 10', 1000);
+  s.run(900000);
+  const up = sws().slice(3);
+  check('2 -> 10: set 1 to 2 over 3.45, set 2 to 3 over 9.2 mbar', up.length === 2 && up[0][0] === 1 && up[0][1] === 2 &&
+    up[0][2] >= 3.4 && up[0][2] < 4.5 && up[1][0] === 2 && up[1][1] === 3 && up[1][2] >= 9.2 && up[1][2] < 10.5, JSON.stringify(up));
+  shot(s, 'gain-schedule');
+  // Setpoint schedule: the set follows the setpoint at once (no hysteresis).
+  check('SCHED SET SP in AUTO', one('SCHED SET SP,3,8,15;MODE?') === 'MODE AUTO\r\n', one('MODE?'));
+  s.cmd('PRES SP 5', 3000);
+  check('SP schedule: setpoint 5 gives set 2 at once', /^PIDS 2,/.test(one('PIDS?')) && /AUTO PID set 3 to 2, setpoint 5\.0 mbar/.test(events(s, 5)),
+    one('PIDS?') + events(s, 5));
+  check('SCHED SET OFF: set 1', one('SCHED SET OFF,6,20,15') === '' && (s.run(3000), /^PIDS 1,/.test(one('PIDS?'))) &&
+    one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('PIDS?;PID?'));
 }
 console.log(failed ? failed + ' failed' : 'all passed');
 process.exit(failed ? 1 : 0);

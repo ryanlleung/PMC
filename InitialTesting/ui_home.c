@@ -54,7 +54,7 @@ typedef struct {
 } tile_t;
 
 static tile_t pt, vt;
-static lv_obj_t *pid_btn, *pid_val[3], *start_btn, *stop_btn, *homev_btn;
+static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn;
 
 static void show_if(lv_obj_t *o, bool on)
 {
@@ -479,7 +479,7 @@ static void pid_make(lv_obj_t *scr, int32_t y)
     pid_btn = ui_btn(scr, 361, y, 109, 48, UI_SECONDARY, "", pid_event, NULL);
     for (int i = 0; i < 3; i++) {
         int32_t x = 1 + i * 36;
-        ui_label(pid_btn, x, 8, 35, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, nm[i]);
+        pid_nm[i] = ui_label(pid_btn, x, 8, 35, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, nm[i]);
         pid_val[i] = ui_label(pid_btn, x, 25, 35, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
         if (i) {
             lv_obj_t *r = lv_obj_create(pid_btn);
@@ -493,12 +493,23 @@ static void pid_make(lv_obj_t *scr, int32_t y)
     }
 }
 
+// The gains of the set in use. With the gain schedule on (0.15.15) the
+// set's number takes KD's place: Set, KP, TI.
 static void pid_refresh(void)
 {
-    static const cfg_key_t key[3] = { CFG_KP, CFG_TI, CFG_KD };
+    static const char *const off[3] = { "KP", "TI", "KD" }, *const on[3] = { "Set", "KP", "TI" };
+    const int set = valve_pid_set();
+    const bool sched = cfg_tune(CFG_SCHED) != CTRL_SCHED_OFF;
     char b[16];
-    for (int i = 0; i < 3; i++)
-        ui_set_text(pid_val[i], fmt3(b, sizeof b, cfg_tune(key[i])));
+    for (int i = 0; i < 3; i++) {
+        ui_set_text(pid_nm[i], sched ? on[i] : off[i]);
+        if (sched && i == 0) {
+            lv_snprintf(b, sizeof b, "%d", set);
+            ui_set_text(pid_val[i], b);
+        } else {
+            ui_set_text(pid_val[i], fmt3(b, sizeof b, cfg_tune(cfg_pid_key(set, sched ? i - 1 : i))));
+        }
+    }
 }
 
 // Start AUTO --------------------------------------------------------------

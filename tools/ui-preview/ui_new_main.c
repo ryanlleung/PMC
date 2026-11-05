@@ -91,6 +91,8 @@ bool valve_start_auto_at(int32_t m, const char **why)
 int32_t valve_range_mmbar(void) { return 1034214; }
 int32_t valve_band_mmbar(void) { return 100; }
 ctrl_reg_t valve_regulation(void) { return v_mode == VALVE_AUTO ? v_reg : CTRL_REG_NONE; }
+static int v_pidset = 1;
+int valve_pid_set(void) { return v_pidset; }
 bool valve_calibrated(void) { return v_cal; }
 static valve_ref_t v_ref = VALVE_REF_HOMED;
 valve_ref_t valve_reference(void) { return v_cal ? v_ref : VALVE_REF_NONE; }
@@ -306,7 +308,8 @@ int main(int argc, char **argv)
     bool aut = !strncmp(st, "auto", 4) || !strcmp(st, "paused") || !strncmp(st, "warn", 4) || !strcmp(st, "f08") || !strcmp(st, "trendauto");
     if (aut) { v_mode = VALVE_MANUAL; v_cal = true; v_pct10 = 342; v_sp_set = strcmp(st, "autofirst") != 0; }
     if (!strcmp(st, "auto") || !strcmp(st, "autostable") || !strcmp(st, "autoreg") || !strcmp(st, "autosp") ||
-        !strcmp(st, "automan") || !strcmp(st, "autovalve")) v_mode = VALVE_AUTO;
+        !strcmp(st, "automan") || !strcmp(st, "autovalve") || !strcmp(st, "autosched")) v_mode = VALVE_AUTO;
+    if (!strcmp(st, "autosched")) v_pidset = 2;
     if (!strcmp(st, "autostable")) v_reg = CTRL_REG_STABLE;
     if (!strcmp(st, "autoreg")) { extern bool fake_busy; fake_busy = moving = true; v_target10 = 356; v_reg = CTRL_REG_REGULATING; }
     if (!strcmp(st, "paused")) v_warn = "W-2 Not settling: switched to MANUAL, valve idle";   // shown until OK
@@ -359,6 +362,16 @@ int main(int argc, char **argv)
     }
     cal_init();
     cfg_init();
+    // The gain schedule on pressure with three sets (0.15.15).
+    if (!strcmp(st, "autosched")) {
+        int32_t v[CFG_N] = { 0 };
+        bool on[CFG_N] = { false };
+        const char *why;
+        static const cfg_key_t k[] = { CFG_SCHED, CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3 };
+        static const int32_t x[] = { 2, 10, 40, 80, 30, 120, 30 };
+        for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) { v[k[i]] = x[i]; on[k[i]] = true; }
+        if (!cfg_save_with(v, on, &why)) printf("schedule not saved: %s\n", why);
+    }
     ui_init();
     run(1200);
 

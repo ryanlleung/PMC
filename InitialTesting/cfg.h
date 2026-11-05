@@ -81,7 +81,8 @@ bool cfg_net_restart_due(void);   // the live address differs from the one in us
 bool cfg_remote(void);
 void cfg_set_remote(bool on);
 
-// Settings with a field on the screens. CFG_KP to CFG_KD stay in order.
+// Settings with a field on the screens. CFG_KP to CFG_TUNE_LAST stay in
+// order (cfg.c tune[]).
 typedef enum {
     CFG_POSMAX,    // steps for 100 %
     CFG_REVERSE,   // motor direction, 0 / 1 (a change clears the calibration)
@@ -99,6 +100,15 @@ typedef enum {
     CFG_KDIR,      // pressure response, +1 opening raises pressure, -1 lowers
     CFG_BAND,      // target band, 0.01 mbar
     CFG_KD,        // derivative, 0.01 % per mbar/s (0 = off; settings record version 7)
+    // Gain schedule (0.15.15, record version 8): CFG_KP, CFG_TI and CFG_KD
+    // are PID set 1 (low pressure), these sets 2 (middle) and 3 (high).
+    CFG_KP2, CFG_TI2, CFG_KD2,
+    CFG_KP3, CFG_TI3, CFG_KD3,
+    CFG_SCHED,     // 0 Off (set 1 always), 1 on the setpoint, 2 on the pressure
+    CFG_B1,        // boundary set 1 / set 2, 0.1 mbar
+    CFG_B2,        // boundary set 2 / set 3, 0.1 mbar
+    CFG_HYST,      // hysteresis on the pressure, % of the boundary
+    CFG_DBC,       // deadband closing, steps (CFG_DB is the opening one)
     CFG_SENSOR,    // serial number of the sensor in use
     CFG_N
 } cfg_key_t;
@@ -124,7 +134,10 @@ int cfg_unsaved_other(char *buf, size_t n);
 bool cfg_value(cfg_from_t from, cfg_key_t k, int32_t *v);
 bool cfg_rev(cfg_from_t from, uint32_t *rev, const char **saved_at);
 void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi);
+#define CFG_TUNE_LAST CFG_DBC
 int32_t cfg_tune(cfg_key_t k);   // live tuning value
+// The key of PID set 1 to 3's KP (which 0), TI (1) or KD (2).
+cfg_key_t cfg_pid_key(int set, int which);
 // Applies the live values with v[k] for each set[k], checked together, then
 // saves. Nothing changes unless all of it is good.
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why);

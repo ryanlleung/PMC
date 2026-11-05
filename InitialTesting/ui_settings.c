@@ -111,7 +111,7 @@ static const char *plural(char *buf, size_t n, int count, const char *word)
 /* --------------------------------------------------------------------------
  * Fields
  * ------------------------------------------------------------------------ */
-typedef enum { K_NUM, K_TURNS, K_TOGGLE, K_CHOICE } kind_t;
+typedef enum { K_NUM, K_TURNS, K_TOGGLE, K_CHOICE, K_SCHED } kind_t;
 
 typedef struct {
     const char *cap, *unit;
@@ -134,10 +134,22 @@ static const field_t F[CFG_N] = {
     [CFG_KP]      = { "KP", "%/mB", 2, K_NUM, "gain, % open per mB of error" },
     [CFG_TI]      = { "TI", "min", 2, K_NUM, "integral time, min; 0 is off" },
     [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "AUTO never closes the valve below this" },
-    [CFG_DB]      = { "Deadband", "steps", 0, K_NUM, "AUTO skips moves smaller than this" },
+    [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO holds an opening move until it adds up to this, then makes it in one go, past the needle's stick" },
     [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "How the pressure moves when the valve opens; a needle valve feeding the pot normally raises it" },
     [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Within this of the setpoint reads Within setpoint band" },
     [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "derivative, % open per mB/s the pressure changes; 0 is off" },
+    // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD).
+    [CFG_KP2]     = { "Set 2 KP", "%/mB", 2, K_NUM, "gain, % open per mB of error" },
+    [CFG_TI2]     = { "Set 2 TI", "min", 2, K_NUM, "integral time, min; 0 is off" },
+    [CFG_KD2]     = { "Set 2 KD", "%/(mB/s)", 2, K_NUM, "derivative, % open per mB/s the pressure changes; 0 is off" },
+    [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "gain, % open per mB of error" },
+    [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "integral time, min; 0 is off" },
+    [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "derivative, % open per mB/s the pressure changes; 0 is off" },
+    [CFG_SCHED]   = { "Schedule on", NULL, 0, K_SCHED, "What picks the PID set. Off: set 1 always. Pressure: the pressure now, so a move down keeps the high-pressure gains until the pressure gets there. Setpoint: the setpoint" },
+    [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "set 1 below it, set 2 above" },
+    [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "set 2 below it, set 3 above" },
+    [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "on the pressure, a set changes only this far past a boundary, so noise there cannot flip it" },
+    [CFG_DBC]     = { "Deadband close", "steps", 0, K_NUM, "AUTO skips closing moves smaller than this" },
     [CFG_SENSOR]  = { "Sensor in use", NULL, 0, K_CHOICE, "The sensor read for the pressure" },
 };
 
@@ -182,6 +194,8 @@ static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
         return v > 0 ? "Opening raises" : "Opening lowers";
     case K_CHOICE:
         return sensor_name(buf, n, (uint32_t)v);
+    case K_SCHED:
+        return v == CTRL_SCHED_PV ? "Pressure" : v == CTRL_SCHED_SP ? "Setpoint" : "Off";
     default:
         return fixed_fmt(buf, n, v, F[k].dec);
     }
@@ -338,6 +352,13 @@ static void ed_toggle_ok(void)
 
 static void sensor_pick(int i);
 
+static void sched_pick(int i)
+{
+    static const int32_t v[3] = { CTRL_SCHED_OFF, CTRL_SCHED_PV, CTRL_SCHED_SP };
+    if (i >= 0 && i < 3)
+        set_draft(CFG_SCHED, v[i]);
+}
+
 static void edit(cfg_key_t k)
 {
     static char t[160], cap[40], now[24], sv[24];
@@ -375,6 +396,10 @@ static void edit(cfg_key_t k)
                 sel = n;
         }
         ui_pick("Sensor in use", items, n, sel, sensor_pick);
+    } else if (F[k].kind == K_SCHED) {
+        static const char *const items[3] = { "Off, set 1 always", "Pressure", "Setpoint" };
+        int32_t now = shown(k);
+        ui_pick("Pick the PID set on", items, 3, now == CTRL_SCHED_PV ? 1 : now == CTRL_SCHED_SP ? 2 : 0, sched_pick);
     } else {
         int32_t lo, hi, s;
         cfg_range(k, &lo, &hi);
@@ -617,9 +642,15 @@ static void settings_refresh(void)
     lv_snprintf(t, sizeof t, "%s turns", value_text(d, sizeof d, CFG_POSMAX, live(CFG_POSMAX)));
     ui_btn_text(st.tile[2], "Valve setup", t);
     {
+        // The set in use; with the schedule on (0.15.15) its number, not KD.
         char a[16], b[16];
-        lv_snprintf(t, sizeof t, "KP %s, TI %s, KD %s", fixed_fmt(d, sizeof d, live(CFG_KP), 2),
-                    fixed_fmt(a, sizeof a, live(CFG_TI), 2), fixed_fmt(b, sizeof b, live(CFG_KD), 2));
+        const int n = valve_pid_set();
+        if (live(CFG_SCHED) != CTRL_SCHED_OFF)
+            lv_snprintf(t, sizeof t, "Set %d: KP %s, TI %s", n, fixed_fmt(d, sizeof d, live(cfg_pid_key(n, 0)), 2),
+                        fixed_fmt(a, sizeof a, live(cfg_pid_key(n, 1)), 2));
+        else
+            lv_snprintf(t, sizeof t, "KP %s, TI %s, KD %s", fixed_fmt(d, sizeof d, live(CFG_KP), 2),
+                        fixed_fmt(a, sizeof a, live(CFG_TI), 2), fixed_fmt(b, sizeof b, live(CFG_KD), 2));
     }
     ui_btn_text(st.tile[3], "PID tuning", t);
     // Without side buttons: the strip only.
@@ -1173,31 +1204,43 @@ typedef struct {
 } tab_t;
 
 static const tab_t valve_tabs[3] = {
-    { "Valve", { CFG_POSMAX, CFG_REVERSE }, 2, NULL },
+    // The deadbands (0.15.15: opening and closing) are the valve's: from
+    // the 5 Nov bench, the needle sticks opening at low openings.
+    { "Valve", { CFG_POSMAX, CFG_REVERSE, CFG_DB, CFG_DBC }, 4, NULL },
     { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4, NULL },
     { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Used by manual and AUTO moves. Saved when the valve is stopped." },
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
-// name on their own tab, the rest of AUTO's settings on the other.
-static const tab_t tune_tabs[2] = {
-    { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3, "Used by AUTO from the next control step. Save to keep them.", true },
-    { "AUTO limits", { CFG_OUTMIN, CFG_DB, CFG_KDIR, CFG_BAND }, 4,
+// name on their own tab, the rest of AUTO's settings on the other. From
+// 0.15.15 (Ryan 5 Nov, "build like industry ones"): three PID sets, the
+// PID tab showing one at a time (the keys here are set 1's; the set row
+// picks), and the gain schedule on its own tab.
+static const tab_t tune_tabs[3] = {
+    { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3,
+      "With the gain schedule on (Schedule tab), three sets of gains for low, middle and high pressure: "
+      "tap a set to see or change its gains; the dot marks the set in use. With it Off, set 1 only. "
+      "Used by AUTO from the next control step. Save to keep them.", true },
+    { "Schedule", { CFG_SCHED, CFG_HYST, CFG_B1, CFG_B2 }, 4,
+      "Gain scheduling, as industrial controllers do it: set 1 below boundary 1, set 2 between, set 3 "
+      "above boundary 2. A change of set does not move the valve. Used by AUTO from the next control "
+      "step. Save to keep them." },
+    { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
       "Used by AUTO from the next control step. Save to keep them." },
 };
 
 // Tall card for KP, TI and KD: the name 26 px, what it is and its unit
 // 12 px, the value 26 px, the chevron; the draft edge as an editable card.
-static void tcard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, cfg_key_t k)
+static void tcard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, cfg_key_t k, int i)
 {
     static const char *const what[3] = { "Gain", "Integral time", "Derivative" };
-    const int i = k == CFG_KP ? 0 : k == CFG_TI ? 1 : 2;
+    static const char *const name[3] = { "KP", "TI", "KD" };
     e->card = ui_card(scr, x, y, 109, 104);
     lv_obj_add_flag(e->card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_border_width(e->card, 1, 0);
     lv_obj_set_style_border_color(e->card, UI_TICK, 0);
     lv_obj_set_style_bg_color(e->card, UI_TRACK, LV_STATE_PRESSED);
     lv_obj_add_event_cb(e->card, field_event, LV_EVENT_CLICKED, (void *)(intptr_t)k);
-    ui_label(e->card, 12, 6, 85, &ui_font_26, UI_TEXT, LV_TEXT_ALIGN_LEFT, F[k].cap);
+    ui_label(e->card, 12, 6, 85, &ui_font_26, UI_TEXT, LV_TEXT_ALIGN_LEFT, name[i]);
     ui_label(e->card, 12, 36, 85, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, what[i]);
     ui_label(e->card, 12, 50, 85, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, F[k].unit);
     e->v = ui_label(e->card, 12, 69, 72, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
@@ -1214,7 +1257,86 @@ static struct {
     ecard_t f[6];
     lv_obj_t *seg, *segb[3];
     lv_obj_t *scr;
+    int set;                                   // the PID set the PID tab shows, 1 to 3
+    bool sets;                                 // the PID tab shows the set row (schedule on)
+    lv_obj_t *sel, *selb[3], *selr[3], *seld[3];   // the set row: track, segments, range lines, in-use dots
 } pg;
+
+// The key a tab shows in place i: on the PID tab, the set picked.
+static cfg_key_t pg_key(const tab_t *t, int i)
+{
+    return t->tall ? cfg_pid_key(pg.set, i) : t->keys[i];
+}
+
+static void segs_draw(lv_obj_t *const *b, int n, int on);
+static void pg_fields(void);
+static void pg_refresh(void);
+
+static void set_cb(lv_event_t *e)
+{
+    int s = (int)(intptr_t)lv_event_get_user_data(e);
+    if (s == pg.set)
+        return;
+    pg.set = s;
+    pg_fields();
+    pg_refresh();
+}
+
+// A grey track with n raised segments (the tabs, and the PID tab's sets).
+static lv_obj_t *segs_make(lv_obj_t *scr, int32_t y, int n, lv_obj_t **b, lv_event_cb_t cb, int first)
+{
+    lv_obj_t *track = ui_card(scr, 10, y, 343, RH);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0xC3CDD7), 0);
+    lv_obj_set_style_border_width(track, 0, 0);
+    lv_obj_set_style_radius(track, 6, 0);
+    int32_t iw = (343 - 8) / n;
+    for (int i = 0; i < n; i++) {
+        b[i] = ui_card(track, 4 + i * iw, 4, iw, RH - 8);
+        lv_obj_add_flag(b[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_radius(b[i], 4, 0);
+        lv_obj_set_style_border_width(b[i], 0, 0);
+        lv_obj_add_event_cb(b[i], cb, LV_EVENT_CLICKED, (void *)(intptr_t)(first + i));
+    }
+    return track;
+}
+
+// The set row: "Set 2" over its pressures, a dot on the set in use.
+static void sel_make(void)
+{
+    pg.sel = segs_make(pg.scr, RY[1], 3, pg.selb, set_cb, 1);
+    int32_t iw = (343 - 8) / 3;
+    for (int i = 0; i < 3; i++) {
+        char t[8];
+        lv_snprintf(t, sizeof t, "Set %d", i + 1);
+        ui_label(pg.selb[i], 0, 2, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, t);
+        pg.selr[i] = ui_label(pg.selb[i], 0, 22, iw, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
+        pg.seld[i] = ui_card(pg.selb[i], 10, 9, 8, 8);
+        lv_obj_set_style_radius(pg.seld[i], 4, 0);
+        lv_obj_set_style_border_width(pg.seld[i], 0, 0);
+        lv_obj_set_style_bg_color(pg.seld[i], UI_TEXT, 0);
+    }
+    segs_draw(pg.selb, 3, pg.set - 1);
+}
+
+static void sel_refresh(void)
+{
+    char a[16], b[16], t[3][28];
+    fixed_fmt(a, sizeof a, shown(CFG_B1), 1);
+    fixed_fmt(b, sizeof b, shown(CFG_B2), 1);
+    lv_snprintf(t[0], sizeof t[0], "below %s mB", a);
+    lv_snprintf(t[1], sizeof t[1], "%s to %s mB", a, b);
+    lv_snprintf(t[2], sizeof t[2], "%s mB up", b);
+    // The dot only while the schedule in use is on (a draft schedule
+    // picks nothing yet).
+    const int use = live(CFG_SCHED) != CTRL_SCHED_OFF ? valve_pid_set() : 0;
+    for (int i = 0; i < 3; i++) {
+        ui_set_text(pg.selr[i], t[i]);
+        if ((i + 1 == use) == lv_obj_has_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN)) {
+            if (i + 1 == use) lv_obj_remove_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN);
+            else              lv_obj_add_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
 
 static void pg_fields(void)
 {
@@ -1224,27 +1346,50 @@ static void pg_fields(void)
             lv_obj_delete(pg.f[i].card);
             pg.f[i].card = NULL;
         }
+    if (pg.sel) {
+        lv_obj_delete(pg.sel);
+        pg.sel = NULL;
+    }
     const tab_t *t = &pg.tabs[pg.tab];
     int y0 = pg.ntabs > 1 ? 1 : 0;
     char cap[40];
-    for (int i = 0; i < t->n && t->tall; i++)
-        tcard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0], t->keys[i]);
+    // The PID tab: with the schedule Off, set 1 as three tall cards (as
+    // before 0.15.15); with it on (or a draft turning it on), the set row
+    // and the set picked as three cards under it.
+    pg.sets = t->tall && shown(CFG_SCHED) != CTRL_SCHED_OFF;
+    if (t->tall && !pg.sets) {
+        pg.set = 1;
+        for (int i = 0; i < t->n; i++)
+            tcard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0], pg_key(t, i), i);
+    }
+    if (pg.sets) {
+        static const char *const nm[3] = { "KP", "TI", "KD" };
+        sel_make();
+        for (int i = 0; i < 3; i++) {
+            const cfg_key_t k = pg_key(t, i);
+            lv_snprintf(cap, sizeof cap, "%s, %s", nm[i], i == 2 ? "%/mB/s" : F[k].unit);   // 78 px of caption
+            ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, cap, field_event, (void *)(intptr_t)k);
+        }
+    }
     for (int i = 0; i < t->n && !t->tall; i++)
         ecard_make(&pg.f[i], pg.scr, C2X[i % 2], RY[y0 + i / 2], C2W[i % 2], caption(cap, sizeof cap, t->keys[i]),
                    field_event, (void *)(intptr_t)t->keys[i]);
 }
 
-static void seg_draw(void)
+static void segs_draw(lv_obj_t *const *b, int n, int on)
 {
-    for (int i = 0; i < pg.ntabs && pg.ntabs > 1; i++) {
-        bool on = i == pg.tab;
-        lv_obj_set_style_bg_opa(pg.segb[i], on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_shadow_width(pg.segb[i], 0, 0);
-        ui_set_color(lv_obj_get_child(pg.segb[i], 0), on ? UI_TEXT : UI_MUTED);
+    for (int i = 0; i < n; i++) {
+        lv_obj_set_style_bg_opa(b[i], i == on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_shadow_width(b[i], 0, 0);
+        ui_set_color(lv_obj_get_child(b[i], 0), i == on ? UI_TEXT : UI_MUTED);
     }
 }
 
-static void pg_refresh(void);
+static void seg_draw(void)
+{
+    if (pg.ntabs > 1)
+        segs_draw(pg.segb, pg.ntabs, pg.tab);
+}
 
 static void seg_cb(lv_event_t *e)
 {
@@ -1259,9 +1404,12 @@ static void seg_cb(lv_event_t *e)
 
 static const char *pg_help(void)
 {
-    static char buf[700];
+    static char buf[900];
     const tab_t *t = &pg.tabs[pg.tab];
-    return field_help(buf, sizeof buf, t->note, t->keys, t->n);
+    cfg_key_t keys[6];
+    for (int i = 0; i < t->n; i++)
+        keys[i] = pg_key(t, i);
+    return field_help(buf, sizeof buf, t->note, keys, t->n);
 }
 
 static void pg_build(lv_obj_t *scr, const char *title, const tab_t *tabs, int n)
@@ -1270,22 +1418,14 @@ static void pg_build(lv_obj_t *scr, const char *title, const tab_t *tabs, int n)
     pg.scr = scr;
     pg.tabs = tabs;
     pg.ntabs = n;
+    pg.set = live(CFG_SCHED) != CTRL_SCHED_OFF ? valve_pid_set() : 1;   // the PID tab opens on the set in use
     if (n > 1) {
         // Segmented choice: a grey track, the page shown as a raised white segment.
-        pg.seg = ui_card(scr, 10, RY[0], 343, RH);
-        lv_obj_set_style_bg_color(pg.seg, lv_color_hex(0xC3CDD7), 0);
-        lv_obj_set_style_border_width(pg.seg, 0, 0);
-        lv_obj_set_style_radius(pg.seg, 6, 0);
+        pg.seg = segs_make(scr, RY[0], n, pg.segb, seg_cb, 0);
         int32_t iw = (343 - 8) / n;
         for (int i = 0; i < n; i++) {
-            lv_obj_t *b = ui_card(pg.seg, 4 + i * iw, 4, iw, RH - 8);
-            lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_set_style_radius(b, 4, 0);
-            lv_obj_set_style_border_width(b, 0, 0);
-            lv_obj_t *l = ui_label(b, 0, 0, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, tabs[i].label);
+            lv_obj_t *l = ui_label(pg.segb[i], 0, 0, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, tabs[i].label);
             lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
-            lv_obj_add_event_cb(b, seg_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-            pg.segb[i] = b;
         }
         seg_draw();
     }
@@ -1296,13 +1436,19 @@ static void pg_build(lv_obj_t *scr, const char *title, const tab_t *tabs, int n)
 static void pg_refresh(void)
 {
     const tab_t *t = &pg.tabs[pg.tab];
+    // The schedule turned on or off (a draft, Discard, or the network): the
+    // PID tab changes form.
+    if (t->tall && pg.sets != (shown(CFG_SCHED) != CTRL_SCHED_OFF))
+        pg_fields();
     for (int i = 0; i < t->n; i++)
-        field_update(&pg.f[i], t->keys[i]);
+        field_update(&pg.f[i], pg_key(t, i));
+    if (pg.sel)
+        sel_refresh();
     side_refresh();
 }
 
 static void valve_set_build(lv_obj_t *scr) { pg_build(scr, "Valve setup", valve_tabs, 3); }
-static void tune_build(lv_obj_t *scr) { pg_build(scr, "PID tuning", tune_tabs, 2); }
+static void tune_build(lv_obj_t *scr) { pg_build(scr, "PID tuning", tune_tabs, 3); }
 
 const ui_screen_t ui_scr_valve_set = { "Valve setup", valve_set_build, pg_refresh, NULL };
 const ui_screen_t ui_scr_tune = { "PID tuning", tune_build, pg_refresh, NULL };

@@ -642,7 +642,34 @@ static ctrl_tune_t tune_now(void)
     k.kd = (float)cfg_tune(CFG_KD) / 100.0f;
     k.pos_max = pm();
     k.steps = stepper3_scale();
+    // Sets 2 and 3, the schedule (0.1 mbar boundaries, % hysteresis) and
+    // the closing deadband (0 = none: one step).
+    for (int s = 2; s <= 3; s++) {
+        k.set23[s - 2].kp = (float)cfg_tune(cfg_pid_key(s, 0)) / 100.0f;
+        k.set23[s - 2].ti = (float)cfg_tune(cfg_pid_key(s, 1)) / 100.0f;
+        k.set23[s - 2].kd = (float)cfg_tune(cfg_pid_key(s, 2)) / 100.0f;
+    }
+    k.sched = (int)cfg_tune(CFG_SCHED);
+    k.b1 = (float)cfg_tune(CFG_B1) / 10.0f;
+    k.b2 = (float)cfg_tune(CFG_B2) / 10.0f;
+    k.hyst = (float)cfg_tune(CFG_HYST) / 100.0f;
+    k.db_close = cfg_tune(CFG_DBC) > 0 ? sc(cfg_tune(CFG_DBC)) : 1;
     return k;
+}
+
+// The PID set in use: in AUTO the one the schedule has switched to; else
+// the one AUTO would start with now (the pressure for PV, the setpoint for
+// SP; 1 with the schedule Off).
+int valve_pid_set(void)
+{
+    ctrl_tune_t k = tune_now();
+    if (k.sched == CTRL_SCHED_OFF)
+        return 1;
+    if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 3)
+        return ctl.set;
+    if (k.sched == CTRL_SCHED_PV && pv_ok)
+        return ctrl_pick_set(&k, 0, pv_mbar);
+    return ctl.sp_set ? ctrl_pick_set(&k, 0, ctl.sp) : 1;
 }
 
 int32_t valve_range_mmbar(void)
@@ -723,7 +750,15 @@ static void auto_step(void)
     }
     ctrl_tune_t k = tune_now();
     ctrl_in_t in = { lv_tick_get(), pv_mbar, stepper3_position(), stepper3_busy(), limit_open_now(), range_mbar() };
-    switch (ctrl_step(&ctl, &k, &in)) {
+    const int set0 = ctl.set;
+    const ctrl_result_t res = ctrl_step(&ctl, &k, &in);
+    if (ctl.set != set0 && set0 >= 1) {
+        char a[16];
+        ev("MODE", "AUTO PID set %d to %d, %s %s mbar", set0, ctl.set,
+           k.sched == CTRL_SCHED_SP ? "setpoint" : "pressure",
+           mbar_text(a, sizeof a, k.sched == CTRL_SCHED_SP ? ctl.sp : ctl.pv_f, 1));
+    }
+    switch (res) {
     case CTRL_RUN:
         // The closed switch blocks closing from rest (stepper3 refuses it);
         // ctrl.c holds the integral meanwhile.
@@ -796,8 +831,11 @@ bool valve_start_auto(const char **why)
     over_n = 0;
     update_lock();
     char a[16], p[16];
-    ev("MODE", "%s at setpoint %s mbar, valve %s %%", "Auto",
-       mbar_text(a, sizeof a, ctl.sp, 1), pct_text(p, sizeof p, now));
+    char st[16] = "";
+    if (k.sched != CTRL_SCHED_OFF)
+        lv_snprintf(st, sizeof st, ", PID set %d", ctl.set);
+    ev("MODE", "%s at setpoint %s mbar, valve %s %%%s", "Auto",
+       mbar_text(a, sizeof a, ctl.sp, 1), pct_text(p, sizeof p, now), st);
     return true;
 }
 
