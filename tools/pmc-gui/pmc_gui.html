@@ -59,7 +59,11 @@
       <div id="alarm"></div>
     </div>
     <div class="card">
-      <h2>Step test results</h2>
+      <h2>1. Valve step results (MANUAL)</h2>
+      <table><thead><tr><th>Valve, %</th><th>From, mbar</th><th>Change</th><th>Gain K</th><th>Delay</th><th>Time constant</th><th>Suggested KP, TI</th><th></th></tr></thead><tbody id="vres"><tr><td colspan="8" style="color:var(--muted)">None yet</td></tr></tbody></table>
+    </div>
+    <div class="card">
+      <h2>2. Setpoint step results (AUTO)</h2>
       <table><thead><tr><th>Step, mbar</th><th>90 % in</th><th>Overshoot</th><th>Settled in</th><th>Last minute</th></tr></thead><tbody id="res"><tr><td colspan="5" style="color:var(--muted)">None yet</td></tr></tbody></table>
     </div>
   </div>
@@ -80,7 +84,16 @@
       <div class="row" id="pidNow" style="font-size:13px;color:var(--muted)"></div>
     </div>
     <div class="card">
-      <h2>Setpoint step test</h2>
+      <h2>1. Valve step test (MANUAL)</h2>
+      <div class="row"><label style="width:60px">At</label><input id="vAt" type="number" step="0.1" value="35"><label>% open</label></div>
+      <div class="row"><label style="width:60px">Step</label><input id="vStep" type="number" step="0.1" value="1"><label>%, then back</label></div>
+      <div class="row"><label style="width:60px">Settle</label><input id="vHold" type="number" value="180"><label>s before the step</label></div>
+      <div class="row"><label style="width:60px">Record</label><input id="vRec" type="number" value="600"><label>s per step</label></div>
+      <div class="row"><button class="primary" id="vGo" onclick="startVtest()">Run</button><button onclick="post('/api/test/stop', {})">Stop test</button></div>
+      <div style="font-size:13px;color:var(--muted)">MANUAL, valve to At, waits, opens by Step, records, closes back, records. Start At near where AUTO holds the setpoint you use.</div>
+    </div>
+    <div class="card">
+      <h2>2. Setpoint step test (AUTO)</h2>
       <div class="row"><label style="width:60px">From</label><input id="tFrom" type="number" step="0.1" value="3"><label>mbar</label></div>
       <div class="row"><label style="width:60px">To</label><input id="tTo" type="number" step="0.1" value="5"><label>mbar</label></div>
       <div class="row"><label style="width:60px">Record</label><input id="tRec" type="number" value="600"><label>s per step</label></div>
@@ -111,6 +124,11 @@ function setPid() {
   const kd = val('kd');
   cmd('PID SET ' + val('kp') + ',' + val('ti') + (kd !== '' ? ',' + kd : '')).then(r => { if (!r) pidLoaded = false; });
 }
+function startVtest() {
+  post('/api/vtest', { at: +val('vAt'), step: +val('vStep'), hold: +val('vHold'), record: +val('vRec') });
+}
+function useGains(kp, ti) { $('kp').value = kp.toFixed(2); $('ti').value = ti.toFixed(2); pidLoaded = true;
+  $('msg').textContent = 'KP and TI filled in: press Set and save to use them.'; }
 function startTest() {
   post('/api/test', { start: +val('tFrom'), to: +val('tTo'), record: +val('tRec'), band: +val('tBand'), back: $('tBack').checked, hold: 120 });
 }
@@ -134,8 +152,13 @@ async function refresh() {
       $('pidNow').textContent = 'In use: KP ' + s.pid[0].toFixed(2) + ', TI ' + s.pid[1].toFixed(2) + ', KD ' + s.pid[2].toFixed(2);
       if (!pidLoaded) { $('kp').value = s.pid[0].toFixed(2); $('ti').value = s.pid[1].toFixed(2); $('kd').value = s.pid[2].toFixed(2); pidLoaded = true; }
     }
-    $('tState').textContent = s.test ? (s.test === 'settle' ? 'Settling at From' : 'Recording step ' + s.test) : 'Starts AUTO at From, waits 2 min holding within the band, then steps.';
-    $('tGo').disabled = !!s.test;
+    $('tState').textContent = s.test ? (s.test === 'settle' ? 'Settling at From' : s.test === 'valve settle' ? 'Valve test: settling' : 'Recording ' + s.test) : 'Starts AUTO at From, waits 2 min holding within the band, then steps.';
+    $('tGo').disabled = $('vGo').disabled = !!s.test;
+    $('vres').innerHTML = s.vresults.length ? s.vresults.slice().reverse().map(m =>
+      `<tr><td>${m.from.toFixed(1)} to ${m.to.toFixed(1)}</td><td>${m.p0.toFixed(3)}</td><td>${m.dp === null ? '--' : (m.dp > 0 ? '+' : '') + m.dp.toFixed(3) + ' mbar'}</td>` +
+      (m.K === null ? '<td colspan="5" style="color:var(--amber)">No usable response: try a larger step</td>' :
+      `<td>${m.K.toFixed(3)} mbar/%</td><td>${m.delay_s} s</td><td>${m.tau_s} s</td><td>${m.kp.toFixed(2)}, ${m.ti.toFixed(2)} min</td>` +
+      `<td><button onclick="useGains(${m.kp},${m.ti})">Use</button></td>`) + '</tr>').join('') : '<tr><td colspan="8" style="color:var(--muted)">None yet</td></tr>';
     $('log').textContent = s.log.slice().reverse().join('\n');
     $('res').innerHTML = s.results.length ? s.results.slice().reverse().map(m =>
       `<tr><td>${m.from.toFixed(1)} to ${m.to.toFixed(1)}</td><td>${m.t90_s === null ? 'not reached' : Math.round(m.t90_s) + ' s'}</td>` +

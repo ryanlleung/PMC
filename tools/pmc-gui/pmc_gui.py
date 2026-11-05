@@ -7,7 +7,9 @@
 A small web server on this PC talks to the board's text port (TCP 8888) and
 serves one page: live pressure, setpoint and valve with a chart, the mode
 and alarms, setpoint / AUTO / MANUAL / STOP, the PID gains (PID? and
-PID SET), and setpoint step tests with their overshoot and settling time.
+PID SET), valve step tests in MANUAL (the plant's gain, delay and time
+constant, and the KP and TI they suggest), and setpoint step tests in AUTO
+(overshoot and settling time).
 The chart's samples download as CSV.
 
 Python 3.8 or later, standard library only: nothing to install, and no
@@ -31,6 +33,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 BOARD_PORT = 8888
 HISTORY = 4 * 3600          # samples kept (1 a second): 4 hours
 HERE = os.path.dirname(os.path.abspath(__file__))
+# The step fit and SIMC rules of the gain schedule program (tools/gain-schedule).
+for d in (os.path.join(HERE, '..', 'gain-schedule'), HERE):
+    if os.path.exists(os.path.join(d, 'pmc_gains.py')):
+        sys.path.insert(0, d)
+        break
+from pmc_gains import fit_step, simc   # noqa: E402
 
 
 def num(part):
@@ -74,8 +82,10 @@ class Board:
         self.hist = []            # [t, sp, p, valve, mode, alarm, phase]
         self.t0 = time.time()
         self.state = {'link': 'connecting', 'idn': '', 'pid': None, 'log': []}
-        self.test = None          # the step test in progress
+        self.test = None          # the setpoint step test in progress
         self.results = []
+        self.vtest = None         # the valve step test in progress
+        self.vresults = []
 
     # Link ----------------------------------------------------------------
     def connect(self):
@@ -137,7 +147,8 @@ class Board:
         r = self.ask('PRES SP?;PRES?;VALV?;MODE?;ALRM?;PID?')
         sp, p, v, m, a, pid = (r.split(';') + [''] * 6)[:6]
         t = round((time.time() - self.t0) * self.speed, 1)
-        row = [t, num(sp), num(p), num(v), m[5:], a[5:], self.test['phase'] if self.test else '']
+        phase = self.test['phase'] if self.test else self.vtest['phase'] if self.vtest else ''
+        row = [t, num(sp), num(p), num(v), m[5:], a[5:], phase]
         with self.lock:
             self.hist.append(row)
             del self.hist[:-HISTORY]
@@ -145,11 +156,13 @@ class Board:
                 self.state['pid'] = [float(x) for x in pid[4:].split(',')]
         if self.test:
             self.step_tick(row)
+        if self.vtest:
+            self.vstep_tick(row)
 
     # Step test -----------------------------------------------------------
     def start_test(self, start, to, back, record, hold, band):
-        if self.test:
-            return 'a step test is already running'
+        if self.test or self.vtest:
+            return 'a test is already running'
         r = self.send('PRES SP %.1f;MODE AUTO' % start)
         if r:
             return r
@@ -209,13 +222,83 @@ class Board:
             self.note('setpoint refused: ' + r)
         self.note('step %.1f -> %.1f mbar, recording %d s' % (T['cur'][0], T['cur'][1], T['record']))
 
+    # Valve step test (MANUAL): the plant alone, before the loop -----------
+    # The valve to At %, a wait for the pressure to settle, then At + Step %
+    # and back, each recorded and fitted to a gain, a delay and a time
+    # constant (pmc_gains.fit_step), with the KP and TI the SIMC rules give.
+    def start_vtest(self, at, step, hold, record):
+        if self.test or self.vtest:
+            return 'a test is already running'
+        if not (0 <= at <= 100 and 0 < at + step <= 100 and step):
+            return 'At and At + Step must be within 0 to 100 %'
+        r = self.send('MODE MANUAL;VALV SET %.1f' % at)
+        if r:
+            return r
+        self.vtest = {'at': at, 'step': step, 'hold': hold, 'record': record, 'phase': 'valve settle',
+                      't_phase': None, 'rows': [], 'moves': [(at, at + step), (at + step, at)], 'base': []}
+        self.note('valve step test: valve to %.1f %%, waiting %d s for the pressure to settle' % (at, hold))
+        return ''
+
+    def stop_vtest(self, why='stopped'):
+        if self.vtest:
+            self.note('valve step test %s; valve left where it is, in MANUAL' % why)
+            self.vtest = None
+
+    def vstep_tick(self, row):
+        V = self.vtest
+        t, p, mode = row[0], row[2], row[4]
+        if mode != 'MANUAL':
+            self.stop_vtest('ended: the board is in %s %s' % (mode, row[5]))
+            return
+        if V['t_phase'] is None:
+            V['t_phase'] = t
+        if p is not None:
+            V['base'] = (V['base'] + [p])[-30:]
+            V['rows'].append((t - V['t_phase'], p))
+        if t - V['t_phase'] < (V['hold'] if V['phase'] == 'valve settle' else V['record']):
+            return
+        if V['phase'] != 'valve settle':
+            x0, x1 = V['cur']
+            base = V['p0']
+            ts = [a for a, _ in V['rows']]
+            dp = [b - base for _, b in V['rows']]
+            f = fit_step(ts, dp, x1 - x0)
+            if f and f['K'] > 0:
+                kp, ti = simc(f['K'], f['delay'], f['tau'])
+                m = {'from': x0, 'to': x1, 'p0': round(base, 3), 'dp': round(f['dp_end'], 3),
+                     'K': round(f['K'], 3), 'delay_s': round(f['delay']), 'tau_s': round(f['tau']),
+                     'kp': round(kp, 2), 'ti': round(ti, 2)}
+                self.note('valve %.1f -> %.1f %%: pressure %+.3f mbar, K %.3f mbar/%%, delay %d s, tau %d s, '
+                          'SIMC KP %.2f TI %.2f' % (x0, x1, m['dp'], m['K'], m['delay_s'], m['tau_s'], m['kp'], m['ti']))
+            else:
+                m = {'from': x0, 'to': x1, 'p0': round(base, 3), 'dp': round(dp[-1], 3) if dp else None,
+                     'K': None, 'delay_s': None, 'tau_s': None, 'kp': None, 'ti': None}
+                self.note('valve %.1f -> %.1f %%: no usable response (pressure moved too little, '
+                          'or the wrong way); try a larger step' % (x0, x1))
+            with self.lock:
+                self.vresults.append(m)
+        if not V['moves']:
+            self.note('valve step test done; valve back at %.1f %%, MANUAL' % V['at'])
+            self.vtest = None
+            return
+        V['cur'] = V['moves'].pop(0)
+        V['p0'] = statistics.mean(V['base']) if V['base'] else p
+        V['phase'] = 'valve %.1f->%.1f' % V['cur']
+        V['t_phase'], V['rows'] = t, []
+        r = self.ask('VALV SET %.1f;VALV?' % V['cur'][1])
+        if r.startswith('ERR'):
+            self.stop_vtest('ended: ' + r)
+            return
+        self.note('valve %.1f -> %.1f %%, recording %d s' % (V['cur'][0], V['cur'][1], V['record']))
+
     # For the page --------------------------------------------------------
     def snapshot(self, since):
         with self.lock:
             rows = [r for r in self.hist[-HISTORY:] if r[0] > since]
             return {'link': self.state['link'], 'idn': self.state['idn'], 'pid': self.state['pid'],
                     'log': self.state['log'], 'rows': rows, 'results': self.results,
-                    'test': self.test['phase'] if self.test else None}
+                    'vresults': self.vresults,
+                    'test': self.test['phase'] if self.test else self.vtest['phase'] if self.vtest else None}
 
     def csv_text(self):
         f = io.StringIO()
@@ -267,8 +350,12 @@ def make_handler(board):
                     r = board.start_test(float(q['start']), float(q['to']), bool(q.get('back')),
                                          float(q.get('record', 600)), float(q.get('hold', 120)),
                                          float(q.get('band', 0.1)))
+                elif self.path == '/api/vtest':
+                    r = board.start_vtest(float(q['at']), float(q['step']), float(q.get('hold', 180)),
+                                          float(q.get('record', 600)))
                 elif self.path == '/api/test/stop':
                     board.stop_test()
+                    board.stop_vtest()
                     r = ''
                 else:
                     self.send_error(404)
