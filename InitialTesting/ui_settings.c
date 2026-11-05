@@ -122,35 +122,35 @@ typedef struct {
 
 // In cfg_key_t order.
 static const field_t F[CFG_N] = {
-    [CFG_POSMAX]  = { "100 % travel", "turns", 2, K_TURNS, "Output turns from closed to fully open" },
-    [CFG_REVERSE] = { "Motor direction", NULL, 0, K_TOGGLE, "Reversed if Open drives the valve closed; saving it clears the zero" },
-    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Homing step 2: off the switch after the fast close" },
-    [CFG_RETURN]  = { "Return", "steps", 0, K_NUM, "Homing step 4: off the switch after the slow close; that point is 0 %" },
-    [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM, "Homing step 1: closing fast to the switch" },
-    [CFG_FCREEP]  = { "Slow close", "steps/s", 0, K_NUM, "Homing step 3: closing slowly onto the switch" },
-    [CFG_RATE]    = { "Run speed", "steps/s", 0, K_NUM, "Normal move speed" },
-    [CFG_START]   = { "Start speed", "steps/s", 0, K_NUM, "Speed at the start and end of a move" },
-    [CFG_ACCEL]   = { "Acceleration", "steps/s/s", 0, K_NUM, "Ramp between start and run" },
-    [CFG_KP]      = { "KP", "%/mB", 2, K_NUM, "gain, % open per mB of error" },
-    [CFG_TI]      = { "TI", "min", 2, K_NUM, "integral time, min; 0 is off" },
-    [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "AUTO never closes the valve below this" },
-    [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO holds an opening move until it adds up to this, then makes it in one go, past the needle's stick" },
-    [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "How the pressure moves when the valve opens; a needle valve feeding the pot normally raises it" },
-    [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Within this of the setpoint reads Within setpoint band" },
-    [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "derivative, % open per mB/s the pressure changes; 0 is off" },
+    [CFG_POSMAX]  = { "100 % travel", "turns", 2, K_TURNS, "Output turns, closed to fully open" },
+    [CFG_REVERSE] = { "Motor direction", NULL, 0, K_TOGGLE, "Reverse if Open closes the valve; saving clears the zero" },
+    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Homing step 2, off the switch after the fast close" },
+    [CFG_RETURN]  = { "Return", "steps", 0, K_NUM, "Homing step 4, off the switch after the slow close; defines 0 %" },
+    [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM, "Homing step 1, to the switch" },
+    [CFG_FCREEP]  = { "Slow close", "steps/s", 0, K_NUM, "Homing step 3, onto the switch" },
+    [CFG_RATE]    = { "Run speed", "steps/s", 0, K_NUM, "Move speed" },
+    [CFG_START]   = { "Start speed", "steps/s", 0, K_NUM, "Start and stop speed of a move" },
+    [CFG_ACCEL]   = { "Acceleration", "steps/s/s", 0, K_NUM, "Ramp from start to run speed" },
+    [CFG_KP]      = { "KP", "%/mB", 2, K_NUM, "Proportional gain" },
+    [CFG_TI]      = { "TI", "min", 2, K_NUM, "Integral time; 0 = off" },
+    [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "Lowest opening AUTO commands" },
+    [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO opening moves accumulate to this, then go in one step (needle stiction)" },
+    [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "Process direction; normally opening raises the pressure" },
+    [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "In-band tolerance about the setpoint" },
+    [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
     // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD).
-    [CFG_KP2]     = { "Set 2 KP", "%/mB", 2, K_NUM, "gain, % open per mB of error" },
-    [CFG_TI2]     = { "Set 2 TI", "min", 2, K_NUM, "integral time, min; 0 is off" },
-    [CFG_KD2]     = { "Set 2 KD", "%/(mB/s)", 2, K_NUM, "derivative, % open per mB/s the pressure changes; 0 is off" },
-    [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "gain, % open per mB of error" },
-    [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "integral time, min; 0 is off" },
-    [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "derivative, % open per mB/s the pressure changes; 0 is off" },
-    [CFG_SCHED]   = { "Schedule on", NULL, 0, K_SCHED, "What picks the PID set. Off: set 1 always. Pressure: the pressure now, so a move down keeps the high-pressure gains until the pressure gets there. Setpoint: the setpoint" },
-    [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "set 1 below it, set 2 above" },
-    [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "set 2 below it, set 3 above" },
-    [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "on the pressure, a set changes only this far past a boundary, so noise there cannot flip it" },
-    [CFG_DBC]     = { "Deadband close", "steps", 0, K_NUM, "AUTO skips closing moves smaller than this" },
-    [CFG_SENSOR]  = { "Sensor in use", NULL, 0, K_CHOICE, "The sensor read for the pressure" },
+    [CFG_KP2]     = { "Set 2 KP", "%/mB", 2, K_NUM, "Proportional gain" },
+    [CFG_TI2]     = { "Set 2 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
+    [CFG_KD2]     = { "Set 2 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
+    [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
+    [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
+    [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
+    [CFG_SCHED]   = { "Schedule on", NULL, 0, K_SCHED, "Scheduling variable. Off: set 1 only. Pressure: PV. Setpoint: SP" },
+    [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
+    [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
+    [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary, Pressure schedule only" },
+    [CFG_DBC]     = { "Deadband close", "steps", 0, K_NUM, "AUTO closing moves below this are skipped" },
+    [CFG_SENSOR]  = { "Sensor in use", NULL, 0, K_CHOICE, "Transducer read for the pressure" },
 };
 
 static const char *psi_text(char *buf, size_t n, int32_t psi10)
@@ -220,7 +220,12 @@ static const char *field_help(char *buf, size_t n, const char *notes, const cfg_
         used = strlen(buf);
     }
     for (int i = 0; i < nk && used < n; i++) {
-        lv_snprintf(buf + used, n - used, "%s: %s.\n", F[keys[i]].cap, F[keys[i]].info);
+        // Terse, for a trained operator (0.15.18, Ryan): the unit in brackets.
+        const field_t *f = &F[keys[i]];
+        if (f->unit)
+            lv_snprintf(buf + used, n - used, "%s [%s]: %s.\n", f->cap, f->unit, f->info);
+        else
+            lv_snprintf(buf + used, n - used, "%s: %s.\n", f->cap, f->info);
         used += strlen(buf + used);
     }
     if (used && buf[used - 1] == '\n')
@@ -1003,11 +1008,10 @@ static const char *ps_help(void)
     static char buf[600];
     static const cfg_key_t k[1] = { CFG_SENSOR };
     return field_help(buf, sizeof buf,
-                      "Add sensor: type its serial number and pick its range in psi. It starts uncalibrated: "
-                      "Calibrate puts it in use and opens Calibrate sensor; Later leaves it to select "
-                      "in Sensor in use.\n"
-                      "Remove sensor: removes a sensor that is not in use.\n"
-                      "Calibration: tap for its points and state.", k, 1);
+                      "Add sensor: serial number and range [psi]; added uncalibrated. Calibrate puts it in "
+                      "use and opens Calibrate sensor; Later only adds it.\n"
+                      "Remove sensor: any sensor not in use.\n"
+                      "Calibration: points and state.", k, 1);
 }
 
 // The sensor that will be in use after Save.
@@ -1208,7 +1212,7 @@ static const tab_t valve_tabs[3] = {
     // the 5 Nov bench, the needle sticks opening at low openings.
     { "Valve", { CFG_POSMAX, CFG_REVERSE, CFG_DB, CFG_DBC }, 4, NULL },
     { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4, NULL },
-    { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Used by manual and AUTO moves. Saved when the valve is stopped." },
+    { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved only with the valve stopped." },
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
 // name on their own tab, the rest of AUTO's settings on the other. From
@@ -1217,15 +1221,13 @@ static const tab_t valve_tabs[3] = {
 // picks), and the gain schedule on its own tab.
 static const tab_t tune_tabs[3] = {
     { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3,
-      "With the gain schedule on (Schedule tab), three sets of gains for low, middle and high pressure: "
-      "tap a set to see or change its gains; the dot marks the set in use. With it Off, set 1 only. "
-      "Used by AUTO from the next control step. Save to keep them.", true },
+      "Schedule on: three sets, tap one to edit; dot = set in use. Schedule Off: set 1 only. "
+      "Applied at the next control step; Save to keep.", true },
     { "Schedule", { CFG_SCHED, CFG_HYST, CFG_B1, CFG_B2 }, 4,
-      "Gain scheduling, as industrial controllers do it: set 1 below boundary 1, set 2 between, set 3 "
-      "above boundary 2. A change of set does not move the valve. Used by AUTO from the next control "
-      "step. Save to keep them." },
+      "Set 1 below B1, set 2 between, set 3 above B2. Set changes are bumpless. "
+      "Applied at the next control step; Save to keep." },
     { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
-      "Used by AUTO from the next control step. Save to keep them." },
+      "Applied at the next control step; Save to keep." },
 };
 
 // Tall card for KP, TI and KD: the name 26 px, what it is and its unit
@@ -1605,11 +1607,12 @@ static void load_cb(lv_event_t *e)
 
 static const char *rv_help(void)
 {
-    return "Last saved and Previous save: the two saves the board keeps, by date and time.\n"
-           "Unsaved changes: tap for the list, drafts and changes in use alike.\n"
-           "Save settings puts the drafts in use and saves; the last save becomes Previous save.\n"
-           "Load settings: a save comes back in use at once, sensors and calibrations included; "
-           "factory defaults come in as drafts and keep the sensors. Discard changes puts the last save back.";
+    return "Last saved, Previous save: the two stored records.\n"
+           "Unsaved changes: drafts and live changes.\n"
+           "Save settings: applies drafts and saves; Last saved becomes Previous save.\n"
+           "Load settings: a save loads live, sensors and calibrations included; factory defaults "
+           "load as drafts, sensors kept.\n"
+           "Discard changes: back to Last saved.";
 }
 
 static void rv_build(lv_obj_t *scr)
@@ -1676,19 +1679,12 @@ static void cs_title_set(void)
 
 static const char *cs_help(void)
 {
-    return "A two-point calibration of the sensor in use, read live through the board, so the board input "
-           "is inside it.\n"
-           "Capture vacuum: pump the sensor down, then Capture. Nothing to type: the point is 0 mB (Not 0 mB "
-           "if a gauge reads more).\n"
-           "Capture air: vent the sensor to the room, then Capture. The room pressure comes from the room "
-           "sensor (Pressure 21) when it is fitted; Enter value takes a lab barometer reading in mB instead, "
-           "for example 1013.2.\n"
-           "Each capture averages 5 readings. Either point can be redone on its own; the other is kept.\n"
-           "Signal: the Druck output over its excitation, in mV/V.\n"
-           "Saved cal: the pressure from the saved calibration. Captured: the pressure from the points "
-           "captured here, once both are held (None yet until then).\n"
-           "Once both are held the new calibration is in use and unsaved: check Saved cal against Captured, "
-           "then Save settings. Discard changes puts the last save back.";
+    return "Two-point cal of the sensor in use, through the board input.\n"
+           "Capture vacuum: sensor pumped down; point = 0 mB (Not 0 mB: enter a gauge reading).\n"
+           "Capture air: sensor vented; room pressure from Pressure 21, or Enter value (barometer, mB).\n"
+           "5 readings averaged per capture; each point can be redone alone.\n"
+           "Signal: Druck output [mV/V]. Saved cal, Captured: pressure from the saved and the new points.\n"
+           "With both points the new cal is live, unsaved: compare, then Save settings or Discard changes.";
 }
 
 static bool reading_ok(void)
