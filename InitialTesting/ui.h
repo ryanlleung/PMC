@@ -59,6 +59,7 @@ void ui_btn_enable(lv_obj_t *btn, bool on);
 void ui_btn_primary(lv_obj_t *btn, bool on);
 void ui_btn_outline(lv_obj_t *btn, bool on);   // white, blue edge and word
 bool ui_btn_disabled(lv_event_t *e);
+void ui_btn_arrow(lv_obj_t *btn, bool up);       // a drawn 21 x 12 Up or Down chevron in place of the label
 
 lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
 lv_obj_t *ui_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, const lv_font_t *font,
@@ -128,7 +129,7 @@ typedef bool (*ui_keypad_set_t)(int32_t v100, const char **why);
 void ui_keypad(const char *title, const char *info, int32_t min100, int32_t max100,
                const char *side_label, int32_t (*side_milli)(void), ui_keypad_set_t on_set);
 // The same with dec decimals (0-2); min, max and the value are in 10^-dec
-// units. The side card shows a live value (live_label, 0.001 units shown to
+// units. The popup shows a live value (live_label, 0.001 units shown to
 // live_dec decimals) or up to two fixed rows (e.g. In use, Saved).
 typedef struct {
     const char *title, *info;
@@ -145,6 +146,8 @@ void ui_keypad_ex(const ui_kp_t *k);
 // Confirm dialog: Cancel and OK (OK primary). Buttons sit inside x70-410,
 // clear of the Home mode button.
 void ui_confirm(const char *text, const char *ok, void (*on_ok)(void));
+// The Restart question (System, and the power icon in the template).
+void ui_restart_ask(void);
 // Same with a named cancel button and its own action.
 void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void));
 // With a third button between them (NULL mid: as ui_ask).

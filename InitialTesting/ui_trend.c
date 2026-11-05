@@ -394,7 +394,7 @@ static struct {
 #define PL 46   // plot inside the card: left, right, top, bottom margins (46: "1018.0" fits)
 #define PR 40
 #define PT 32
-#define PB 20
+#define PB 23   // 12 px under the time labels (common HMI template)
 
 static void trend_draw(lv_event_t *e)
 {
@@ -449,15 +449,16 @@ static void trend_draw(lv_event_t *e)
         text(layer, buf, UI_MUTED, LV_TEXT_ALIGN_LEFT, x1 + 8, y - 7, a.x2);
     }
     lv_snprintf(buf, sizeof buf, "-%s", WIN_NAME[wi]);
-    text(layer, buf, UI_MUTED, LV_TEXT_ALIGN_LEFT, x0, y1 + 4, x0 + 80);
-    text(layer, "now", UI_MUTED, LV_TEXT_ALIGN_RIGHT, x1 - 60, y1 + 4, x1);
+    text(layer, buf, UI_MUTED, LV_TEXT_ALIGN_LEFT, x0, y1 + 3, x0 + 80);
+    text(layer, "now", UI_MUTED, LV_TEXT_ALIGN_RIGHT, x1 - 60, y1 + 3, x1);
     // Legend: a sample of each mark beside its name, each over its own axis
     // (pressure left, valve right); the names in text colour.
-    fill(layer, COL_PV, a.x1 + 10, a.y1 + 11, a.x1 + 23, a.y1 + 12);
-    text(layer, "Pressure, mB", UI_MUTED, LV_TEXT_ALIGN_LEFT, a.x1 + 28, a.y1 + 5, a.x1 + 140);
-    fill(layer, COL_AREA, a.x2 - 23, a.y1 + 8, a.x2 - 10, a.y1 + 16);
-    fill(layer, COL_POS, a.x2 - 23, a.y1 + 8, a.x2 - 10, a.y1 + 8);
-    text(layer, "Valve, %", UI_MUTED, LV_TEXT_ALIGN_RIGHT, a.x2 - 140, a.y1 + 5, a.x2 - 28);
+    // 12 px from the card's edges (common HMI template).
+    fill(layer, COL_PV, a.x1 + 12, a.y1 + 15, a.x1 + 25, a.y1 + 16);
+    text(layer, "Pressure, mB", UI_MUTED, LV_TEXT_ALIGN_LEFT, a.x1 + 30, a.y1 + 9, a.x1 + 142);
+    fill(layer, COL_AREA, a.x2 - 25, a.y1 + 12, a.x2 - 12, a.y1 + 20);
+    fill(layer, COL_POS, a.x2 - 25, a.y1 + 12, a.x2 - 12, a.y1 + 12);
+    text(layer, "Valve, %", UI_MUTED, LV_TEXT_ALIGN_RIGHT, a.x2 - 142, a.y1 + 9, a.x2 - 30);
 
     float lx, ly;
     pen(layer, win, K_V, x0, x1, y_pct, &s, COL_POS, 1, false, &lx, &ly);   // the area's edge
@@ -485,9 +486,11 @@ static void trend_build(lv_obj_t *scr)
 {
     tr.plot = ui_card(scr, 10, 48, CARD_W, 160);
     lv_obj_add_event_cb(tr.plot, trend_draw, LV_EVENT_DRAW_MAIN_END, NULL);
-    tr.up = ui_btn(scr, 361, 48, 109, 48, UI_SECONDARY, LV_SYMBOL_UP, range_cb, (void *)1);
+    tr.up = ui_btn(scr, 361, 48, 109, 48, UI_SECONDARY, "", range_cb, (void *)1);
+    ui_btn_arrow(tr.up, true);
     tr.range = ui_info(scr, 361, 104, 109, 48, "Range");
-    tr.down = ui_btn(scr, 361, 160, 109, 48, UI_SECONDARY, LV_SYMBOL_DOWN, range_cb, NULL);
+    tr.down = ui_btn(scr, 361, 160, 109, 48, UI_SECONDARY, "", range_cb, NULL);
+    ui_btn_arrow(tr.down, false);
     tr.seen = UINT32_MAX;
     tr.win_seen = -1;
 }

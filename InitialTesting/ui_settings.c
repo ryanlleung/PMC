@@ -244,8 +244,8 @@ static void ecard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, int32_t 
     lv_obj_set_style_border_color(e->card, UI_TICK, 0);
     lv_obj_set_style_bg_color(e->card, UI_TRACK, LV_STATE_PRESSED);
     lv_obj_add_event_cb(e->card, cb, LV_EVENT_CLICKED, user);
-    ui_label(e->card, 10, 5, w - 30, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
-    e->v = ui_label(e->card, 10, 22, w - 30, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+    ui_label(e->card, 11, 5, w - 31, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
+    e->v = ui_label(e->card, 11, 22, w - 31, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_long_mode(e->v, LV_LABEL_LONG_DOT);
     lv_obj_t *chev = ui_label(e->card, w - 20, 15, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT,
                               LV_SYMBOL_RIGHT);
@@ -313,11 +313,10 @@ static void kp_rows(ui_kp_t *k, cfg_key_t key, char *now, char *sv, size_t n)
 
 static void ed_turns_keypad(void)
 {
-    static char info[32], now[16], sv[16];
+    static char now[16], sv[16];
     int32_t lo, hi, s;
     cfg_range(CFG_POSMAX, &lo, &hi);
-    lv_snprintf(info, sizeof info, "%d steps per output turn", STEPS_PER_TURN);
-    ui_kp_t k = { .title = "100 % travel, output turns", .info = info, .dec = 2,
+    ui_kp_t k = { .title = "100 % travel, output turns", .dec = 2,   // no steps-per-turn hint (template)
                   .min = (int32_t)(((int64_t)lo * 100 + STEPS_PER_TURN - 1) / STEPS_PER_TURN),
                   .max = (int32_t)((int64_t)hi * 100 / STEPS_PER_TURN), .on_set = ed_turns };
     kp_rows(&k, CFG_POSMAX, now, sv, sizeof now);
@@ -341,8 +340,8 @@ static void sensor_pick(int i);
 
 static void edit(cfg_key_t k)
 {
-    static char t[160], cap[40], info[40], now[24], sv[24];
-    char a[16], b[16];
+    static char t[160], cap[40], now[24], sv[24];
+    char b[16];
     ed_key = k;
     if (F[k].kind == K_TURNS) {
         int32_t lo, hi, pos = stepper3_position() / stepper3_scale();
@@ -379,9 +378,8 @@ static void edit(cfg_key_t k)
     } else {
         int32_t lo, hi, s;
         cfg_range(k, &lo, &hi);
-        lv_snprintf(info, sizeof info, "Range %s to %s", fixed_fmt(a, sizeof a, lo, F[k].dec),
-                    fixed_fmt(b, sizeof b, hi, F[k].dec));
-        ui_kp_t kp = { .title = caption(cap, sizeof cap, k), .info = info, .dec = F[k].dec, .min = lo, .max = hi,
+        // The range is in the entry field's corners (Min, Max): no info line.
+        ui_kp_t kp = { .title = caption(cap, sizeof cap, k), .dec = F[k].dec, .min = lo, .max = hi,
                        .on_set = ed_set };
         kp_rows(&kp, k, now, sv, sizeof now);
         (void)s;
@@ -524,7 +522,7 @@ static void side_refresh(void)
     else if (n)
         lv_snprintf(t, sizeof t, "%s in use, not saved.", plural(c, sizeof c, n, "change"));
     else if (cfg_rev(CFG_FROM_SAVED, &rev, &at))
-        lv_snprintf(t, sizeof t, "All settings saved%s%s.", at[0] ? ", " : "", at[0] ? save_when(w, sizeof w, at) : "");
+        lv_snprintf(t, sizeof t, "All settings saved%s%s.", at[0] ? " " : "", at[0] ? save_when(w, sizeof w, at) : "");
     else
         lv_snprintf(t, sizeof t, "Factory settings, nothing saved yet.");
     ui_strip_set(UI_STRIP_INFO, save_icon(n), t);
@@ -545,20 +543,9 @@ static void tile_cb(lv_event_t *e)
     ui_open(lv_event_get_user_data(e));
 }
 
-static void motor_go(void) { ui_service(); }
-
-static void motor_cb(lv_event_t *e)
-{
-    (void)e;
-    if (stepper3_busy()) {
-        ui_msg("Wait for the valve to stop");
-        return;
-    }
-    ui_confirm("Open Motor override? Drives the motor by steps.", "Open", motor_go);
-}
-
 // Restart (on Diagnostics from 0.12.19, Name and network from 0.13.2,
-// next to Motor override on Settings from 0.13.5, Ryan 28 Oct): asks
+// next to Motor override on Settings from 0.13.5, Ryan 28 Oct; on System
+// beside Firmware in the common HMI template): asks
 // first, stops the valve (AUTO ends, homing is cancelled), then waits 2.5 s
 // so the valve position is saved at standstill (valvepos.h, 2 s) and
 // offered at start-up.
@@ -584,34 +571,30 @@ static void do_restart(void)
     lv_timer_set_repeat_count(t, 1);
 }
 
+void ui_restart_ask(void)
+{
+    ui_confirm("Restart the controller? The valve stops and holds where it is.", "Restart", do_restart);
+}
+
 static void restart_cb(lv_event_t *e)
 {
     (void)e;
-    ui_confirm("Restart the controller? The valve stops and holds where it is.", "Restart", do_restart);
+    ui_restart_ask();
 }
 
 static void settings_build(lv_obj_t *scr)
 {
-    // Review and save with the save icon in front (0.13.19, Ryan 28 Oct).
-    static const char *const names[5] = { "System setup", "Choose sensor", "Valve setup", "PID tuning",
+    // Navigation tiles only (common HMI template): System is on the Menu,
+    // Motor override on Valve position, Restart on System. The transducer
+    // calibration, a settings page (Save settings, Discard changes), is
+    // here beside Choose sensor. Review and save bottom left, with the save
+    // icon in front (0.13.19, Ryan 28 Oct).
+    static const char *const names[5] = { "Choose sensor", "Calibrate sensor", "Valve setup", "PID tuning",
                                           LV_SYMBOL_SAVE "  Review and save" };
-    const ui_screen_t *const to[5] = { &ui_scr_namenet, &ui_scr_sensor_set, &ui_scr_valve_set, &ui_scr_tune,
+    const ui_screen_t *const to[5] = { &ui_scr_sensor_set, &ui_scr_sensor_cal, &ui_scr_valve_set, &ui_scr_tune,
                                        &ui_scr_review };
     for (int i = 0; i < 5; i++)
         st.tile[i] = ui_btn(scr, i % 2 ? 244 : 10, RY[i / 2], 226, RH, UI_NAV, names[i], tile_cb, (void *)to[i]);
-    // Motor override looks apart from the pages: a dark outline. Limit
-    // override is on it since 0.11.33 (Ryan, 23 Oct).
-    lv_obj_t *m = ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Motor\noverride", motor_cb, NULL);
-    lv_obj_set_style_border_side(m, LV_BORDER_SIDE_FULL, 0);
-    lv_obj_set_style_border_width(m, 2, 0);
-    lv_obj_set_style_border_color(m, UI_WARN, 0);
-    // Restart beside it, filled dark so it does not read as a page (0.13.5,
-    // Ryan 28 Oct: its own colour, not on Name and network).
-    lv_obj_t *r = ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Restart", restart_cb, NULL);
-    lv_obj_set_style_bg_color(r, UI_TEXT, 0);
-    lv_obj_set_style_text_color(r, lv_color_white(), 0);
-    lv_obj_set_style_border_width(r, 0, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(0x3C4856), LV_STATE_PRESSED);
     side.save = side.discard = NULL;
 }
 
@@ -619,12 +602,18 @@ static void settings_refresh(void)
 {
     char t[48], p[32], d[24];
     cfg_sensor_t s;
-    // Which sensor is read; calibrating it is Menu > Calibrate > Transducer.
+    // Which sensor is read, and when its saved calibration was made.
+    const cal_rec_t *cal = NULL;
     if (cfg_sensor(cfg_sensor_active(), &s)) {
         lv_snprintf(t, sizeof t, "In use: %s", sensor_name(p, sizeof p, s.serial));
-        ui_btn_text(st.tile[1], "Choose sensor", t);
+        ui_btn_text(st.tile[0], "Choose sensor", t);
+        cfg_saved_cal(s.serial, &cal);
     }
-    ui_btn_text(st.tile[0], "System setup", cfg_name()[0] ? cfg_name() : "None");
+    if (cal && cal_date(d, sizeof d, cal))
+        lv_snprintf(t, sizeof t, "Saved %s", d);
+    else
+        lv_strlcpy(t, cal ? "Saved" : "None saved", sizeof t);
+    ui_btn_text(st.tile[1], "Calibrate sensor", t);
     lv_snprintf(t, sizeof t, "%s turns", value_text(d, sizeof d, CFG_POSMAX, live(CFG_POSMAX)));
     ui_btn_text(st.tile[2], "Valve setup", t);
     {
@@ -643,7 +632,7 @@ static void settings_refresh(void)
     else if (n)
         lv_snprintf(t, sizeof t, "%s in use, not saved.", plural(c, sizeof c, n, "change"));
     else if (cfg_rev(CFG_FROM_SAVED, &rev, &at))
-        lv_snprintf(t, sizeof t, "All settings saved%s%s.", at[0] ? ", " : "", at[0] ? save_when(w, sizeof w, at) : "");
+        lv_snprintf(t, sizeof t, "All settings saved%s%s.", at[0] ? " " : "", at[0] ? save_when(w, sizeof w, at) : "");
     else
         lv_snprintf(t, sizeof t, "Factory settings, nothing saved yet.");
     // An armed limit override shows over this, as on every screen.
@@ -787,7 +776,7 @@ const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
  * from 0.14.9), the address in use, the MAC, the
  * firmware and its build date, and the Remote control switch.
  * ------------------------------------------------------------------------ */
-static struct { lv_obj_t *name, *net, *now, *mac, *fw, *remote, *rsw, *rtext; } nn;
+static struct { lv_obj_t *name, *net, *mac, *fw, *remote, *rsw, *rtext; } nn;
 
 static void nn_go(lv_event_t *e) { ui_open((const ui_screen_t *)lv_event_get_user_data(e)); }
 
@@ -803,21 +792,29 @@ static void remote_cb(lv_event_t *e)
 
 static void nn_build(lv_obj_t *scr)
 {
+    // Common HMI template: on the Menu; Address in use dropped (static
+    // only, the IP address tile says it), Firmware 343 wide with Restart
+    // beside it in the STOP column.
     nn.name = ui_btn(scr, 10, RY[0], 226, RH, UI_NAV, "Cryostat name", nn_go, (void *)&ui_scr_name);
     nn.net = ui_btn(scr, 244, RY[0], 226, RH, UI_NAV, "IP address", nn_go, (void *)&ui_scr_netaddr);
-    nn.now = ui_info(scr, 10, RY[1], 226, RH, "Address in use");
     // The MAC, for the site's network records (Ryan, 28 Oct).
-    nn.mac = ui_info(scr, 244, RY[1], 226, RH, "MAC address");
-    nn.fw = ui_info(scr, 10, RY[2], 226, RH, "Firmware");
+    nn.mac = ui_info(scr, 10, RY[1], 226, RH, "MAC address");
+    nn.fw = ui_info(scr, 10, RY[2], 343, RH, "Firmware");
     // Remote control: the name and what it means, the switch on the right.
-    lv_obj_t *c = nn.remote = ui_card(scr, 244, RY[2], 226, RH);
+    lv_obj_t *c = nn.remote = ui_card(scr, 244, RY[1], 226, RH);
     lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(c, remote_cb, LV_EVENT_PRESSED, NULL);
-    ui_label(c, 10, 5, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Remote control");
-    nn.rtext = ui_label(c, 10, 26, 150, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
+    ui_label(c, 12, 6, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Remote control");
+    nn.rtext = ui_label(c, 12, 26, 150, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
+    // Restart filled dark so it does not read as a page (0.13.5, Ryan 28 Oct).
+    lv_obj_t *r = ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Restart", restart_cb, NULL);
+    lv_obj_set_style_bg_color(r, UI_TEXT, 0);
+    lv_obj_set_style_text_color(r, lv_color_white(), 0);
+    lv_obj_set_style_border_width(r, 0, 0);
+    lv_obj_set_style_bg_color(r, lv_color_hex(0x3C4856), LV_STATE_PRESSED);
     lv_obj_t *sw = nn.rsw = lv_switch_create(c);
     lv_obj_set_size(sw, 52, 28);
-    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -10, 0);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -12, 0);
     lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);   // the card takes the press
     lv_obj_set_style_bg_color(sw, lv_color_hex(0xC3CDD7), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
@@ -837,10 +834,8 @@ static void nn_refresh(void)
         *strchr(t, ' ') = '\0';   // the address; the mask is on its page
     ui_btn_text(nn.net, "IP address", t);
 #if PMC_LINK_ETHERNET
-    ui_set_text(nn.now, ethlink_ip()[0] ? ethlink_ip() : link_chip_text());
     ui_set_text(nn.mac, ethlink_mac()[0] ? ethlink_mac() : "Not read");
 #else
-    ui_set_text(nn.now, "None, USB build");
     ui_set_text(nn.mac, "None, USB build");
 #endif
     ui_set_text(nn.fw, ui_fw_text());
@@ -851,7 +846,7 @@ static void nn_refresh(void)
                  ? "New IP address: Save settings, then restart." : "Static address, no DHCP.");
 }
 
-const ui_screen_t ui_scr_namenet = { "System setup", nn_build, nn_refresh, NULL };
+const ui_screen_t ui_scr_namenet = { "System", nn_build, nn_refresh, NULL };
 
 /* IP address: digits and dots for the address and the mask; Use puts
  * them in use for the next restart, unsaved until Save settings. */
@@ -1093,7 +1088,7 @@ static void add_cb(lv_event_t *e)
         ui_msg("Four sensors already on the board");
         return;
     }
-    ui_kp_t k = { .title = "New sensor serial number", .info = "On the Druck label", .dec = 0,
+    ui_kp_t k = { .title = "New sensor serial number", .dec = 0,
                   .min = 1, .max = 99999999, .on_set = add_serial_set };
     ui_keypad_ex(&k);
 }

@@ -78,14 +78,15 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Stop AUTO goes to MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n', s.cmd('MODE?'));
   check('Stop AUTO leaves the valve', Math.abs(s.get(30) - at) < 330, at + ' -> ' + s.get(30));
 }
-{ // The IP tile on Home (0.15.6, in place of Trend) opens System setup, as Menu > Settings > System does.
+{ // The IP tile on Home (0.15.6; kept over the template's Trend in 0.15.9) shows the address/prefix
+  // and opens System, as Menu > System does.
   const hdr = (s) => Buffer.from(new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 40).slice().buffer).toString('base64');
   const a = homed(load()), home = hdr(a);
   shot(a, 'home-ip');
   a.tap(415, 128); shot(a, 'home-ip-system');
   const b = homed(load());
-  b.tap(415, 184); b.tap(379, 184); b.tap(120, 72);
-  check('Home IP tile opens System setup', hdr(a) === hdr(b) && hdr(a) !== home);
+  b.tap(415, 184); b.tap(386, 184);
+  check('Home IP tile opens System', hdr(a) === hdr(b) && hdr(a) !== home);
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
   const s = homed(load());
@@ -205,7 +206,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  s.tap(415, 184); s.tap(379, 184); s.tap(298, 184); s.tap(318, 147);   // Menu > Settings > Motor override > Open
+  s.tap(415, 184); s.tap(212, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position > Motor override > Open (HMI template)
   s.set(7, 1); s.run(500);                                              // switch stuck pressed
   s.tap(186, 184, 1000);
   const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
@@ -305,11 +306,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('switch Off: PRES SP refused', s.cmd('PRES SP 5') === 'ERR 211 Read only over the network\r\n', s.cmd('PRES SP 5'));
   check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: queries answer', s.cmd('MODE?;PRES SP?') === 'MODE NOT HOMED;PRES SP NONE\r\n', s.cmd('MODE?;PRES SP?'));
-  s.tap(415, 184); s.tap(379, 184); s.tap(120, 72); s.tap(357, 184);   // Menu, Settings, System, Remote control
+  s.tap(415, 184); s.tap(386, 184); s.tap(357, 128);   // Menu, System, Remote control (HMI template)
   check('switch On from the screen: PRES SP taken', s.cmd('PRES SP 5;PRES SP?') === 'PRES SP 5.0 mbar\r\n', s.cmd('PRES SP?'));
   check('switch On is a NET event', /NET,Remote control on \(screen\)/.test(events(s, 5)), events(s, 5));
   shot(s, 'system');
-  s.tap(357, 184);
+  s.tap(357, 128);
   check('switch Off again: refused', s.cmd('PRES SP 6') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('PID?') === 'PID 4.00,0.25,0.00\r\n', s.cmd('PID?'));

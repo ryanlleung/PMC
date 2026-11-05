@@ -32,7 +32,20 @@
  * ------------------------------------------------------------------------ */
 #define TILE_W  167
 #define TILE_H  160
-#define BAR_W   143
+// The bar as wide as the widest reading, so it sits right under it: the
+// wider of "1013.2" and "100.00" at 40 px (Ryan, 4 Nov).
+static int32_t bar_w(void)
+{
+    static int32_t w = 0;
+    if (!w) {
+        lv_point_t a, b;
+        lv_text_get_size(&a, "1013.2", &ui_num_40, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        lv_text_get_size(&b, "100.00", &ui_num_40, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        w = a.x > b.x ? a.x : b.x;
+    }
+    return w;
+}
+#define BAR_W   bar_w()
 
 typedef struct {
     lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev, *sp_cap;
@@ -197,17 +210,19 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
 {
     t->log = log;
     t->fill = -1;
-    t->tile = ui_card(scr, x, 48, TILE_W, TILE_H);
+    // Halves of the 343 area as on every page, 168 + 8 + 167 (common HMI template).
+    int32_t w = x == 10 ? 168 : TILE_W, r = w - 12;   // right edge of the unit, reading, bar and box
+    t->tile = ui_card(scr, x, 48, w, TILE_H);
     // Caption and unit 16 px (Ryan, 21 Oct: 12 px was too small).
     ui_label(t->tile, 12, 6, 90, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
-    ui_label(t->tile, 75, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
+    ui_label(t->tile, r - 80, 6, 80, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_RIGHT, unit);
     // The reading, 40 px (Ryan 16 Oct: bigger once the sparklines left the
     // tiles); "1013.2" just fits, right edge on the bar's.
-    t->reading = ui_label(t->tile, 0, 34, 12 + BAR_W, &ui_num_40, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "----");
+    t->reading = ui_label(t->tile, 0, 34, r, &ui_num_40, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "----");
     t->bar = lv_obj_create(t->tile);
     lv_obj_remove_style_all(t->bar);
     lv_obj_remove_flag(t->bar, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(t->bar, 12, 76);   // 14 px from the digits, as the caption is above them
+    lv_obj_set_pos(t->bar, r - BAR_W, 76);   // 14 px from the digits, as the caption is above them
     lv_obj_set_size(t->bar, BAR_W, 30);
     lv_obj_add_event_cb(t->bar, bar_draw, LV_EVENT_DRAW_MAIN, t);
     // SP / Go to at the button text size, 16 px (Ryan, 4 Nov).
@@ -215,7 +230,7 @@ static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, cons
     t->box = lv_obj_create(t->tile);
     lv_obj_remove_style_all(t->box);
     lv_obj_remove_flag(t->box, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(t->box, 67, 116);   // wide enough for "100.00" and the chevron
+    lv_obj_set_pos(t->box, r - 88, 116);   // wide enough for "100.00" and the chevron
     lv_obj_set_size(t->box, 88, 40);
     lv_obj_set_style_bg_opa(t->box, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(t->box, lv_color_hex(0xEEF2F6), 0);
@@ -241,14 +256,6 @@ static const char *not_manual_why(void)
 // AUTO ------------------------------------------------------------------
 static int32_t pv_milli(void) { return clicks_state()->p_mmbar; }
 
-static const char *range_info(void)
-{
-    static char info[32];
-    char r[16];
-    lv_snprintf(info, sizeof info, "Allowed 0 to %s", ui_fmt1(r, sizeof r, valve_range_mmbar()));
-    return info;
-}
-
 static void to_manual(void)
 {
     const char *why;
@@ -265,7 +272,7 @@ static bool sp_set(int32_t v10, const char **why)
 
 static void keypad_sp(void)
 {
-    ui_kp_t k = { .title = "Setpoint, mB", .info = range_info(), .dec = 1, .min = 0,
+    ui_kp_t k = { .title = "Setpoint, mB", .dec = 1, .min = 0,   // the range in the field's corners
                   .max = valve_range_mmbar() / 100, .live_label = "Now, mB", .live_milli = pv_milli,
                   .live_dec = 1, .on_set = sp_set };
     ui_keypad_ex(&k);
@@ -316,7 +323,7 @@ static void goto_event(lv_event_t *e)
         ui_msg(not_manual_why());
         return;
     }
-    ui_keypad("Go to, %", "0 closed, 100 open", 0, 10000, "Valve, %", valve_pct_milli, goto_set);
+    ui_keypad("Go to, %", NULL, 0, 10000, "Valve, %", valve_pct_milli, goto_set);   // no hint line (template)
 }
 
 static void calibrate(void)
@@ -355,7 +362,7 @@ static bool set_position(int32_t v100, const char **why)
  * not verified by homing. */
 static void set_position_ask(void)
 {
-    ui_keypad("Set position, %", "0 closed, 100 open", 0, 10000, NULL, NULL, set_position);
+    ui_keypad("Set position, %", NULL, 0, 10000, NULL, NULL, set_position);
 }
 
 static void set_closed_ask(void)
@@ -523,11 +530,12 @@ static void menu_event(lv_event_t *e)
     ui_open(&ui_scr_menu);
 }
 
-// IP tile (0.15.6, Ryan 4 Nov: in place of Trend, still on Menu and the
-// sparkline): the address and mask the link uses, from start-up (a new one
-// waits for a restart), 12 px, the address over the mask. A tap opens
-// System setup.
-static lv_obj_t *ip_val[2];
+// IP tile (0.15.6, Ryan 4 Nov: in place of Trend; kept over the template's
+// Trend in 0.15.9, Ryan 5 Nov "No trend show ip"): a grey "IP address"
+// over the address and prefix the link uses, 192.168.1.100/24 (Ryan 5 Nov,
+// option A), from start-up (a new one waits for a restart), 12 px. A tap
+// opens System. Trend stays on Menu and on the sparkline.
+static lv_obj_t *ip_val;
 
 static void ip_event(lv_event_t *e)
 {
@@ -538,20 +546,34 @@ static void ip_event(lv_event_t *e)
 static void ip_make(lv_obj_t *scr, int32_t y)
 {
     lv_obj_t *b = ui_btn(scr, 361, y, 109, 48, UI_SECONDARY, "", ip_event, NULL);
-    ip_val[0] = ui_label(b, 1, 8, 107, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
-    ip_val[1] = ui_label(b, 1, 25, 107, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
+    ui_label(b, 1, 8, 107, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "IP address");
+    ip_val = ui_label(b, 1, 25, 107, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
+}
+
+// Prefix length of a dotted mask: 255.255.255.0 is 24.
+static int ip_prefix(const char *m)
+{
+    int n = 0;
+    for (int o = 0; o < 4 && m; o++) {
+        int v = 0;
+        while (*m >= '0' && *m <= '9')
+            v = v * 10 + (*m++ - '0');
+        for (int b = 7; b >= 0; b--)
+            n += (v >> b) & 1;
+        m = *m == '.' ? m + 1 : NULL;
+    }
+    return n;
 }
 
 static void ip_refresh(void)
 {
 #if PMC_REMOTE_SWITCH
-    char ip[16], mask[16];
+    char ip[16], mask[16], t[24];
     cfg_net_boot(ip, mask);
-    ui_set_text(ip_val[0], ip);
-    ui_set_text(ip_val[1], mask);
+    lv_snprintf(t, sizeof t, "%s/%d", ip, ip_prefix(mask));
+    ui_set_text(ip_val, t);
 #else
-    ui_set_text(ip_val[0], "No Ethernet");
-    ui_set_text(ip_val[1], "USB build");
+    ui_set_text(ip_val, "USB build");
 #endif
 }
 
@@ -577,13 +599,14 @@ static void home_build(lv_obj_t *scr)
     ip_make(scr, 104);
     ui_btn(scr, 361, 160, 109, 48, UI_NAV, "Menu", menu_event, NULL);
     // The mode buttons on the tiles' bottom rows, in place of the SP and Go
-    // to boxes (0.15.3): Start AUTO outside AUTO, Stop AUTO in AUTO, both
-    // outlined blue; Home valve while not homed, filled (what is expected).
-    start_btn = ui_btn(pt.tile, 12, 116, 143, 40, UI_SECONDARY, "Start AUTO", start_event, NULL);
-    ui_btn_outline(start_btn, true);
-    stop_btn = ui_btn(vt.tile, 12, 116, 143, 40, UI_SECONDARY, "Stop AUTO", stop_event, NULL);
+    // to boxes (0.15.3): Start AUTO outside AUTO, filled dark blue with
+    // white lettering in the template (Ryan, 4 Nov; outlined to 0.15.7),
+    // Stop AUTO in AUTO, outlined blue; Home valve while not homed, filled.
+    // Under the bar and as wide (Ryan, 4 Nov: sized to the widest reading).
+    start_btn = ui_btn(pt.tile, 156 - BAR_W, 116, BAR_W, 40, UI_PRIMARY, "Start AUTO", start_event, NULL);
+    stop_btn = ui_btn(vt.tile, 155 - BAR_W, 116, BAR_W, 40, UI_SECONDARY, "Stop AUTO", stop_event, NULL);
     ui_btn_outline(stop_btn, true);
-    homev_btn = ui_btn(vt.tile, 12, 116, 143, 40, UI_PRIMARY, "Home valve", homev_event, NULL);
+    homev_btn = ui_btn(vt.tile, 155 - BAR_W, 116, BAR_W, 40, UI_PRIMARY, "Home valve", homev_event, NULL);
 }
 
 // Valve reading and bar, at 10 Hz.
@@ -699,11 +722,13 @@ void ui_status_line(void)
 const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
 
 /* --------------------------------------------------------------------------
- * Menu: the six v63 tiles in three captioned rows (Trend from stage 7; it
- * is built). The 0.6.0 motor screen is Settings > Motor override.
+ * Menu: six tiles in three captioned rows, as the common HMI template:
+ * Records (Trend, Events), Service (the valve page, Diagnostics), Setup
+ * (Settings, System). Calibrate sensor is under Settings beside Choose
+ * sensor; the motor screen is on Valve position.
  * ------------------------------------------------------------------------ */
-static const ui_screen_t *const menu_scr[6] = { &ui_scr_trend, &ui_scr_faults, &ui_scr_calib, &ui_scr_sensor_cal,
-                                                &ui_scr_diag, &ui_scr_settings };
+static const ui_screen_t *const menu_scr[6] = { &ui_scr_trend, &ui_scr_faults, &ui_scr_calib, &ui_scr_diag,
+                                                &ui_scr_settings, &ui_scr_namenet };
 
 static void menu_tile_event(lv_event_t *e)
 {
@@ -713,9 +738,9 @@ static void menu_tile_event(lv_event_t *e)
 static void menu_build(lv_obj_t *scr)
 {
     // Grouped in rows with a caption on the left, as on Diagnostics.
-    static const char *const rows[3] = { "Records", "Calibrate", "System" };
+    static const char *const rows[3] = { "Records", "Service", "Setup" };
     static const char *const names[6] = { "Trend", "Events", "Valve position",
-                                          "Transducer", "Diagnostics", "Settings" };
+                                          "Diagnostics", "Settings", "System" };
     // Caption and two tiles in 1 : 1.5 : 1.5, the caption centred on its row.
     for (int r = 0; r < 3; r++) {
         lv_obj_t *l = ui_label(scr, 10, 0, 111, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);

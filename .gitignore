@@ -19,6 +19,3 @@ tools/cfg-test/out/
 tools/ctrl-test/out/
 tools/baro-test/out/
 tools/modbus-test/out/
-
-# HMI template preview build (simulator/hmi-preview/build.sh).
-simulator/hmi-preview/out/

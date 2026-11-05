@@ -103,6 +103,20 @@ static void timer_deleted(lv_event_t *e)
     lv_timer_delete(lv_event_get_user_data(e));
 }
 
+// Motor override (Settings to 0.14.13; on the valve page it acts on in the
+// common HMI template). Limit override is on it since 0.11.33.
+static void motor_go(void) { ui_service(); }
+
+static void motor_cb(lv_event_t *e)
+{
+    (void)e;
+    if (stepper3_busy()) {
+        ui_msg("Wait for the valve to stop");
+        return;
+    }
+    ui_confirm("Open Motor override? Drives the motor by steps.", "Open", motor_go);
+}
+
 static void calib_build(lv_obj_t *scr)
 {
     memset(&cp, 0, sizeof cp);
@@ -116,7 +130,12 @@ static void calib_build(lv_obj_t *scr)
     cp.closed = ui_btn(scr, 10, 104, 226, 48, UI_SECONDARY, "Set as 0 %", setpos_cb, (void *)(intptr_t)0);
     cp.start = ui_btn(scr, 244, 104, 226, 48, UI_PRIMARY, "Home valve", start_cb, NULL);
     cp.enter = ui_btn(scr, 10, 160, 226, 48, UI_SECONDARY, "Set as other %", setpos_cb, (void *)(intptr_t)1);
-    cp.saved = ui_btn(scr, 244, 160, 226, 48, UI_SECONDARY, "Use last saved", setpos_cb, (void *)(intptr_t)2);
+    cp.saved = ui_btn(scr, 244, 160, 109, 48, UI_SECONDARY, "Use last\nsaved", setpos_cb, (void *)(intptr_t)2);
+    // Motor override apart from the position commands: a dark outline.
+    lv_obj_t *m = ui_btn(scr, 361, 160, 109, 48, UI_SECONDARY, "Motor\noverride", motor_cb, NULL);
+    lv_obj_set_style_border_side(m, LV_BORDER_SIDE_FULL, 0);
+    lv_obj_set_style_border_width(m, 2, 0);
+    lv_obj_set_style_border_color(m, UI_WARN, 0);
 }
 
 // Motor turns from closed at 10 Hz (Ryan, 24 Oct: turns read more
@@ -317,12 +336,12 @@ static void detail_open(int i)
     fp.detail = i;
     lv_obj_add_event_cb(o, detail_deleted, LV_EVENT_DELETE, NULL);
     lv_obj_t *c = ui_card(o, 10, 8, 460, 160);
-    fp.d_title = ui_label(c, 10, 6, 260, &ui_font_16, UI_FAULT, LV_TEXT_ALIGN_LEFT, "");
-    fp.d_when = ui_label(c, 270, 8, 180, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_RIGHT, "");
+    fp.d_title = ui_label(c, 12, 6, 258, &ui_font_16, UI_FAULT, LV_TEXT_ALIGN_LEFT, "");
+    fp.d_when = ui_label(c, 270, 8, 178, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_RIGHT, "");
     static const char *const caps[4] = { "Happened", "Controller", "Check", "Reset when" };
     for (int k = 0; k < 4; k++) {
-        ui_label(c, 10, 30 + k * 32, 84, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, caps[k]);
-        fp.d_text[k] = ui_label(c, 98, 30 + k * 32, 352, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+        ui_label(c, 12, 30 + k * 32, 84, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, caps[k]);
+        fp.d_text[k] = ui_label(c, 98, 30 + k * 32, 350, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
         lv_label_set_long_mode(fp.d_text[k], LV_LABEL_LONG_WRAP);
     }
     fp.d_next = ui_btn(o, 10, 176, 109, 48, UI_SECONDARY, "Next fault", d_next_cb, NULL);
@@ -378,11 +397,11 @@ static void faults_build(lv_obj_t *scr)
     fp.reset = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Reset fault", faults_reset_cb, NULL);
 
     lv_obj_t *ev = ui_card(scr, 10, 104, 343, 104);
-    ui_label(ev, 10, 4, 300, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "Events, newest first");
+    ui_label(ev, 12, 4, 300, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "Events, newest first");
     lv_obj_t *box = lv_obj_create(ev);
     lv_obj_remove_style_all(box);
-    lv_obj_set_pos(box, 10, 22);
-    lv_obj_set_size(box, 329, 80);
+    lv_obj_set_pos(box, 12, 22);
+    lv_obj_set_size(box, 319, 80);
     lv_obj_set_scroll_dir(box, LV_DIR_VER);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
                             LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_CHAIN);
@@ -393,15 +412,15 @@ static void faults_build(lv_obj_t *scr)
     lv_obj_set_style_bg_color(box, UI_IDLE, LV_PART_SCROLLBAR);
     fp.box = box;
     for (int i = 0; i < 2; i++) {
-        lv_obj_t *b = ui_btn(scr, 361, i ? 160 : 104, 109, 48, UI_SECONDARY,
-                             i ? LV_SYMBOL_DOWN : LV_SYMBOL_UP, NULL, NULL);
+        lv_obj_t *b = ui_btn(scr, 361, i ? 160 : 104, 109, 48, UI_SECONDARY, "", NULL, NULL);
+        ui_btn_arrow(b, !i);
         lv_obj_add_event_cb(b, log_page, LV_EVENT_PRESSED, (void *)(intptr_t)i);
         lv_obj_add_event_cb(b, log_page, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)i);
         fp.page[i] = b;
     }
     fp.log_time = ui_label(box, 0, 0, 0, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
     fp.log_tag = ui_label(box, 0, 0, 0, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
-    fp.log = ui_label(box, 0, 0, 317, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+    fp.log = ui_label(box, 0, 0, 307, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_long_mode(fp.log, LV_LABEL_LONG_WRAP);
     for (int i = 0; i < 3; i++)
         lv_obj_set_style_text_line_space(i == 0 ? fp.log_time : i == 1 ? fp.log_tag : fp.log, 2, 0);
@@ -423,7 +442,7 @@ static void faults_rows(void)
     lv_strlcpy(fp.sig, sig, sizeof fp.sig);
     lv_obj_clean(fp.list);
     if (!n) {
-        ui_label(fp.list, 10, 14, 300, &ui_font_16, UI_IDLE, LV_TEXT_ALIGN_LEFT, "No faults");
+        ui_label(fp.list, 12, 14, 300, &ui_font_16, UI_IDLE, LV_TEXT_ALIGN_LEFT, "No faults");
         return;
     }
     for (int i = 0; i < n && valve_fault_get(i, &f); i++) {
@@ -436,9 +455,9 @@ static void faults_rows(void)
         lv_obj_add_event_cb(r, row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         char t[48], w[16];
         lv_snprintf(t, sizeof t, "%s  %s", f.tag, f.text);
-        ui_label(r, 10, 5, 300, &ui_font_16, UI_FAULT, LV_TEXT_ALIGN_LEFT, t);
+        ui_label(r, 12, 5, 300, &ui_font_16, UI_FAULT, LV_TEXT_ALIGN_LEFT, t);
         lv_snprintf(t, sizeof t, "%s  %s", ui_when(w, sizeof w, f.age_ms), mode_word(f.mode));
-        ui_label(r, 10, 27, 300, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, t);
+        ui_label(r, 12, 27, 300, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, t);
         ui_label(r, 318, 14, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
     }
 }
@@ -465,7 +484,7 @@ static void faults_log(void)
         if (a.x > tw) tw = a.x;
         if (b.x > gw) gw = b.x;
     }
-    const int32_t gap = 8, x_tag = tw + gap, x_text = x_tag + gw + gap, text_w = 317 - x_text;
+    const int32_t gap = 8, x_tag = tw + gap, x_text = x_tag + gw + gap, text_w = 307 - x_text;
     size_t lt = 0, lg = 0, lx = 0;
     log_text[0] = log_time[0] = log_tag[0] = '\0';
     for (int i = 0; i < n; i++) {
@@ -537,25 +556,27 @@ static void diag_build(lv_obj_t *scr)
 {
     // The board temperature in the bottom row from 0.13.4, as the strip
     // shows the Home status line (Ryan, 28 Oct); Moved, steps went.
-    static const char *const rows[3] = { "Pressure sensor", "Valve motor", "Controller" };
+    static const char *const rows[3] = { "Pressure", "Valve motor", "Controller" };
     // The valve motor row: steps, limit switch, last move ("Past limit"
     // went in 0.12.9, Ryan 26 Oct; the motor supply in 0.14.3). The
     // Pressure 21 room reading from 0.14.5 (Ryan 30 Oct), with the
     // excitation moved to the controller row.
-    static const char *const caps[9] = { "Signal, mV", "Before cal, mB", "Room, mB",
+    // Shorter captions for the 85 px inside a grid tile: Before cal is the
+    // nominal scale, Temperature the board's.
+    static const char *const caps[9] = { "Signal, mV", "Nominal, mB", "Room, mB",
                                          "Steps", "Limit switch", "Last move",
-                                         "Temperature, \xC2\xB0" "C", "Excitation, V", "Move took, s" };
+                                         "Board, \xC2\xB0" "C", "Excitation, V", "Move took, s" };
     lv_obj_t **const to[9] = { &dp.v[0], &dp.v[2], &dp.v[7], &dp.v[3], &dp.v[4], &dp.v[6],
                                &dp.v[5], &dp.v[1], &dp.v[8] };
-    static const int32_t x[3] = { 98, 225, 351 };
+    static const int32_t x[3] = { 127, 244, 361 };   // grid columns 2 to 4 (common HMI template)
     for (int r = 0; r < 3; r++) {
         // 16 px as the Menu captions, centred on the row (Ryan, 22 Oct).
-        lv_obj_t *l = ui_label(scr, 10, 0, 84, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);
+        lv_obj_t *l = ui_label(scr, 10, 0, 109, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
         lv_obj_update_layout(l);
         lv_obj_set_y(l, 48 + r * 56 + (48 - lv_obj_get_height(l)) / 2);
         for (int c = 0; c < 3; c++)
-            *to[r * 3 + c] = ui_info(scr, x[c], 48 + r * 56, 119, 48, caps[r * 3 + c]);
+            *to[r * 3 + c] = ui_info(scr, x[c], 48 + r * 56, 109, 48, caps[r * 3 + c]);
     }
     lv_timer_t *t = lv_timer_create(diag_motor, 20, NULL);
     lv_obj_add_event_cb(scr, timer_deleted, LV_EVENT_DELETE, t);
@@ -590,6 +611,12 @@ static void diag_refresh(void)
         case STEPPER3_STOP_STALL:   res = "Loop stalled"; break;
         default: break;
     }
+    // 85 px inside a grid tile: a long result drops to 12 px.
+    lv_point_t sz;
+    lv_text_get_size(&sz, res, &ui_num_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    const lv_font_t *f = sz.x > lv_obj_get_width(dp.v[6]) ? &ui_font_12 : &ui_num_16;
+    if (lv_obj_get_style_text_font(dp.v[6], 0) != f)
+        lv_obj_set_style_text_font(dp.v[6], f, 0);
     ui_set_text(dp.v[6], res);
     ui_set_text(dp.v[8], any ? ui_fmt1(buf, sizeof buf, ms) : "--");
 

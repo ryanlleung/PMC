@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision N, 4 November 2026. Firmware 0.15.8. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23); revision F adds Shut down and the OFF state (0.15.0); revision G covers Shut down to 0 %, every start in OFF and the power icon at the top left (0.15.1); revision H covers the mode panel in the header (0.15.2); revision I covers Home without the mode button (0.15.3); revision J the dark blue AUTO panel and the faster Start AUTO / Stop AUTO (0.15.4); revision K the wider mode panel (0.15.5); revision L the IP tile on Home (0.15.6); revision M adds the choice to close the valve or not on the Shut down question, and the start-up with no white flash (0.15.7); revision N adds the PID? and PID SET text port commands (0.15.8). It does not add hardware bench verification.
+Revision O, 5 November 2026. Firmware 0.15.9. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23); revision F adds Shut down and the OFF state (0.15.0); revision G covers Shut down to 0 %, every start in OFF and the power icon at the top left (0.15.1); revision H covers the mode panel in the header (0.15.2); revision I covers Home without the mode button (0.15.3); revision J the dark blue AUTO panel and the faster Start AUTO / Stop AUTO (0.15.4); revision K the wider mode panel (0.15.5); revision L the IP tile on Home (0.15.6); revision M adds the choice to close the valve or not on the Shut down question, and the start-up with no white flash (0.15.7); revision N adds the PID? and PID SET text port commands (0.15.8); revision O covers the common screen template: header, Menu, Settings, System, keypad popup, and the IP tile as address/prefix (0.15.9). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.15.8: power-up, Shut down, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.15.9: power-up, Shut down, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -53,9 +53,9 @@ The controller has no hardware interlock. The closing stop is the firmware readi
 - **STOP** on the bottom row of every screen stops the valve at once and holds it. In AUTO it also switches to MANUAL. Nothing latches, so operation can resume straight away from the screen. STOP works with any finger, even with another one on the glass.
 - **Nothing moves at power-up.** Every power-up and restart starts OFF, and only a double tap on the screen turns the controller on. The network cannot turn it on, so AUTO does not resume after a power cut until someone is at the screen. The valve is NOT HOMED until the operator homes it or sets its position. The controller never uses a saved position on its own, with one exception: after Shut down, if the limit switch reads released at power-up, it keeps the position it shut down at (section 4). The valve does not move either way.
 - **Shut down before switching off.** Shut down moves the valve to 0 % and records the position, so the next power-up needs no homing. Switching off without it is safe (the valve stays where it is) but the next power-up asks for the position or a homing.
-- **Limit override** (Settings > Motor override) drives the valve closed past an open limit switch. It takes two fingers: hold Limit override, then press Close with another finger. Holding Limit override alone does nothing. A closing override moves only while both fingers are held and stops immediately when either lifts. Open also works while Limit override is held; an opening move ramps down when either finger lifts. Use it only when the switch is known to be stuck and the valve is known to be off the seat.
+- **Limit override** (Menu > Service > Valve position > Motor override) drives the valve closed past an open limit switch. It takes two fingers: hold Limit override, then press Close with another finger. Holding Limit override alone does nothing. A closing override moves only while both fingers are held and stops immediately when either lifts. Open also works while Limit override is held; an opening move ramps down when either finger lifts. Use it only when the switch is known to be stuck and the valve is known to be off the seat.
 - **Motor supply.** The Stepper 3 Click has no current limit. The motor supply must be a regulated 12 V. The firmware does not measure it: losing motor power does not directly end AUTO, and the counted position can keep changing while the motor is stationary. Check the supply and home again if position is in doubt. Do not feed 12 V into the Boost 10 Click, which takes 5 V from the board and makes the 10 V Druck excitation.
-- **Remote control.** While Settings > System setup > Remote control is On (the default), anyone who can reach the controller's IP address on port 8888 or port 502 can set the target, move the valve in MANUAL, start AUTO and stop. With it Off the network can only read, and a network STOP is refused too. Keep the controller on the instrument network only.
+- **Remote control.** While Menu > Setup > System > Remote control is On (the default), anyone who can reach the controller's IP address on port 8888 or port 502 can set the target, move the valve in MANUAL, start AUTO and stop. With it Off the network can only read, and a network STOP is refused too. Keep the controller on the instrument network only.
 
 Operating limits:
 
@@ -94,7 +94,7 @@ Socket pin details are in InitialTesting/clicks.h, limit.h and extflash.h, and t
 
 At power-up the controller loads the newest saved settings, starts the pressure reading and shows the OFF screen: black, a grey power symbol and "Double tap to turn on". The valve does not move. Two taps anywhere on the screen within 0.6 s turn it on: the start-up logo and bar for about 1.5 s, then Home, in NOT HOMED unless the position was kept from Shut down.
 
-1. Check the header. It reads NOT HOMED. Settings > System setup shows the firmware version and build date, the address in use and MAC address. The version should be 0.14.8. Diagnostics shows the live sensor, motor and temperature readings.
+1. Check the header. It reads NOT HOMED. Menu > Setup > System shows the firmware version and build date, the IP address and MAC address. The version should be 0.15.9. Diagnostics shows the live sensor, motor and temperature readings.
 2. Check the pressure. The Pressure tile shows the line pressure in mbar. Dashes mean no valid reading (section 9, F-1). Check Settings > Choose sensor > Calibration for the calibration kind and saved state; an uncalibrated sensor uses the nominal conversion (section 8).
 3. If a saved position is on offer, the screen says "Valve position unknown. Last saved position X %." and offers Use X %, Set position and Home valve. The saved position is the step count written before the last power-off. If power was lost during a move the prompt instead says the saved position is accurate to within E %. Use X % is quick but is not checked against the limit switch. Home is the checked option.
 4. Home the valve (section 7). This takes up to a few minutes. The header then reads MANUAL and the valve reading is 0.00 % and the strip reads "Valve idle" once it has stopped.
@@ -108,7 +108,7 @@ The real-time clock keeps time through a reset. If the dates on saves and events
 
 ### Shut down and switching off
 
-Before switching the controller off, tap the power icon at the top left of Home (where Back is on the other screens). The question "Shut down the controller?" has a checkbox "Close the valve to 0 %", ticked each time the question opens, and Cancel and Shut down. Tap the checkbox row to untick it: Shut down then turns the controller OFF at once with the valve left where it is (step 3 without the move), and the position is kept just the same.
+Before switching the controller off, tap the power icon at the top left of Home (where Home is on the other screens). The question "Shut down the controller?" has a checkbox "Close the valve to 0 %", ticked each time the question opens, and Cancel, Restart and Shut down. Restart asks its own question, as on System. Tap the checkbox row to untick it: Shut down then turns the controller OFF at once with the valve left where it is (step 3 without the move), and the position is kept just the same.
 
 1. With the box ticked, Shut down ends AUTO and moves the valve to 0 % at the normal move speed (400 steps/s by default, about 50 s from 30 % open). It does not close onto the limit switch.
 2. While it moves the whole screen is black: "Shutting down", the bar emptying as the valve closes and the seconds left. STOP, in its usual place, cancels it: MANUAL, the valve where it stopped.
@@ -123,23 +123,24 @@ First use of a new board or a new Druck sensor also needs: the sensor added unde
 
 ## 5. Screens
 
-Every screen has the same frame: a header with Back and Home buttons, the title, and the mode on the right on a flat panel the header's height, from just left of the buttons below it to the screen's edge (MANUAL, NOT HOMED or HOMING on grey, AUTO on dark blue, FAULT on red); a status strip; and STOP on the bottom row. On Home a power icon at the top left, where Back is on the other screens, opens Shut down. While shutting down and while OFF the whole screen is black (section 4). On Home and the operator pages the strip shows the valve's state (Valve idle, Moving to X %, or in AUTO Regulating to, In band or Stable at the setpoint) with the 5 minute pressure sparkline, and takes over for prompts, faults and messages. Under a popup the strip stays visible and greyed. Colour follows the ISA-101 convention: grey when normal, colour only for an abnormal state.
+Every screen has the same frame: a header with Home and Back icons at the left (Home first), the title left-aligned after them, and the mode on the right on a flat panel the header's height, from just left of the buttons below it to the screen's edge (MANUAL, NOT HOMED or HOMING on grey, AUTO on dark blue, FAULT on red); a status strip; and STOP on the bottom row. On Home a power icon at the top left, where Home is on the other screens, opens Shut down, and there is no Back. Under a popup Home and the power icon are greyed and Back closes the popup. While shutting down and while OFF the whole screen is black (section 4). On Home and the operator pages the strip shows the valve's state (Valve idle, Moving to X %, or in AUTO Regulating to, In band or Stable at the setpoint) with the 5 minute pressure sparkline, and takes over for prompts, faults and messages. Under a popup the strip stays visible and greyed. Colour follows the ISA-101 convention: grey when normal, colour only for an abnormal state.
 
 | Screen | How to reach it | What it shows and does |
 | --- | --- | --- |
-| Home | Home button | Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar; in AUTO the SP (setpoint) box, otherwise the Start AUTO button) and Valve tile (reading in %, bar; in MANUAL the Go to box for a typed %, in AUTO the Stop AUTO button, while not homed the Home valve button). On the right, from the top: the PID tile (the KP, TI and KD in use; a tap opens PID tuning), the IP tile (the IP address over the subnet mask the controller is using, "No Ethernet" on the USB build; a tap opens System setup), Menu and STOP. A tap on the sparkline opens Trend |
+| Home | Home button | Pressure tile (reading in mbar, log bar 0.1 to 1000 mbar; in AUTO the SP (setpoint) box, otherwise the Start AUTO button) and Valve tile (reading in %, bar; in MANUAL the Go to box for a typed %, in AUTO the Stop AUTO button, while not homed the Home valve button). On the right, from the top: the PID tile (the KP, TI and KD in use; a tap opens PID tuning), the IP tile ("IP address" over the address and prefix the controller is using, for example 192.168.1.100/24, "USB build" on the USB build; a tap opens System), Menu and STOP. A tap on the sparkline opens Trend |
 | Menu | Home > Menu | Records: Trend, Events. Calibrate: Valve position, Transducer. System: Diagnostics, Settings |
 | Trend | Menu > Records > Trend | Pressure (left axis), the target while in AUTO (dashed) and valve % (right axis) over 1, 2, 5, 10, 30 min or 1 hour |
 | Events | Menu > Records > Events | Latched faults, with Reset fault. Tap a fault for its detail and help. The event log (last 100 events) |
-| Valve position | Menu > Calibrate > Valve position | One page with Home valve, Set as 0 %, Set as other % and Use last saved, plus Help. Shows the position reference and output turns; during homing it shows the current stage |
-| Calibrate sensor | Menu > Calibrate > Transducer | The two-point calibration: Capture vacuum, Capture air, and the saved and captured readings side by side |
-| Diagnostics | Menu > System > Diagnostics | Live readings: Druck signal, pressure before calibration, the room sensor (Pressure 21), motor steps, limit switch and last move, board temperature, excitation and how long the last move took |
+| Valve position | Menu > Service > Valve position | One page with Home valve, Set as 0 %, Set as other % and Use last saved, plus Help and Motor override. Shows the position reference and output turns; during homing it shows the current stage |
+| Calibrate sensor | Menu > Setup > Settings > Calibrate sensor | The two-point calibration: Capture vacuum, Capture air, and the saved and captured readings side by side |
+| Diagnostics | Menu > Service > Diagnostics | Live readings: Druck signal, pressure before calibration, the room sensor (Pressure 21), motor steps, limit switch and last move, board temperature, excitation and how long the last move took |
 | PID tuning | Home > PID tile, or Settings > PID tuning | PID tab: KP, TI and KD, each on its own card with its name, unit and value. AUTO limits tab: AUTO min, deadband, pressure response and target band (section 10) |
-| Settings | Menu > System > Settings | System setup, Choose sensor, Valve setup, PID tuning, Review and save (with Load settings), Motor override and Restart (section 10) |
+| Settings | Menu > Setup > Settings | Choose sensor, Calibrate sensor, Valve setup, PID tuning, Review and save (with Load settings) (section 10) |
+| System | Menu > Setup > System | Cryostat name, IP address, MAC address, Remote control, Firmware with Restart beside it (section 10) |
 
 Display formats: pressure to 1 decimal in mbar, valve position and keypad entries to 2 decimals in %, dates DD/MM/YY.
 
-Keypads: a tap on a value box opens a number pad with the allowed range under the title. Set applies the value. A value outside the range is refused with the range shown. Cancel leaves the old value.
+Keypads: a tap on a value box opens a number pad as a popup over the dimmed page, with the title and the present value on the left and the entry in a blue-edged field on the right. Set applies the value. A value outside the range is refused with "Out of range" and the range in place of those lines. Cancel leaves the old value.
 
 Short messages: a refused action puts its reason in the strip for a few seconds, for example "Stop AUTO first", "Home the valve first", "Reset the fault first", "Limit switch pressed, cannot close" or "Wait for the valve to stop".
 
@@ -152,7 +153,7 @@ In MANUAL the operator positions the valve and watches the pressure. Position is
 - Tap the Go to box on Home to type a position, then Set. 0 and 100 close and open the valve fully.
 - Moves run at the drive's run speed (Settings > Valve setup > Drive). A new Go to during a move retargets it: further on extends the move, behind it ramps down and turns round.
 - The limit switch stops any closing move. If it trips away from 0 % the controller asks Set as seat or Skip (W-1, section 9).
-- Go to needs the valve homed or its position set. Before that a tap says why and nothing moves. Settings > Motor override can move the motor by steps without a position reference.
+- Go to needs the valve homed or its position set. Before that a tap says why and nothing moves. Motor override on the Valve position page can move the motor by steps without a position reference.
 
 ### Starting AUTO
 
@@ -186,7 +187,7 @@ When AUTO ends for any reason the valve stays where it was. It does not close. I
 
 Homing finds the closed limit switch and sets 0 % from it. It is the only way the controller checks the valve position. Home after every power-up, after a motor direction or coil order change, and whenever the position is in doubt.
 
-Start it from Home valve in the Valve tile on Home (while NOT HOMED) or from Menu > Calibrate > Valve position. The question "Home the valve? It closes onto the limit switch to find 0 %, up to N min" confirms it. The Valve position page shows the stage running and output turns. Diagnostics shows the motor step count and live limit switch.
+Start it from Home valve in the Valve tile on Home (while NOT HOMED) or from Menu > Service > Valve position. The question "Home the valve? It closes onto the limit switch to find 0 %, up to N min" confirms it. The Valve position page shows the stage running and output turns. Diagnostics shows the motor step count and live limit switch.
 
 1. If the switch is already pressed, the valve moves off it first. If the switch stays pressed, fault F-4.
 2. Fast close to the switch. If the switch is not found within 1.1 times the full travel, fault F-3.
@@ -223,7 +224,7 @@ The Druck output is ratiometric, so the controller reads the ratio of signal to 
 
 Calibrate when a sensor is first fitted to a board, when the sensor or the Click boards are changed, and when a check against the reference gauge shows drift. Calibration is refused in AUTO.
 
-From the screen (Menu > Calibrate > Transducer):
+From the screen (Menu > Setup > Settings > Calibrate sensor):
 
 1. Pump the sensor down. Press Capture vacuum. The question "Sensor at vacuum? Capture sets 0 mB" has Capture, which takes the point as 0 mbar, and Not 0 mB, which opens a keypad for the reference gauge reading (0 to 50 mbar). Type what the Pfeiffer gauge shows. The capture averages 5 readings and takes about 5 s.
 2. Vent the sensor to the room. Press Capture air. With the Pressure 21 room sensor fitted, the question "Sensor open to room air?" shows its reading: Capture takes the air point at the room sensor's reading averaged over the same 5 readings, and Enter value opens a keypad for a laboratory barometer reading instead. Without the room sensor the keypad opens straight away: type the barometer reading in mbar, for example 1013.2 (500 to 1100 mbar).
@@ -264,7 +265,7 @@ Warnings do not latch. W-2, W-4, W-5 and W-6 show on the strip until OK is press
 
 Other strip messages:
 
-- **Limit override held / closing past the switch**: the override from Settings > Motor override is in use. Release either finger to stop a closing override; there is no Cancel button on the strip.
+- **Limit override held / closing past the switch**: the override from Valve position > Motor override is in use. Release either finger to stop a closing override; there is no Cancel button on the strip.
 - **Valve not homed**: the valve position is not known.
 - **Shut down stopped: limit switch pressed before 0 %**: the limit switch tripped while Shut down moved the valve to 0 % (section 4). The limit switch question follows. OK clears it.
 
@@ -276,7 +277,7 @@ Settings are commissioning items, not daily operation. Numeric valve and tuning 
 
 | Page | Settings | Notes |
 | --- | --- | --- |
-| System setup | Cryostat name (up to 12 characters, shown in the Home title). IP address and mask. Remote control switch (On by default). Firmware version and build date | The name is in use at once and unsaved until Save settings. A new IP address is used after Save settings and a restart. Default puts the build's address back. The page shows the address in use |
+| System (on the Menu) | Cryostat name (up to 12 characters, shown in the Home title). IP address and mask. MAC address. Remote control switch (On by default). Firmware version and build date, with Restart | The name is in use at once and unsaved until Save settings. A new IP address is used after Save settings and a restart. Default puts the build's address back |
 | Choose sensor | Up to four Druck sensors, each with serial number, range in psi and its own calibration. Sensor in use | A new sensor starts uncalibrated. Calibrate puts it in use and opens Calibrate sensor |
 | Valve setup, Valve tab | 100 % travel in output turns (4 by default, 16512 steps per turn). Motor direction | Changing the direction clears the homing. Home again after saving |
 | Valve setup, Homing tab | Back-off (400 full steps), Return (400 full steps), fast close speed (400 steps/s), slow close speed (25 steps/s) | Back-off follows the fast close; Return follows the slow close and defines 0 %. The distances are independent |
@@ -284,8 +285,8 @@ Settings are commissioning items, not daily operation. Numeric valve and tuning 
 | PID tuning, PID tab | KP, gain (% open per mbar, 4.00). TI, integral time (min, 0.25; 0 is off). KD, derivative (% open per mbar/s of pressure change, 0.00; 0 is off) | Set at commissioning. Operators do not change these. KD acts on the pressure's rate of change, not the error, so a setpoint change gives no kick. Settings saved before 0.14.21 load with KD 0 |
 | PID tuning, AUTO limits tab | AUTO min (%), deadband (steps, 8), pressure response (opening raises or lowers the pressure), target band (mbar, 0.10) | Set at commissioning. A wrong pressure response gives W-6 |
 | Review and save | Last save and previous save by date. Unsaved changes list. Save settings. Discard changes. Load settings: last save, previous save or factory defaults | A loaded save is in use at once, sensors and calibrations included. Factory defaults come in as drafts and keep the sensors. Load is refused while the valve moves or in AUTO |
-| Restart | Stops the valve, ends AUTO or homing, then restarts after about 2.5 s | Asks first. Saved settings are loaded and the valve starts NOT HOMED, or OFF after a restart while OFF |
-| Motor override | Move tab: step size 1 to 10 000 or Hold, Close and Open, Zero, Limit override. Speed tab: run, start and acceleration rates. Coils tab: step mode (wave, full, half), hold torque, coils off, coil order, direction | Engineering page. It drives the motor by steps past the valve's checks. Coil order, direction and Zero clear the homing and ask first. The strip reads the motor state and the limit switch |
+| Restart (System, and the power icon on Home) | Stops the valve, ends AUTO or homing, then restarts after about 2.5 s | Asks first. Saved settings are loaded and the valve starts NOT HOMED, or OFF after a restart while OFF |
+| Motor override (Valve position) | Move tab: step size 1 to 10 000 or Hold, Close and Open, Zero, Limit override. Speed tab: run, start and acceleration rates. Coils tab: step mode (wave, full, half), hold torque, coils off, coil order, direction | Engineering page. It drives the motor by steps past the valve's checks. Coil order, direction and Zero clear the homing and ask first. The strip reads the motor state and the limit switch |
 
 Factory defaults for the valve and the loop are for the PK22 344:1 stepper on the Oxford Instruments needle valve. The CF-11 on the bench ran at about 1.6 K with 3 to 8 mbar, the valve around 34 % open, on the Mercury iTC's P 20 % and I 0.1 min. The mm4's equivalent gain and integral time for each cryostat are set at commissioning.
 
@@ -296,9 +297,9 @@ The Ethernet build (the one for the cryostat) runs two servers on one cable and 
 
 ### Network and IP address
 
-The controller has a fixed (static) IP address only; it does not use DHCP. The address is the one saved under Settings > System setup, or the build's default 192.168.1.100 with mask 255.255.255.0. There is no gateway, so it answers only on its own subnet. The header shows the address, or NO CABLE, NET NO CLK or NET NO PHY. Settings > System setup shows the address in use and MAC address. There is no DHCP or DNS, so connect by the IP address.
+The controller has a fixed (static) IP address only; it does not use DHCP. The address is the one saved under Menu > Setup > System, or the build's default 192.168.1.100 with mask 255.255.255.0. There is no gateway, so it answers only on its own subnet. The header shows the address, or NO CABLE, NET NO CLK or NET NO PHY. Home shows the address in use as address/prefix (192.168.1.100/24); Menu > Setup > System shows it with the MAC address. There is no DHCP or DNS, so connect by the IP address.
 
-To set the address, type it and the mask on the System setup page (IP address), then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. Put the PC on the same subnet with a fixed address: for the default, for example 192.168.1.10 with mask 255.255.255.0. On a site network, give each controller its own address on the instrument subnet: they all start at 192.168.1.100.
+To set the address, type it and the mask on the System page (IP address), then Save settings and restart. The address cannot be changed over the network, so a remote user cannot cut off their own link. Put the PC on the same subnet with a fixed address: for the default, for example 192.168.1.10 with mask 255.255.255.0. On a site network, give each controller its own address on the instrument subnet: they all start at 192.168.1.100.
 
 Ethernet and Modbus were proven on the bench on 26 October 2026 with the laptop on a fixed address.
 
@@ -311,7 +312,7 @@ Port 8888 takes the remote command set in plain text, one command per line (uppe
 | Reading | PRES? the pressure. PRES SP? the target. MODE? MANUAL, AUTO, HOMING, NOT HOMED, SHUTDOWN or OFF. VALV? the position; VALV MOVING? 1 while moving or homing. ALRM? the latched faults and the warnings. EVNT? followed by a number, the last events (on a line of its own). BARO? the room pressure. NETW? the address in use. TIME? the clock. PID? the PID gains in use (KP, TI, KD). *IDN? the identity and firmware version |
 | Control | PRES SP followed by the target in mbar (does not start AUTO). MODE AUTO starts AUTO with the same checks as the screen; MODE MANUAL ends it, the valve stays where it is. VALV SET followed by a % moves the valve in MANUAL. STOP stops the valve and ends AUTO or a shut down; it is the only stop. ALRM RESET clears the faults whose cause has gone; ALRM OK acknowledges a strip warning. TIME SET 2026-10-27 09:00:00 sets the clock. PID SET 3.5,0.5 sets and saves KP and TI (a third number sets KD), as Save on the PID tuning page; it is taken in AUTO at the next control step. Each change is a save in flash: send it only when the gains change |
 
-Set commands need Remote control On (Settings > System setup); with it Off they answer ERR 211, STOP included. Homing, calibration, the other settings and the motor are on the touchscreen only. In AUTO, VALV SET answers "Switch to MANUAL first". While OFF or shutting down, VALV SET, MODE AUTO and MODE MANUAL answer ERR 213; the controller is turned on at the screen only. The error codes and the full table are in the README. With network writes enabled, any other command answers ERR 100. With writes off, queries still work but other input, including an unknown command, answers ERR 211. The USB build is local and is not gated by the Remote control switch.
+Set commands need Remote control On (Menu > Setup > System); with it Off they answer ERR 211, STOP included. Homing, calibration, the other settings and the motor are on the touchscreen only. In AUTO, VALV SET answers "Switch to MANUAL first". While OFF or shutting down, VALV SET, MODE AUTO and MODE MANUAL answer ERR 213; the controller is turned on at the screen only. The error codes and the full table are in the README. With network writes enabled, any other command answers ERR 100. With writes off, queries still work but other input, including an unknown command, answers ERR 211. The USB build is local and is not gated by the Remote control switch.
 
 Tools in the repository: tools/logger/log_druck.py polls the pressure, target, valve, mode and alarms once a second and logs them to CSV, from an IP address or a COM port, and reconnects on its own.
 
@@ -353,7 +354,7 @@ The Modbus read test passed on the bench on 26 October 2026. The write test has 
 | Review the event log | After a fault, and before clearing it | Menu > Records > Events, or EVNT? 100 over the link. The log empties at a restart, so read it first |
 | Save the settings | After any commissioning change | Settings > Review and save > Save settings. Review and save shows the date of the last save |
 | Set the clock | When the dates on saves and events are wrong | TIME SET over the link, in the form TIME SET 2026-10-27 09:00:00 |
-| Update the firmware | When a new version is released | Flash over USB-C with mikroBootloader. The settings, calibration and saved position are in serial flash and survive reflashing. Check Settings > System setup, or *IDN? over the link, afterwards |
+| Update the firmware | When a new version is released | Flash over USB-C with mikroBootloader. The settings, calibration and saved position are in serial flash and survive reflashing. Check Menu > Setup > System, or *IDN? over the link, afterwards |
 | Clean the touchscreen | As needed | Shut down and switch off first, or the taps will act on the screen (a double tap on the OFF screen turns it on). A soft cloth, no solvents |
 
 The controller has no fuse, battery or filter to replace. The real-time clock runs from the board supply; a cell in the BAT1 holder keeps it through a power-off.
@@ -392,3 +393,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | L | 4 November 2026 | Firmware 0.15.6: on Home the IP tile (the IP address and subnet mask in use, a tap opens System setup) replaces the Trend button. Trend stays on Menu and on a tap on the sparkline |
 | M | 4 November 2026 | Firmware 0.15.7: the Shut down question has a "Close the valve to 0 %" checkbox, ticked each time; unticked, the controller turns OFF with the valve left where it is and its position kept. At power-up the backlight stays off until the OFF screen is drawn (the panel flashed white before) |
 | N | 4 November 2026 | Firmware 0.15.8: the text port takes PID? (the KP, TI and KD in use) and PID SET (set and save them, as Save on the PID tuning page, in AUTO too), for a gain schedule run from a PC |
+| O | 5 November 2026 | Firmware 0.15.9: the common screen template. Header: Home at the top left on every page (the power icon on Home), Back beside it, the title left-aligned. The power question also offers Restart. Menu rows Records (Trend, Events), Service (Valve position, Diagnostics), Setup (Settings, System). Settings holds navigation tiles only; System moves to the Menu with Restart; Motor override moves to Valve position. Keypads are a popup with the present value and the entry side by side. The Home IP tile reads "IP address" over address/prefix, for example 192.168.1.100/24 |

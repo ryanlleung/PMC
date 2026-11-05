@@ -365,33 +365,39 @@ int main(int argc, char **argv)
 
     // Heap check: Menu open and back ten times.
     size_t before = heap_used();
-    // Home (72, 20), not Back: where Menu does not open (homing), Back's
-    // place on Home is the power icon (0.15.1).
+    // Header (common HMI template, 0.15.9): Home at x 0-44 on every page
+    // but Home, Back at 44-88; on Home the power icon is at 0-44.
+    // Menu: Trend, Events / Valve position, Diagnostics / Settings, System
+    // at x 129 and 303, rows y 48, 104, 160. Settings: Choose sensor,
+    // Calibrate sensor / Valve setup, PID tuning / Review and save at x 10
+    // and 244.
+#define HOME() tap(22, 20)
+#define BACK() tap(66, 20)
     for (int i = 0; i < 10; i++) {
         tap(415, 184);          // Menu
-        tap(72, 20);            // Home
+        HOME();
     }
-    tap(300, 184);              // Go to box (opens the keypad in MANUAL)
-    tap(72, 20);                // Home closes it
+    tap(300, 184);              // Start AUTO / Go to area of the valve card
+    HOME();                     // Home closes any popup
     for (int i = 0; i < 5; i++) {
-        // The 0.6.0 motor screen first (review, 16 Oct: it stayed built and
-        // a settings keypad after it ran the heap out). Its Back opens
-        // Settings, with Menu behind.
-        tap(415, 184); tap(379, 184); ui_service(); run(300);   // from Settings
-        tap(40, 15); run(300);                                  // its Back: Settings
-        tap(72, 20);                                            // Home (Back twice would land on the power icon)
-        tap(415, 72); tap(24, 20);                              // PID tuning
-        tap(415, 184); tap(350, 72); tap(72, 20);               // Events
-        tap(415, 184); tap(120, 128); tap(72, 20);              // Calibrate valve
-        tap(415, 184); tap(120, 184); tap(72, 20);              // Diagnostics
-        tap(415, 184); tap(379, 184);                           // Settings
-        tap(120, 72); tap(24, 20);                              //   Cryostat name
-        tap(356, 72); tap(24, 20);                              //   Pressure sensor
-        tap(120, 128); tap(270, 72); tap(24, 20);               //   Valve setup, Drive tab
-        tap(356, 128); tap(94, 72); tap(24, 20); tap(24, 20);   //   Control tuning, keypad
-        tap(120, 184); tap(24, 20);                             //   Review and save
-        tap(72, 20);                                            // Home
-        tap(415, 184); tap(379, 128); tap(72, 20);              // Calibrate sensor
+        // The motor screen first (review, 16 Oct: it stayed built and a
+        // settings keypad after it ran the heap out), opened as its Open
+        // button does, from Valve position.
+        tap(415, 184); tap(212, 128); ui_service(); run(300);   // Valve position, Motor override
+        BACK(); run(300);
+        HOME();
+        tap(415, 72); BACK();                                   // PID tile: PID tuning
+        tap(415, 184); tap(212, 72); HOME();                    // Trend
+        tap(415, 184); tap(386, 72); HOME();                    // Events
+        tap(415, 184); tap(386, 128); HOME();                   // Diagnostics
+        tap(415, 184); tap(386, 184); HOME();                   // System
+        tap(415, 184); tap(212, 184);                           // Settings
+        tap(123, 72); BACK();                                   //   Choose sensor
+        tap(357, 72); BACK();                                   //   Calibrate sensor
+        tap(123, 128); BACK();                                  //   Valve setup
+        tap(357, 128); BACK();                                  //   PID tuning
+        tap(123, 184); BACK();                                  //   Review and save
+        HOME();
     }
     run(1200);
     size_t after = heap_used();
