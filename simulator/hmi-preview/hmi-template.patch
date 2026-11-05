@@ -1307,7 +1307,7 @@ index f61bfa9..d03eb00 100644
      ui_set_text(dp.v[8], any ? ui_fmt1(buf, sizeof buf, ms) : "--");
  
 diff --git a/simulator/tests/run.js b/simulator/tests/run.js
-index 640ffbb..3421f93 100644
+index a3d85c4..d85901b 100644
 --- a/simulator/tests/run.js
 +++ b/simulator/tests/run.js
 @@ -78,14 +78,14 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
@@ -1351,5 +1351,5 @@ index 640ffbb..3421f93 100644
 -  s.tap(357, 184);
 +  s.tap(357, 128);
    check('switch Off again: refused', s.cmd('PRES SP 6') === 'ERR 211 Read only over the network\r\n');
- }
- { // Homing return: its own setting, the step 4 move off the switch; 0 % is there.
+   check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
+     s.cmd('PID?') === 'PID 4.00,0.25,0.00\r\n', s.cmd('PID?'));

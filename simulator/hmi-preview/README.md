@@ -1,6 +1,6 @@
 # HMI template preview
 
-The simulator with the common HMI template changes applied, for a look before any firmware change. The base is the firmware on this branch (0.15.7, from the w676ed branch). The firmware in `InitialTesting` is not changed: `build.sh` copies it, applies `hmi-template.patch` to the copy and compiles that with `simulator/wasm/build.sh`.
+The simulator with the common HMI template changes applied, for a look before any firmware change. The base is the firmware on this branch (0.15.8, from the w676ed branch). The firmware in `InitialTesting` is not changed: `build.sh` copies it, applies `hmi-template.patch` to the copy and compiles that with `simulator/wasm/build.sh`.
 
 Open `index.html` here in a browser (it works from a file path, like `simulator/index.html`).
 
