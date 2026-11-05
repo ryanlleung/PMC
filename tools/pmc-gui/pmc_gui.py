@@ -11,7 +11,8 @@ to a Lake Shore 336 (TCP 7777) when one is given, and serves one page:
             PID SET); the logger; the 336 connection.
   Tests     1. valve step test in MANUAL: the plant's gain, delay and time
             constant, and the KP and TI they suggest; 2. setpoint step test
-            in AUTO: overshoot and settling time.
+            in AUTO through a list of setpoints (and back): time to 90 %,
+            overshoot and settling time of each step.
   Gains     the gain table over several setpoints (pmc_gains.py tune), its
             blended KP and TI (show), and the gain schedule (run), which
             sets KP and TI each time the setpoint changes.
@@ -67,6 +68,9 @@ HISTORY = 4 * 3600          # samples kept for the page (1 a second): 4 hours
 SHOW_SP = [1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 35, 50]
 POINT_GUESS_S = 900         # a gain table setpoint, until one has finished
 RIDE_S = 120                # a gain table run waits this long for the link
+SETTLED_S = 60              # setpoint step test: held this long within the band = settled
+SETTLE_PCT = 5.0            # its band: this % of the step, or the Band box if larger
+FIRST_MAX_S = 600           # the most it waits for the first setpoint to hold
 COLS = ['t_s', 'sp_mbar', 'p_mbar', 'valve_pct', 'mode', 'alarm', 'stage']
 # The 336 inputs on this rig, used when an input is given without a name.
 LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
@@ -115,11 +119,18 @@ def ls_col(i, name):
     return '%s_%s_K' % (i, slug) if slug else '%s_K' % i
 
 
+def step_band(p0, p1, band):
+    """Settled = within 5 % of the step of the new setpoint (as in the
+    5 Nov analysis), or within the Band box if that is wider."""
+    return max(band, abs(p1 - p0) * SETTLE_PCT / 100)
+
+
 def metrics(rows, p0, p1, band):
     """rows: (s from the step, pressure). The step response figures."""
     step = p1 - p0
     if abs(step) < 1e-6 or not rows:
         return None
+    band = step_band(p0, p1, band)
     t90 = next((t for t, p in rows if (p - p0) / step >= 0.9), None)
     peak = max((p - p0) / step for _, p in rows)
     settle = 0.0
@@ -129,7 +140,7 @@ def metrics(rows, p0, p1, band):
     last = [p for t, p in rows if t >= rows[-1][0] - 60]
     return {'from': p0, 'to': p1, 't90_s': None if t90 is None else round(t90),
             'overshoot_pct': round(max(0.0, (peak - 1) * 100), 1),
-            'settle_s': round(settle) if settle < rows[-1][0] else None,
+            'settle_s': round(settle) if settle < rows[-1][0] else None, 'band': round(band, 3),
             'mean': round(statistics.mean(last), 3),
             'spread': round(statistics.pstdev(last), 3) if len(last) > 1 else 0.0}
 
@@ -565,12 +576,12 @@ class Board:
         if pid.startswith('PID '):
             with self.lock:
                 self.state['pid'] = [float(x) for x in pid[4:].split(',')]
+        self.schedule_tick(row)      # first: a step below sets its own setpoint's gains
         with self.tlock:
             if self.test:
                 self.step_tick(row)
             if self.vtest:
                 self.vstep_tick(row)
-        self.schedule_tick(row)
 
     def busy(self):
         return self.test or self.vtest or self.job
@@ -683,16 +694,9 @@ class Board:
         else:
             durs = P['durs']
             rest = sum(d for d, s in zip(durs, P['steps']) if s['state'] == 'todo')
-            if i is None:
-                left = rest
-            elif durs[i] is None:            # setpoint test, settling at From
-                T = self.test or {}
-                since = T.get('since')
-                hold = T.get('hold', 0)
-                left = rest + max(hold - (t - since), 0) if since is not None else rest + hold
-                how = 'about' if since is not None else 'at least'
-            else:
-                left = rest + max(durs[i] - in_step, 0)
+            left = rest + (max(durs[i] - in_step, 0) if i is not None else 0)
+            if P['kind'] == 'setpoint':      # each step can end early, once settled
+                how = 'at most'
         wait = None
         if self.link_wait is not None:
             wait = 'waiting for the board link: %d of %d s' % ((time.monotonic() - self.link_wait) * self.speed, RIDE_S)
@@ -703,24 +707,36 @@ class Board:
                 'done_at': time.strftime('%H:%M', time.localtime(time.time() + left / self.speed))}
 
     # Setpoint step test (AUTO) -------------------------------------------
-    def start_test(self, start, to, back, record, hold, band):
+    # AUTO at the first setpoint until it holds within the band, then a step
+    # to each next one in turn (and back down through them when asked). A
+    # step ends once the pressure has held within 5 % of the step (or the
+    # band) for 1 min, or at the limit. The gain schedule, when on, sets the
+    # gains for each new setpoint just before its step.
+    def start_test(self, sps, back, record, hold, band):
         if self.busy():
             return 'a test is already running'
-        r = self.send('PRES SP %.1f;MODE AUTO' % start)
+        sps = [round(x, 1) for x in sps]
+        if len(sps) < 2 or any(x <= 0 for x in sps) or any(a == b for a, b in zip(sps, sps[1:])):
+            return 'give two or more setpoints above 0, each different from the one before'
+        r = self.send('PRES SP %.1f;MODE AUTO' % sps[0])
         if r:
             return r
-        labels = ['Settle at %.1f mbar' % start, 'Step %.1f -> %.1f mbar' % (start, to)]
+        pairs = list(zip(sps, sps[1:]))
         if back:
-            labels.append('Step %.1f -> %.1f mbar' % (to, start))
-        self.begin('setpoint', 'Setpoint step test', labels, [None] + [record] * (len(labels) - 1),
-                   'from %.1f to %.1f mbar%s, %d s a step, band %.2f mbar' %
-                   (start, to, ' and back' if back else '', record, band))
+            pairs += [(b, a) for a, b in reversed(pairs)]
+        labels = ['Settle at %.1f mbar' % sps[0]] + ['Step %.1f -> %.1f mbar' % x for x in pairs]
+        self.begin('setpoint', 'Setpoint step test', labels, [FIRST_MAX_S] + [record] * len(pairs),
+                   '%s mbar%s, each step until it holds %d s within %g %% of the step (band %.2f mbar) '
+                   'or %d s at most, gain schedule %s' %
+                   (' -> '.join('%g' % x for x in sps), ' and back' if back else '', SETTLED_S, SETTLE_PCT,
+                    band, record, 'on (%s)' % (self.table_name or 'table') if self.schedule and self.table
+                    else 'off'))
         with self.tlock:
-            self.test = {'start': start, 'to': to, 'back': back, 'record': record, 'hold': hold, 'band': band,
+            self.test = {'start': sps[0], 'pairs': pairs, 'record': record, 'hold': hold, 'band': band,
                          'phase': 'settle', 'since': None, 't_phase': None, 'rows': [], 'steps': [], 'k': 0}
         self.step(0, 'now')
-        self.stage('AUTO at %.1f mbar, waiting for it to hold within %.2f mbar for %d s' % (start, band, hold),
-                   'settle at %.1f mbar' % start, 1200)
+        self.stage('AUTO at %.1f mbar, waiting for it to hold within %.2f mbar for %d s' % (sps[0], band, hold),
+                   'settle at %.1f mbar' % sps[0], FIRST_MAX_S)
         return ''
 
     def stop_test(self, why='stopped', put_back=True):
@@ -747,28 +763,48 @@ class Board:
                            (T['start'], T['band'], t - T['since'], T['hold']), restart=False)
                 if t - T['since'] >= T['hold']:
                     self.step(0, 'done', 'held %d s' % T['hold'])
-                    T['steps'] = [(T['start'], T['to'])] + ([(T['to'], T['start'])] if T['back'] else [])
+                    T['steps'] = list(T['pairs'])
                     self.next_step(t)
             else:
                 T['since'] = None
                 self.stage('AUTO at %.1f mbar, waiting for it to hold within %.2f mbar for %d s' %
                            (T['start'], T['band'], T['hold']), restart=False)
-                if t - T['t_phase'] > 1200:
-                    self.stop_test('ended: %.1f mbar not held within 20 min' % T['start'])
+                if t - T['t_phase'] >= FIRST_MAX_S:
+                    # The steps still say how the gains do: go on from where it is.
+                    self.note('%.1f mbar not held within %.2f mbar in %d min; stepping anyway' %
+                              (T['start'], T['band'], FIRST_MAX_S // 60))
+                    self.step(0, 'done', 'not held in %d min, stepped anyway' % (FIRST_MAX_S // 60))
+                    T['steps'] = list(T['pairs'])
+                    self.next_step(t)
             return
+        p0, p1 = T['cur']
+        band = step_band(p0, p1, T['band'])
         if p is not None:
             T['rows'].append((t - T['t_phase'], p))
-        if t - T['t_phase'] >= T['record']:
-            p0, p1 = T['cur']
+            T['in'] = (T['in'] if T['in'] is not None else t) if abs(p - p1) <= band else None
+        held = T['in'] is not None and t - T['in'] >= SETTLED_S
+        if T['in'] is not None and not held:
+            self.stage('setpoint %.1f -> %.1f mbar, within %.2f mbar for %d of %d s' %
+                       (p0, p1, band, t - T['in'], SETTLED_S), restart=False)
+        else:
+            self.stage('setpoint %.1f -> %.1f mbar, waiting for it to hold within %.2f mbar for %d s' %
+                       (p0, p1, band, SETTLED_S), restart=False)
+        if held or t - T['t_phase'] >= T['record']:
             m = metrics(T['rows'], p0, p1, T['band'])
             if m:
+                pid = self.state['pid'] or [None, None]
+                m['kp'], m['ti'] = pid[0], pid[1]
                 with self.lock:
                     self.results.append(m)
                 self.result('results.csv', m)
-                self.note('%.1f -> %.1f mbar: 90 %% in %s s, overshoot %s %%, settled in %s s' %
-                          (p0, p1, m['t90_s'], m['overshoot_pct'], m['settle_s']))
-            self.step(T['k'], 'done', ('overshoot %s %%, settled %s' % (
-                m['overshoot_pct'], 'in %s s' % m['settle_s'] if m['settle_s'] is not None else 'no')) if m else '')
+                self.note('%.1f -> %.1f mbar, KP %s TI %s: 90 %% in %s s, overshoot %s %%, settled in %s s' %
+                          (p0, p1, m['kp'], m['ti'], m['t90_s'], m['overshoot_pct'],
+                           m['settle_s'] if held else 'no (%d s limit)' % T['record']))
+                note = 'overshoot %s %%, %s' % (m['overshoot_pct'], 'settled in %s s' % m['settle_s'] if held
+                                                else 'not settled in %d s' % T['record'])
+            else:
+                note = ''
+            self.step(T['k'], 'done', note)
             if T['steps']:
                 self.next_step(t)
             else:
@@ -779,10 +815,12 @@ class Board:
         T = self.test
         T['cur'] = T['steps'].pop(0)
         T['phase'] = '%.1f->%.1f mbar' % T['cur']
-        T['t_phase'], T['rows'], T['k'] = t, [], T['k'] + 1
+        T['t_phase'], T['rows'], T['k'], T['in'] = t, [], T['k'] + 1, None
         self.step(T['k'], 'now')
-        self.stage('setpoint %.1f -> %.1f mbar, recording %d s' % (T['cur'] + (T['record'],)),
+        self.stage('setpoint %.1f -> %.1f mbar, waiting for it to hold within %.2f mbar for %d s' %
+                   (T['cur'] + (step_band(*T['cur'], T['band']), SETTLED_S)),
                    'setpoint %.1f->%.1f mbar' % T['cur'], T['record'])
+        self.schedule_set(T['cur'][1])                         # the new setpoint's gains first
         r = self.ask('PRES SP %.1f;PRES SP?' % T['cur'][1])   # the query: a set alone gives no reply
         if r.startswith('ERR'):
             self.note('setpoint refused: ' + r)
@@ -990,7 +1028,14 @@ class Board:
     # Gain schedule (pmc_gains.py run) ------------------------------------
     def schedule_tick(self, row):
         sp = row[1]
-        if not self.schedule or not self.table or sp is None or self.job or sp == self.sched_sp:
+        if sp is not None and not self.job and sp != self.sched_sp:
+            self.schedule_set(sp)
+
+    def schedule_set(self, sp):
+        """With the schedule on: KP and TI from the table for this setpoint,
+        sent only when they differ from the board's (each PID SET is a
+        flash write)."""
+        if not self.schedule or not self.table:
             return
         kp, ti = gains_for(self.table, sp)
         now = self.state['pid']
@@ -1000,6 +1045,9 @@ class Board:
                 self.note('gain schedule off: %s' % r)
                 self.schedule = False
                 return
+            if r.startswith('PID '):
+                with self.lock:
+                    self.state['pid'] = [float(x) for x in r[4:].split(',')]
             self.note('gain schedule: setpoint %g mbar, KP %.2f TI %.2f' % (sp, kp, ti))
         self.sched_sp = sp
 
@@ -1098,9 +1146,11 @@ def make_handler(board):
                 elif p == '/api/time':
                     r = board.send('TIME SET ' + time.strftime('%Y-%m-%d %H:%M:%S'))
                 elif p == '/api/test':
-                    r = board.start_test(float(q['start']), float(q['to']), bool(q.get('back')),
-                                         float(q.get('record', 600)), float(q.get('hold', 120)),
-                                         float(q.get('band', 0.1)))
+                    sps = q.get('sps')
+                    sps = ([float(x) for x in str(sps).replace(',', ' ').split()] if sps is not None
+                           else [float(q['start']), float(q['to'])])
+                    r = board.start_test(sps, bool(q.get('back')), float(q.get('record', 300)),
+                                         float(q.get('hold', SETTLED_S)), float(q.get('band', 0.1)))
                 elif p == '/api/vtest':
                     r = board.start_vtest(float(q['at']), float(q['step']), float(q.get('hold', 180)),
                                           float(q.get('record', 600)))

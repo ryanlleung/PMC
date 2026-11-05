@@ -159,7 +159,7 @@
       </div>
       <div class="card">
         <h2>2. Setpoint step results (AUTO)</h2>
-        <table><thead><tr><th>Step, mbar</th><th>90 % in</th><th>Overshoot</th><th>Settled in</th><th>Last minute</th></tr></thead><tbody id="res"></tbody></table>
+        <table><thead><tr><th>Step, mbar</th><th>KP, TI</th><th>90 % in</th><th>Overshoot</th><th>Settled in</th><th>Last minute</th></tr></thead><tbody id="res"></tbody></table>
       </div>
     </div>
     <div class="tab col" data-tab="gains">
@@ -239,14 +239,14 @@
       </div>
       <div class="card" data-kind="setpoint">
         <h2>2. Setpoint step test (AUTO)<span class="badge">Running</span></h2>
-        <div class="row"><label class="w">From</label><input id="tFrom" type="number" step="0.1" value="3"><label>mbar</label></div>
-        <div class="row"><label class="w">To</label><input id="tTo" type="number" step="0.1" value="5"><label>mbar</label></div>
-        <div class="row"><label class="w">Record</label><input id="tRec" type="number" value="600"><label>s per step</label></div>
-        <div class="row"><label class="w">Band</label><input id="tBand" type="number" step="0.01" value="0.1"><label>mbar, settled</label></div>
-        <div class="row"><label><input id="tBack" type="checkbox" checked> Step back afterwards</label></div>
+        <div class="row"><label class="w">Setpoints</label><input id="tSps" type="text" class="wide" value="1 2 3 5 8 12 18 25 50"><label>mbar</label></div>
+        <div class="row"><label class="w">Limit</label><input id="tRec" type="number" value="300"><label>s a step, at most</label></div>
+        <div class="row"><label class="w">Band</label><input id="tBand" type="number" step="0.01" value="0.1"><label>mbar or 5 % of step</label></div>
+        <div class="row"><label><input id="tBack" type="checkbox" checked> Then step back through them</label></div>
         <div class="est" id="tEst"></div>
+        <div class="est" id="tSched"></div>
         <div class="row"><button class="primary run" onclick="startTest(this)">Run setpoint test</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
-        <div class="hint">AUTO at From, 2 min within the band, then the step, with the gains on the board (the scheduled ones when the gain schedule is on).</div>
+        <div class="hint">AUTO at the first setpoint until it holds within the band for 1 min (or 10 min have passed), then a step to each next one. A step ends once the pressure has held within 5 % of the step (or the band, if larger) for 1 min, or at the limit. Settled in is the time from the step to the start of that minute.</div>
       </div>
     </div>
 
@@ -342,7 +342,7 @@ function setPid(btn) {
 }
 function readBack(btn) { pidLoaded = false; toast(hhmmss() + '  PID boxes read back from the board'); refresh(); }
 const startVtest = btn => post('/api/vtest', { at: +val('vAt'), step: +val('vStep'), hold: +val('vHold'), record: +val('vRec') }, btn, 'Valve step test', 'started');
-const startTest = btn => post('/api/test', { start: +val('tFrom'), to: +val('tTo'), record: +val('tRec'), band: +val('tBand'), back: $('tBack').checked, hold: 120 }, btn, 'Setpoint step test', 'started');
+const startTest = btn => post('/api/test', { sps: val('tSps'), record: +val('tRec'), band: +val('tBand'), back: $('tBack').checked, hold: 60 }, btn, 'Setpoint step test', 'started');
 const startTune = btn => post('/api/tune', { sps: val('gSps'), step: +val('gStep'), tc: +val('gTc') }, btn, 'Gain table', 'started');
 const toggleLog = btn => post('/api/log', { on: !(S && S.logger.on) }, btn, S && S.logger.on ? 'Logging stopped' : 'Logging started');
 function lsConnect(btn) {
@@ -389,12 +389,13 @@ function setPill(id, cls, text, title) { $(id).className = 'pill ' + cls; $(id).
 function estimates() {
   const hold = +val('vHold') || 0, rec = +val('vRec') || 0;
   $('vEst').textContent = `Takes ${fmtDur(hold + 2 * rec)}: ${hold} s settling, then 2 steps of ${rec} s.`;
-  const n = $('tBack').checked ? 2 : 1, tr = +val('tRec') || 0;
-  $('tEst').textContent = `Takes ${fmtDur(n * tr)} once the pressure holds at From for 2 min (${n} step${n > 1 ? 's' : ''} of ${tr} s).`;
+  const ts = val('tSps').split(/[\s,]+/).filter(x => +x > 0), tr = +val('tRec') || 0;
+  const n = Math.max(ts.length - 1, 0) * ($('tBack').checked ? 2 : 1);
+  $('tEst').textContent = n ? `At most ${fmtDur(600 + n * tr)}: up to 10 min for ${ts[0]} mbar to hold, then ${n} step${n > 1 ? 's' : ''} of up to ${tr} s each, less where the pressure settles sooner.` : 'Give two or more setpoints.';
   const k = val('gSps').split(/[\s,]+/).filter(x => +x > 0).length;
   $('gEst').textContent = k ? `${k} setpoint${k > 1 ? 's' : ''}: about ${fmtDur(k * 600)} to ${fmtDur(k * 1200)} (10 to 20 min each).` : 'Give at least one setpoint.';
 }
-document.querySelectorAll('#vHold,#vRec,#tRec,#tBack,#gSps').forEach(e => e.addEventListener('input', estimates));
+document.querySelectorAll('#vHold,#vRec,#tSps,#tRec,#tBack,#gSps').forEach(e => e.addEventListener('input', estimates));
 estimates();
 
 const ICON = { done: '✓', now: '▶', todo: '○', failed: '✗', stopped: '■' };
@@ -424,7 +425,7 @@ function runbar(s) {
   $('rbSteps').innerHTML = stepsHtml(P.steps);
   $('rbEl').textContent = fmtClock(P.elapsed_s);
   $('rbLeft').textContent = (P.how ? P.how + ' ' : '') + fmtDur(P.left_s);
-  $('rbEta').textContent = P.how === 'at least' ? 'after ' + P.done_at : P.done_at;
+  $('rbEta').textContent = P.how === 'at least' ? 'after ' + P.done_at : P.how === 'at most' ? 'by ' + P.done_at : P.done_at;
   $('rbBar').style.width = Math.min(100, 100 * P.elapsed_s / Math.max(1, P.elapsed_s + P.left_s)).toFixed(1) + '%';
   $('rbDir').textContent = P.dir ? 'Saving in ' + P.dir : '';
 }
@@ -507,9 +508,10 @@ async function refresh() {
     `<td>${m.K.toFixed(3)} mbar/%</td><td>${m.delay_s} s</td><td>${m.tau_s} s</td><td>${m.kp.toFixed(2)}, ${m.ti.toFixed(2)} min</td>` +
     `<td><button onclick="useGains(${m.kp},${m.ti})">Use</button></td>`) + '</tr>').join('') : none(8);
   $('res').innerHTML = s.results.length ? s.results.slice().reverse().map(m =>
-    `<tr><td>${m.from.toFixed(1)} to ${m.to.toFixed(1)}</td><td>${m.t90_s === null ? 'not reached' : m.t90_s + ' s'}</td>` +
-    `<td>${m.overshoot_pct} %</td><td>${m.settle_s === null ? 'not settled' : m.settle_s + ' s'}</td>` +
-    `<td>${m.mean.toFixed(3)} ± ${m.spread.toFixed(3)}</td></tr>`).join('') : none(5);
+    `<tr><td>${m.from.toFixed(1)} to ${m.to.toFixed(1)}</td><td>${m.kp == null ? '--' : m.kp.toFixed(2) + ', ' + m.ti.toFixed(2) + ' min'}</td>` +
+    `<td>${m.t90_s === null ? 'not reached' : m.t90_s + ' s'}</td><td>${m.overshoot_pct} %</td>` +
+    `<td>${m.settle_s === null ? 'not settled' : m.settle_s + ' s'}${m.band == null ? '' : ' (±' + m.band.toFixed(2) + ')'}</td>` +
+    `<td>${m.mean.toFixed(3)} ± ${m.spread.toFixed(3)}</td></tr>`).join('') : none(6);
   $('tName').textContent = s.table_name ? '(' + s.table_name + ')' : '';
   const gv = (o, k, d) => o[k] === undefined || o[k] === null ? '--' : (+o[k]).toFixed(d);
   $('tRows').innerHTML = s.table.length ? s.table.map(t => `<tr><td>${gv(t, 'sp_mbar', 1)}</td><td>${gv(t, 'kp', 2)}</td><td>${gv(t, 'ti_min', 2)}</td>` +
@@ -520,6 +522,8 @@ async function refresh() {
   $('schState').textContent = (s.schedule ? 'On: each setpoint change sets KP and TI from the table.' :
     s.table.length ? 'Off. On sets KP and TI from the table at each setpoint change.' : 'Off. Make or load a gain table first.') +
     ' It also runs during setpoint step tests and pauses while a gain table is made.';
+  $('tSched').innerHTML = s.schedule ? `Gain schedule <b>On</b>${s.table_name ? ' (' + esc(s.table_name) + ')' : ''}: each step uses the table's KP and TI for its new setpoint.` :
+    'Gain schedule <b>Off</b>: every step uses the KP and TI on the board. To check a table, load it on the Gains tab and turn the schedule On first.';
   draw();
 }
 
