@@ -599,7 +599,7 @@ def main():
     ap.add_argument('host', help='board IP, or IP:port (port 8888 by default)')
     ap.add_argument('--port', type=int, default=8080, help='web page port on this PC (default 8080)')
     ap.add_argument('--bind', default='127.0.0.1',
-                    help='address the page listens on (default this PC only; 0.0.0.0 in Docker)')
+                    help='address the page listens on (default this PC only; 0.0.0.0 lets other PCs open it)')
     ap.add_argument('--speed', type=float, default=1.0, help=argparse.SUPPRESS)   # simulator only
     a = ap.parse_args()
     board = Board(a.host, a.speed)

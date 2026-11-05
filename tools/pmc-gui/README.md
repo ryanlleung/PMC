@@ -27,15 +27,6 @@ python pmc_gui.py 192.168.1.100
 
 Then open http://localhost:8080. `--port 8090` picks another page port.
 
-## Run it with Docker
-
-```
-docker build -t pmc-gui -f tools/pmc-gui/Dockerfile tools
-docker run --rm -p 8080:8080 pmc-gui 192.168.1.100
-```
-
-Then open http://localhost:8080. The container reaches the board through the PC's network.
-
 ## Before you start
 
 - Settings > System setup > Remote control On, or every button answers ERR 211.
