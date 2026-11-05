@@ -392,10 +392,13 @@ bool ui_btn_disabled(lv_event_t *e)
 #define HDR_MODE_X 353   // the mode panel's left edge: the third column's right edge (Ryan 5 Nov)
 static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
 // The remote light (0.15.14, Ryan 5 Nov: show that remote communication is
-// being received and sent): an arrow down for each request in and an arrow
-// up for each reply out, text port and Modbus, left of the mode panel.
+// being received and sent): an arrow down for requests in and an arrow up
+// for replies out, text port and Modbus, left of the mode panel. From
+// 0.15.17 (Ryan: "The flashing arrow is a bit annoying") an arrow stays lit
+// while its messages keep coming, up to 3 s apart, so a polling client
+// gives a steady light, not a flash per message (to 0.15.16, 300 ms each).
 #define COMM_W 30
-#define COMM_LIT_TICKS 3       // lit for up to 300 ms a message (fast timer, 100 ms)
+#define COMM_LIT_TICKS 30      // lit 3 s after the last message (fast timer, 100 ms)
 #define COMM_SHOW_MS 10000     // shown this long after the last message with no client
 #define COMM_IDLE lv_color_hex(0x5A6670)
 static lv_obj_t *comm_obj;
@@ -1113,8 +1116,8 @@ static bool frame_due;
 
 void ui_refresh_soon(void) { frame_due = true; }
 
-// The remote light, every 100 ms: an arrow lit for each new request or
-// reply, and shown or hidden (the title's room changes with it).
+// The remote light, every 100 ms: an arrow lit while requests or replies
+// keep coming, and shown or hidden (the title's room changes with it).
 static void comm_tick(void)
 {
     uint32_t n[2];

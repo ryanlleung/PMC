@@ -135,6 +135,22 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(100, 240); const hb = !s.popup();                           // the greyed strip under it
   check('Help: closes on a tap on the greyed strip', ha && hb, [ha, hb].join());
 }
+{ // The remote light holds steady while a client polls (0.15.17, Ryan: "The flashing arrow is a bit annoying"):
+  // each arrow lit until 3 s after its last message, not 300 ms a message.
+  const s = homed(load()); s.run(12000);
+  const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
+  const arrows = () => [px(324, 16), px(336, 24)];   // the arrow down's and the arrow up's stems
+  let dark = 0, n = 0;
+  for (let i = 0; i < 8; i++) {
+    s.send('PRES?');
+    for (let t = 0; t < 10; t++) { s.run(100); if (i || t > 2) { n++; if (arrows().some(c => c !== 0xFFFF)) dark++; } }
+  }
+  shot(s, 'remote-light');
+  check('remote light: steady while polled once a second', n > 70 && dark === 0, dark + ' of ' + n + ' samples not lit');
+  s.run(1800); const still = arrows().every(c => c === 0xFFFF);
+  s.run(1500); const grey = arrows().every(c => c !== 0xFFFF);
+  check('remote light: grey 3 s after the last message', still && grey, [still, grey].join());
+}
 { // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
   const s = load(); s.boot(); s.run(2000);
   const ok = s.setClosed(), st = s.cmd('MODE?;VALV?');
