@@ -706,7 +706,7 @@ void ui_status_line(void)
                                              "Homing 4 of 4: return" };
         ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_REFRESH, what[step < 0 ? 0 : step]);
     } else if (m == VALVE_MANUAL && valve_warning()) {
-        // No PAUSED state (Ryan, 22 Oct): W-2, W-4, W-5 and W-6 drop to
+        // No PAUSED state (Ryan, 22 Oct): W-2, W-4 and W-5 drop to
         // MANUAL; shown until OK.
         if (!nf)
             ui_strip_action("OK", NULL, warn_ok_event);

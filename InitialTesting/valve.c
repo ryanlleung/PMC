@@ -181,7 +181,7 @@ static bool sensor_fault(fault_t f) { return f == F01 || f == F02; }
 
 static bool is_auto(void) { return mode == VALVE_AUTO; }
 
-// The warning that ended AUTO or needs a look (W-2, W-4, W-5, W-6), shown on
+// The warning that ended AUTO or needs a look (W-2, W-4, W-5; W-6 removed in 0.15.11), shown on
 // the status strip until OK, the next Start AUTO or homing.
 static char warn[72];
 static int sw_far_n;      // W-4: consecutive 1 s reads with the switch pressed away from the seat
@@ -715,7 +715,6 @@ static void warn_checks(void)
 // Once a second, after the faults of this read.
 static void auto_step(void)
 {
-    char pc[16];
     warn_checks();
     ctrl_track(&ctl, stepper3_position(), calibrated && mode != VALVE_CALIBRATING);
     if (mode != VALVE_AUTO || !pv_ok) {
@@ -742,11 +741,6 @@ static void auto_step(void)
     case CTRL_W02:
         auto_end("W-2 Not settling: switched to MANUAL, valve idle");
         ev("W-2", "Convergence timeout after %d s, AUTO ended, MANUAL, valve idle", CTRL_TCONV_S);
-        break;
-    case CTRL_W06:
-        auto_end("W-6 Valve driven the wrong way: check KDIR");
-        ev("W-6", "At %s %% for %d s, pressure off setpoint the wrong way: KDIR? AUTO ended, valve idle",
-           pct_text(pc, sizeof pc, stepper3_position()), CTRL_TWRONG_S);
         break;
     case CTRL_F06:
         raise(F06, false, "No pressure response in %d windows: drive slipping, motor unplugged or needle seized",

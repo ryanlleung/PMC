@@ -73,9 +73,9 @@ Reading past address 25 answers exception 2, so read 0 to 25 (26 registers) in o
 | 2 | F-3 Limit not found | W-3 Controller hot |
 | 3 | F-4 Limit pressed when it should be free (stuck, or pressed during an opening move) | W-4 Switch pressed off the seat |
 | 4 | F-5 Motion timeout | W-5 Over range in AUTO |
-| 5 | F-6 No response | W-6 Driven the wrong way |
+| 5 | F-6 No response | W-6 (removed in 0.15.11, always 0) |
 
-W-2, W-4, W-5 and W-6 show one at a time (the strip warning) until OK. W-1 clears when the question is answered on the screen, W-3 when the controller cools below 50 C.
+W-2, W-4 and W-5 show one at a time (the strip warning) until OK. W-1 clears when the question is answered on the screen, W-3 when the controller cools below 50 C.
 
 ## Coils (FC1; FC5 where marked W)
 
@@ -84,7 +84,7 @@ W-2, W-4, W-5 and W-6 show one at a time (the strip warning) until OK. W-1 clear
 | 0 | AUTO (W) | 1 in AUTO | Start AUTO (entry checks as on the screen) | Switch to MANUAL (the valve ramps down and holds) |
 | 1 | STOP (W) | 0 | STOP (in AUTO: to MANUAL, nothing latched) | Nothing |
 | 2 | RESET (W) | 1 while a fault is latched | Clear the latches whose cause has gone | Nothing |
-| 3 | Warning OK (W) | 1 while W-2, W-4, W-5 or W-6 shows | OK the warning, as on the strip | Nothing |
+| 3 | Warning OK (W) | 1 while W-2, W-4 or W-5 shows | OK the warning, as on the strip | Nothing |
 | 16-25 | Status | Status bits 0-9 above | Exception 2 | Exception 2 |
 
 Coils 4 to 15 are not in the map (exception 2). Homing, the switch question, calibration and settings are not on Modbus.

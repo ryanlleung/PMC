@@ -26,13 +26,12 @@
  *     or at AUTO min, while the loop asks for more is judged too. A
  *     wrong-way change counts as a response (no fault since 0.11.20).
  *   - W-2: outside the target band for CTRL_TCONV s; AUTO ends, MANUAL, valve idle.
- *   - W-6 (0.11.45): the valve at rest at AUTO min (or on the closed switch)
- *     with the pressure below the target band, or fully open above it, for
- *     CTRL_TWRONG s. Opening raises this pressure, so AUTO is driving the
- *     wrong way (KDIR the wrong way round); AUTO ends, MANUAL, valve idle.
+ *   - W-6 (0.11.45 to 0.15.10, pinned at the wrong end for 60 s) is removed:
+ *     it tripped at low pressure, where the valve rightly rests near closed
+ *     (Ryan 5 Nov). A KDIR the wrong way round ends AUTO by W-2.
  *   - Less hunting (0.12.12, Ryan 26 Oct): the PI works on the pressure
- *     through a CTRL_PV_TAU_S first-order filter (the band, Stable, W-2,
- *     W-6 and F-6 still use the reading itself), and a move the opposite
+ *     through a CTRL_PV_TAU_S first-order filter (the band, Stable, W-2
+ *     and F-6 still use the reading itself), and a move the opposite
  *     way to the last one is only sent once the command is CTRL_REV_PCT of
  *     travel from the valve. Before, the reading's noise turned the motor
  *     round about every 2 s, inside the drive's backlash. AUTO moves run at
@@ -47,7 +46,6 @@
 #define CTRL_DPMIN      0.05f   // smallest pressure change that counts, mbar
 #define CTRL_CHECKMIN   1000    // smallest lagged move that is judged, steps
 #define CTRL_TCONV_S    1800    // W-2 after this long outside the band, s
-#define CTRL_TWRONG_S   60      // W-6 after this long pinned the wrong way, s
 #define CTRL_LEAD_MAX   3000    // travel anti-windup, steps
 #define CTRL_TLAG_S     40      // process lag for the response monitor, s
 #define CTRL_STABLE_S   60      // in band this long reads Stable, s
@@ -84,7 +82,6 @@ typedef enum {
     CTRL_RUN,          // carry on (a move may be requested)
     CTRL_F06,          // no pressure response
     CTRL_W02,          // not settling: to MANUAL
-    CTRL_W06           // driving the wrong way: to MANUAL
 } ctrl_result_t;
 
 typedef enum { CTRL_REG_NONE, CTRL_REG_REGULATING, CTRL_REG_BAND, CTRL_REG_STABLE } ctrl_reg_t;
@@ -100,7 +97,6 @@ typedef struct {
     float win_t, win_pos, win_pv;
     int noresp;
     uint32_t conv_ms;  // last time in band (or target set, or AUTO started)
-    uint32_t right_ms; // last time not pinned the wrong way (W-6)
     bool in_band;
     uint32_t in_band_ms;
     bool move;         // ctrl_step asks for a move to move_to

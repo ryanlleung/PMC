@@ -77,7 +77,7 @@ const char *valve_status(void);  // one status line
 
 // AUTO (stage 8).
 bool valve_auto(void);
-// The strip text of a warning not yet acknowledged (W-2, W-4, W-5, W-6), or
+// The strip text of a warning not yet acknowledged (W-2, W-4, W-5), or
 // NULL; cleared by OK, Start AUTO and homing.
 const char *valve_warning(void);
 void valve_warning_clear(void);

@@ -31,7 +31,7 @@ Then open the address it prints, normally http://localhost:8080. If Windows refu
 
 - Settings > System setup > Remote control On, or every button answers ERR 211.
 - The board takes one text-port connection at a time, and a new one replaces the old. Close PuTTY, the logger, `pmc_gains.py` and `sp_step.py` first.
-- STOP on the page and on the screen both end AUTO. If the board leaves AUTO during a step test (a fault, W-2, W-4, W-5, W-6 or STOP), the test ends and says why.
+- STOP on the page and on the screen both end AUTO. If the board leaves AUTO during a step test (a fault, W-2, W-4, W-5 or STOP), the test ends and says why.
 - Every Set and save that changes a gain is written to flash, and so is every setpoint change while the schedule is on (only when the gains differ). Set gains when they change, not in a loop.
 
 To try it without the board, run `node simulator/tests/tcp-board.js` and use `127.0.0.1` as the address.

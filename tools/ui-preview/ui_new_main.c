@@ -312,7 +312,6 @@ int main(int argc, char **argv)
     if (!strcmp(st, "paused")) v_warn = "W-2 Not settling: switched to MANUAL, valve idle";   // shown until OK
     if (!strcmp(st, "warn4")) v_warn = "W-4 Switch pressed at 48.04 %: check the switch";
     if (!strcmp(st, "warn5")) v_warn = "W-5 Pressure above the sensor range: switched to MANUAL";
-    if (!strcmp(st, "warn6")) v_warn = "W-6 Valve driven the wrong way: check KDIR";
     if (!strcmp(st, "f08")) v_f16 = true;
     if (!strcmp(st, "faults") || !strcmp(st, "detail")) { v_f01 = true; v_f12 = true; }
 

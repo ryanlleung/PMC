@@ -1,8 +1,8 @@
 # mm4 Operation Manual
 
-Revision P, 5 November 2026. Firmware 0.15.10. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23); revision F adds Shut down and the OFF state (0.15.0); revision G covers Shut down to 0 %, every start in OFF and the power icon at the top left (0.15.1); revision H covers the mode panel in the header (0.15.2); revision I covers Home without the mode button (0.15.3); revision J the dark blue AUTO panel and the faster Start AUTO / Stop AUTO (0.15.4); revision K the wider mode panel (0.15.5); revision L the IP tile on Home (0.15.6); revision M adds the choice to close the valve or not on the Shut down question, and the start-up with no white flash (0.15.7); revision N adds the PID? and PID SET text port commands (0.15.8); revision O covers the common screen template: header, Menu, Settings, System, keypad popup, and the IP tile as address/prefix (0.15.9); revision P left-aligns the IP tile (0.15.10). It does not add hardware bench verification.
+Revision Q, 5 November 2026. Firmware 0.15.11. Revision C checked the instructions against `main` commit `bbf2ec46fa6dccabae46dadd32ce076985a15677` (firmware 0.14.8); revision D adds the static IP address (0.14.9 to 0.14.11) and renames the Faults and log screen to Events (0.14.12); revision E covers the Home PID tile, the Maintain button and the PID tuning page, the removal of the Valve page (0.14.21) and of the setpoint change question (0.14.22), and the mode shown as MANUAL mode or AUTO mode (0.14.23); revision F adds Shut down and the OFF state (0.15.0); revision G covers Shut down to 0 %, every start in OFF and the power icon at the top left (0.15.1); revision H covers the mode panel in the header (0.15.2); revision I covers Home without the mode button (0.15.3); revision J the dark blue AUTO panel and the faster Start AUTO / Stop AUTO (0.15.4); revision K the wider mode panel (0.15.5); revision L the IP tile on Home (0.15.6); revision M adds the choice to close the valve or not on the Shut down question, and the start-up with no white flash (0.15.7); revision N adds the PID? and PID SET text port commands (0.15.8); revision O covers the common screen template: header, Menu, Settings, System, keypad popup, and the IP tile as address/prefix (0.15.9); revision P left-aligns the IP tile (0.15.10); revision Q removes W-6 (0.15.11). It does not add hardware bench verification.
 
-This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.15.10: power-up, Shut down, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
+This manual covers day-to-day use of the mm4 pressure controller (Option C) at firmware 0.15.11: power-up, Shut down, homing, MANUAL and AUTO, calibration, faults and warnings, settings, and remote access over Ethernet. It is written for the operator at the cryostat.
 
 | Field | Value |
 | --- | --- |
@@ -172,13 +172,13 @@ Once a second, after the pressure reading, the controller works out a new valve 
 - Change the target from the SP (setpoint) box on Home. Set applies it at once, with no question, however large the change.
 - The valve moves in short bursts rather than continuously. Small reversals are held until the command is at least 0.1 % of travel from the valve, so the reading's noise does not turn the motor round inside the drive's backlash (firmware 0.12.12). The motion is still less smooth than the Mercury iTC's; this is a known difference (26 October 2026).
 - In AUTO the Valve tile has Stop AUTO in place of the Go to box. Homing and changes to valve settings are refused in AUTO with "Stop AUTO first". PID tuning drafts can be saved and take effect from the next control step; changed valve or sensor-selection drafts must wait for MANUAL.
-- The controller watches for a pressure that does not respond to valve moves (F-6), a pressure that does not settle in 30 min (W-2), a pressure above the sensor range (W-5) and the valve pinned at an end the wrong way (W-6). Each of these ends AUTO; section 9 says what to do.
+- The controller watches for a pressure that does not respond to valve moves (F-6), a pressure that does not settle in 30 min (W-2), and a pressure above the sensor range (W-5). Each of these ends AUTO; section 9 says what to do.
 
 ### Leaving AUTO
 
 - Stop AUTO in the Valve tile on Home goes to MANUAL at once, with no question. The valve ramps down if it was moving and holds where it stops. The target is kept but not used: the next Start AUTO takes the pressure shown.
 - STOP does the same.
-- A fault, W-2, W-4, W-5 or W-6 also ends AUTO. The valve stops and the strip says why.
+- A fault, W-2, W-4 or W-5 also ends AUTO. The valve stops and the strip says why.
 - Loss of the motor 12 V supply is not detected directly. AUTO and the step count can continue while the motor is stationary. F-6 may later detect a lack of pressure response, but it is not a motor-supply detector.
 
 When AUTO ends for any reason the valve stays where it was. It does not close. If the cryostat needs the valve elsewhere, move it in MANUAL.
@@ -252,7 +252,7 @@ Faults latch until Reset fault (on the strip, on Events, or in the fault detail)
 | F-5 Motion timeout | A move took longer than its distance at the set rate plus the ramps plus 2 s | Stopped the valve and holds it. Homing kept, unless it came while homing | The valve turns freely, and the motor 12 V supply | Any time |
 | F-6 No response | The valve moved in AUTO but the pressure did not respond over 5 windows of 30 s | Stopped the valve and holds it. MANUAL | Drive slipping, motor unplugged, needle seized, helium supply lost | Any time. Check before starting AUTO again |
 
-Warnings do not latch. W-2, W-4, W-5 and W-6 show on the strip until OK is pressed or the next Start AUTO, and each ends AUTO. W-1 clears when its question is answered. W-3 clears on its own.
+Warnings do not latch. W-2, W-4 and W-5 show on the strip until OK is pressed or the next Start AUTO, and each ends AUTO. W-1 clears when its question is answered. W-3 clears on its own.
 
 | Warning | Cause | What the controller did | What to do |
 | --- | --- | --- | --- |
@@ -261,7 +261,6 @@ Warnings do not latch. W-2, W-4, W-5 and W-6 show on the strip until OK is press
 | W-3 Controller hot | Power Monitor die at or above 55 °C | Nothing blocked. Shown until it cools below 50 °C | Check the enclosure ventilation |
 | W-4 Switch pressed off the seat | The switch reads pressed with the valve well off the seat, two reads in a row | In AUTO: AUTO ended, valve idle. In MANUAL: a strip warning | Check the switch, its wiring and the valve position. Home again when the switch is free |
 | W-5 Over range in AUTO | The pressure is above the sensor range, two reads in a row | AUTO ended, MANUAL, valve idle | The line is at or near atmosphere. Pump down, then start AUTO |
-| W-6 Driven the wrong way | The valve was stationary at AUTO min or on the closed switch with pressure below the target band, or fully open above it, for more than 60 s | AUTO ended, valve idle | The pressure response setting is the wrong way round for this valve. Check Settings > PID tuning > AUTO limits > Pressure response |
 
 Other strip messages:
 
@@ -283,7 +282,7 @@ Settings are commissioning items, not daily operation. Numeric valve and tuning 
 | Valve setup, Homing tab | Back-off (400 full steps), Return (400 full steps), fast close speed (400 steps/s), slow close speed (25 steps/s) | Back-off follows the fast close; Return follows the slow close and defines 0 %. The distances are independent |
 | Valve setup, Drive tab | Run speed (400 steps/s), start speed (200 steps/s), acceleration (3200 steps/s²), by default | Used by MANUAL and AUTO moves. Saved when the valve is stopped |
 | PID tuning, PID tab | KP, gain (% open per mbar, 4.00). TI, integral time (min, 0.25; 0 is off). KD, derivative (% open per mbar/s of pressure change, 0.00; 0 is off) | Set at commissioning. Operators do not change these. KD acts on the pressure's rate of change, not the error, so a setpoint change gives no kick. Settings saved before 0.14.21 load with KD 0 |
-| PID tuning, AUTO limits tab | AUTO min (%), deadband (steps, 8), pressure response (opening raises or lowers the pressure), target band (mbar, 0.10) | Set at commissioning. A wrong pressure response gives W-6 |
+| PID tuning, AUTO limits tab | AUTO min (%), deadband (steps, 8), pressure response (opening raises or lowers the pressure), target band (mbar, 0.10) | Set at commissioning. A wrong pressure response gives W-2 after 30 min in AUTO |
 | Review and save | Last save and previous save by date. Unsaved changes list. Save settings. Discard changes. Load settings: last save, previous save or factory defaults | A loaded save is in use at once, sensors and calibrations included. Factory defaults come in as drafts and keep the sensors. Load is refused while the valve moves or in AUTO |
 | Restart (System, and the power icon on Home) | Stops the valve, ends AUTO or homing, then restarts after about 2.5 s | Asks first. Saved settings are loaded and the valve starts NOT HOMED, or OFF after a restart while OFF |
 | Motor override (Valve position) | Move tab: step size 1 to 10 000 or Hold, Close and Open, Zero, Limit override. Speed tab: run, start and acceleration rates. Coils tab: step mode (wave, full, half), hold torque, coils off, coil order, direction | Engineering page. It drives the motor by steps past the valve's checks. Coil order, direction and Zero clear the homing and ask first. The strip reads the motor state and the limit switch |
@@ -330,7 +329,7 @@ The Modbus server is for a supervisory system. It reads 26 holding registers (0 
 | Register 2 | Mode: 0 NOT HOMED, 1 HOMING, 2 MANUAL, 3 AUTO, 4 SHUTTING DOWN, 5 OFF |
 | Register 3 | Status bits: reading valid, position set, homed, moving, switch pressed, fault, warning, target set, writes on, legacy motor-supply bit (always 1; supply is not measured) |
 | Register 4 | Regulation in AUTO: 1 Regulating, 2 In band, 3 Stable |
-| Registers 5, 6 | Faults latched (bit 0 F-1 to bit 5 F-6) and warnings showing (bit 0 W-1 to bit 5 W-6) |
+| Registers 5, 6 | Faults latched (bit 0 F-1 to bit 5 F-6) and warnings showing (bit 0 W-1 to bit 4 W-5; bit 5, W-6, is always 0 since 0.15.11) |
 | Registers 10 to 11 | Pressure, mbar |
 | Registers 12 to 13 | Target, mbar (writable, any mode) |
 | Registers 14 to 15 | Valve position, % |
@@ -370,7 +369,7 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | Pressure 21 Click (room pressure, BARO?) and the air calibration reference from it | Driver built in 0.11.47. Click ordered 15 October; fitting and operation were unconfirmed in the 27 October bench notes |
 | Modbus writes (target, valve going to, coils 0 to 3) | On since 0.12.6. The read test passed 26 October; the write test has not been run |
 | AUTO on a cryostat with the production gain and integral time | AUTO has run on the bench rig against a manual vent valve, and its motion was compared with the Mercury iTC on 26 October. Tuning for each cryostat is still to be set |
-| W-5 Over range and W-6 Driven the wrong way | Checked on the PC control-loop test, not provoked on the bench |
+| W-5 Over range | Checked on the PC control-loop test, not provoked on the bench |
 | Loss of polling from the supervisory system | No behaviour defined yet. Waiting on the owner of that system |
 | Earth bond in the enclosure | Found on the bench 21 October; not yet in the enclosure drawings |
 | Shut down, OFF and the power-up after it (0.15.0, 0.15.1) | Checked in the simulator only. To check on the bench: the move to 0 % and the coils off, the power-up after it with the switch released and pressed, the black screen from the first frame, the double tap on the real touch panel |
@@ -395,3 +394,4 @@ The firmware is a prototype. The last recorded bench status below is from 27 Oct
 | N | 4 November 2026 | Firmware 0.15.8: the text port takes PID? (the KP, TI and KD in use) and PID SET (set and save them, as Save on the PID tuning page, in AUTO too), for a gain schedule run from a PC |
 | O | 5 November 2026 | Firmware 0.15.9: the common screen template. Header: Home at the top left on every page (the power icon on Home), Back beside it, the title left-aligned. The power question also offers Restart. Menu rows Records (Trend, Events), Service (Valve position, Diagnostics), Setup (Settings, System). Settings holds navigation tiles only; System moves to the Menu with Restart; Motor override moves to Valve position. Keypads are a popup with the present value and the entry side by side. The Home IP tile reads "IP address" over address/prefix, for example 192.168.1.100/24 |
 | P | 5 November 2026 | Firmware 0.15.10: the Home IP tile is left-aligned, as Menu |
+| Q | 5 November 2026 | Firmware 0.15.11: W-6 (driven the wrong way) is removed. It ended AUTO at low pressure, where the valve rightly rests near closed with the pressure under the band. A pressure response setting the wrong way round now shows as W-2 after 30 min |

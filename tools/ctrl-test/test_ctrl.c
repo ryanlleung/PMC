@@ -22,9 +22,7 @@ static ctrl_tune_t K = { 4.0f, 0.25f, 8, 1, 0.1f, 14.0f, 99072 };
 #define FS 1034.0f
 
 typedef enum { MANUAL, AUTO } mode_t_;
-static bool w02, w06;
-static double w06_t;
-static bool w06_seen;   // any W-6 in the cases with KDIR right
+static bool w02;
 static mode_t_ mode;
 static ctrl_t C;
 static ctrl_result_t fault;   // last fault, CTRL_RUN if none
@@ -69,11 +67,6 @@ static void ctrl_tick(void)
         model_stop();
         mode = MANUAL;
         w02 = true;
-    } else if (r == CTRL_W06) {
-        model_stop();
-        mode = MANUAL;
-        w06 = w06_seen = true;
-        w06_t = M.t;
     } else {
         model_stop();
         fault = r;
@@ -127,7 +120,7 @@ static void fresh(void)
     if (!smooth) C.pv_tau = C.rev_pct = 0;
     mode = MANUAL;
     fault = CTRL_RUN;
-    w02 = w06 = false;
+    w02 = false;
     run(120, 0);
 }
 
@@ -339,24 +332,19 @@ int main(int argc, char **argv)
     CHECK(C.pos_cmd == K.pos_max && fault == CTRL_RUN,
           "Target 500 mB from %.1f mB: command %ld of %ld steps (fully open)", M.pv, (long)C.pos_cmd, (long)K.pos_max);
 
-    // None of the cases above (KDIR right) raise W-6.
-    CHECK(!w06_seen, "W-6 not raised with KDIR right");
-
-    // KDIR the wrong way round (0.11.45): AUTO drives the valve to the
-    // wrong end, W-6 ends AUTO after CTRL_TWRONG_S at rest there.
-    for (int up = 0; up < 2; up++) {
+    // KDIR the wrong way round: W-6 is gone (0.15.11, it tripped at low
+    // pressure), so AUTO carries on at the wrong end until W-2 ends it.
+    {
         fresh();
         model_start_move(K.pos_max / 3);
         run(300, 0);
-        float sp = up ? 9 : 2;
-        set_sp(sp);
+        set_sp(2);
         K.kdir = -K.kdir;
         to_auto();
         t0 = M.t;
-        run(1200, sp);
-        CHECK(w06 && mode == MANUAL && fault == CTRL_RUN && w06_t - t0 < 300,
-              "KDIR wrong, target %.0f mB from %.2f mB: W-6 after %.0f s, valve at %ld steps", sp, M.pv,
-              w06 ? w06_t - t0 : -1, (long)M.pos);
+        run(CTRL_TCONV_S + 120, 2);
+        CHECK(w02 && mode == MANUAL && fault == CTRL_RUN,
+              "KDIR wrong, target 2 mB: W-2 ends AUTO (%.2f mB, valve at %ld steps)", M.pv, (long)M.pos);
         K.kdir = -K.kdir;
     }
 
