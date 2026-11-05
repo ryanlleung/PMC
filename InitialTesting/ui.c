@@ -388,7 +388,7 @@ bool ui_btn_disabled(lv_event_t *e)
  * ------------------------------------------------------------------------ */
 #define HDR_BTN_W 44  // Home (Power on Home) and Back, icons only (48 to 0.15.7)
 #define HDR_TITLE_X (2 * HDR_BTN_W + 8)   // every title starts here (common HMI template)
-#define HDR_MODE_X 357   // the mode panel's left edge: mid-gap between the columns below
+#define HDR_MODE_X 353   // the mode panel's left edge: the third column's right edge (Ryan 5 Nov)
 static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *pmc_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
 static lv_obj_t *strip, *strip_icon, *strip_shape, *strip_text, *strip_ok, *strip_act, *strip_spark;
 static lv_obj_t *stop_btn;
@@ -607,8 +607,9 @@ static void build_frame(void)
     // lettering without a box, 0.14.23, was not liked). The same for every
     // mode: Start AUTO's column (x 361, 109 px) and 10 px more each side, to
     // the screen's right edge (0.15.5, Ryan 4 Nov); in the template from
-    // x 357, the middle of the gap between the columns below (Ryan 4 Nov),
-    // to 480, the word centred over the column (6 px right padding). Grey
+    // x 357, the middle of the gap between the columns below (Ryan 4 Nov);
+    // from 0.15.13 x 353, the right edge of the third column (Ryan 5 Nov),
+    // to 480, the word centred over the fourth column (2 px right padding). Grey
     // in MANUAL and the others, dark blue in AUTO (0.15.4, Ryan: not
     // white), red with a fault; white lettering.
     mode_lbl = ui_label(hdr, HDR_MODE_X, 0, 480 - HDR_MODE_X, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
