@@ -1,4 +1,4 @@
-# The control test GUI in a container. Build from tools/ (it uses the step fit in gain-schedule/):
+# The control test GUI in a container. Build from tools/ (it imports gain-schedule/pmc_gains.py):
 #   docker build -t pmc-gui -f tools/pmc-gui/Dockerfile tools
 #   docker run --rm -p 8080:8080 pmc-gui 192.168.1.100      then open http://localhost:8080
 FROM python:3.12-slim
