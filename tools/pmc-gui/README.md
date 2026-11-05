@@ -25,7 +25,7 @@ Python 3.8 or later, standard library only. Keep `tools/pmc-gui` and `tools/gain
 python pmc_gui.py 192.168.1.100
 ```
 
-Then open http://localhost:8080. `--port 8090` picks another page port.
+Then open the address it prints, normally http://localhost:8080. If Windows refuses 8080 (WinError 10013: the port is in a block Windows reserves for Hyper-V, WSL or Docker) or another program has it, the GUI tries the next ports and prints the one it got. `--port 8090` picks a page port yourself.
 
 ## Before you start
 

@@ -603,9 +603,22 @@ def main():
     ap.add_argument('--speed', type=float, default=1.0, help=argparse.SUPPRESS)   # simulator only
     a = ap.parse_args()
     board = Board(a.host, a.speed)
+    # Windows reserves blocks of ports (Hyper-V, WSL, Docker) and refuses
+    # them with WinError 10013 even without admin limits, and 8080 is often
+    # in one. If the page port is refused or busy, try the next few, then
+    # ports well away from it, then any free port.
+    srv = None
+    for port in [a.port] + list(range(a.port + 1, a.port + 10)) + [18080, 28080, 0]:
+        try:
+            srv = ThreadingHTTPServer((a.bind, port), make_handler(board))
+            break
+        except OSError as e:
+            print('page port %d not available (%s), trying another' % (port, e.strerror or e))
+    if srv is None:
+        sys.exit('no port for the page; try --port with another number')
+    port = srv.server_address[1]
     threading.Thread(target=board.run, daemon=True).start()
-    srv = ThreadingHTTPServer((a.bind, a.port), make_handler(board))
-    print('board %s:%d, open http://localhost:%d  (Ctrl+C to stop)' % (board.addr + (a.port,)))
+    print('board %s:%d, open http://localhost:%d  (Ctrl+C to stop)' % (board.addr + (port,)))
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
