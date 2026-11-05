@@ -70,6 +70,7 @@ function load(file) {
     reg: () => x.sim_reg(),            // 0 none, 1 regulating, 2 in band, 3 stable
     offer: () => x.sim_offer(),        // saved position offered at start-up, or -2147483648
     busy: () => !!x.sim_busy(), override: () => !!x.sim_override(),
+    popup: () => !!x.sim_popup(),     // a popup is open (ui_overlay_open)
     flash: () => new Uint8Array(x.memory.buffer, x.sim_flash(), x.sim_flash_size()).slice(),
   };
   return sim;

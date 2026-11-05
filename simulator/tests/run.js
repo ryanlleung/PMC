@@ -104,6 +104,37 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
     [s.setting(CFG.KP), s.setting(CFG.KP2), s.setting(CFG.KP3)].join());
   shot(s, 'pid-tuning-set3');
 }
+{ // A tap on anything greyed round a popup closes it, as Back (0.15.16, Ryan 5 Nov: "Make popups exitable when
+  // tapping the greyed out areas"): the dimmed page, the greyed strip, the greyed header icons. A tap on the box does not.
+  const s = homed(load());
+  // The header's title, left of the remote light: Home's, a keypad's or another page's.
+  const title = () => { const fb = new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272); let h = 0;
+    for (let y = 4; y < 36; y++) for (let x = 96; x < 290; x++) h = (h * 31 + fb[y * 480 + x]) >>> 0; return h; };
+  const home = title(), at = s.cmd('VALV?');
+  s.tap(290, 184); const kp = s.popup();                           // Go to: the keypad
+  s.tap(110, 183); s.tap(100, 70); const kpStays = s.popup();       // 5, then a tap on its title
+  shot(s, 'popup-keypad');
+  s.tap(415, 72); s.run(2000);                                      // the dimmed page right of it (the PID tile under it)
+  check('keypad: stays on a tap on its box, closes on the dimmed page; nothing set, still Home', kp && kpStays && !s.popup() &&
+    s.cmd('VALV?') === at && !s.busy() && title() === home, [kp, kpStays, s.popup(), s.cmd('VALV?'), title() === home].join());
+  s.tap(24, 20); const sa = s.popup();                              // the power icon: Shut down?
+  s.tap(240, 62); const sb = s.popup();                             // a tap on its question
+  shot(s, 'popup-shutdown');
+  s.tap(455, 100); const sc = !s.popup();                           // the dimmed page right of the box
+  s.tap(24, 20); s.tap(100, 240); const sd = !s.popup();            // the greyed strip
+  s.tap(24, 20); s.tap(24, 20); const se = !s.popup();              // the greyed power icon
+  check('Shut down question: closes on the dimmed page, the greyed strip and the greyed power icon, not on its box; nothing done',
+    sa && sb && sc && sd && se && s.cmd('MODE?') === 'MODE MANUAL\r\n', [sa, sb, sc, sd, se].join() + ' ' + s.cmd('MODE?'));
+  s.tap(415, 72); s.tap(182, 72); s.tap(94, 128); const pa = s.popup();   // PID tuning > Schedule > Schedule on: the list
+  s.tap(100, 54); const pb = s.popup();                             // its caption
+  shot(s, 'popup-pick');
+  s.tap(415, 200);                                                  // the dimmed page (Discard changes under it)
+  check('pick list: stays on a tap on its caption, closes on the dimmed page; nothing picked',
+    pa && pb && !s.popup() && s.setting(CFG.SCHED) === 0, [pa, pb, s.popup(), s.setting(CFG.SCHED)].join());
+  s.tap(415, 72); const ha = s.popup();                             // Help
+  s.tap(100, 240); const hb = !s.popup();                           // the greyed strip under it
+  check('Help: closes on a tap on the greyed strip', ha && hb, [ha, hb].join());
+}
 { // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
   const s = load(); s.boot(); s.run(2000);
   const ok = s.setClosed(), st = s.cmd('MODE?;VALV?');
@@ -210,6 +241,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const t = load(); t.x.sim_bench_init(); t.boot(flash); t.set(5, needle); t.run(3000);
   check('settings kept over a power cycle', saved && t.setting(CFG.KP) === 300, s.why() + ' KP ' + t.setting(CFG.KP));
   check('valve position offered after a power cycle', Math.abs(t.offer() - 6605) <= 1, 'offer ' + t.offer());
+  // The question needs an answer: a tap round it, on the strip or on the power icon leaves it (0.15.16).
+  t.turnOn(5000); const asked = t.popup();
+  t.tap(455, 100); t.tap(100, 240); t.tap(24, 20);
+  check('saved position question stays on a tap round it', asked && t.popup() && Math.abs(t.offer() - 6605) <= 1,
+    [asked, t.popup(), t.offer()].join());
 }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
@@ -475,6 +511,10 @@ let parkedFlash;
   check('early switch: event and question', /Shut down stopped \(limit switch pressed\)/.test(events(s, 5)) &&
     /W-1,Limit switch pressed/.test(events(s, 5)), events(s, 5));
   shot(s, 'early-switch');
+  // The switch question needs an answer: a tap round it or on the strip leaves it (0.15.16).
+  const asked = s.popup();
+  s.tap(455, 100); s.tap(100, 240);
+  check('switch question stays on a tap round it', asked && s.popup() && /W-1/.test(s.cmd('ALRM?')), [asked, s.popup(), s.cmd('ALRM?')].join());
 }
 { // Already at 0 %: OFF at once.
   const s = homed(load());

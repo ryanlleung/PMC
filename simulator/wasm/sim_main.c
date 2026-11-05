@@ -461,3 +461,4 @@ EXPORT(sim_busy) int sim_busy(void) { return stepper3_busy(); }
 EXPORT(sim_shutdown) int sim_shutdown(int close) { const char *w = NULL; return hook(valve_shutdown(close != 0, &w), w); }
 EXPORT(sim_turn_on) int sim_turn_on(void) { const char *w = NULL; return hook(valve_turn_on(&w), w); }
 EXPORT(sim_override) int sim_override(void) { return stepper3_override(); }
+EXPORT(sim_popup) int sim_popup(void) { return ui_overlay_open(); }   // a popup (keypad, question, list, Help) is open

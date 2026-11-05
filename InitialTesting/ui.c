@@ -441,11 +441,31 @@ static void back_event(lv_event_t *e)
     ui_back();
 }
 
+/* A tap on anything greyed round a popup closes it, as Back (0.15.16,
+ * Ryan 5 Nov: "Make popups exitable when tapping the greyed out areas"):
+ * the dimmed page, the greyed strip, the greyed header icons. Nothing is
+ * done and a keypad's entry is dropped, as with Cancel. The two questions
+ * that need an answer (the limit switch during a move, the saved position
+ * at start-up) stay until answered. */
+static void dim_back(void)
+{
+    if (overlay && !overlay_q)
+        ui_back();
+}
+
+static void dim_event(lv_event_t *e)
+{
+    (void)e;
+    dim_back();
+}
+
 static void home_event(lv_event_t *e)
 {
     (void)e;
-    if (overlay)
-        return;   // greyed under a popup: Back (or Cancel) closes it first
+    if (overlay) {
+        dim_back();   // greyed under a popup: the tap closes the popup, not Home
+        return;
+    }
     ui_home();
 }
 
@@ -465,17 +485,28 @@ static void shut_ask(void);
 static void pwr_event(lv_event_t *e)
 {
     (void)e;
-    if (overlay)
-        return;   // greyed under a popup, as Home
+    if (overlay) {
+        dim_back();   // greyed under a popup, as Home
+        return;
+    }
     shut_ask();
 }
 
 static void unsaved_event(lv_event_t *e)
 {
     (void)e;
-    if (overlay)
-        return;   // greyed under a popup, as Home
+    if (overlay) {
+        dim_back();   // greyed under a popup, as Home
+        return;
+    }
     ui_open(&ui_scr_review);
+}
+
+// The strip under a popup is greyed: a tap on it closes the popup.
+static void strip_event(lv_event_t *e)
+{
+    (void)e;
+    dim_back();
 }
 
 static void stop_event(lv_event_t *e)
@@ -601,8 +632,10 @@ static void comm_draw(lv_event_t *e)
 static void comm_event(lv_event_t *e)
 {
     (void)e;
-    if (overlay)
-        return;   // as the other header icons under a popup
+    if (overlay) {
+        dim_back();   // as the other header icons under a popup
+        return;
+    }
     ui_open(&ui_scr_namenet);   // System setup: Remote control and the address
 }
 
@@ -701,6 +734,7 @@ static void build_frame(void)
     lv_obj_set_size(strip, 343, 48);
     lv_obj_add_style(strip, &st_card, 0);
     lv_obj_add_flag(strip, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(strip, strip_event, LV_EVENT_CLICKED, NULL);   // greyed under a popup: closes it
     strip_icon = ui_label(strip, 12, 15, 0, &lv_font_montserrat_14, lv_color_white(), LV_TEXT_ALIGN_LEFT,
                           LV_SYMBOL_WARNING);
     // Drawn icons with no font glyph: the valve symbol and the target.
@@ -1246,6 +1280,26 @@ static lv_obj_t *overlay_new(void)
     return overlay;
 }
 
+// A popup over the page, dimmed: a tap on the page (outside the box)
+// closes it (dim_back).
+static lv_obj_t *overlay_dim(void)
+{
+    lv_obj_t *o = overlay_new();
+    lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
+    lv_obj_set_style_bg_opa(o, 140, 0);
+    lv_obj_add_event_cb(o, dim_event, LV_EVENT_CLICKED, NULL);
+    return o;
+}
+
+// The popup's box: a touch on it (its text, its edge) stays in it and
+// does not reach the dimmed page round it.
+static lv_obj_t *popup_box(lv_obj_t *o, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    lv_obj_t *box = ui_card(o, x, y, w, h);
+    lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    return box;
+}
+
 /* Keypad: a popup over the dimmed page (common HMI template, Ryan 4 Nov:
  * not a full screen, and the present value small; an operator took the
  * large present value for the entry). The box is 343 x 216 on columns 1
@@ -1414,7 +1468,7 @@ static void kp_cancel(lv_event_t *e)
 
 void ui_keypad_ex(const ui_kp_t *k)
 {
-    lv_obj_t *o = overlay_new();
+    lv_obj_t *o = overlay_dim();
     memset(&kp, 0, sizeof kp);
     kp.k = *k;
     kp_open = true;
@@ -1423,10 +1477,9 @@ void ui_keypad_ex(const ui_kp_t *k)
     if (comma)
         *comma = '\0';
 
-    // The page stays in view, dimmed, as under a question.
-    lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
-    lv_obj_set_style_bg_opa(o, 140, 0);
-    lv_obj_t *box = ui_card(o, 10, 8, 343, 216);
+    // The page stays in view, dimmed, as under a question; a tap on it
+    // closes the keypad, as Cancel.
+    lv_obj_t *box = popup_box(o, 10, 8, 343, 216);
     lv_obj_set_style_radius(box, 8, 0);
 
     // Left: the title (16 px, 12 px if it is too long), then the present
@@ -1502,7 +1555,7 @@ void ui_keypad(const char *title, const char *info, int32_t min100, int32_t max1
 }
 
 // Pick list: a caption and up to six rows, the selected one dark. A tap
-// outside the list closes it.
+// outside the list closes it (on the caption, from 0.15.16, it does not).
 static void (*pick_cb)(int);
 
 static void pick_event(lv_event_t *e)
@@ -1517,10 +1570,7 @@ static void pick_event(lv_event_t *e)
 
 void ui_pick(const char *title, const char *const *items, int n, int sel, void (*on_pick)(int i))
 {
-    lv_obj_t *o = overlay_new();
-    lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
-    lv_obj_set_style_bg_opa(o, 140, 0);
-    lv_obj_add_event_cb(o, pick_event, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
+    lv_obj_t *o = overlay_dim();
     pick_cb = on_pick;
     if (n > 6)
         n = 6;
@@ -1530,7 +1580,7 @@ void ui_pick(const char *title, const char *const *items, int n, int sel, void (
     int cols = n > 4 ? 2 : 1, rows = (n + cols - 1) / cols;
     const int32_t PICK_ROW = rows > 3 ? 37 : 40;
     int32_t iw = 343 / cols;
-    lv_obj_t *box = ui_card(o, 10, 4, 343, 24 + PICK_ROW * rows);
+    lv_obj_t *box = popup_box(o, 10, 4, 343, 24 + PICK_ROW * rows);
     lv_obj_set_style_clip_corner(box, true, 0);
     ui_label(box, 12, 4, 320, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, title);
     for (int i = 0; i < n; i++) {
@@ -1587,9 +1637,7 @@ static void dialog_btn(lv_obj_t *box, int32_t x, int32_t y, int32_t w, int32_t h
 void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), const char *mid,
              void (*on_mid)(void), const char *mid2, void (*on_mid2)(void), const char *ok, void (*on_ok)(void))
 {
-    lv_obj_t *o = overlay_new();
-    lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
-    lv_obj_set_style_bg_opa(o, 140, 0);
+    lv_obj_t *o = overlay_dim();   // a tap round it closes it as Back, not as the left button
     confirm_ok = on_ok;
     confirm_cancel = on_cancel;
     confirm_mid = on_mid;
@@ -1597,7 +1645,7 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
     // Four buttons need a wider box: 420 px, four of 91; three, 376 px,
     // three of 108 (template: "Shut down" on one line).
     int32_t bw = mid2 ? 420 : mid ? 376 : 340;
-    lv_obj_t *box = ui_card(o, (480 - bw) / 2, 0, bw, 100);
+    lv_obj_t *box = popup_box(o, (480 - bw) / 2, 0, bw, 100);
     lv_obj_set_style_radius(box, 8, 0);
     lv_obj_t *t = ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, text);
     lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
@@ -1668,14 +1716,12 @@ static void shut_ask(void)
                 "Shut down", shut_go);
         return;
     }
-    lv_obj_t *o = overlay_new();
-    lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
-    lv_obj_set_style_bg_opa(o, 140, 0);
+    lv_obj_t *o = overlay_dim();
     confirm_ok = shut_go;
     confirm_mid = ui_restart_ask;   // Restart from the power icon too (Ryan 4 Nov), with its own question
     confirm_cancel = confirm_mid2 = NULL;
     const int32_t bw = 376, h = 14 + 22 + 6 + 44 + 8 + 48 + 12;   // three buttons (340 to 0.15.7)
-    lv_obj_t *box = ui_card(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
+    lv_obj_t *box = popup_box(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
     lv_obj_set_style_radius(box, 8, 0);
     ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Shut down the controller?");
     // The whole row is the checkbox (a 44 px touch target).
@@ -1708,7 +1754,8 @@ static void shut_ask(void)
     frame_refresh();
 }
 
-// Text page over the screen (Help). Header Back closes it. No dragging (a
+// Text page over the screen (Help). Header Back closes it, or a tap on the
+// greyed strip (0.15.16). No dragging (a
 // drag redraws the card every frame and crowded Back): small Up and Down
 // buttons on the right jump a page less one line, without animation.
 // On the grid (common HMI template): text card 343 x 160 over the page,
