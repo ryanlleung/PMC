@@ -47,6 +47,16 @@ It polls `PRES SP?;MODE?;PID?` every 2 s. When the setpoint changes, and once at
 
 If the PC or the network stops, the board keeps the last KP and TI it was given. `run` reconnects on its own.
 
+## Checking the loop: setpoint steps
+
+`sp_step.py` checks how AUTO answers a setpoint change with the KP and TI on the board. Use it to compare gains, or to check a table from `tune`.
+
+```
+python sp_step.py 192.168.1.100 --start 3 --to 5 --back --out cf11_3to5.csv
+```
+
+It starts AUTO at `--start`, waits until the pressure holds within `--band` (0.1 mbar) for 2 minutes, then steps the setpoint to `--to` and records for `--record` s (600 by default). With `--back` it steps back and records again. It writes one line a second to the CSV and prints, for each step, the time to 90 % of the step, the overshoot, the settling time and the mean and spread of the last minute. Ctrl+C puts the setpoint back to `--start` and leaves AUTO running.
+
 ## Tests
 
 ```
