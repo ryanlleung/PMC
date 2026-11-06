@@ -138,6 +138,8 @@ void lv_port_disp_init(void)
     lv_display_set_flush_cb(d, flush_cb);
 }
 
+void lv_port_disp_light(void) {}   // the board's backlight (0.15.7); the page has none
+
 static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
 {
     (void)indev;
@@ -360,11 +362,12 @@ EXPORT(sim_set) void sim_set(int id, double v)
     }
 }
 
-// Power on. reset: 0 power-on, 1 watchdog. now: the page's clock, s since 1970 (local time).
+// Power on. reset: 0 power-on, 1 watchdog, 2 software (Restart). now: the page's clock, s since 1970 (local time).
 EXPORT(sim_bench_init) void sim_bench_init(void) { bench_init(); }
 EXPORT(sim_boot) void sim_boot(int reset, double now)
 {
-    sim_rcc.CSR = reset ? RCC_CSR_IWDGRSTF | RCC_CSR_PINRSTF : RCC_CSR_PORRSTF | RCC_CSR_PINRSTF;
+    sim_rcc.CSR = reset == 2 ? RCC_CSR_SFTRSTF | RCC_CSR_PINRSTF
+                : reset ? RCC_CSR_IWDGRSTF | RCC_CSR_PINRSTF : RCC_CSR_PORRSTF | RCC_CSR_PINRSTF;
     sim_rcc.CFGR = RCC_CFGR_SWS_HSE;   // only read for the timer clock: 25 MHz, PSC 24
     sim_rcc.BDCR = RCC_BDCR_LSERDY | RCC_BDCR_LSEON | RCC_BDCR_RTCEN | (1UL << 8);
     sim_rtc.ISR = RTC_ISR_INITS | RTC_ISR_RSF | RTC_ISR_INITF;
@@ -453,4 +456,9 @@ EXPORT(sim_reg) int sim_reg(void) { return (int)valve_regulation(); }   // ctrl_
 // The saved position offered at start-up, INT32_MIN if none.
 EXPORT(sim_offer) int sim_offer(void) { int32_t c; return valvepos_offer(&c) ? c : INT32_MIN; }
 EXPORT(sim_busy) int sim_busy(void) { return stepper3_busy(); }
+// Shut down (the power icon on Home, after its confirm) and turn on (the
+// double tap on the OFF screen).
+EXPORT(sim_shutdown) int sim_shutdown(int close) { const char *w = NULL; return hook(valve_shutdown(close != 0, &w), w); }
+EXPORT(sim_turn_on) int sim_turn_on(void) { const char *w = NULL; return hook(valve_turn_on(&w), w); }
 EXPORT(sim_override) int sim_override(void) { return stepper3_override(); }
+EXPORT(sim_popup) int sim_popup(void) { return ui_overlay_open(); }   // a popup (keypad, question, list, Help) is open

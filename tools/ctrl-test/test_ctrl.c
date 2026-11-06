@@ -22,9 +22,7 @@ static ctrl_tune_t K = { 4.0f, 0.25f, 8, 1, 0.1f, 14.0f, 99072 };
 #define FS 1034.0f
 
 typedef enum { MANUAL, AUTO } mode_t_;
-static bool w02, w06;
-static double w06_t;
-static bool w06_seen;   // any W-6 in the cases with KDIR right
+static bool w02;
 static mode_t_ mode;
 static ctrl_t C;
 static ctrl_result_t fault;   // last fault, CTRL_RUN if none
@@ -56,12 +54,32 @@ static bool request_move(int32_t target)
     return true;
 }
 
+// PID set changes (gain schedule, 0.15.15): the pressure at each, the
+// command's step at that control step, and the step a change of KP with no
+// re-base would have given ((KP new - KP old) x error).
+#define SW_MAX 32
+static int sw_n, sw_from[SW_MAX], sw_to[SW_MAX];
+static float sw_pv[SW_MAX];
+static long sw_jump[SW_MAX], sw_kick[SW_MAX], sw_int[SW_MAX];
+
 static void ctrl_tick(void)
 {
     ctrl_track(&C, M.pos, true);
     if (mode != AUTO) { ctrl_idle(&C); return; }
     ctrl_in_t in = { ms(), (float)M.pv, M.pos, M.moving, M.lim_active, FS };
+    const ctrl_t before = C;
     ctrl_result_t r = ctrl_step(&C, &K, &in);
+    if (C.set != before.set && before.set && sw_n < SW_MAX) {
+        const float e = (float)K.kdir * (C.sp - in.pv);
+        const float dkp = (ctrl_set_gains(&K, C.set).kp - ctrl_set_gains(&K, before.set).kp) / 100.0f * (float)K.pos_max;
+        sw_from[sw_n] = before.set;
+        sw_to[sw_n] = C.set;
+        sw_pv[sw_n] = in.pv;
+        sw_kick[sw_n] = lroundf(dkp * e);
+        const ctrl_pid_t g = ctrl_set_gains(&K, C.set);
+        sw_int[sw_n] = lroundf(g.ti > 0 ? g.kp / 100.0f * (float)K.pos_max / (60.0f * g.ti) * e : 0);   // this step's integral
+        sw_jump[sw_n++] = (long)(C.pos_cmd - before.pos_cmd);
+    }
     if (r == CTRL_RUN) {
         if (C.move && request_move(C.move_to))
             ctrl_sent(&C);
@@ -69,11 +87,6 @@ static void ctrl_tick(void)
         model_stop();
         mode = MANUAL;
         w02 = true;
-    } else if (r == CTRL_W06) {
-        model_stop();
-        mode = MANUAL;
-        w06 = w06_seen = true;
-        w06_t = M.t;
     } else {
         model_stop();
         fault = r;
@@ -127,7 +140,7 @@ static void fresh(void)
     if (!smooth) C.pv_tau = C.rev_pct = 0;
     mode = MANUAL;
     fault = CTRL_RUN;
-    w02 = w06 = false;
+    w02 = false;
     run(120, 0);
 }
 
@@ -339,25 +352,167 @@ int main(int argc, char **argv)
     CHECK(C.pos_cmd == K.pos_max && fault == CTRL_RUN,
           "Target 500 mB from %.1f mB: command %ld of %ld steps (fully open)", M.pv, (long)C.pos_cmd, (long)K.pos_max);
 
-    // None of the cases above (KDIR right) raise W-6.
-    CHECK(!w06_seen, "W-6 not raised with KDIR right");
-
-    // KDIR the wrong way round (0.11.45): AUTO drives the valve to the
-    // wrong end, W-6 ends AUTO after CTRL_TWRONG_S at rest there.
-    for (int up = 0; up < 2; up++) {
+    // KDIR the wrong way round: W-6 is gone (0.15.11, it tripped at low
+    // pressure), so AUTO carries on at the wrong end until W-2 ends it.
+    {
         fresh();
         model_start_move(K.pos_max / 3);
         run(300, 0);
-        float sp = up ? 9 : 2;
-        set_sp(sp);
+        set_sp(2);
         K.kdir = -K.kdir;
         to_auto();
         t0 = M.t;
-        run(1200, sp);
-        CHECK(w06 && mode == MANUAL && fault == CTRL_RUN && w06_t - t0 < 300,
-              "KDIR wrong, target %.0f mB from %.2f mB: W-6 after %.0f s, valve at %ld steps", sp, M.pv,
-              w06 ? w06_t - t0 : -1, (long)M.pos);
+        run(CTRL_TCONV_S + 120, 2);
+        CHECK(w02 && mode == MANUAL && fault == CTRL_RUN,
+              "KDIR wrong, target 2 mB: W-2 ends AUTO (%.2f mB, valve at %ld steps)", M.pv, (long)M.pos);
         K.kdir = -K.kdir;
+    }
+
+    // KD (0.14.21, a setting): the D term works on the measured pressure's
+    // rate and against it; KD 0 is the PI as before.
+    {
+        ctrl_tune_t k0 = K, k1 = K;
+        k0.kd = 0;
+        k1.kd = 1.0f;   // 1 % of travel per mbar/s
+        ctrl_t a, b;
+        ctrl_init(&a);
+        ctrl_init(&b);
+        ctrl_set_sp(&a, 5, FS, 0);
+        ctrl_set_sp(&b, 5, FS, 0);
+        ctrl_start(&a, &k0, 0, 5, 30000);
+        ctrl_start(&b, &k1, 0, 5, 30000);
+        ctrl_in_t in = { .t_ms = 1000, .pv = 5.5f, .pos = 30000, .fs = FS };
+        ctrl_step(&a, &k0, &in);
+        ctrl_step(&b, &k1, &in);
+        long dd = (long)(b.pos_cmd - a.pos_cmd), want = -lroundf(0.01f * (float)K.pos_max * 0.5f);
+        CHECK(labs(dd - want) <= 1, "KD 1 %%/(mB/s), pressure rising 0.5 mB/s: command %ld steps from the PI's (expected %ld)",
+              dd, want);
+    }
+
+    // Gain schedule (0.15.15): which set, from the boundaries and the hysteresis.
+    {
+        ctrl_tune_t k = K;
+        k.b1 = 8; k.b2 = 30; k.hyst = 0.15f;
+        k.sched = CTRL_SCHED_OFF;
+        bool off = ctrl_pick_set(&k, 0, 2) == 1 && ctrl_pick_set(&k, 3, 50) == 1;
+        k.sched = (ctrl_sched_t)1;   // the setpoint schedule, removed in 0.15.20: set 1, as Off
+        bool sp = ctrl_pick_set(&k, 0, 20) == 1 && ctrl_pick_set(&k, 3, 50) == 1;
+        k.sched = CTRL_SCHED_PV;
+        // Up: 1 to 2 past 9.2, 2 to 3 past 34.5. Down: 3 to 2 under 25.5, 2 to 1 under 6.8.
+        bool pv = ctrl_pick_set(&k, 0, 8.5f) == 2 && ctrl_pick_set(&k, 1, 9.1f) == 1 && ctrl_pick_set(&k, 1, 9.3f) == 2 &&
+                  ctrl_pick_set(&k, 2, 34.4f) == 2 && ctrl_pick_set(&k, 2, 34.6f) == 3 &&
+                  ctrl_pick_set(&k, 3, 25.6f) == 3 && ctrl_pick_set(&k, 3, 25.4f) == 2 &&
+                  ctrl_pick_set(&k, 2, 6.9f) == 2 && ctrl_pick_set(&k, 2, 6.7f) == 1 &&
+                  ctrl_pick_set(&k, 1, 50) == 3 && ctrl_pick_set(&k, 3, 2) == 1;
+        CHECK(off && sp && pv, "schedule: Off (and 1, the old SP) set 1; PV 1>2 past 9.2, 2>3 past 34.5, 3>2 under 25.5, "
+              "2>1 under 6.8 mB, both at once on a large move");
+        k.set23[1].kp = 0;
+        CHECK(!strcmp(ctrl_check(&C, &k, true, false, true, 5, FS), "Tuning not set"), "schedule on: a set with KP 0 refused");
+        k.sched = CTRL_SCHED_OFF;
+        CHECK(ctrl_check(&C, &k, true, false, true, 5, FS) == NULL, "schedule Off: sets 2 and 3 not checked");
+    }
+    // Schedule Off runs exactly as before, whatever sets 2 and 3 hold.
+    {
+        const ctrl_tune_t kk = K;
+        double pv[2];
+        int32_t cmd[2];
+        for (int f = 0; f < 2; f++) {
+            K = kk;
+            if (f) {
+                K.set23[0] = (ctrl_pid_t){ 1.0f, 0.5f, 0 };
+                K.set23[1] = (ctrl_pid_t){ 9.0f, 0.1f, 0.5f };
+                K.b1 = 6; K.b2 = 8; K.hyst = 0.1f;
+            }
+            fresh();
+            set_sp(5);
+            to_auto();
+            run(900, 5);
+            set_sp(10);
+            run(900, 10);
+            pv[f] = M.pv;
+            cmd[f] = C.pos_cmd;
+        }
+        K = kk;
+        CHECK(pv[0] == pv[1] && cmd[0] == cmd[1], "schedule Off: the same run with other sets 2 and 3 (%.4f mB, %ld steps)",
+              pv[1], (long)cmd[1]);
+    }
+    // Schedule on the pressure, 5 to 10 to 5 mB on the model: each set
+    // change past its boundary by the hysteresis, bumpless.
+    {
+        const ctrl_tune_t kk = K;
+        K.sched = CTRL_SCHED_PV;
+        K.b1 = 6; K.b2 = 8.5f; K.hyst = 0.1f;   // up past 6.6 and 9.35, down under 7.65 and 5.4
+        K.set23[0] = (ctrl_pid_t){ 3.0f, 0.25f, 0 };
+        K.set23[1] = (ctrl_pid_t){ 2.0f, 0.30f, 0 };
+        fresh();
+        set_sp(5);
+        to_auto();
+        const int set0 = C.set;
+        run(900, 5);
+        sw_n = 0;
+        set_sp(10);
+        met_t up = run(1200, 10);
+        const int n_up = sw_n;
+        set_sp(5);
+        met_t down = run(1200, 5);
+        bool order = false, where = true, smooth_ = true;
+        long worst = 0;
+        for (int i = 0; i < sw_n; i++) {
+            const float b = sw_from[i] + sw_to[i] == 3 ? K.b1 : K.b2;
+            where &= sw_to[i] > sw_from[i] ? sw_pv[i] > b * 1.1f : sw_pv[i] < b * 0.9f;
+            const long extra = labs(sw_jump[i]) - labs(sw_int[i]);   // past this step's integral
+            worst = extra > worst ? extra : worst;
+            printf("     set %d to %d at %.3f mB: command %+ld steps, this step's integral %+ld (%+ld more without the re-base)\n",
+                   sw_from[i], sw_to[i], sw_pv[i], sw_jump[i], sw_int[i], sw_kick[i]);
+        }
+        smooth_ = worst <= 2;
+        for (int i = 0; i + 1 < n_up; i++)
+            order |= sw_from[i] == 1 && sw_to[i] == 2 && sw_from[i + 1] == 2 && sw_to[i + 1] == 3;
+        bool back = false;
+        for (int i = n_up; i + 1 < sw_n; i++)
+            back |= sw_from[i] == 3 && sw_to[i] == 2 && sw_from[i + 1] == 2 && sw_to[i + 1] == 1;
+        CHECK(set0 == 1 && order && back && where, "schedule PV: set 1 at 5 mB, 1>2>3 going to 10, 3>2>1 back to 5, each past "
+              "its boundary by the hysteresis (%d changes)", sw_n);
+        CHECK(smooth_, "schedule PV: each change bumpless, the command moves by the step's integral alone (%ld steps over)", worst);
+        CHECK(fault == CTRL_RUN && mode == AUTO && up.t_band > 0 && down.t_band > 0 && fabs(down.end - 5) <= K.band,
+              "schedule PV: settles at 10 and back at 5 mB, no trip (end %.3f)", down.end);
+        K = kk;
+    }
+    // Deadbands (0.15.15): opening moves wait for DB open, closing ones for DB close.
+    {
+        ctrl_tune_t k = K;
+        k.db = 200;
+        k.db_close = 8;
+        k.kp = 1.0f;          // 990.72 steps/mB
+        k.ti = 1.6512f;       // 10 steps/s at 1 mB of error
+        ctrl_t c;
+        ctrl_init(&c);
+        c.pv_tau = 0;
+        ctrl_set_sp(&c, 6, FS, 0);
+        ctrl_start(&c, &k, 0, 5, 30000);
+        int first = 0;
+        for (int i = 1; i <= 25 && !first; i++) {
+            ctrl_in_t in = { .t_ms = (uint32_t)i * 1000u, .pv = 5, .pos = 30000, .fs = FS };
+            ctrl_step(&c, &k, &in);
+            if (c.move) first = i;
+        }
+        CHECK(first == 20 && c.move_to - 30000 >= 200 && c.move_to - 30000 < 210,
+              "DB open 200: the creep sends nothing for 19 s, then one move of %ld steps at %d s", (long)(c.move_to - 30000), first);
+        ctrl_t d;
+        ctrl_init(&d);
+        d.pv_tau = 0;
+        ctrl_set_sp(&d, 6, FS, 0);
+        ctrl_start(&d, &k, 0, 6, 30000);
+        ctrl_in_t in = { .t_ms = 1000, .pv = 6.01f, .pos = 30000, .fs = FS };
+        ctrl_step(&d, &k, &in);
+        const bool closed_now = d.move && d.move_to < 30000;
+        ctrl_init(&d);
+        d.pv_tau = 0;
+        ctrl_set_sp(&d, 6, FS, 0);
+        ctrl_start(&d, &k, 0, 6, 30000);
+        in.pv = 5.99f;
+        ctrl_step(&d, &k, &in);
+        CHECK(closed_now && !d.move, "DB close 8: a 10-step closing move goes at once, the same opening is held");
     }
 
     printf(fails ? "%d failed\n" : "all passed\n", fails);

@@ -81,15 +81,6 @@ void board_init()
     timerInit();
 }
 
-// Waits ms on the start-up screen, its bar moving on every 30 ms.
-static void splash_wait(int ms)
-{
-    for (int t = 0; t < ms; t += 30) {
-        Delay_ms(30);
-        ui_splash_tick();
-    }
-}
-
 /**
  * @brief Initializes the LVGL application and loads the main screen.
  */
@@ -101,11 +92,11 @@ void application_init()
 
     // Initialize board peripherals and LVGL drivers.
     board_init();
-    // The start-up screen until Home is built (0.13.3): from 0.13.13 the
-    // logo and a bar that fills as each part starts, paced so it can be
-    // seen (Ryan, 28 Oct; the board is ready in about a second). No delay
-    // in the simulator.
+    // Every start is OFF (0.15.1, Ryan 4 Nov): the OFF screen from the
+    // first frame; a double tap turns it on once ui_init has run. The
+    // backlight comes on only once it is drawn (0.15.7: no white flash).
     ui_splash();
+    lv_port_disp_light();
 
     // Druck calibration from the on-board serial flash (nominal if none stored).
     cal_init();
@@ -114,23 +105,13 @@ void application_init()
     // when the valve is moved (screen or link).
     clicks_init();
     limit_init();
-    valve_init();   // NOT HOMED: nothing moves until homed or moved on the screen
-    ui_splash_step(40);
-    splash_wait(500);
+    valve_init();   // OFF, not homed: nothing moves until turned on and homed or moved
     // Saved motor, valve and cal settings (factory defaults if none). Nothing moves.
     cfg_init();
-    ui_splash_step(65);
-    splash_wait(400);
     // The valve position saved at the last standstill: offered on the
-    // screen (Use saved / Calibrate), never used by itself.
+    // screen (Use saved / Calibrate), never used by itself; the count kept
+    // at Shut down is taken (valvepos.h).
     valvepos_init();
-    ui_splash_step(90);
-    splash_wait(500);
-    ui_splash_done();
-    // Until the bar is full (it may lag behind after a pause), then a beat.
-    for (int n = 0; n < 100 && !ui_splash_tick(); n++)
-        Delay_ms(30);
-    splash_wait(300);
 
     // The frame and Home. The 0.6.0 motor screen is built the first time
     // Menu > Motor opens it, which keeps its LVGL heap free until then.

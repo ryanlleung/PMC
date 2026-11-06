@@ -228,9 +228,12 @@ static void mb_task(void)
             uint8_t out[MODBUS_ADU_MAX];
             size_t written;
             mbmap_set_peer(c->ip);
+            link_count(false);   // the header's remote light
             size_t r = modbus_handle(c->buf, n, out);
-            if (r)
+            if (r) {
                 socketSend(c->s, out, r, &written, 0);
+                link_count(true);
+            }
             memmove(c->buf, c->buf + n, c->len - n);
             c->len -= n;
         }

@@ -73,10 +73,13 @@ static void refuse(int err, const char *fmt, ...)
  *                                 212 the valve cannot move now (the
  *                                     switch, a move running), or the
  *                                     clock is not running
+ *                                 213 controller off or shutting down
+ *                                     (0.15.0): turned on at the screen
  */
 static const struct { const char *head; int num; const char *text; } why_codes[] = {
     { "Homing", 201, "Homing, STOP to cancel" },
     { "Switch to MANUAL", 202, "Switch to MANUAL first" },
+    { "Stop AUTO", 202, "Switch to MANUAL first" },   // the screen's wording from 0.15.3
     { "Reset the fault", 203, "Reset the fault first" },
     { "Home the valve", 204, "Home the valve first" },
     { "No valid pressure", 205, "No valid pressure" }, { "No pressure", 205, "No valid pressure" },
@@ -85,6 +88,9 @@ static const struct { const char *head; int num; const char *text; } why_codes[]
     { "Pressure above", 208, "Pressure above the sensor range" },
     { "Pressure response", 209, "Control settings not set" },
     { "Tuning not set", 209, "Control settings not set" },
+    { "Controller is off", 213, "Controller is off" },
+    { "Shutting down", 213, "Shutting down, STOP to cancel" },
+    { "B2 must", 102, NULL },   // SCHED SET boundaries (0.15.15)
     { "Expected", 101, NULL },
     { "Outside", 102, NULL },
 };
@@ -208,6 +214,24 @@ static bool query(const char *c)
             reply("TIME NONE");
     } else if (strcmp(c, "*IDN?") == 0) {
         idn_query();
+    } else if (strcmp(c, "PID?") == 0) {
+        // The set in use (0.15.15; set 1 with the schedule Off, as before).
+        char kp[16], ti[16];
+        const int n = valve_pid_set();
+        reply("PID %s,%s,%s", fixed_fmt(kp, sizeof kp, cfg_tune(cfg_pid_key(n, 0)), 2),
+              fixed_fmt(ti, sizeof ti, cfg_tune(cfg_pid_key(n, 1)), 2),
+              fixed_fmt(v, sizeof v, cfg_tune(cfg_pid_key(n, 2)), 2));
+    } else if (strcmp(c, "PIDS?") == 0) {
+        char g[3][3][16];
+        for (int n = 1; n <= 3; n++)
+            for (int w = 0; w < 3; w++)
+                fixed_fmt(g[n - 1][w], sizeof g[0][0], cfg_tune(cfg_pid_key(n, w)), 2);
+        reply("PIDS %d,%s,%s,%s,%s,%s,%s,%s,%s,%s", valve_pid_set(), g[0][0], g[0][1], g[0][2],
+              g[1][0], g[1][1], g[1][2], g[2][0], g[2][1], g[2][2]);
+    } else if (strcmp(c, "SCHED?") == 0) {
+        char b1[16], b2[16];
+        reply("SCHED %s,%s,%s,%ld", cfg_tune(CFG_SCHED) == CTRL_SCHED_PV ? "PV" : "OFF", fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1),
+              fixed_fmt(b2, sizeof b2, cfg_tune(CFG_B2), 1), (long)cfg_tune(CFG_HYST));
     } else {
         return false;
     }
@@ -228,6 +252,127 @@ static bool number(const char *s, int dec, int64_t *v)
     return *s == '\0';
 }
 
+// PID SET <kp>,<ti>[,<kd>] (0.15.8, for a PC gain schedule): what the PID
+// tab's Save does, so it works in AUTO and the loop takes the gains at its
+// next step (cfg_save_with, tuning only). KP %/mB, TI min, KD %/(mB/s), 2 dp.
+// Each change is a settings save in flash: unchanged gains write nothing.
+// From 0.15.15 PID SET sets the set in use and PIDS SET <set>,... any set.
+static void pid_set(const char *c, bool pick)
+{
+    static const char *const nm[3] = { "KP", "TI", "KD" };
+    const char *form = pick ? "Expected: PIDS SET <set>,<kp>,<ti>[,<kd>]" : "Expected: PID SET <kp>,<ti>[,<kd>]";
+    int32_t v[CFG_N] = { 0 };
+    bool on[CFG_N] = { false }, same = true;
+    char buf[LINK_LINE_MAX + 1], a[16], b[16];
+    int n = 0, set = valve_pid_set();
+    lv_strlcpy(buf, c, sizeof buf);
+    char *p = buf, *e;
+    if (pick) {
+        int64_t x;
+        e = strchr(p, ',');
+        if (!e) {
+            refuse(101, form);
+            return;
+        }
+        *e = '\0';
+        if (!number(p, 0, &x)) {
+            refuse(101, form);
+            return;
+        }
+        if (x < 1 || x > 3) {
+            refuse(102, "Outside 1 to 3 for the set");
+            return;
+        }
+        set = (int)x;
+        p = e + 1;
+    }
+    for (; n <= 3; p = e + 1, n++) {
+        e = strchr(p, ',');
+        if (e)
+            *e = '\0';
+        int64_t x;
+        if (n == 3 || !number(p, 2, &x)) {
+            refuse(101, form);
+            return;
+        }
+        const cfg_key_t key = cfg_pid_key(set, n);
+        int32_t lo, hi;
+        cfg_range(key, &lo, &hi);
+        if (x < lo || x > hi) {
+            refuse(102, "Outside %s to %s for %s", fixed_fmt(a, sizeof a, lo, 2), fixed_fmt(b, sizeof b, hi, 2), nm[n]);
+            return;
+        }
+        v[key] = (int32_t)x;
+        on[key] = true;
+        same = same && x == cfg_tune(key);
+        if (!e)
+            break;
+    }
+    if (n < 1) {   // one number: KP alone is not the form
+        refuse(101, form);
+        return;
+    }
+    const char *why;
+    if (!same && !cfg_save_with(v, on, &why))
+        refuse_why(why);
+}
+
+// SCHED SET <OFF|PV>,<b1>,<b2>,<h> (0.15.15; SP removed in 0.15.20): the PID table, as the
+// PID tuning Schedule tab's Save. Boundaries in mbar (1 dp), hysteresis %.
+static void sched_set(const char *c)
+{
+    static const char *const form = "Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<h>";
+    static const cfg_key_t key[4] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST };
+    static const char *const nm[4] = { "", "B1", "B2", "H" };
+    static const int dec[4] = { 0, 1, 1, 0 };
+    int32_t v[CFG_N] = { 0 };
+    bool on[CFG_N] = { false }, same = true;
+    char buf[LINK_LINE_MAX + 1], a[16], b[16];
+    lv_strlcpy(buf, c, sizeof buf);
+    char *p = buf, *e = NULL;
+    for (int n = 0; n < 4; n++, p = e + 1) {
+        e = strchr(p, ',');
+        if ((n < 3) != (e != NULL)) {
+            refuse(101, form);
+            return;
+        }
+        if (e)
+            *e = '\0';
+        int64_t x;
+        if (n == 0) {
+            while (*p == ' ')
+                p++;
+            char *q = p + strlen(p);
+            while (q > p && q[-1] == ' ')
+                *--q = '\0';
+            if (strcmp(p, "OFF") == 0) x = CTRL_SCHED_OFF;
+            else if (strcmp(p, "PV") == 0) x = CTRL_SCHED_PV;
+            else {
+                refuse(101, form);
+                return;
+            }
+        } else {
+            if (!number(p, dec[n], &x)) {
+                refuse(101, form);
+                return;
+            }
+            int32_t lo, hi;
+            cfg_range(key[n], &lo, &hi);
+            if (x < lo || x > hi) {
+                refuse(102, "Outside %s to %s for %s", fixed_fmt(a, sizeof a, lo, dec[n]),
+                       fixed_fmt(b, sizeof b, hi, dec[n]), nm[n]);
+                return;
+            }
+        }
+        v[key[n]] = (int32_t)x;
+        on[key[n]] = true;
+        same = same && x == cfg_tune(key[n]);
+    }
+    const char *why;
+    if (!same && !cfg_save_with(v, on, &why))
+        refuse_why(why);
+}
+
 static bool set(const char *c)
 {
     const char *why;
@@ -243,13 +388,14 @@ static bool set(const char *c)
         else if (!valve_set_target((int32_t)v, &why))
             refuse_why(why);
     } else if (strcmp(c, "MODE AUTO") == 0) {
-        if (PMC_REMOTE_SWITCH && valve_remote_held() && !valve_auto())
-            refuse(212, VALVE_REMOTE_HELD_WHY);
-        else if (!valve_start_auto(&why))
+        if (!valve_start_auto(&why))
             refuse_why(why);
     } else if (strcmp(c, "MODE MANUAL") == 0) {
         // Outside AUTO there is nothing to end; the valve stays where it is.
-        if (valve_auto() && !valve_to_manual(&why))
+        // Off or shutting down it is refused: only the screen turns it on.
+        if (valve_off_why())
+            refuse_why(valve_off_why());
+        else if (valve_auto() && !valve_to_manual(&why))
             refuse_why(why);
     } else if (strncmp(c, "MODE", 4) == 0 && (c[4] == ' ' || c[4] == '\0')) {
         refuse(101, "Expected: MODE AUTO or MODE MANUAL");
@@ -258,8 +404,6 @@ static bool set(const char *c)
             refuse(101, "Expected: VALV SET <%%>");
         else if (v < 0 || v > 1000)
             refuse(102, "Outside 0 to 100 %%");
-        else if (PMC_REMOTE_SWITCH && valve_remote_held())
-            refuse(212, VALVE_REMOTE_HELD_WHY);
         else if (!valve_goto_pct10((int32_t)v, &why))
             refuse_why(why);
     } else if (strcmp(c, "STOP") == 0) {
@@ -276,6 +420,12 @@ static bool set(const char *c)
             valve_event("OK", "Warning OK (link): %s", w);
             valve_warning_clear();
         }
+    } else if (strncmp(c, "PID SET", 7) == 0 && (c[7] == ' ' || c[7] == '\0')) {
+        pid_set(c + 7, false);
+    } else if (strncmp(c, "PIDS SET", 8) == 0 && (c[8] == ' ' || c[8] == '\0')) {
+        pid_set(c + 8, true);
+    } else if (strncmp(c, "SCHED SET", 9) == 0 && (c[9] == ' ' || c[9] == '\0')) {
+        sched_set(c + 9);
     } else if (strncmp(c, "TIME SET", 8) == 0 && (c[8] == ' ' || c[8] == '\0')) {
         why = rtclock_set_text(c[8] ? c + 9 : "");
         if (why && strncmp(why, "Expected", 8) == 0)
@@ -323,6 +473,7 @@ static void part(const char *c, bool chained)
 
 void remote_line(const char *line)
 {
+    link_count(false);   // the header's remote light (link_write counts the reply)
     out_len = 0;
     out[0] = '\0';
     refused = false;

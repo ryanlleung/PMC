@@ -12,7 +12,8 @@
 #include "valve.h"
 
 /* --------------------------------------------------------------------------
- * Modbus register map, version 1. docs/modbus-register-map.md is the
+ * Modbus register map, version 2 (0.15.15: the gain schedule, registers
+ * 26 to 50, added after the version 1 map). docs/modbus-register-map.md is the
  * reference; keep the two in step. Floats are IEEE 754 single in two
  * registers, high word first (ABCD). NaN means no value (no reading, no
  * target set).
@@ -22,15 +23,38 @@
  * Each accepted write is logged as a NET event with the client's address.
  * ------------------------------------------------------------------------ */
 
-#define MAP_VERSION 1
+#define MAP_VERSION 2
 
 enum {
     HR_VERSION = 0, HR_HEARTBEAT, HR_MODE, HR_STATUS, HR_REGULATION,
     HR_FAULTS, HR_WARNINGS, HR_FAULT_COUNT, HR_EVENTS, HR_RESERVED,
     HR_PRESSURE = 10, HR_TARGET = 12, HR_VALVE = 14, HR_VALVE_TARGET = 16,
     HR_RANGE = 18, HR_EXCITATION = 20, HR_TEMP = 22, HR_UPTIME = 24,
-    HR_COUNT = 26
+    // The gain schedule (version 2): the set in use (read only), then the
+    // settings, written as the PID tuning page's Save (tuning only, works
+    // in AUTO, one settings save per write).
+    HR_PID_SET = 26, HR_SCHED = 27, HR_B1 = 28, HR_B2 = 30, HR_HYST = 32,
+    HR_GAINS = 33,   // KP1, TI1, KD1, KP2, TI2, KD2, KP3, TI3, KD3: floats
+    HR_COUNT = HR_GAINS + 18
 };
+
+// The settings behind the writable schedule registers: the key, 0.01 or
+// 0.1 per unit (the cfg scale), and whether it is a float.
+static bool sched_reg(uint16_t a, cfg_key_t *key, int *dec, bool *flt)
+{
+    if (a == HR_SCHED) { *key = CFG_SCHED; *dec = 0; *flt = false; return true; }
+    if (a == HR_HYST)  { *key = CFG_HYST; *dec = 0; *flt = false; return true; }
+    if (a == HR_B1)    { *key = CFG_B1; *dec = 1; *flt = true; return true; }
+    if (a == HR_B2)    { *key = CFG_B2; *dec = 1; *flt = true; return true; }
+    if (a >= HR_GAINS && a < HR_COUNT && (a - HR_GAINS) % 2 == 0) {
+        int g = (a - HR_GAINS) / 2;
+        *key = cfg_pid_key(g / 3 + 1, g % 3);
+        *dec = 2;
+        *flt = true;
+        return true;
+    }
+    return false;
+}
 
 // Command coils (read and write) and status coils (read only).
 enum { CO_AUTO = 0, CO_STOP, CO_RESET, CO_ACK, CO_STATUS = 16, CO_COUNT = CO_STATUS + 10 };
@@ -84,7 +108,9 @@ void mbmap_begin(void)
     uint16_t st = 0;
     if (s->reading_ok)                         st |= 1u << ST_READING_OK;
     if (valve_calibrated())                    st |= 1u << ST_POSITION_SET;
-    if (valve_reference() == VALVE_REF_HOMED)  st |= 1u << ST_HOMED;
+    // Homed, also kept through a Shut down (0.15.0; PARKED is homed only, 0.15.1).
+    if (valve_reference() == VALVE_REF_HOMED || valve_reference() == VALVE_REF_PARKED)
+        st |= 1u << ST_HOMED;
     if (stepper3_busy())                       st |= 1u << ST_MOVING;
     if (stepper3_limit_open())                 st |= 1u << ST_SWITCH;
     if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 and F-2 too
@@ -128,6 +154,18 @@ void mbmap_begin(void)
     put_f32(HR_TEMP, s->pm_found ? s->die_mc / 1000.0f : NAN);
     reg[HR_UPTIME] = (uint16_t)(up_s >> 16);
     reg[HR_UPTIME + 1] = (uint16_t)up_s;
+    reg[HR_PID_SET] = (uint16_t)valve_pid_set();
+    for (uint16_t a = HR_SCHED; a < HR_COUNT; a++) {
+        cfg_key_t key;
+        int dec;
+        bool flt;
+        if (!sched_reg(a, &key, &dec, &flt))
+            continue;
+        if (flt)
+            put_f32(a, (float)cfg_tune(key) / (dec == 2 ? 100.0f : 10.0f));
+        else
+            reg[a] = (uint16_t)cfg_tune(key);
+    }
 }
 
 bool mbmap_read_reg(uint16_t addr, uint16_t *v)
@@ -172,8 +210,49 @@ static uint8_t refused(const char *what, const char *why)
     return MODBUS_EX_REFUSED;
 }
 
+// A write to the schedule registers (27 to 50): every register in it
+// writable, floats whole; values checked as the screen does, then one
+// tuning save (nothing written when nothing changes).
+static uint8_t write_sched(uint16_t addr, uint16_t n, const uint16_t *v)
+{
+    int32_t val[CFG_N] = { 0 };
+    bool on[CFG_N] = { false }, same = true;
+    for (uint16_t i = 0; i < n;) {
+        cfg_key_t key;
+        int dec;
+        bool flt;
+        if (!sched_reg((uint16_t)(addr + i), &key, &dec, &flt) || (flt && i + 1 >= n))
+            return MODBUS_EX_ADDRESS;
+        int32_t x, lo, hi;
+        if (flt) {
+            float f = get_f32(v + i);
+            if (!isfinite(f) || fabsf(f) > 1.0e6f)
+                return MODBUS_EX_VALUE;
+            x = (int32_t)lroundf(f * (dec == 2 ? 100.0f : 10.0f));
+        } else {
+            x = v[i];
+        }
+        cfg_range(key, &lo, &hi);
+        if (x < lo || x > hi || (key == CFG_SCHED && x == 1))   // 1, the setpoint, removed in 0.15.20
+            return MODBUS_EX_VALUE;
+        val[key] = x;
+        on[key] = true;
+        same = same && x == cfg_tune(key);
+        i = (uint16_t)(i + (flt ? 2 : 1));
+    }
+    if (same)
+        return 0;
+    const char *why;
+    if (!cfg_save_with(val, on, &why))
+        return refused("gain schedule", why);
+    valve_event("NET", "Modbus %s: gain schedule and PID sets saved", peer);
+    return 0;
+}
+
 uint8_t mbmap_write_regs(uint16_t addr, uint16_t n, const uint16_t *v)
 {
+    if (addr >= HR_SCHED)
+        return write_sched(addr, n, v);
     // Only the two writable floats, each written whole.
     for (uint16_t i = 0; i < n; i += 2) {
         uint16_t a = (uint16_t)(addr + i);
@@ -204,8 +283,6 @@ uint8_t mbmap_write_regs(uint16_t addr, uint16_t n, const uint16_t *v)
                 return MODBUS_EX_VALUE;
             int32_t p = (int32_t)lroundf(f * 100.0f);
             fixed_fmt(t, sizeof t, p, 2);
-            if (valve_remote_held())
-                return refused("valve %", VALVE_REMOTE_HELD_WHY);
             if (!valve_goto_pct100(p, &why))
                 return refused("valve %", why);
             valve_event("NET", "Modbus %s: valve to %s %%", peer, t);
@@ -223,8 +300,6 @@ uint8_t mbmap_write_coil(uint16_t addr, bool on)
     case CO_AUTO:
         if (on == valve_auto())
             return 0;
-        if (on && valve_remote_held())
-            return refused("AUTO", VALVE_REMOTE_HELD_WHY);
         if (on ? !valve_start_auto(&why) : !valve_to_manual(&why))
             return refused(on ? "AUTO" : "MANUAL", why);
         valve_event("NET", "Modbus %s: %s", peer, on ? "AUTO" : "MANUAL");

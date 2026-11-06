@@ -19,3 +19,5 @@ tools/cfg-test/out/
 tools/ctrl-test/out/
 tools/baro-test/out/
 tools/modbus-test/out/
+# Logs and test results from tools/pmc-gui, when it is run from the repository.
+pmc-logs/

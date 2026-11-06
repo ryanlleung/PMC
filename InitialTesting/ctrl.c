@@ -13,7 +13,34 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 static int sgnf(float v) { return v > 0 ? 1 : v < 0 ? -1 : 0; }
 static uint32_t since(uint32_t now, uint32_t then) { return now - then; }   // wraps
 
-static float kp_steps(const ctrl_tune_t *k) { return k->kp / 100.0f * (float)k->pos_max; }
+// % of travel per unit in steps.
+static float steps_of(float pct, const ctrl_tune_t *k) { return pct / 100.0f * (float)k->pos_max; }
+
+int ctrl_pick_set(const ctrl_tune_t *k, int now, float x)
+{
+    if (k->sched != CTRL_SCHED_PV)
+        return 1;
+    // With no set yet, straight from the boundaries.
+    if (now < 1 || now > 3)
+        return x < k->b1 ? 1 : x < k->b2 ? 2 : 3;
+    // On the pressure, a set holds until the pressure is past its boundary
+    // by the hysteresis; a large move can pass both in one step.
+    const float up = 1.0f + k->hyst, down = 1.0f - k->hyst;
+    if (now == 1 && x > k->b1 * up) now = 2;
+    if (now == 2 && x > k->b2 * up) now = 3;
+    if (now == 3 && x < k->b2 * down) now = 2;
+    if (now == 2 && x < k->b1 * down) now = 1;
+    return now;
+}
+
+ctrl_pid_t ctrl_set_gains(const ctrl_tune_t *k, int set)
+{
+    if (set == 2 || set == 3)
+        return k->set23[set - 2];
+    ctrl_pid_t g = { k->kp, k->ti, k->kd };
+    return g;
+}
+
 
 void ctrl_init(ctrl_t *c)
 {
@@ -43,14 +70,21 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
     if (c->sp < 0 || c->sp > fs)    return "Setpoint outside the sensor range";
     if (pv > fs)                    return "Pressure above the sensor range";
     if (!k->kdir)                   return "Pressure response not set";
-    if (!(k->kp > 0) || k->ti < 0)  return "Tuning not set";
+    // Set 1 always; sets 2 and 3 when the schedule can pick them.
+    for (int s = 1; s <= (k->sched == CTRL_SCHED_OFF ? 1 : 3); s++) {
+        const ctrl_pid_t g = ctrl_set_gains(k, s);
+        if (!(g.kp > 0) || g.ti < 0)
+            return "Tuning not set";
+    }
     return NULL;
 }
 
 void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_t now_pos)
 {
     float e = (float)k->kdir * (c->sp - pv);
-    c->i = (float)now_pos - kp_steps(k) * e;   // bumpless: first output is the position in force
+    c->set = ctrl_pick_set(k, 0, pv);
+    const ctrl_pid_t g = ctrl_set_gains(k, c->set);
+    c->i = (float)now_pos - steps_of(g.kp, k) * e;   // bumpless: first output is the position in force
     c->pos_cmd = c->last_sent = now_pos;
     c->prev_pv = pv;
     c->win_t = 0;
@@ -58,9 +92,9 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
     c->win_pv = pv;
     c->noresp = 0;
     c->conv_ms = t_ms;
-    c->right_ms = t_ms;
     c->move = false;
-    c->kp_used = kp_steps(k);
+    c->kp_used = steps_of(g.kp, k);
+    c->kd_used = steps_of(g.kd, k);
     c->kdir_used = k->kdir;
     c->pv_f = pv;
     c->last_dir = 0;
@@ -110,14 +144,17 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->pv_f = pv;
     const float pf = c->pv_f;
     const float e = (float)k->kdir * (c->sp - pf);
-    const float kp = kp_steps(k), ki = k->ti > 0 ? kp / (60.0f * k->ti) : 0;
-    const float d = -(CTRL_KD / 100.0f * pos_max) * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
+    c->set = ctrl_pick_set(k, c->set, pf);
+    const ctrl_pid_t g = ctrl_set_gains(k, c->set);
+    const float kp = steps_of(g.kp, k), ki = g.ti > 0 ? kp / (60.0f * g.ti) : 0, kd = steps_of(g.kd, k);
+    const float d = -kd * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
     c->prev_pv = pf;
-    if (kp != c->kp_used || k->kdir != c->kdir_used) {
-        // Tuning changed in AUTO: keep the output where it is, as on entry,
-        // rather than stepping by the change in KP x e.
+    if (kp != c->kp_used || kd != c->kd_used || k->kdir != c->kdir_used) {
+        // Tuning or PID set changed in AUTO: keep the output where it is, as
+        // on entry, rather than stepping by the change in KP x e (or in D).
         c->i = (float)c->pos_cmd - kp * e - d;
         c->kp_used = kp;
+        c->kd_used = kd;
         c->kdir_used = k->kdir;
     }
     float i_new = c->i + ki * e * CTRL_TS_S;
@@ -142,9 +179,12 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     if (in->limit && cmd < (float)c->pos_cmd)
         cmd = (float)c->pos_cmd;
     c->pos_cmd = (int32_t)lroundf(cmd);
-    int32_t db = k->db > 1 ? k->db : 1;
+    // Deadbands: opening (counts up) and closing; a closing one of 0 is the
+    // opening one (initialisers from before 0.15.15).
+    const int32_t db_open = k->db > 1 ? k->db : 1;
+    const int32_t db_close = k->db_close > 1 ? k->db_close : k->db_close == 1 ? 1 : db_open;
     int32_t step = c->pos_cmd - c->last_sent;
-    if (step >= db || step <= -db) {
+    if (step >= db_open || step <= -db_close) {
         // Reversal hysteresis: turning round for less than this is lost in
         // the drive's backlash and only makes the motor hunt.
         const int32_t to_go = c->pos_cmd - in->pos;
@@ -169,7 +209,8 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         const bool pin_open = err > 0 && AT(p, pos_max) && AT(c->pos_f, pos_max) && AT(c->win_pos, pos_max);
         const bool pin_min = err < 0 && AT(p, lo) && AT(c->pos_f, lo) && AT(c->win_pos, lo);
 #undef AT
-        const float judge = (float)(k->db > CTRL_CHECKMIN * fs ? k->db : CTRL_CHECKMIN * fs);
+        const int32_t db_max = db_open > db_close ? db_open : db_close;
+        const float judge = (float)(db_max > CTRL_CHECKMIN * fs ? db_max : CTRL_CHECKMIN * fs);
         const bool judged = fabsf(moved) >= judge;
         const int way = judged ? sgnf(moved) : !in->moving && pin_open ? 1 : !in->moving && pin_min ? -1 : 0;
         if (way) {
@@ -189,19 +230,10 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->win_pv = pv;
     }
 
-    // W-6 wrong way: pinned at the end that moves the pressure away from the
-    // target. With KDIR right the loop leaves that end within a step or two.
-    {
-        const float tol = 0.01f * pos_max;
-        const bool shut = in->limit || (float)in->pos <= lo + tol;
-        const bool full = (float)in->pos >= pos_max - tol;
-        const bool wrong = !in->moving && ((shut && c->sp > k->band && c->sp - pv > k->band) ||
-                                           (full && pv - c->sp > k->band));
-        if (!wrong)
-            c->right_ms = in->t_ms;
-        else if (since(in->t_ms, c->right_ms) > CTRL_TWRONG_S * 1000u)
-            return CTRL_W06;
-    }
+    // W-6 (pinned at the wrong end for 60 s) removed in 0.15.11 (Ryan 5 Nov):
+    // at low pressure the valve rightly sits within 1 % of closed with the
+    // pressure under the band for minutes, and it tripped there. A KDIR the
+    // wrong way round still ends AUTO by W-2 (CTRL_TCONV_S).
 
     // W-2 convergence timeout.
     if (fabsf(c->sp - pv) <= k->band)
