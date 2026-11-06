@@ -1923,7 +1923,10 @@ static void question_check(void)
 #define SPL_BAR_X 130
 #define SPL_BAR_W 220
 #define OFF_TAP_MS 600
-#define OFF_GREY   lv_color_hex(0x4A5664)
+// Brighter from 0.16.0 (Ryan 6 Nov: "make the turned off screen brighter";
+// were 0x4A5664 and 0x6B7787, hard to see): still on black, still grey.
+#define OFF_GREY   lv_color_hex(0xA9B4C0)
+#define OFF_TEXT   lv_color_hex(0xD3D9E0)
 
 static lv_obj_t *splash_scr;
 
@@ -2002,7 +2005,7 @@ static void off_draw(lv_obj_t *s)
     lv_obj_set_style_bg_color(s, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s, LV_OPA_COVER, 0);
     power_icon(s, 240, 112, 64, OFF_GREY);
-    ui_label(s, 0, 176, 480, &ui_font_16, lv_color_hex(0x6B7787), LV_TEXT_ALIGN_CENTER, "Double tap to turn on");
+    ui_label(s, 0, 176, 480, &ui_font_16, OFF_TEXT, LV_TEXT_ALIGN_CENTER, "Double tap to turn on");
 }
 
 void ui_splash(void)
