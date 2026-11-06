@@ -59,6 +59,8 @@ So a test that is stopped, stalls, loses the link or is cut short by closing the
 
 Download session CSV (Logger box) gives the samples since the GUI started, up to 4 hours, from memory.
 
+Long logs (a weekend): the GUI's memory does not grow (the page keeps 4 hours, the event log 200 lines) and the logger file grows about 0.3 MB an hour, so 70 hours is one file of about 20 MB and 250,000 rows, which Excel opens. What stops a log is the PC sleeping. On Windows the GUI asks the PC not to sleep on its own while it runs (`--allow-sleep` turns that off); the screen can still turn off. Closing the lid, Sleep from the Start menu or a Windows Update restart still stop it, so keep the laptop plugged in with the lid open and restart for any pending update before you leave. Closing the browser tab does not stop the log; closing the GUI's window does. A gap of over a minute with no samples is written to the event log with its start and end, so a gap shows on Monday.
+
 ## Run it with Python
 
 Python 3.8 or later, standard library only. Keep `tools/pmc-gui` and `tools/gain-schedule` side by side (it imports the step fit from there), so nothing needs pip or admin rights. On Windows without admin, the "Windows embeddable package" zip from python.org runs after unzipping.

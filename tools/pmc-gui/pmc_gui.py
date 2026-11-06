@@ -33,6 +33,8 @@ started from (--log-dir to change it):
                            table the table after every setpoint and each
                            valve step's raw data. A run that stops, stalls
                            or loses the link keeps everything up to there.
+On Windows the GUI keeps the PC from sleeping on its own while it runs
+(--allow-sleep to let it), and notes any gap in the samples.
 
 Python 3.8 or later, standard library only: nothing to install, and no
 admin rights needed. Keep tools/pmc-gui and tools/gain-schedule side by side
@@ -77,6 +79,7 @@ RIDE_S = 120                # a gain table run waits this long for the link
 SETTLED_S = 60              # setpoint step test: held this long within the band = settled
 SETTLE_PCT = 5.0            # its band: this % of the step, or the Band box if larger
 FIRST_MAX_S = 600           # the most it waits for the first setpoint to hold
+GAP_S = 60                  # no sample for this long: noted in the event log
 COLS = ['t_s', 'sp_mbar', 'p_mbar', 'valve_pct', 'mode', 'alarm', 'stage']
 # The 336 inputs on this rig, used when an input is given without a name.
 LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
@@ -432,6 +435,7 @@ class Board:
         self.cmds = queue.Queue()
         self.hist = []            # COLS + one per 336 input
         self.t0 = time.time()
+        self.last_wall = None     # PC time of the last sample, to see a gap (the PC asleep)
         self.state = {'link': 'connecting', 'idn': '', 'pid': None, 'log': []}
         self.logger = Logger(log_dir)
         self.ls = None
@@ -573,6 +577,13 @@ class Board:
         return COLS + [ls_col(i, n) for i, n in (self.ls.inputs if self.ls and self.ls.host else [])]
 
     def add_row(self, row):
+        now = time.time()
+        if self.last_wall is not None and (now - self.last_wall) * self.speed > GAP_S:
+            gap = int(now - self.last_wall)
+            self.note('no samples for %d h %02d min, %s to %s: was this PC asleep, or both links down?' % (
+                gap // 3600, gap % 3600 // 60, time.strftime('%a %H:%M', time.localtime(self.last_wall)),
+                time.strftime('%a %H:%M', time.localtime(now))))
+        self.last_wall = now
         with self.lock:
             self.hist.append(row)
             del self.hist[:-HISTORY]
@@ -1418,6 +1429,22 @@ def make_handler(board):
     return H
 
 
+def keep_awake():
+    """Ask Windows not to sleep on its own while the GUI runs, so a long
+    log has no gaps (the CSV of 6 Nov had none from 17:27 to 10:40: the
+    laptop slept). The screen can still turn off. Closing the lid or Sleep
+    from the Start menu still sleeps. No admin rights needed; lasts until
+    the GUI closes."""
+    if sys.platform != 'win32':
+        return False
+    try:
+        import ctypes
+        ES_CONTINUOUS, ES_SYSTEM_REQUIRED = 0x80000000, 0x00000001
+        return bool(ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED))
+    except (OSError, AttributeError):
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('host', help='board IP, or IP:port (port 8888 by default)')
@@ -1428,6 +1455,8 @@ def main():
     ap.add_argument('--port', type=int, default=8080, help='web page port on this PC (default 8080)')
     ap.add_argument('--bind', default='127.0.0.1',
                     help='address the page listens on (default this PC only; 0.0.0.0 lets other PCs open it)')
+    ap.add_argument('--allow-sleep', action='store_true',
+                    help='let Windows sleep while the GUI runs (by default it keeps the PC awake)')
     ap.add_argument('--speed', type=float, default=1.0, help=argparse.SUPPRESS)   # simulator only
     a = ap.parse_args()
     try:
@@ -1456,6 +1485,8 @@ def main():
     threading.Thread(target=board.run, daemon=True).start()
     print('board %s:%d, open http://localhost:%d  (Ctrl+C to stop)' % (board.addr + (port,)))
     print('logging to %s' % board.logger.folder)
+    if not a.allow_sleep and keep_awake():
+        print('keeping this PC awake while the GUI runs (the screen can turn off; keep it plugged in, lid open)')
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
