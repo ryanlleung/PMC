@@ -401,13 +401,13 @@ int main(int argc, char **argv)
         tap(415, 72); BACK();                                   // PID tile: PID tuning
         tap(415, 184); tap(212, 72); HOME();                    // Trend
         tap(415, 184); tap(386, 72); HOME();                    // Events
-        tap(415, 184); tap(386, 128); HOME();                   // Diagnostics
-        tap(415, 184); tap(386, 184); HOME();                   // System
+        tap(415, 184); tap(386, 128); HOME();                   // Calibrate sensor (0.15.19)
+        tap(415, 184); tap(386, 184);                           // System
+        tap(298, 184); BACK(); HOME();                          //   Diagnostics (0.15.19)
         tap(415, 184); tap(212, 184);                           // Settings
         tap(123, 72); BACK();                                   //   Choose sensor
-        tap(357, 72); BACK();                                   //   Calibrate sensor
-        tap(123, 128); BACK();                                  //   Valve setup
-        tap(357, 128); BACK();                                  //   PID tuning
+        tap(357, 72); BACK();                                   //   Valve setup
+        tap(123, 128); BACK();                                  //   PID tuning
         tap(123, 184); BACK();                                  //   Review and save
         HOME();
     }

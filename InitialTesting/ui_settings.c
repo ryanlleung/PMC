@@ -565,7 +565,7 @@ extern const ui_screen_t ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_sen
                          ui_scr_review;
 
 static struct {
-    lv_obj_t *tile[5];
+    lv_obj_t *tile[4];
 } st;
 
 static void tile_cb(lv_event_t *e)
@@ -615,16 +615,16 @@ static void restart_cb(lv_event_t *e)
 static void settings_build(lv_obj_t *scr)
 {
     // Navigation tiles only (common HMI template): System is on the Menu,
-    // Motor override on Valve position, Restart on System. The transducer
-    // calibration, a settings page (Save settings, Discard changes), is
-    // here beside Choose sensor. Review and save bottom left, with the save
-    // icon in front (0.13.19, Ryan 28 Oct).
-    static const char *const names[5] = { "Choose sensor", "Calibrate sensor", "Valve setup", "PID tuning",
+    // Motor override on Valve position, Restart on System. Calibrate sensor
+    // is on the Menu again from 0.15.19 (Ryan 6 Nov; here from 0.15.9).
+    // Review and save bottom left, with the save icon in front (0.13.19,
+    // Ryan 28 Oct).
+    static const char *const names[4] = { "Choose sensor", "Valve setup", "PID tuning",
                                           LV_SYMBOL_SAVE "  Review and save" };
-    const ui_screen_t *const to[5] = { &ui_scr_sensor_set, &ui_scr_sensor_cal, &ui_scr_valve_set, &ui_scr_tune,
-                                       &ui_scr_review };
-    for (int i = 0; i < 5; i++)
-        st.tile[i] = ui_btn(scr, i % 2 ? 244 : 10, RY[i / 2], 226, RH, UI_NAV, names[i], tile_cb, (void *)to[i]);
+    const ui_screen_t *const to[4] = { &ui_scr_sensor_set, &ui_scr_valve_set, &ui_scr_tune, &ui_scr_review };
+    static const int32_t tx[4] = { 10, 244, 10, 10 }, ty[4] = { 0, 0, 1, 2 };
+    for (int i = 0; i < 4; i++)
+        st.tile[i] = ui_btn(scr, tx[i], RY[ty[i]], 226, RH, UI_NAV, names[i], tile_cb, (void *)to[i]);
     side.save = side.discard = NULL;
 }
 
@@ -632,20 +632,13 @@ static void settings_refresh(void)
 {
     char t[48], p[32], d[24];
     cfg_sensor_t s;
-    // Which sensor is read, and when its saved calibration was made.
-    const cal_rec_t *cal = NULL;
+    // Which sensor is read.
     if (cfg_sensor(cfg_sensor_active(), &s)) {
         lv_snprintf(t, sizeof t, "In use: %s", sensor_name(p, sizeof p, s.serial));
         ui_btn_text(st.tile[0], "Choose sensor", t);
-        cfg_saved_cal(s.serial, &cal);
     }
-    if (cal && cal_date(d, sizeof d, cal))
-        lv_snprintf(t, sizeof t, "Saved %s", d);
-    else
-        lv_strlcpy(t, cal ? "Saved" : "None saved", sizeof t);
-    ui_btn_text(st.tile[1], "Calibrate sensor", t);
     lv_snprintf(t, sizeof t, "%s turns", value_text(d, sizeof d, CFG_POSMAX, live(CFG_POSMAX)));
-    ui_btn_text(st.tile[2], "Valve setup", t);
+    ui_btn_text(st.tile[1], "Valve setup", t);
     {
         // The set in use; with the schedule on (0.15.15) its number, not KD.
         char a[16], b[16];
@@ -657,7 +650,7 @@ static void settings_refresh(void)
             lv_snprintf(t, sizeof t, "KP %s, TI %s, KD %s", fixed_fmt(d, sizeof d, live(CFG_KP), 2),
                         fixed_fmt(a, sizeof a, live(CFG_TI), 2), fixed_fmt(b, sizeof b, live(CFG_KD), 2));
     }
-    ui_btn_text(st.tile[3], "PID tuning", t);
+    ui_btn_text(st.tile[2], "PID tuning", t);
     // Without side buttons: the strip only.
     char c[32], w[24];
     uint32_t rev;
@@ -829,13 +822,17 @@ static void remote_cb(lv_event_t *e)
 static void nn_build(lv_obj_t *scr)
 {
     // Common HMI template: on the Menu; Address in use dropped (static
-    // only, the IP address tile says it), Firmware 343 wide with Restart
-    // beside it in the STOP column.
+    // only, the IP address tile says it), Firmware, Diagnostics and Restart
+    // in the bottom row.
     nn.name = ui_btn(scr, 10, RY[0], 226, RH, UI_NAV, "Cryostat name", nn_go, (void *)&ui_scr_name);
     nn.net = ui_btn(scr, 244, RY[0], 226, RH, UI_NAV, "IP address", nn_go, (void *)&ui_scr_netaddr);
     // The MAC, for the site's network records (Ryan, 28 Oct).
     nn.mac = ui_info(scr, 10, RY[1], 226, RH, "MAC address");
-    nn.fw = ui_info(scr, 10, RY[2], 343, RH, "Firmware");
+    // Firmware 226 wide from 0.15.19 (343 to 0.15.18), with Diagnostics
+    // beside it (from the Menu, Ryan 6 Nov), then Restart.
+    nn.fw = ui_info(scr, 10, RY[2], 226, RH, "Firmware");
+    // No chevron: "Diagnostics" needs the button's whole 109 px.
+    ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Diagnostics", nn_go, (void *)&ui_scr_diag);
     // Remote control: the name and what it means, the switch on the right.
     lv_obj_t *c = nn.remote = ui_card(scr, 244, RY[1], 226, RH);
     lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);

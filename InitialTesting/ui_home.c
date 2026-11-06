@@ -739,11 +739,12 @@ const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
 
 /* --------------------------------------------------------------------------
  * Menu: six tiles in three captioned rows, as the common HMI template:
- * Records (Trend, Events), Service (the valve page, Diagnostics), Setup
- * (Settings, System). Calibrate sensor is under Settings beside Choose
- * sensor; the motor screen is on Valve position.
+ * Records (Trend, Events), Service (the valve page, Calibrate sensor),
+ * Setup (Settings, System). From 0.15.19 (Ryan 6 Nov) Calibrate sensor is
+ * back on the Menu in Diagnostics' place, and Diagnostics is on System;
+ * the motor screen is on Valve position.
  * ------------------------------------------------------------------------ */
-static const ui_screen_t *const menu_scr[6] = { &ui_scr_trend, &ui_scr_faults, &ui_scr_calib, &ui_scr_diag,
+static const ui_screen_t *const menu_scr[6] = { &ui_scr_trend, &ui_scr_faults, &ui_scr_calib, &ui_scr_sensor_cal,
                                                 &ui_scr_settings, &ui_scr_namenet };
 
 static void menu_tile_event(lv_event_t *e)
@@ -756,7 +757,7 @@ static void menu_build(lv_obj_t *scr)
     // Grouped in rows with a caption on the left, as on Diagnostics.
     static const char *const rows[3] = { "Records", "Service", "Setup" };
     static const char *const names[6] = { "Trend", "Events", "Valve position",
-                                          "Diagnostics", "Settings", "System" };
+                                          "Calibrate sensor", "Settings", "System" };
     // Caption and two tiles in 1 : 1.5 : 1.5, the caption centred on its row.
     for (int r = 0; r < 3; r++) {
         lv_obj_t *l = ui_label(scr, 10, 0, 111, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);
