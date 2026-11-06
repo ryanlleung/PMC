@@ -80,7 +80,7 @@ For temperature control the two regimes map onto two ways of working:
 - **Base regime** (setpoint at or near the lowest the cryostat reaches, heater off): the pressure sets the temperature through saturation. The controller should take the pressure setpoint from a measured temperature-to-pressure table and trim it slowly on the temperature error. The heater has no authority here because it would only boil the pool.
 - **Heater regime** (setpoint above base, so the heater is doing work): the heater holds the temperature at 10 Hz on the 336, and the valve, through the pressure setpoint, is moved slowly so the heater output sits near its target fraction. This is the ITC scheme. The direction is unambiguous in this regime: more pressure means more flow means more cooling means the heater has to work harder. Heater too high, lower the pressure setpoint; heater near zero (temperature above setpoint with no heating), raise it.
 
-A helium-starved cryostat is a third state, not a regime: on 6 November, with the dewar dry, opening the valve warmed the cold head. In that state neither actuator can hold the temperature, the heater-balance loop would raise the pressure setpoint to its limit, and the heater would sit at 100 %. The scheme has to recognise and stop on it (section 5.4).
+Two states outside both regimes matter as well. The first happened on 6 November: the 336 heater loop had been left on with a 100 K setpoint while the mm4 held a pressure, so input A sat at exactly 100.00 K, opening the valve 40 to 50 % only made the heater work harder, and the cold head warmed from 11 to 16 K because the gas reaching it had been heated to 100 K in the heat exchanger. Two controllers with one actuator each, no coordination, and the GUI log had no heater column, so the fight was invisible until Ryan looked at the 336. That is the case for this document in one picture. The second state is helium starvation (a dry dewar, a siphon out of the liquid): the heater-balance loop would then raise the pressure setpoint to its clamp and the heater would pin at 100 % without the temperature coming down. The scheme has to recognise both and stop (section 5.4).
 
 ### 3.3 Time scales
 
@@ -144,7 +144,8 @@ Two non-options, for the record. The 336 alone cannot do it: it has no way to mo
 
 ### 5.4 Protection the coordinator must have
 
-- **Helium lost**: heater at or near 100 % of range and the pressure setpoint at its upper clamp for more than a few minutes, or input A rising while the valve opens, is the 6 November signature. Stop adjusting, set the heater range to Off (`RANGE 1,0`), leave the mm4 holding its pressure, and raise an alarm. `TLIMIT` on the 336 is the backstop for the sample, independent of the network.
+- **Heater fighting the flow** (6 November): a heater setpoint far above the working range, or a heater output above a few percent while the operator is working on the pressure, means two controllers are pulling against each other. The coordinator must own the 336 setpoint and range while it is active, and when it is not active it should still read `SETP? 1`, `RANGE? 1` and `HTR? 1` and show them beside the temperatures, so a heater left on is seen. The same applies to the gain table and autotune runs, which should refuse to start with the heater on at a setpoint above the band being tuned.
+- **Helium lost**: heater at or near 100 % of range and the pressure setpoint at its upper clamp for more than a few minutes, with the temperature not falling. Stop adjusting, set the heater range to Off (`RANGE 1,0`), leave the mm4 holding its pressure, and raise an alarm. `TLIMIT` on the 336 is the backstop for the sample, independent of the network.
 - **336 link lost**: freeze the pressure setpoint and tell the operator. The 336 keeps its heater loop running on its own, the mm4 keeps its pressure; nothing moves to a worse state.
 - **mm4 leaves AUTO** (fault, W-2, W-4, W-5, operator STOP): stop the slow loop, keep the heater loop, alarm. Do not restart AUTO from the coordinator after a fault; a person decides (as the handover page already says for drivers).
 - **Operator takes the mm4 screen** (changes the setpoint or the mode): the coordinator sees the setpoint it did not write and drops to monitoring. The mm4 screen stays live for a reason.
@@ -152,13 +153,13 @@ Two non-options, for the record. The 336 alone cannot do it: it has no way to mo
 
 ## 6. What to find out on the bench before building
 
-These need no firmware change. The GUI can log all of it if `HTR? 1` is added to its 336 poll (a small change, not made here).
+These need no firmware change. The GUI can log all of it if `HTR? 1`, `SETP? 1` and `RANGE? 1` are added to its 336 poll (a small change, not made here).
 
 1. **Which heater, which sensor.** Confirm on the instrument: which 336 output is wired to the heat exchanger heater and which (if any) to a sample heater, the heater resistance and maximum current (`HTRSET? 1`, `HTRSET? 2`), and which input the loop should control from (A is nearest the exchanger). Confirm the 336 is on Ethernet (`INTSEL`), its address, and whether SICS or Frappy already holds one of its two connections.
 2. **Heater loop alone.** With the mm4 holding 8 mbar in AUTO and the heat exchanger cold and steady (A below 5 K, moving less than 0.5 K in 10 min), set `OUTMODE 1,1,A,0`, `RANGE 1,2`, `SETP 1,<A + 1 K>` and watch the heater percentage settle. Run the 336 autotune if it hunts. This tells us the heater has authority at that flow and gives the first PID set.
 3. **Heater percent per mbar.** Holding the same temperature, step the pressure setpoint 8 to 5 to 12 mbar and record the steady heater percentage at each. The slope (percent of range per mbar) and how long it takes to settle are the two numbers the slow loop's gain and period come from. Repeat at a second temperature (say 10 K) to see how much the slope changes.
 4. **Temperature-to-pressure table for the base regime.** Heater off, cold and wet, hold 2, 3, 5, 8, 12 mbar for 10 min each and record A and D. This replaces the saturation-temperature column above with measured values.
-5. **Helium-lost signature.** No test needed: the 6 November log already shows it. Write the thresholds from it.
+5. **Heater in the log.** Add `HTR? 1`, `SETP? 1` and `RANGE? 1` to the GUI's 336 poll so every run records what the heater was doing. The 6 November log could not tell a heater fight from a dry dewar because it had no heater column.
 
 With those numbers the GUI card (option A) can be built and tried in a day, and the Frappy module (option B) specified with real limits.
 
