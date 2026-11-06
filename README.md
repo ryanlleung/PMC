@@ -13,7 +13,7 @@ The controller is a MikroE Mikromedia 4 (STM32F407ZG) touchscreen board with fou
 | Folder | Holds |
 | --- | --- |
 | `InitialTesting/` | The firmware (NECTO Studio 7 project, mikroSDK, LVGL 9.4) |
-| `docs/` | Operation manual (`mm4-operation-manual.md`), Modbus register map (`modbus-register-map.md`), hardware schematics and wiring (`hardware/`), HMI reference |
+| `docs/` | Operation manual (`mm4-operation-manual.md`), Modbus register map (`modbus-register-map.md`), hardware schematics and wiring (`hardware/`), HMI reference, evaluation of temperature control with the Lake Shore 336 (`lakeshore-336-temperature-control-evaluation.md`) |
 | `simulator/` | The firmware compiled to WebAssembly, run in a browser over a simulated bench (`simulator/README.md`) |
 | `secop/` | A reference Frappy (SECoP) driver for the text port (`secop/README.md`) |
 | `tools/` | PC tests, screen previews, a cross-build, a logger and calibration helpers |
