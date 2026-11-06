@@ -349,6 +349,15 @@ void ui_btn_enable(lv_obj_t *b, bool on)
         lv_obj_set_style_text_color(lv_obj_get_child(b, 1), on ? UI_CHEV : UI_IDLE, 0);
 }
 
+void ui_btn_blue(lv_obj_t *b)
+{
+    // A navigation tile filled dark blue with white lettering, the colour of
+    // Start AUTO (0.15.23: Settings on the Menu, Review and save).
+    ui_btn_primary(b, true);
+    for (uint32_t c = 0; c < lv_obj_get_child_count(b); c++)
+        lv_obj_set_style_text_color(lv_obj_get_child(b, (int32_t)c), lv_color_white(), 0);
+}
+
 void ui_btn_primary(lv_obj_t *b, bool on)
 {
     if (on == lv_obj_has_flag(b, LV_OBJ_FLAG_USER_2))

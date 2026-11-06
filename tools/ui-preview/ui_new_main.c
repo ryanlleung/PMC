@@ -379,10 +379,9 @@ int main(int argc, char **argv)
     size_t before = heap_used();
     // Header (common HMI template, 0.15.9): Home at x 0-44 on every page
     // but Home, Back at 44-88; on Home the power icon is at 0-44.
-    // Menu: Trend, Events / Valve position, Diagnostics / Settings, System
+    // Menu: Trend, Events / Valve position, Calibration / System, Settings
     // at x 129 and 303, rows y 48, 104, 160. Settings: Choose sensor,
-    // Calibrate sensor / Valve setup, PID tuning / Review and save at x 10
-    // and 244.
+    // Valve setup / PID tuning, Review and save at x 10 and 244.
 #define HOME() tap(22, 20)
 #define BACK() tap(66, 20)
     for (int i = 0; i < 10; i++) {
@@ -402,9 +401,9 @@ int main(int argc, char **argv)
         tap(415, 184); tap(212, 72); HOME();                    // Trend
         tap(415, 184); tap(386, 72); HOME();                    // Events
         tap(415, 184); tap(386, 128); HOME();                   // Calibrate sensor (0.15.19)
-        tap(415, 184); tap(386, 184);                           // System
+        tap(415, 184); tap(212, 184);                           // System
         tap(298, 184); BACK(); HOME();                          //   Diagnostics (0.15.19)
-        tap(415, 184); tap(212, 184);                           // Settings
+        tap(415, 184); tap(386, 184);                           // Settings (right, 0.15.23)
         tap(123, 72); BACK();                                   //   Choose sensor
         tap(357, 72); BACK();                                   //   Valve setup
         tap(123, 128); BACK();                                  //   PID tuning

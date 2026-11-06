@@ -618,18 +618,14 @@ static void settings_build(lv_obj_t *scr)
     // is on the Menu again from 0.15.19 (Ryan 6 Nov; here from 0.15.9).
     // Review and save with the save icon in front (0.13.19, Ryan 28 Oct);
     // from 0.15.22 (Ryan 6 Nov) on the second row, right of PID tuning,
-    // filled dark with white lettering so it reads apart from the pages.
+    // filled with white lettering so it reads apart from the pages; dark
+    // blue from 0.15.23, as Settings on the Menu.
     static const char *const names[4] = { "Choose sensor", "Valve setup", "PID tuning",
                                           LV_SYMBOL_SAVE "  Review and save" };
     const ui_screen_t *const to[4] = { &ui_scr_sensor_set, &ui_scr_valve_set, &ui_scr_tune, &ui_scr_review };
     for (int i = 0; i < 4; i++)
         st.tile[i] = ui_btn(scr, i % 2 ? 244 : 10, RY[i / 2], 226, RH, UI_NAV, names[i], tile_cb, (void *)to[i]);
-    lv_obj_t *rv_tile = st.tile[3];
-    lv_obj_set_style_bg_color(rv_tile, UI_TEXT, 0);
-    lv_obj_set_style_bg_color(rv_tile, lv_color_hex(0x3C4856), LV_STATE_PRESSED);
-    lv_obj_set_style_border_width(rv_tile, 0, 0);
-    for (uint32_t c = 0; c < lv_obj_get_child_count(rv_tile); c++)
-        lv_obj_set_style_text_color(lv_obj_get_child(rv_tile, (int32_t)c), lv_color_white(), 0);
+    ui_btn_blue(st.tile[3]);
     side.save = side.discard = NULL;
 }
 

@@ -85,7 +85,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(a, 'home-ip');
   a.tap(415, 128); shot(a, 'home-ip-system');
   const b = homed(load());
-  b.tap(415, 184); b.tap(386, 184);
+  b.tap(415, 184); b.tap(212, 184);   // Menu > System (left of Settings from 0.15.23)
   check('Home IP tile opens System', hdr(a) === hdr(b) && hdr(a) !== home);
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
@@ -366,7 +366,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('switch Off: PRES SP refused', s.cmd('PRES SP 5') === 'ERR 211 Read only over the network\r\n', s.cmd('PRES SP 5'));
   check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: queries answer', s.cmd('MODE?;PRES SP?') === 'MODE NOT HOMED;PRES SP NONE\r\n', s.cmd('MODE?;PRES SP?'));
-  s.tap(415, 184); s.tap(386, 184); s.tap(357, 128);   // Menu, System, Remote control (HMI template)
+  s.tap(415, 184); s.tap(212, 184); s.tap(357, 128);   // Menu, System, Remote control (HMI template)
   check('switch On from the screen: PRES SP taken', s.cmd('PRES SP 5;PRES SP?') === 'PRES SP 5.0 mbar\r\n', s.cmd('PRES SP?'));
   check('switch On is a NET event', /NET,Remote control on \(screen\)/.test(events(s, 5)), events(s, 5));
   shot(s, 'system');

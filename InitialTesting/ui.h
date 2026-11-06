@@ -57,6 +57,7 @@ void ui_btn_text(lv_obj_t *btn, const char *text, const char *small);
 void ui_btn_enable(lv_obj_t *btn, bool on);
 // Filled (primary) or plain, for a button whose role changes with the state.
 void ui_btn_primary(lv_obj_t *btn, bool on);
+void ui_btn_blue(lv_obj_t *btn);   // nav tile filled dark blue, white lettering
 void ui_btn_outline(lv_obj_t *btn, bool on);   // white, blue edge and word
 bool ui_btn_disabled(lv_event_t *e);
 void ui_btn_arrow(lv_obj_t *btn, bool up);       // a drawn 21 x 12 Up or Down chevron in place of the label
