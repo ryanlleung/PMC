@@ -275,13 +275,14 @@ static void tests(void)
         req(sizeof g, g);
         CHECK(rlen == 12 && tune[CFG_KP3] == 120 && tune[CFG_TI3] == 30 && tune[CFG_KD3] == 5 && tune[CFG_KP] == 400);
         REQ(0x03, 0, 45, 0, 2);   CHECK(fabsf(rf(0) - 1.2f) < 1e-5f);
-        // Out of range, a type past 2, half a float, the read-only set register, B2 under B1.
+        // Out of range, a type past 2 or 1 (the setpoint, removed), half a float, the read-only set register, B2 under B1.
         uint8_t k0[] = { 0x10, 0, 33, 0, 2, 4, 0, 0, 0, 0 };
         f32(0.0f, k0 + 6); req(sizeof k0, k0);       CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_KP] == 400);
         f32(NAN, k0 + 6); req(sizeof k0, k0);        CHECK(is_ex(0x10, MODBUS_EX_VALUE));
         REQ(0x10, 0, 27, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);
         REQ(0x10, 0, 32, 0, 1, 2, 0, 41);            CHECK(is_ex(0x10, MODBUS_EX_VALUE));
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 1);             CHECK(rlen == 12 && tune[CFG_SCHED] == 1);
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 1);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);   // 1, the setpoint, removed in 0.15.20
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 0);             CHECK(rlen == 12 && tune[CFG_SCHED] == 0);
         REQ(0x10, 0, 28, 0, 1, 2, 0x40, 0xD0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 26, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 29, 0, 2, 4, 0, 0, 0, 0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));   // the second half of B1

@@ -47,7 +47,7 @@ Rewriting the target with the value it already has changes nothing (no event; th
 | 22-23 | F32 | Controller temperature | degC, Power Monitor die. NaN if it does not answer |
 | 24-25 | U32 | Uptime | Seconds since start-up, high word first |
 | 26 | U16 | PID set in use | 1 to 3. In AUTO the set the gain schedule has switched to; otherwise the set AUTO would start with now. 1 with the schedule Off (0.15.15) |
-| 27 | U16 W | Gain schedule | 0 Off (set 1 always), 1 on the setpoint, 2 on the pressure |
+| 27 | U16 W | PID table (gain schedule) | 0 Off (set 1 always), 2 on the pressure. 1 (the setpoint, 0.15.15 to 0.15.19) answers exception 3 from 0.15.20 |
 | 28-29 | F32 W | Boundary 1 | mbar, kept to 0.1 mbar, 0.1 to 1000: set 1 below, set 2 above |
 | 30-31 | F32 W | Boundary 2 | mbar, as boundary 1: set 2 below, set 3 above |
 | 32 | U16 W | Hysteresis | % of the boundary, 0 to 40. On the pressure a set changes only this far past a boundary |
@@ -59,7 +59,7 @@ Reading past address 50 answers exception 2. Read 0 to 50 (51 registers) in one 
 
 ### Gain schedule (registers 26 to 50)
 
-The same settings as Settings > PID tuning on the screen (PID and Schedule tabs) and the text port's `PIDS` and `SCHED` commands. A write is a tuning save, as the screen's Save settings: it is taken in AUTO too, from the next control step, and kept through a power cycle. One FC16 can write any run of registers 27 to 50 (each float whole); the values are checked first, then saved together in one flash write. A write that changes nothing writes nothing. A value out of range or NaN answers exception 3 and changes nothing. Boundary 2 must be above boundary 1 by more than the hysteresis either side (B1 x (1 + H) below B2 x (1 - H)); a write that breaks this answers exception 4 and logs the reason. Register 26 is read only.
+The same settings as Settings > PID tuning on the screen (PID and PID table tabs) and the text port's `PIDS` and `SCHED` commands. A write is a tuning save, as the screen's Save settings: it is taken in AUTO too, from the next control step, and kept through a power cycle. One FC16 can write any run of registers 27 to 50 (each float whole); the values are checked first, then saved together in one flash write. A write that changes nothing writes nothing. A value out of range or NaN answers exception 3 and changes nothing. Boundary 2 must be above boundary 1 by more than the hysteresis either side (B1 x (1 + H) below B2 x (1 - H)); a write that breaks this answers exception 4 and logs the reason. Register 26 is read only.
 
 The set in use changes in AUTO when the pressure (schedule 2) passes a boundary by the hysteresis, or when the setpoint (schedule 1) crosses a boundary. Each change is logged ("AUTO PID set 3 to 2, pressure 16.9 mbar"). A change re-bases the integral, so the valve does not jump.
 

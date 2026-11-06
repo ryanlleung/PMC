@@ -1046,7 +1046,7 @@ class Board:
         if self.state.get('board_sched') in ('SP', 'PV'):
             # The board picks its own PID set: a PID SET here would overwrite
             # the set in use.
-            self.note('gain schedule off: the board has its own (SCHED %s)' % self.state['board_sched'])
+            self.note('gain schedule off: the board has its own PID table on (SCHED %s)' % self.state['board_sched'])
             self.schedule = False
             return
         kp, ti = gains_for(self.table, sp)

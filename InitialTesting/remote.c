@@ -229,10 +229,8 @@ static bool query(const char *c)
         reply("PIDS %d,%s,%s,%s,%s,%s,%s,%s,%s,%s", valve_pid_set(), g[0][0], g[0][1], g[0][2],
               g[1][0], g[1][1], g[1][2], g[2][0], g[2][1], g[2][2]);
     } else if (strcmp(c, "SCHED?") == 0) {
-        static const char *const nm[3] = { "OFF", "SP", "PV" };
         char b1[16], b2[16];
-        int32_t ty = cfg_tune(CFG_SCHED);
-        reply("SCHED %s,%s,%s,%ld", nm[ty >= 0 && ty <= 2 ? ty : 0], fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1),
+        reply("SCHED %s,%s,%s,%ld", cfg_tune(CFG_SCHED) == CTRL_SCHED_PV ? "PV" : "OFF", fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1),
               fixed_fmt(b2, sizeof b2, cfg_tune(CFG_B2), 1), (long)cfg_tune(CFG_HYST));
     } else {
         return false;
@@ -319,11 +317,11 @@ static void pid_set(const char *c, bool pick)
         refuse_why(why);
 }
 
-// SCHED SET <OFF|SP|PV>,<b1>,<b2>,<h> (0.15.15): the gain schedule, as the
+// SCHED SET <OFF|PV>,<b1>,<b2>,<h> (0.15.15; SP removed in 0.15.20): the PID table, as the
 // PID tuning Schedule tab's Save. Boundaries in mbar (1 dp), hysteresis %.
 static void sched_set(const char *c)
 {
-    static const char *const form = "Expected: SCHED SET <OFF|SP|PV>,<b1>,<b2>,<h>";
+    static const char *const form = "Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<h>";
     static const cfg_key_t key[4] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST };
     static const char *const nm[4] = { "", "B1", "B2", "H" };
     static const int dec[4] = { 0, 1, 1, 0 };
@@ -348,7 +346,6 @@ static void sched_set(const char *c)
             while (q > p && q[-1] == ' ')
                 *--q = '\0';
             if (strcmp(p, "OFF") == 0) x = CTRL_SCHED_OFF;
-            else if (strcmp(p, "SP") == 0) x = CTRL_SCHED_SP;
             else if (strcmp(p, "PV") == 0) x = CTRL_SCHED_PV;
             else {
                 refuse(101, form);

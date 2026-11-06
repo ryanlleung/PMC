@@ -50,7 +50,7 @@ pid 3 1.2 0.3 0.05:  10 00 2d 00 06   accepted
 sched pv 20 6 15:  90 04   exception 4
 pid 4 1 1 1: set 1, 2 or 3"
 [ "$OUT" = "$WANT" ] || { echo "mb.sh FAIL: write commands"; echo "$OUT"; exit 1; }
-echo "$MAP" | grep -q "gain schedule pressure, B1 6.500 mbar, B2 22.000 mbar, hysteresis 10 %, set in use 1" &&
+echo "$MAP" | grep -q "PID table     on (pressure), B1 6.500 mbar, B2 22.000 mbar, hysteresis 10 %, set in use 1" &&
   echo "$MAP" | grep -q "set 3        KP 1.200, TI 0.300, KD 0.050" || { echo "mb.sh FAIL: schedule in the map"; echo "$MAP"; exit 1; }
 echo "mb.sh write commands: ok"
 if python3 -c "import pymodbus" 2>/dev/null; then

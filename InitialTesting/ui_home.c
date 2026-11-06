@@ -493,23 +493,14 @@ static void pid_make(lv_obj_t *scr, int32_t y)
     }
 }
 
-// The gains of the set in use. With the gain schedule on (0.15.15) the
-// set's number takes KD's place: Set, KP, TI.
+// KP, TI and KD of the set in use. With the PID table on, no set number
+// (0.15.20, Ryan 6 Nov: "just KP ti kd"; 0.15.15 to 0.15.19 Set, KP, TI).
 static void pid_refresh(void)
 {
-    static const char *const off[3] = { "KP", "TI", "KD" }, *const on[3] = { "Set", "KP", "TI" };
     const int set = valve_pid_set();
-    const bool sched = cfg_tune(CFG_SCHED) != CTRL_SCHED_OFF;
     char b[16];
-    for (int i = 0; i < 3; i++) {
-        ui_set_text(pid_nm[i], sched ? on[i] : off[i]);
-        if (sched && i == 0) {
-            lv_snprintf(b, sizeof b, "%d", set);
-            ui_set_text(pid_val[i], b);
-        } else {
-            ui_set_text(pid_val[i], fmt3(b, sizeof b, cfg_tune(cfg_pid_key(set, sched ? i - 1 : i))));
-        }
-    }
+    for (int i = 0; i < 3; i++)
+        ui_set_text(pid_val[i], fmt3(b, sizeof b, cfg_tune(cfg_pid_key(set, i))));
 }
 
 // Start AUTO --------------------------------------------------------------

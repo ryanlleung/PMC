@@ -145,10 +145,10 @@ static const field_t F[CFG_N] = {
     [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
-    [CFG_SCHED]   = { "Schedule on", NULL, 0, K_SCHED, "Scheduling variable. Off: set 1 only. Pressure: PV. Setpoint: SP" },
+    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Off: set 1 only. On: set picked by the pressure" },
     [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
-    [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary, Pressure schedule only" },
+    [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },
     [CFG_DBC]     = { "Deadband close", "steps", 0, K_NUM, "AUTO closing moves below this are skipped" },
     [CFG_SENSOR]  = { "Sensor in use", NULL, 0, K_CHOICE, "Transducer read for the pressure" },
 };
@@ -195,7 +195,7 @@ static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
     case K_CHOICE:
         return sensor_name(buf, n, (uint32_t)v);
     case K_SCHED:
-        return v == CTRL_SCHED_PV ? "Pressure" : v == CTRL_SCHED_SP ? "Setpoint" : "Off";
+        return v == CTRL_SCHED_PV ? "On" : "Off";
     default:
         return fixed_fmt(buf, n, v, F[k].dec);
     }
@@ -359,9 +359,8 @@ static void sensor_pick(int i);
 
 static void sched_pick(int i)
 {
-    static const int32_t v[3] = { CTRL_SCHED_OFF, CTRL_SCHED_PV, CTRL_SCHED_SP };
-    if (i >= 0 && i < 3)
-        set_draft(CFG_SCHED, v[i]);
+    if (i == 0 || i == 1)
+        set_draft(CFG_SCHED, i ? CTRL_SCHED_PV : CTRL_SCHED_OFF);
 }
 
 static void edit(cfg_key_t k)
@@ -402,9 +401,9 @@ static void edit(cfg_key_t k)
         }
         ui_pick("Sensor in use", items, n, sel, sensor_pick);
     } else if (F[k].kind == K_SCHED) {
-        static const char *const items[3] = { "Off, set 1 always", "Pressure", "Setpoint" };
-        int32_t now = shown(k);
-        ui_pick("Pick the PID set on", items, 3, now == CTRL_SCHED_PV ? 1 : now == CTRL_SCHED_SP ? 2 : 0, sched_pick);
+        // Off or on the pressure (the setpoint removed in 0.15.20, Ryan 6 Nov).
+        static const char *const items[2] = { "Off, set 1 always", "On, set by the pressure" };
+        ui_pick("PID table", items, 2, shown(k) == CTRL_SCHED_PV ? 1 : 0, sched_pick);
     } else {
         int32_t lo, hi, s;
         cfg_range(k, &lo, &hi);
@@ -640,15 +639,11 @@ static void settings_refresh(void)
     lv_snprintf(t, sizeof t, "%s turns", value_text(d, sizeof d, CFG_POSMAX, live(CFG_POSMAX)));
     ui_btn_text(st.tile[1], "Valve setup", t);
     {
-        // The set in use; with the schedule on (0.15.15) its number, not KD.
+        // The gains of the set in use, no set number (0.15.20, as Home's tile).
         char a[16], b[16];
         const int n = valve_pid_set();
-        if (live(CFG_SCHED) != CTRL_SCHED_OFF)
-            lv_snprintf(t, sizeof t, "Set %d: KP %s, TI %s", n, fixed_fmt(d, sizeof d, live(cfg_pid_key(n, 0)), 2),
-                        fixed_fmt(a, sizeof a, live(cfg_pid_key(n, 1)), 2));
-        else
-            lv_snprintf(t, sizeof t, "KP %s, TI %s, KD %s", fixed_fmt(d, sizeof d, live(CFG_KP), 2),
-                        fixed_fmt(a, sizeof a, live(CFG_TI), 2), fixed_fmt(b, sizeof b, live(CFG_KD), 2));
+        lv_snprintf(t, sizeof t, "KP %s, TI %s, KD %s", fixed_fmt(d, sizeof d, live(cfg_pid_key(n, 0)), 2),
+                    fixed_fmt(a, sizeof a, live(cfg_pid_key(n, 1)), 2), fixed_fmt(b, sizeof b, live(cfg_pid_key(n, 2)), 2));
     }
     ui_btn_text(st.tile[2], "PID tuning", t);
     // Without side buttons: the strip only.
@@ -1218,9 +1213,9 @@ static const tab_t valve_tabs[3] = {
 // picks), and the gain schedule on its own tab.
 static const tab_t tune_tabs[3] = {
     { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3,
-      "Schedule on: three sets, tap one to edit; dot = set in use. Schedule Off: set 1 only. "
+      "PID table on: three sets, tap one to edit; dot = set in use. PID table off: set 1 only. "
       "Applied at the next control step; Save to keep.", true },
-    { "Schedule", { CFG_SCHED, CFG_HYST, CFG_B1, CFG_B2 }, 4,
+    { "PID table", { CFG_SCHED, CFG_HYST, CFG_B1, CFG_B2 }, 4,
       "Set 1 below B1, set 2 between, set 3 above B2. Set changes are bumpless. "
       "Applied at the next control step; Save to keep." },
     { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
@@ -1309,7 +1304,12 @@ static void sel_make(void)
         lv_snprintf(t, sizeof t, "Set %d", i + 1);
         ui_label(pg.selb[i], 0, 2, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, t);
         pg.selr[i] = ui_label(pg.selb[i], 0, 22, iw, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
-        pg.seld[i] = ui_card(pg.selb[i], 10, 9, 8, 8);
+        // The dot 6 px before "Set n", on the middle of its capitals (0.15.20,
+        // Ryan: it sat at the segment's left edge, apart from the name).
+        lv_point_t sz;
+        lv_text_get_size(&sz, t, &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        const int32_t cap_mid = 2 + ui_font_16.line_height - ui_font_16.base_line - 6;   // half a 12 px capital
+        pg.seld[i] = ui_card(pg.selb[i], (iw - sz.x) / 2 - 6 - 8, cap_mid - 4, 8, 8);
         lv_obj_set_style_radius(pg.seld[i], 4, 0);
         lv_obj_set_style_border_width(pg.seld[i], 0, 0);
         lv_obj_set_style_bg_color(pg.seld[i], UI_TEXT, 0);

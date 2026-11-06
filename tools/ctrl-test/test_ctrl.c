@@ -395,9 +395,8 @@ int main(int argc, char **argv)
         k.b1 = 8; k.b2 = 30; k.hyst = 0.15f;
         k.sched = CTRL_SCHED_OFF;
         bool off = ctrl_pick_set(&k, 0, 2) == 1 && ctrl_pick_set(&k, 3, 50) == 1;
-        k.sched = CTRL_SCHED_SP;
-        bool sp = ctrl_pick_set(&k, 0, 7.9f) == 1 && ctrl_pick_set(&k, 3, 7.9f) == 1 && ctrl_pick_set(&k, 1, 8) == 2 &&
-                  ctrl_pick_set(&k, 1, 29.9f) == 2 && ctrl_pick_set(&k, 1, 30) == 3;
+        k.sched = (ctrl_sched_t)1;   // the setpoint schedule, removed in 0.15.20: set 1, as Off
+        bool sp = ctrl_pick_set(&k, 0, 20) == 1 && ctrl_pick_set(&k, 3, 50) == 1;
         k.sched = CTRL_SCHED_PV;
         // Up: 1 to 2 past 9.2, 2 to 3 past 34.5. Down: 3 to 2 under 25.5, 2 to 1 under 6.8.
         bool pv = ctrl_pick_set(&k, 0, 8.5f) == 2 && ctrl_pick_set(&k, 1, 9.1f) == 1 && ctrl_pick_set(&k, 1, 9.3f) == 2 &&
@@ -405,7 +404,7 @@ int main(int argc, char **argv)
                   ctrl_pick_set(&k, 3, 25.6f) == 3 && ctrl_pick_set(&k, 3, 25.4f) == 2 &&
                   ctrl_pick_set(&k, 2, 6.9f) == 2 && ctrl_pick_set(&k, 2, 6.7f) == 1 &&
                   ctrl_pick_set(&k, 1, 50) == 3 && ctrl_pick_set(&k, 3, 2) == 1;
-        CHECK(off && sp && pv, "schedule: Off set 1; SP from the boundaries; PV 1>2 past 9.2, 2>3 past 34.5, 3>2 under 25.5, "
+        CHECK(off && sp && pv, "schedule: Off (and 1, the old SP) set 1; PV 1>2 past 9.2, 2>3 past 34.5, 3>2 under 25.5, "
               "2>1 under 6.8 mB, both at once on a large move");
         k.set23[1].kp = 0;
         CHECK(!strcmp(ctrl_check(&C, &k, true, false, true, 5, FS), "Tuning not set"), "schedule on: a set with KP 0 refused");

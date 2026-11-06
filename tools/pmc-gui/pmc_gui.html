@@ -492,7 +492,7 @@ async function refresh() {
     let edited = false;
     ['kp', 'ti', 'kd'].forEach((id, k) => { const c = $(id).value !== '' && Math.abs(+$(id).value - s.pid[k]) > 0.004; $(id).classList.toggle('changed', c); edited = edited || c; });
     const set = s.board_sched && s.board_sched !== 'OFF' && s.pid_set ?
-      ' (set ' + s.pid_set + ', gain schedule on the ' + (s.board_sched === 'PV' ? 'pressure' : 'setpoint') + ')' : '';
+      ' (set ' + s.pid_set + ', PID table on)' : '';
     $('pidNow').textContent = 'On the board' + set + ': KP ' + s.pid[0].toFixed(2) + ', TI ' + s.pid[1].toFixed(2) + ', KD ' + s.pid[2].toFixed(2) +
       (edited ? '. The amber boxes are not sent until Set and save.' : '.');
   }

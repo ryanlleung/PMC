@@ -615,11 +615,9 @@ let parkedFlash;
   check('2 -> 10: set 1 to 2 over 3.45, set 2 to 3 over 9.2 mbar', up.length === 2 && up[0][0] === 1 && up[0][1] === 2 &&
     up[0][2] >= 3.4 && up[0][2] < 4.5 && up[1][0] === 2 && up[1][1] === 3 && up[1][2] >= 9.2 && up[1][2] < 10.5, JSON.stringify(up));
   shot(s, 'gain-schedule');
-  // Setpoint schedule: the set follows the setpoint at once (no hysteresis).
-  check('SCHED SET SP in AUTO', one('SCHED SET SP,3,8,15;MODE?') === 'MODE AUTO\r\n', one('MODE?'));
-  s.cmd('PRES SP 5', 3000);
-  check('SP schedule: setpoint 5 gives set 2 at once', /^PIDS 2,/.test(one('PIDS?')) && /AUTO PID set 3 to 2, setpoint 5\.0 mbar/.test(events(s, 5)),
-    one('PIDS?') + events(s, 5));
+  // The setpoint schedule is gone (0.15.20, Ryan 6 Nov): SP is refused, the table stays on the pressure.
+  check('SCHED SET SP refused', one('SCHED SET SP,3,8,15') === 'ERR 101 Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<h>\r\n' &&
+    one('SCHED?') === 'SCHED PV,3.0,8.0,15\r\n', one('SCHED SET SP,3,8,15') + one('SCHED?'));
   check('SCHED SET OFF: set 1', one('SCHED SET OFF,6,20,15') === '' && (s.run(3000), /^PIDS 1,/.test(one('PIDS?'))) &&
     one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('PIDS?;PID?'));
 }

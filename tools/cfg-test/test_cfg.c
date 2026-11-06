@@ -719,10 +719,41 @@ static void test_sched(void)
     // In AUTO the schedule is tuning too: taken without leaving AUTO.
     v_auto = true;
     memset(set, 0, sizeof set);
-    v[CFG_SCHED] = 1; set[CFG_SCHED] = true;
+    v[CFG_SCHED] = 0; set[CFG_SCHED] = true;
     v[CFG_KP3] = 150; set[CFG_KP3] = true;
-    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 1 && cfg_tune(CFG_KP3) == 150);
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_KP3) == 150);
+    v[CFG_SCHED] = 2;
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2);
     v_auto = false;
+    // 1, the setpoint schedule (0.15.15 to 0.15.19), removed in 0.15.20:
+    // refused on save; a saved record holding it loads with the PID table Off.
+    memset(set, 0, sizeof set);
+    v[CFG_SCHED] = 1; set[CFG_SCHED] = true;
+    CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2);
+    {
+        uint32_t size8, a8 = 0, one = 1;
+        int sl = 0;
+        for (int i = 0; i < 2; i++) {
+            uint32_t r, ver;
+            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+            if (ver == 8 && r >= a8) { a8 = r; sl = i; }
+        }
+        uint32_t base = 0x7FD000 + sl * 0x1000;
+        memcpy(&size8, flash + base + 8, 4);
+        static uint8_t buf[4096];
+        memcpy(buf, flash + base, size8);
+        memcpy(buf + 16 + 7 * 4 + 7 * 4 + 13 * 4, &one, 4);   // tune[T_SCHED]
+        uint32_t c = crc32(buf, size8 - 4);
+        memcpy(buf + size8 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size8);
+        reboot();
+        uint32_t rev;
+        const char *at;
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
+        CHECK(cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
+    }
     // The same record as version 7.
     {
         uint32_t size8, a8 = 0;

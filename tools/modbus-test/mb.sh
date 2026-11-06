@@ -8,7 +8,7 @@
 #                                     the command coils 0-3
 #   mb.sh <ip> [port] pid <set> <kp> <ti> <kd>
 #                                     one PID set's gains (map version 2)
-#   mb.sh <ip> [port] sched <off|sp|pv> <b1> <b2> <h>
+#   mb.sh <ip> [port] sched <off|pv> <b1> <b2> <h>
 #                                     the gain schedule: boundaries in mbar,
 #                                     hysteresis in %
 #   mb.sh <ip> [port] writetest  write target 4.8 and the AUTO coil, then an
@@ -16,7 +16,7 @@
 #   mb.sh <ip> [port] raw <pdu>  send one PDU in hex (e.g. 03 00 0a 00 02)
 #                                and print the reply PDU in hex
 # Register map: docs/modbus-register-map.md.
-IP=${1:?usage: mb.sh <ip> [port] [target <mbar> | valve <pct> | auto | manual | stop | reset | ok | pid <set> <kp> <ti> <kd> | sched <off|sp|pv> <b1> <b2> <h> | writetest | raw <hex bytes>]}
+IP=${1:?usage: mb.sh <ip> [port] [target <mbar> | valve <pct> | auto | manual | stop | reset | ok | pid <set> <kp> <ti> <kd> | sched <off|pv> <b1> <b2> <h> | writetest | raw <hex bytes>]}
 shift
 PORT=502
 if [[ $1 =~ ^[0-9]+$ ]]; then PORT=$1; shift; fi
@@ -91,7 +91,7 @@ pid)
     ;;
 sched)
     # Registers 27-32: type (0 off, 1 setpoint, 2 pressure), B1, B2, H.
-    case ${1:?sched <off|sp|pv> <b1> <b2> <h>} in off) t=0 ;; sp) t=1 ;; pv) t=2 ;; *) echo "off, sp or pv"; exit 1 ;; esac
+    case ${1:?sched <off|pv> <b1> <b2> <h>} in off) t=0 ;; pv) t=2 ;; *) echo "off or pv"; exit 1 ;; esac
     h=${4:?h}
     wr 10 00 1b 00 06 0c 00 $(printf %02x $t) $(f32 "${2:?b1}") $(f32 "${3:?b2}") $(printf '%02x %02x' $(( h >> 8 )) $(( h & 255 )))
     ;;
@@ -134,8 +134,8 @@ map)
         printf "excitation    %s V\n", f32(20)
         printf "temperature   %s C\n", f32(22)
         printf "uptime        %d s\n", reg(24) * 65536 + reg(25)
-        split("off,setpoint,pressure", sch, ",")
-        printf "gain schedule %s, B1 %s mbar, B2 %s mbar, hysteresis %d %%, set in use %d\n", (reg(27) < 3 ? sch[reg(27) + 1] : reg(27)), f32(28), f32(30), reg(32), reg(26)
+        split("off,1,on (pressure)", sch, ",")
+        printf "PID table     %s, B1 %s mbar, B2 %s mbar, hysteresis %d %%, set in use %d\n", (reg(27) < 3 ? sch[reg(27) + 1] : reg(27)), f32(28), f32(30), reg(32), reg(26)
         for (k = 0; k < 3; k++)
             printf "set %d        KP %s, TI %s, KD %s\n", k + 1, f32(33 + 6 * k), f32(35 + 6 * k), f32(37 + 6 * k)
         split(coils, c, " ")

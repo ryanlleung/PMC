@@ -68,7 +68,10 @@
 #define CTRL_REV_PCT    0.10f   // a reversal waits until the command is this far away, % of travel (rev_pct)
 #endif
 
-typedef enum { CTRL_SCHED_OFF, CTRL_SCHED_SP, CTRL_SCHED_PV } ctrl_sched_t;
+// The PID table (gain schedule): Off, or on the pressure. 1 was the
+// setpoint schedule (0.15.15 to 0.15.19), removed in 0.15.20 (Ryan 6 Nov);
+// the pressure keeps 2 for the saved records and Modbus register 27.
+typedef enum { CTRL_SCHED_OFF = 0, CTRL_SCHED_PV = 2 } ctrl_sched_t;
 
 typedef struct {
     float kp, ti, kd;  // as set 1 below

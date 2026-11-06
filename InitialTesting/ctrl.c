@@ -18,11 +18,10 @@ static float steps_of(float pct, const ctrl_tune_t *k) { return pct / 100.0f * (
 
 int ctrl_pick_set(const ctrl_tune_t *k, int now, float x)
 {
-    if (k->sched != CTRL_SCHED_SP && k->sched != CTRL_SCHED_PV)
+    if (k->sched != CTRL_SCHED_PV)
         return 1;
-    // On the setpoint (or with no set yet) straight from the boundaries:
-    // the same setpoint always gives the same set.
-    if (k->sched == CTRL_SCHED_SP || now < 1 || now > 3)
+    // With no set yet, straight from the boundaries.
+    if (now < 1 || now > 3)
         return x < k->b1 ? 1 : x < k->b2 ? 2 : 3;
     // On the pressure, a set holds until the pressure is past its boundary
     // by the hysteresis; a large move can pass both in one step.
@@ -42,11 +41,6 @@ ctrl_pid_t ctrl_set_gains(const ctrl_tune_t *k, int set)
     return g;
 }
 
-// What the schedule follows: the setpoint for SP, else the pressure.
-static float sched_x(const ctrl_t *c, const ctrl_tune_t *k, float pv)
-{
-    return k->sched == CTRL_SCHED_SP ? c->sp : pv;
-}
 
 void ctrl_init(ctrl_t *c)
 {
@@ -88,7 +82,7 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
 void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_t now_pos)
 {
     float e = (float)k->kdir * (c->sp - pv);
-    c->set = ctrl_pick_set(k, 0, sched_x(c, k, pv));
+    c->set = ctrl_pick_set(k, 0, pv);
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     c->i = (float)now_pos - steps_of(g.kp, k) * e;   // bumpless: first output is the position in force
     c->pos_cmd = c->last_sent = now_pos;
@@ -150,7 +144,7 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->pv_f = pv;
     const float pf = c->pv_f;
     const float e = (float)k->kdir * (c->sp - pf);
-    c->set = ctrl_pick_set(k, c->set, sched_x(c, k, pf));
+    c->set = ctrl_pick_set(k, c->set, pf);
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     const float kp = steps_of(g.kp, k), ki = g.ti > 0 ? kp / (60.0f * g.ti) : 0, kd = steps_of(g.kd, k);
     const float d = -kd * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;

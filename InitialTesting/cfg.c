@@ -83,7 +83,8 @@ static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
 static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10, 0,
                              400, 25, 0, 400, 25, 0, 0, 60, 200, 15, 8 };
 // Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar, 0.01 % per mbar/s;
-// sets 2 and 3 as set 1; schedule 0 Off, 1 setpoint, 2 pressure; B1 and B2
+// sets 2 and 3 as set 1; PID table 0 Off, 2 on the pressure (1, the setpoint,
+// removed in 0.15.20; loads as Off); B1 and B2
 // 0.1 mbar; hysteresis % of the boundary; closing deadband steps.
 
 typedef struct {
@@ -345,7 +346,8 @@ static const char *values_why(const cfg_rec_t *r)
     if (valve_settings_check(r->valve))
         return valve_settings_check(r->valve);
     for (int i = 0; i < T_N; i++)
-        if (r->tune[i] < tune_lo[i] || r->tune[i] > tune_hi[i] || (i == T_KDIR && r->tune[i] == 0))
+        if (r->tune[i] < tune_lo[i] || r->tune[i] > tune_hi[i] || (i == T_KDIR && r->tune[i] == 0) ||
+            (i == T_SCHED && r->tune[i] == 1))
             return tune_name[i];
     if (bounds_why(r->tune))
         return "B2";
@@ -495,6 +497,8 @@ static const char *read_slot(int i)
     }
     slot_offset[i] = r->valve[5];   // the zero offset, removed in 0.13.31
     r->valve[5] = 0;
+    if (r->tune[T_SCHED] == 1)       // the setpoint schedule, removed in 0.15.20: Off
+        r->tune[T_SCHED] = 0;
     if (values_why(r))
         return "value out of range";
     return NULL;

@@ -667,9 +667,7 @@ int valve_pid_set(void)
         return 1;
     if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 3)
         return ctl.set;
-    if (k.sched == CTRL_SCHED_PV && pv_ok)
-        return ctrl_pick_set(&k, 0, pv_mbar);
-    return ctl.sp_set ? ctrl_pick_set(&k, 0, ctl.sp) : 1;
+    return pv_ok ? ctrl_pick_set(&k, 0, pv_mbar) : 1;
 }
 
 int32_t valve_range_mmbar(void)
@@ -754,9 +752,7 @@ static void auto_step(void)
     const ctrl_result_t res = ctrl_step(&ctl, &k, &in);
     if (ctl.set != set0 && set0 >= 1) {
         char a[16];
-        ev("MODE", "AUTO PID set %d to %d, %s %s mbar", set0, ctl.set,
-           k.sched == CTRL_SCHED_SP ? "setpoint" : "pressure",
-           mbar_text(a, sizeof a, k.sched == CTRL_SCHED_SP ? ctl.sp : ctl.pv_f, 1));
+        ev("MODE", "AUTO PID set %d to %d, pressure %s mbar", set0, ctl.set, mbar_text(a, sizeof a, ctl.pv_f, 1));
     }
     switch (res) {
     case CTRL_RUN:
