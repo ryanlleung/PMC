@@ -616,14 +616,20 @@ static void settings_build(lv_obj_t *scr)
     // Navigation tiles only (common HMI template): System is on the Menu,
     // Motor override on Valve position, Restart on System. Calibrate sensor
     // is on the Menu again from 0.15.19 (Ryan 6 Nov; here from 0.15.9).
-    // Review and save bottom left, with the save icon in front (0.13.19,
-    // Ryan 28 Oct).
+    // Review and save with the save icon in front (0.13.19, Ryan 28 Oct);
+    // from 0.15.22 (Ryan 6 Nov) on the second row, right of PID tuning,
+    // filled dark with white lettering so it reads apart from the pages.
     static const char *const names[4] = { "Choose sensor", "Valve setup", "PID tuning",
                                           LV_SYMBOL_SAVE "  Review and save" };
     const ui_screen_t *const to[4] = { &ui_scr_sensor_set, &ui_scr_valve_set, &ui_scr_tune, &ui_scr_review };
-    static const int32_t tx[4] = { 10, 244, 10, 10 }, ty[4] = { 0, 0, 1, 2 };
     for (int i = 0; i < 4; i++)
-        st.tile[i] = ui_btn(scr, tx[i], RY[ty[i]], 226, RH, UI_NAV, names[i], tile_cb, (void *)to[i]);
+        st.tile[i] = ui_btn(scr, i % 2 ? 244 : 10, RY[i / 2], 226, RH, UI_NAV, names[i], tile_cb, (void *)to[i]);
+    lv_obj_t *rv_tile = st.tile[3];
+    lv_obj_set_style_bg_color(rv_tile, UI_TEXT, 0);
+    lv_obj_set_style_bg_color(rv_tile, lv_color_hex(0x3C4856), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(rv_tile, 0, 0);
+    for (uint32_t c = 0; c < lv_obj_get_child_count(rv_tile); c++)
+        lv_obj_set_style_text_color(lv_obj_get_child(rv_tile, (int32_t)c), lv_color_white(), 0);
     side.save = side.discard = NULL;
 }
 
@@ -871,7 +877,7 @@ static void nn_refresh(void)
         lv_obj_set_state(nn.rsw, LV_STATE_CHECKED, cfg_remote());
     ui_set_text(nn.rtext, cfg_remote() ? "On: network can set" : "Off: network read only");
     ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, cfg_net_restart_due()
-                 ? "New IP address: Save settings, then restart." : "Static address, no DHCP.");
+                 ? "New IP address: Save settings, then restart." : "Static IP address.");   // no DHCP wording (Ryan 6 Nov)
 }
 
 const ui_screen_t ui_scr_namenet = { "System", nn_build, nn_refresh, NULL };
@@ -982,7 +988,7 @@ static void na_build(lv_obj_t *scr)
 
 static void na_refresh(void)
 {
-    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "The controller's address (no DHCP), after Save settings and a restart.");
+    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "The controller's address, used after Save settings and a restart.");
 }
 
 const ui_screen_t ui_scr_netaddr = { "IP address", na_build, na_refresh, NULL };

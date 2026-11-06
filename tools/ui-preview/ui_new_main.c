@@ -408,7 +408,7 @@ int main(int argc, char **argv)
         tap(123, 72); BACK();                                   //   Choose sensor
         tap(357, 72); BACK();                                   //   Valve setup
         tap(123, 128); BACK();                                  //   PID tuning
-        tap(123, 184); BACK();                                  //   Review and save
+        tap(357, 128); BACK();                                  //   Review and save (row 2, 0.15.22)
         HOME();
     }
     run(1200);
