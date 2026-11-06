@@ -13,7 +13,10 @@ to a Lake Shore 336 (TCP 7777) when one is given, and serves one page:
             constant, and the KP and TI they suggest; 2. setpoint step test
             in AUTO through a list of setpoints (and back): time to 90 %,
             overshoot and settling time of each step.
-  Gains     the gain table over several setpoints (pmc_gains.py tune), its
+  Gains     the autotune for the board's PID table (pmc_autotune.py: a relay
+            test per setpoint for Ku and Pu, KP = Ku / 4, TI = 2 Pu, a
+            checking step, the three sets, Write to board); the gain table
+            over several setpoints (pmc_gains.py tune), its
             blended KP and TI (show), and the gain schedule (run), which
             sets KP and TI each time the setpoint changes.
   Board     the event log (EVNT?), reset and OK for alarms, the board clock
@@ -60,6 +63,7 @@ for d in (os.path.join(HERE, '..', 'gain-schedule'), HERE):
         sys.path.insert(0, d)
         break
 import pmc_gains   # noqa: E402
+import pmc_autotune   # noqa: E402
 from pmc_gains import fit_step, simc, gains_for, load_table, Refused   # noqa: E402
 
 BOARD_PORT = 8888
@@ -67,6 +71,8 @@ LS_PORT = 7777
 HISTORY = 4 * 3600          # samples kept for the page (1 a second): 4 hours
 SHOW_SP = [1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 35, 50]
 POINT_GUESS_S = 900         # a gain table setpoint, until one has finished
+AUTO_GUESS_S = 1200         # an autotune setpoint, until one has finished
+HX_SPAN_K, HX_WINDOW_S = 0.5, 600   # autotune: heat exchanger (336 A) steady = moved less than this in that long
 RIDE_S = 120                # a gain table run waits this long for the link
 SETTLED_S = 60              # setpoint step test: held this long within the band = settled
 SETTLE_PCT = 5.0            # its band: this % of the step, or the Band box if larger
@@ -397,6 +403,21 @@ class GuiTuner(pmc_gains.Tuner):
         return fit, away
 
 
+class GuiAutoTuner(pmc_autotune.AutoTuner):
+    """pmc_autotune.AutoTuner that tells the page which stage it is in."""
+
+    def say(self, msg):
+        self.board.note('autotune: ' + msg)
+
+    def stage(self, text, phase=None, most=None):
+        self.board.stage(text, phase, most)
+
+    def left(self, want, mode):
+        alarm = self.board.hist[-1][5] if self.board.hist else ''
+        return 'the board left %s (now %s%s)' % (want, mode or 'no mode',
+                                                  ', ' + alarm if alarm and alarm != 'NONE' else '')
+
+
 class Board:
     """One connection, owned by one thread: it polls once a second and runs
     the lines the page and the tuner hand it through a queue in between."""
@@ -426,6 +447,7 @@ class Board:
         self.prog, self.last_prog = None, None    # what the run bar shows
         self.phase = ''           # the stage column of every sample
         self.run_dir, self.run_files, self.run_log = None, {}, None
+        self.at = None            # the last autotune: its rows, the three sets, written or not
 
     def now(self):
         return round((time.time() - self.t0) * self.speed, 2)
@@ -692,10 +714,11 @@ class Board:
         cur = P['steps'][i] if i is not None else None
         in_step = t - cur['t0'] if cur and cur['t0'] is not None else 0.0
         how = ''
-        if P['kind'] == 'gains':
-            took = [s['t1'] - s['t0'] for s in P['steps'] if s['state'] == 'done' and s['t0'] is not None]
-            per = sum(took) / len(took) if took else POINT_GUESS_S
-            todo = sum(1 for s in P['steps'] if s['state'] == 'todo')
+        if P['kind'] in ('gains', 'autotune'):
+            pts = P['steps'][:-1] if P['kind'] == 'autotune' else P['steps']   # not its last step, the sets
+            took = [s['t1'] - s['t0'] for s in pts if s['state'] == 'done' and s['t0'] is not None]
+            per = sum(took) / len(took) if took else POINT_GUESS_S if P['kind'] == 'gains' else AUTO_GUESS_S
+            todo = sum(1 for s in pts if s['state'] == 'todo')
             left, how = max(per - in_step, 60) + per * todo, 'about'
         else:
             durs = P['durs']
@@ -987,6 +1010,189 @@ class Board:
             self.end(outcome)
             self.job = None
 
+    # Autotune (pmc_autotune.py) ------------------------------------------
+    def hx_steady(self):
+        """'' when the heat exchanger (336 input A) has moved less than
+        HX_SPAN_K over the last HX_WINDOW_S, or there is no 336 to ask; else why not."""
+        ls = self.ls
+        if not (ls and ls.host and ls.state == 'connected'):
+            return ''
+        k = next((i for i, (inp, _) in enumerate(ls.inputs) if inp == 'A'), None)
+        if k is None:
+            return ''
+        t = self.now()
+        with self.lock:
+            vs = [(r[0], r[7 + k]) for r in self.hist
+                  if r[0] >= t - HX_WINDOW_S and len(r) > 7 + k and r[7 + k] is not None]
+        have = (t - vs[0][0]) if vs else 0
+        if have < HX_WINDOW_S - 30:
+            return ('the heat exchanger (336 A) has been read for %d of %d min: start again when it has %d min '
+                    'of readings, so it can be checked for steady' % (have // 60, HX_WINDOW_S // 60, HX_WINDOW_S // 60))
+        span = max(v for _, v in vs) - min(v for _, v in vs)
+        if span >= HX_SPAN_K:
+            return ('the heat exchanger (336 A) moved %.2f K in the last %d min: wait until it is steady '
+                    '(under %.1f K)' % (span, HX_WINDOW_S // 60, HX_SPAN_K))
+        return ''
+
+    def start_autotune(self, sps, d, div, b1, b2, h, heater, kp0=0.10, ti0=0.40):
+        if self.busy():
+            return 'a test is already running'
+        sps = sorted(set(round(x, 1) for x in sps if x > 0))
+        if not sps:
+            return 'give at least one setpoint'
+        if not heater:
+            return "tick Heater at the experiment's power first: the gains change with the heat load"
+        if not 0 < b1 < b2:
+            return 'B1 must be above 0 and below B2'
+        if not 0 <= h <= 50:
+            return 'H must be 0 to 50 %'
+        if not 0.1 <= d <= pmc_autotune.D_MAX:
+            return 'the relay step must be 0.1 to %g %%' % pmc_autotune.D_MAX
+        if not 2 <= div <= 8:
+            return 'KP = Ku / must be 2 to 8'
+        if not (pmc_gains.KP_MIN <= kp0 <= pmc_gains.KP_MAX and pmc_gains.TI_MIN <= ti0 <= pmc_gains.TI_MAX):
+            return 'the first gains must be KP %g to %g and TI %g to %g min' % (
+                pmc_gains.KP_MIN, pmc_gains.KP_MAX, pmc_gains.TI_MIN, pmc_gains.TI_MAX)
+        r = self.raw('PRES SP?;PRES?;VALV?;ALRM?;PID?')
+        if r.startswith('LINK '):
+            return r
+        parts = (r.split(';') + [''] * 5)[:5]
+        if parts[1] == 'PRES NONE':
+            return 'no pressure reading'
+        if parts[2] == 'VALV NONE':
+            return 'the valve is not homed: home it on the screen first'
+        if 'F-' in parts[3]:
+            return 'reset the fault first (Board tab): ' + parts[3][5:]
+        if not parts[4].startswith('PID '):
+            return 'this firmware has no PID SET (0.15.8 or later): ' + parts[4]
+        why = self.hx_steady()
+        if why:
+            return why
+        r = self.send('PID SET ' + parts[4][4:])   # the same gains, so nothing is written: ERR 211 when Remote control is Off
+        if r:
+            return r
+        a = SimpleNamespace(sps=sps, d=d, div=div, ti_pu=2.0, trims=2, b1=b1, b2=b2, h=h, kp0=kp0, ti0=ti0)
+        self.job, self.stop_job, self.abort = 'autotune', False, False
+        self.begin('autotune', 'PID autotune', ['%g mbar' % x for x in sps] + ['PID table sets'], None,
+                   'setpoints %s mbar, first gains KP %.2f TI %.2f, first relay step %.1f %%, KP = Ku / %g, TI = 2 Pu, '
+                   'PID table B1 %g B2 %g H %d %%' % (' '.join('%g' % x for x in sps), kp0, ti0, d, div, b1, b2, h))
+        with self.lock:
+            self.at = {'rows': [], 'sets': [], 'b1': b1, 'b2': b2, 'h': h, 'dir': self.run_dir, 'lines': [],
+                       'written': '', 'running': True}
+        if not (self.ls and self.ls.host):
+            self.note('autotune: no Lake Shore 336, so the heat exchanger was not checked for steady')
+        threading.Thread(target=self.autotune_job, args=(a,), daemon=True).start()
+        return ''
+
+    def at_rows(self, rows, a):
+        """The results so far: the sets, and the files that hold them."""
+        sets = pmc_autotune.table_sets(rows, a.b1, a.b2)
+        lines = pmc_autotune.write_lines(sets, a.b1, a.b2, a.h)
+        with self.lock:
+            self.at.update(rows=list(rows), sets=[list(x) for x in sets], lines=lines)
+        if not self.run_dir:
+            return
+        try:
+            with open(os.path.join(self.run_dir, 'table.csv'), 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(['sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s'])     # loads as a PC gain table
+                for r in rows:
+                    w.writerow([r['sp_mbar'], r['kp'], r['ti_min'], r['Ku'], r['Pu_s']])
+            with open(os.path.join(self.run_dir, 'sets.csv'), 'w', newline='', encoding='utf-8') as f:
+                w = csv.writer(f)
+                w.writerow(['set', 'kp', 'ti_min', 'from_mbar', 'b1_mbar', 'b2_mbar', 'h_pct'])
+                for n, kp, ti, pts in sets:
+                    w.writerow([n, kp, ti, ' '.join('%g' % x for x in pts), a.b1, a.b2, a.h])
+            with open(os.path.join(self.run_dir, 'write-to-board.txt'), 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines) + '\n')
+        except OSError as e:
+            self.note('could not save the autotune results: %s' % e)
+
+    def autotune_job(self, a):
+        link = ViaBoard(self)
+        t = GuiAutoTuner(link, pmc_gains.Clock(self.speed), a, self.run_dir)
+        t.board = self
+        f, rows, outcome, skipped = None, [], 'done', []
+        last = len(a.sps)
+        try:
+            f = pmc_autotune.found(link)
+            t.say('found setpoint %s mbar, %s, PID %s, PID table %s' %
+                  (f['sp'], f['mode'], ', '.join('%.2f' % x for x in f['pid']), f['sched'] or 'not in this firmware'))
+            pmc_autotune.pid_table_off(link, f)
+            gains = (a.kp0, a.ti0)      # to reach the first point; each later one uses the point before's
+            ku = None
+            for i, sp in enumerate(a.sps):
+                self.step(i, 'now')
+                try:
+                    r = t.point(sp, gains, pmc_autotune.next_d(sp, ku, a.d))
+                except RuntimeError as e:
+                    # One point with no usable oscillation (or a warning that
+                    # dropped AUTO) should not lose the others.
+                    t.say('%g mbar skipped: %s' % (sp, e))
+                    self.step(i, 'failed', str(e))
+                    skipped.append('%g' % sp)
+                    continue
+                rows.append(r)
+                self.result('results.csv', r)
+                self.step(i, 'done', 'Ku %.2f, KP %.2f, TI %.2f%s' % (r['Ku'], r['kp'], r['ti_min'],
+                                                                     ', trimmed ' + r['trims'] if r['trims'] else ''))
+                self.at_rows(rows, a)
+                ku, gains = r['Ku'], (r['kp'], r['ti_min'])
+            self.step(last, 'now')
+            if rows:
+                sets = pmc_autotune.table_sets(rows, a.b1, a.b2)
+                self.step(last, 'done', '; '.join('set %d %s' % (n, 'KP %.2f TI %.2f' % (kp, ti) if kp is not None
+                                                                   else 'not measured') for n, kp, ti, _ in sets))
+            else:
+                self.step(last, 'failed', 'no point measured')
+            if skipped:
+                outcome = 'done, %s mbar skipped' % ', '.join(skipped)
+            if not rows:
+                outcome = 'ended: no point measured'
+        except Stopped:
+            outcome = 'ended by STOP' if self.abort else 'stopped'
+        except (Refused, ConnectionError, ValueError) as e:
+            outcome = 'ended: %s' % e
+        finally:
+            self.stop_job = False
+            with self.lock:
+                if self.at:
+                    self.at['running'] = False
+            if outcome not in ('done',) and not outcome.startswith('done,') and self.prog:
+                with self.lock:
+                    self.where(self.prog)
+            if self.abort:
+                t.say('STOP pressed: nothing put back')
+            elif f:
+                back = pmc_autotune.put_back_lines(f)
+                self.stage('putting back what it found: ' + ', '.join(back), 'put back')
+                for c in back:
+                    r = self.send(c)
+                    t.say('put back: %s%s' % (c, ' (' + r + ')' if r else ''))
+            self.end(outcome)
+            self.job = None
+
+    def write_sets(self):
+        """The three sets and the PID table (pressure) to the board."""
+        if self.busy():
+            return 'a test is running'
+        with self.lock:
+            at = self.at
+            lines = list(at['lines']) if at else []
+        if not lines or not any(x[1] is not None for x in at['sets']):
+            return 'run the autotune first'
+        for line in lines:
+            r = self.send(line)
+            if r.startswith('ERR 100'):
+                return ('this firmware has no PID table (0.15.15 or later); load table.csv from %s as the PC gain '
+                        'table instead' % at['dir'])
+            if r:
+                return '%s: %s' % (line, r)
+        with self.lock:
+            at['written'] = time.strftime('%H:%M')
+        self.note('autotune: PID table written to the board: ' + '; '.join(lines))
+        return ''
+
     def save_table(self):
         if self.run_dir:
             try:
@@ -1091,7 +1297,7 @@ class Board:
                     'log': self.state['log'], 'rows': rows, 'results': self.results, 'vresults': self.vresults,
                     'prog': self.prog_view(), 'last_prog': self.last_prog,
                     'table': self.table_rows, 'table_name': self.table_name, 'blended': blended,
-                    'schedule': self.schedule, 'logger': self.logger.view(), 'ls': ls}
+                    'schedule': self.schedule, 'logger': self.logger.view(), 'ls': ls, 'autotune': self.at}
 
     def csv_text(self):
         f = io.StringIO()
@@ -1167,6 +1373,13 @@ def make_handler(board):
                 elif p == '/api/vtest':
                     r = board.start_vtest(float(q['at']), float(q['step']), float(q.get('hold', 180)),
                                           float(q.get('record', 600)))
+                elif p == '/api/autotune':
+                    r = board.start_autotune([float(x) for x in str(q['sps']).replace(',', ' ').split()],
+                                             float(q.get('d', 0.4)), float(q.get('div', 4)), float(q.get('b1', 6)),
+                                             float(q.get('b2', 20)), int(float(q.get('h', 15))), bool(q.get('heater')),
+                                             float(q.get('kp0', 0.10)), float(q.get('ti0', 0.40)))
+                elif p == '/api/autotune/write':
+                    r = board.write_sets()
                 elif p == '/api/tune':
                     r = board.start_tune([float(x) for x in str(q['sps']).replace(',', ' ').split()],
                                          float(q.get('step', 0.5)), float(q.get('tc', 1.0)))

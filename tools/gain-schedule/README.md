@@ -57,9 +57,17 @@ python sp_step.py 192.168.1.100 --start 3 --to 5 --back --out cf11_3to5.csv
 
 It starts AUTO at `--start`, waits until the pressure holds within `--band` (0.1 mbar) for 2 minutes, then steps the setpoint to `--to` and records for `--record` s (600 by default). With `--back` it steps back and records again. It writes one line a second to the CSV and prints, for each step, the time to 90 % of the step, the overshoot, the settling time and the mean and spread of the last minute. Ctrl+C puts the setpoint back to `--start` and leaves AUTO running.
 
+## Autotune for the PID table
+
+`pmc_autotune.py` holds the autotune that the control test GUI runs from its Gains tab (Autotune the PID table; the GUI's README describes it). At each setpoint a relay test in MANUAL measures the ultimate gain Ku and period Pu, KP = Ku / 4 and TI = 2 Pu, and a setpoint step up and back trims KP. The rows are then combined into the firmware's three PID sets. It has no command line of its own: run it from the GUI.
+
 ## Tests
 
 ```
 python test_pmc_gains.py          # fit, table and run against a fake board
 python test_pmc_gains.py --sim    # also tunes 3 mbar and runs on simulator/tests/tcp-board.js (needs node)
+```
+
+```
+python test_pmc_autotune.py       # relay test, rules and the whole sequence on a valve model (seconds)
 ```
