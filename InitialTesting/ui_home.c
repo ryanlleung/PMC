@@ -26,6 +26,8 @@
  *              stays where it is, no question).
  *   NOT HOMED  Valve: Home valve (Home or Set position). Start AUTO greyed.
  *   HOMING     Valve: the Go to box, greyed, "----".
+ * A yellow "Limit" tag beside the Valve caption while the limit switch is
+ * pressed (0.16.1).
  * The strip shows the status line, with the 5 min pressure sparkline on its
  * right as on the operator screens (ui.c, Ryan 21 Oct). A tap on the
  * sparkline opens Trend.
@@ -54,7 +56,7 @@ typedef struct {
 } tile_t;
 
 static tile_t pt, vt;
-static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn;
+static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn, *limit_tag;
 
 static void show_if(lv_obj_t *o, bool on)
 {
@@ -614,6 +616,18 @@ static void home_build(lv_obj_t *scr)
     stop_btn = ui_btn(vt.tile, 155 - BAR_W, 116, BAR_W, 40, UI_SECONDARY, "Stop AUTO", stop_event, NULL);
     ui_btn_outline(stop_btn, true);
     homev_btn = ui_btn(vt.tile, 155 - BAR_W, 116, BAR_W, 40, UI_PRIMARY, "Home valve", homev_event, NULL);
+    // Limit switch pressed (the NC contact open): a warning yellow tag
+    // beside the Valve caption, whatever the mode (0.16.1, Ryan PR #43).
+    limit_tag = lv_obj_create(vt.tile);
+    lv_obj_remove_style_all(limit_tag);
+    lv_obj_remove_flag(limit_tag, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(limit_tag, 62, 4);
+    lv_obj_set_size(limit_tag, 56, 22);
+    lv_obj_set_style_bg_opa(limit_tag, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(limit_tag, UI_YELLOW, 0);
+    lv_obj_set_style_radius(limit_tag, 4, 0);
+    ui_label(limit_tag, 0, 2, 56, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, "Limit");
+    lv_obj_add_flag(limit_tag, LV_OBJ_FLAG_HIDDEN);
 }
 
 // Valve reading and bar, at 10 Hz.
@@ -635,6 +649,7 @@ static void home_fast(void)
     }
     int32_t p = ui_pct_shown(valve_pct_milli());
     bar_set(&vt, cal ? p * BAR_W / 10000 : -1);
+    show_if(limit_tag, stepper3_limit_open());
 }
 
 static void home_refresh(void)
