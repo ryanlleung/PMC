@@ -184,8 +184,13 @@ static bool is_auto(void) { return mode == VALVE_AUTO; }
 // The warning that ended AUTO or needs a look (W-2, W-4, W-5; W-6 removed in 0.15.11), shown on
 // the status strip until OK, the next Start AUTO or homing.
 static char warn[72];
-static int sw_far_n;      // W-4: consecutive 1 s reads with the switch pressed away from the seat
+static uint32_t sw_far_ms; // W-4: when the switch was first read pressed away from the seat, 0 = not
 static bool sw_far_said;  // W-4 raised for this occurrence
+// W-4 once the switch has read pressed away from the seat this long (0.16.4,
+// Ryan PR #43: the warning "should update as quickly as the limit hitting
+// it"; to 0.16.3 two 1 s reads, so up to 2 s after Home's limit edge).
+// Long enough that one glitch on the wire does not end AUTO.
+#define SW_FAR_MS 200
 static int over_n;        // W-5: consecutive reads above the sensor range in AUTO
 
 // Shut down (valve.h): the move to 0 % running, and where it started.
@@ -448,6 +453,7 @@ static void limit_hit(void)
  * rules; valvepos.c keeps the count while OFF.
  * ------------------------------------------------------------------------ */
 static void seq_check(void);
+static void far_check(void);
 
 static void go_off(void)
 {
@@ -619,6 +625,7 @@ void valve_task(void)
     running = true;
     evt_dump_task();
     seq_check();
+    far_check();
     if (hold_on && !stepper3_busy())
         hold_on = false;   // the held move has ended (released, the switch, its end)
     if (mode == VALVE_CALIBRATING && cal_settling && lv_tick_elaps(cal_settle_from) >= SETTLE_MS)
@@ -700,15 +707,17 @@ static bool switch_far(void)
            stepper3_position() > sc(n_clear + (n_backoff > n_return ? n_backoff : n_return));
 }
 
-// W-4 and W-5, once a second; two reads in a row, so one glitch does not
-// end AUTO.
-static void warn_checks(void)
+// W-4, every pass of the main loop: the switch pressed away from the seat
+// for SW_FAR_MS.
+static void far_check(void)
 {
     char pc[16], v[16];
     if (!switch_far()) {
-        sw_far_n = 0;
+        sw_far_ms = 0;
         sw_far_said = false;
-    } else if (++sw_far_n >= 2 && !sw_far_said) {
+    } else if (!sw_far_ms) {
+        sw_far_ms = lv_tick_get() | 1;   // 0 means not pressed
+    } else if (lv_tick_elaps(sw_far_ms) >= SW_FAR_MS && !sw_far_said) {
         sw_far_said = true;
         int32_t pos = stepper3_position();
         bool was_auto = is_auto();
@@ -724,6 +733,12 @@ static void warn_checks(void)
         if (was_auto)
             ev("MODE", "Manual after W-4, valve idle at %s %%", pct_text(pc, sizeof pc, pos));
     }
+}
+
+// W-5, once a second; two reads in a row, so one glitch does not end AUTO.
+static void warn_checks(void)
+{
+    char pc[16], v[16];
     if (!is_auto() || !pv_ok || pv_mbar <= range_mbar()) {
         over_n = 0;
     } else if (++over_n >= 2) {

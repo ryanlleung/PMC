@@ -1215,10 +1215,33 @@ static void comm_tick(void)
         lv_obj_invalidate(comm_obj);
 }
 
+// A new fault, warning, limit question or mode redraws the strip (and asks
+// the question) at the next 100 ms tick, not the 0.5 s refresh (0.16.4,
+// Ryan PR #43: the warning "should update as quickly as the limit hitting
+// it", as the Valve tile's yellow edge does).
+static void valve_watch(void)
+{
+    static int nf = -1, mode = -1;
+    static bool lim;
+    static char w[80];
+    int32_t q;
+    bool l = valve_question(&q);
+    const char *v = valve_warning();
+    int f = valve_fault_count(), m = (int)valve_mode();
+    if (f != nf || m != mode || l != lim || strncmp(v ? v : "", w, sizeof w - 1)) {
+        nf = f;
+        mode = m;
+        lim = l;
+        lv_snprintf(w, sizeof w, "%s", v ? v : "");
+        frame_due = true;
+    }
+}
+
 static void fast_timer(lv_timer_t *t)
 {
     (void)t;
     comm_tick();
+    valve_watch();
     // STOP for any finger: a tap on STOP that LVGL does not follow (another
     // contact on the glass) stops the valve as the button does.
     // Shutting down, the STOP on the black screen; off, none.

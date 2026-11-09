@@ -651,5 +651,18 @@ let parkedFlash;
   check('SCHED SET OFF: set 1', one('SCHED SET OFF,6,20,15') === '' && (s.run(3000), /^PIDS 1,/.test(one('PIDS?'))) &&
     one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('PIDS?;PID?'));
 }
+{ // The limit switch pressed away from the seat (0.16.4, Ryan PR #43): a yellow edge round Home's Valve tile at
+  // once (the "Limit" tag of 0.16.1 gone) and W-4 within 0.3 s (two 1 s reads to 0.16.3); released, the edge goes.
+  const s = homed(load()); s.cmd('VALV SET 20', 60000);
+  const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
+  const before = px(187, 100);
+  s.set(7, 1); s.run(200);   // the wire open: the NC contact reads pressed
+  const edge = px(187, 100), al = s.cmd('ALRM?', 100);
+  shot(s, 'limit-edge');
+  s.set(7, 0); s.run(300);
+  const after = px(187, 100);
+  check('limit pressed: yellow edge on the Valve tile, W-4 within 0.3 s', before === 0xFFFF && edge === 0xF606 && /W-4/.test(al) &&
+    after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
+}
 console.log(failed ? failed + ' failed' : 'all passed');
 process.exit(failed ? 1 : 0);

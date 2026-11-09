@@ -26,8 +26,9 @@
  *              stays where it is, no question).
  *   NOT HOMED  Valve: Home valve (Home or Set position). Start AUTO greyed.
  *   HOMING     Valve: the Go to box, greyed, "----".
- * A yellow "Limit" tag beside the Valve caption while the limit switch is
- * pressed (0.16.1).
+ * A yellow edge round the Valve tile while the limit switch is pressed
+ * (0.16.4; a "Limit" tag beside the caption in 0.16.1-0.16.3); a valve
+ * fault's red edge wins.
  * The strip shows the status line, with the 5 min pressure sparkline on its
  * right as on the operator screens (ui.c, Ryan 21 Oct). A tap on the
  * sparkline opens Trend.
@@ -56,7 +57,8 @@ typedef struct {
 } tile_t;
 
 static tile_t pt, vt;
-static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn, *limit_tag;
+static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn;
+static bool vt_fault;   // a valve fault (F-3 to F-6): the Valve tile's red edge, over the limit's yellow
 
 static void show_if(lv_obj_t *o, bool on)
 {
@@ -198,14 +200,20 @@ static void box_set(tile_t *t, bool active, const char *text)
     ui_set_text(t->box_text, text);
 }
 
-static void alarm_set(tile_t *t, bool on)
+// The tile's 3 px edge: red for a fault (the card style's colour), yellow
+// for a warning (the limit switch pressed, 0.16.4), none.
+static void edge_set(tile_t *t, bool on, lv_color_t c)
 {
     int32_t w = on ? 3 : 0;
     if (lv_obj_get_style_border_width(t->tile, 0) != w) {
         lv_obj_set_style_border_width(t->tile, w, 0);
         lv_obj_set_style_pad_all(t->tile, -w, 0);   // children keep their place
     }
+    if (on && !lv_color_eq(lv_obj_get_style_border_color(t->tile, 0), c))
+        lv_obj_set_style_border_color(t->tile, c, 0);
 }
+
+static void alarm_set(tile_t *t, bool on) { edge_set(t, on, UI_FAULT); }
 
 static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, const char *unit,
                       const char *sp, bool log, lv_event_cb_t box_cb)
@@ -616,18 +624,6 @@ static void home_build(lv_obj_t *scr)
     stop_btn = ui_btn(vt.tile, 155 - BAR_W, 116, BAR_W, 40, UI_SECONDARY, "Stop AUTO", stop_event, NULL);
     ui_btn_outline(stop_btn, true);
     homev_btn = ui_btn(vt.tile, 155 - BAR_W, 116, BAR_W, 40, UI_PRIMARY, "Home valve", homev_event, NULL);
-    // Limit switch pressed (the NC contact open): a warning yellow tag
-    // beside the Valve caption, whatever the mode (0.16.1, Ryan PR #43).
-    limit_tag = lv_obj_create(vt.tile);
-    lv_obj_remove_style_all(limit_tag);
-    lv_obj_remove_flag(limit_tag, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(limit_tag, 62, 4);
-    lv_obj_set_size(limit_tag, 56, 22);
-    lv_obj_set_style_bg_opa(limit_tag, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(limit_tag, UI_YELLOW, 0);
-    lv_obj_set_style_radius(limit_tag, 4, 0);
-    ui_label(limit_tag, 0, 2, 56, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, "Limit");
-    lv_obj_add_flag(limit_tag, LV_OBJ_FLAG_HIDDEN);
 }
 
 // Valve reading and bar, at 10 Hz.
@@ -649,7 +645,12 @@ static void home_fast(void)
     }
     int32_t p = ui_pct_shown(valve_pct_milli());
     bar_set(&vt, cal ? p * BAR_W / 10000 : -1);
-    show_if(limit_tag, stepper3_limit_open());
+    // Limit switch pressed (the NC contact open): a yellow edge round the
+    // Valve tile at 10 Hz, whatever the mode; a valve fault's red wins
+    // (0.16.4, Ryan PR #43: "add yellow border instead of having the word
+    // limit"; a yellow "Limit" tag beside the caption in 0.16.1-0.16.3).
+    bool lim = stepper3_limit_open();
+    edge_set(&vt, vt_fault || lim, vt_fault ? UI_FAULT : UI_YELLOW);
 }
 
 static void home_refresh(void)
@@ -676,9 +677,8 @@ static void home_refresh(void)
     show_if(start_btn, !auto_on);
     ui_btn_enable(start_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
 
+    vt_fault = valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") || valve_fault_is("F-6");
     home_fast();
-    alarm_set(&vt, valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") ||
-                   valve_fault_is("F-6"));
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
     // Where the valve is going, greyed when not editable; "----" while
     // homing.
