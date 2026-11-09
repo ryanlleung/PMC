@@ -1379,7 +1379,7 @@ def make_handler(board):
                                           float(q.get('record', 600)))
                 elif p == '/api/autotune':
                     r = board.start_autotune([float(x) for x in str(q['sps']).replace(',', ' ').split()],
-                                             float(q.get('d', 0.4)), float(q.get('div', 4)), float(q.get('b1', 6)),
+                                             float(q.get('d', 0.4)), float(q.get('div', 4)), float(q.get('b1', 10)),
                                              float(q.get('b2', 20)), int(float(q.get('h', 15))),
                                              float(q.get('kp0', 0.10)), float(q.get('ti0', 0.40)))
                 elif p == '/api/autotune/write':
