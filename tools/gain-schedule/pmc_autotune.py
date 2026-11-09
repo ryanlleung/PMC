@@ -67,6 +67,9 @@ OVERSHOOT_MAX = 10.0           # % of the step
 REVERSALS_MAX = 2
 SLOW_PU = 6.0                  # settled later than this many Pu = slow
 TRIM_DOWN, TRIM_UP = 0.8, 1.25
+WANDER_MAX = 0.25              # the wander allowed for in a check: at most this fraction of the step
+USELESS = 0.9                  # a cut whose check is not 10 % better did not help; two such end the cuts
+RUNOFF_S = 120                 # after a run-off, how long the pressure has to come back
 
 # Reaching a point in AUTO.
 REACH_MAX_S = 600
@@ -103,6 +106,29 @@ def harmonic(samples, w):
     return 2.0 / len(ys) * sum((y - m) * cmath.exp(-1j * w * t) for t, y in samples)
 
 
+def wander(rows):
+    """The pressure's own swing with the valve held, mbar: half its
+    peak-to-peak about a straight line through [(t, p)], so a slow drift
+    (the pressure still settling) does not count. At 4 mbar on 9 Nov the
+    pressure wandered 0.3 mbar peak to peak with the valve standing still."""
+    tp = [(t, p) for t, p in rows if p is not None]
+    if len(tp) < 3:
+        return 0.0
+    n = len(tp)
+    mt, mp = sum(t for t, _ in tp) / n, sum(p for _, p in tp) / n
+    vt = sum((t - mt) ** 2 for t, _ in tp)
+    b = sum((t - mt) * (p - mp) for t, p in tp) / vt if vt else 0.0
+    res = [p - mp - b * (t - mt) for t, p in tp]
+    return (max(res) - min(res)) / 2
+
+
+def badness(fig):
+    """How far a check is from passing on overshoot and reversals: 1 = at the limit."""
+    if not fig or fig.get('wild_pp'):
+        return float('inf')
+    return max(fig['overshoot_pct'] / OVERSHOOT_MAX, fig['reversals'] / REVERSALS_MAX)
+
+
 def noise(ps):
     """The reading's noise, mbar, from one sample to the next, so a slow
     drift (the pressure still settling) does not count."""
@@ -130,6 +156,7 @@ class Relay:
         self.t0 = self.t_last = None
         self.rows = []           # (t, p, x, valve sent)
         self.changes = self.shifts = 0
+        self.off = None          # when the pressure ran off and the step was cut; None once back
         self.done, self.steady, self.why, self.note = False, False, '', ''
 
     def valve(self):
@@ -158,11 +185,21 @@ class Relay:
             return None
         if p > 2 * self.sp + 0.5 or p < 0.4 * self.sp:
             # Too far: a smaller step (a steep valve, Ryan 9 Nov: 0.4 % moved
-            # 2 mbar by 7), and only when that is already the least, give up.
+            # 2 mbar by 7), then time for the pressure to come back before
+            # it is judged again (9 Nov: at 2 mbar it was still 5 mbar the
+            # next second, and the test gave up 13 s in). Only when the step
+            # is already the least, or it does not come back, give up.
+            if self.off is not None:
+                if t - self.off > RUNOFF_S:
+                    return self.fail('pressure %.2f mbar, not back near %g mbar %d s after the relay step was cut'
+                                     % (p, self.sp, RUNOFF_S))
+                return None
             if self.d <= D_MIN or self.changes >= D_CHANGES + 2:
                 return self.fail('pressure %.2f mbar, too far from %g mbar' % (p, self.sp))
-            self.hi = p < self.sp
+            self.hi, self.off = p < self.sp, t
             return self.restart(t, max(self.d / 4, D_MIN), 'pressure %.2f mbar, too far from %g mbar' % (p, self.sp))
+        if self.off is not None:     # back: the test starts from here
+            self.off, self.t_last = None, t
         if self.hi is None:
             self.hi = p < self.sp
             self.rows[-1] = (t, p, x, self.valve())
@@ -335,10 +372,11 @@ class Wild:
         return WILD_CUT_BIG if self.pp > self.sp else WILD_CUT
 
 
-def step_figures(rows, p0, p1, band):
+def step_figures(rows, p0, p1, band, slack=0.0):
     """rows [(s from the change, p, x)]: overshoot %, settled at (s, None if
     not), error reversals after the first crossing, and whether the valve
-    sat at an end (then a slow step is not the gains' fault)."""
+    sat at an end (then a slow step is not the gains' fault). Overshoot
+    counts only beyond slack mbar (the pressure's own wander)."""
     step = p1 - p0
     ps = [(t, p) for t, p, _ in rows if p is not None]
     if not ps or abs(step) < 1e-6:
@@ -364,7 +402,8 @@ def step_figures(rows, p0, p1, band):
             rev += 1
             side = s
     xs = [x for _, _, x in rows if x is not None]
-    return {'overshoot_pct': round(max(0.0, (peak - 1) * 100), 1), 'settle_s': settle, 'reversals': rev,
+    over = max(0.0, (peak - 1) * abs(step) - slack)
+    return {'overshoot_pct': round(over / abs(step) * 100, 1), 'settle_s': settle, 'reversals': rev,
             'saturated': bool(xs) and (max(xs) >= 99.5 or min(xs) <= 0.05)}
 
 
@@ -549,9 +588,11 @@ class AutoTuner(pmc_gains.Tuner):
         self.stage('MANUAL at %.1f %%, %d s for the noise' % (x0, NOISE_S), '%g mbar noise' % sp, NOISE_S)
         rows = self.samples(NOISE_S)
         sd = noise([r[1] for r in rows])
+        wd = wander([(r[0], r[1]) for r in rows])
         eps = max(3 * sd, 0.01 * sp, 0.02)
         self.calc('Noise: sigma = %.4f mbar (sample to sample, %d s in MANUAL at x0). Switch band eps = '
                   'max(3 sigma, 1 %% of %g, 0.02) = %.3f mbar' % (sd, NOISE_S, sp, eps))
+        self.calc('Wander: the pressure swings +/- %.3f mbar on its own with the valve held (drift removed)' % wd)
         R = Relay(sp, x0, d, eps)
         self.stage('relay test: valve %.1f %% +/- %.1f %%, switching at %g +/- %.2f mbar' % (x0, d, sp, eps),
                    '%g mbar relay' % sp, RELAY_MAX_S)
@@ -586,7 +627,7 @@ class AutoTuner(pmc_gains.Tuner):
         r = R.result()
         if r is None:
             raise RuntimeError('relay test: too few cycles')
-        r['x0'], r['noise'] = R.x0, sd
+        r['x0'], r['noise'], r['wander'] = R.x0, sd, wd
         self.calc('Relay result over %d cycles: period Pu = %.1f s, pressure swing a = +/- %.3f mbar, relay step d = %.1f %%' %
                   (r['cycles'], r['Pu_s'], r['a_mbar'], r['d_pct']))
         if r.get('harmonic'):
@@ -598,7 +639,7 @@ class AutoTuner(pmc_gains.Tuner):
                       (r['d_pct'], r['a_mbar'], r['eps_mbar'], r['Ku']))
         return r
 
-    def leg(self, sp, p0, p1, band, most, name):
+    def leg(self, sp, p0, p1, band, most, name, slack=0.0):
         """One step of a check. Ends early when the watchdog trips; the
         figures then carry the swing (wild_pp)."""
         self.link.do('PRES SP %.1f' % p1)
@@ -627,7 +668,7 @@ class AutoTuner(pmc_gains.Tuner):
                 for r in rows:
                     w.writerow(['%.1f' % r[0], '' if r[1] is None else '%.3f' % r[1],
                                 '' if r[2] is None else '%.2f' % r[2], p0, p1])
-        fig = step_figures(rows, p0, p1, band)
+        fig = step_figures(rows, p0, p1, band, slack)
         if fig is not None and wd.wild:
             fig['wild_pp'], fig['wild_big'] = round(wd.pp, 3), wd.pp > p1
         return fig
@@ -643,13 +684,22 @@ class AutoTuner(pmc_gains.Tuner):
                    '%g mbar check %d hold' % (sp, k), CHECK_HOLD_MAX_S)
         kp = self.hold(sp, CHECK_HOLD_MAX_S, kp, ti)[3]
         hi = round(max(sp * (1 + CHECK_UP), sp + 0.2), 1)
-        band = max(0.05 * (hi - sp), 2 * r['noise'], 0.02)
+        # The pressure's own wander is not the gains': overshoot counts only
+        # beyond it, and it widens the band (9 Nov, 4 mbar: +/- 0.17 mbar
+        # with the valve still, against 10 % of a 0.8 mbar step).
+        slack = min(r.get('wander', 0.0), WANDER_MAX * (hi - sp))
+        band = max(0.05 * (hi - sp), 2 * r['noise'], 0.02, slack)
+        if k == 1:
+            self.calc('Check limits: band +/- %.3f mbar = max(5 %% of the %.1f mbar step, 2 sigma, 0.02, the wander); '
+                      'overshoot counted beyond the wander, %.3f mbar (at most %d %% of the step)' % (
+                          band, hi - sp, slack, WANDER_MAX * 100))
         most = min(max(12 * r['Pu_s'] + 90, 150), 360)
         legs = []
         for k2, (a, b) in enumerate([(sp, hi), (hi, sp)]):
             self.stage('check %d: setpoint %g -> %g mbar, waiting for it to hold within %.2f mbar for %d s' %
                        (k, a, b, band, SETTLED_S), '%g mbar check %d %s' % (sp, k, 'up' if k2 == 0 else 'back'), most)
-            legs.append(self.leg(sp, a, b, band, most, 'check_%gmbar_%d_%s' % (sp, k, 'up' if k2 == 0 else 'back')))
+            legs.append(self.leg(sp, a, b, band, most, 'check_%gmbar_%d_%s' % (sp, k, 'up' if k2 == 0 else 'back'),
+                                 slack))
             fg = legs[-1]
             if fg:
                 self.calc('Check %d %s %g -> %g mbar (KP %.2f): %s' % (
@@ -695,6 +745,7 @@ class AutoTuner(pmc_gains.Tuner):
                  % (sp, r['Ku'], r['Pu_s'], r['d_pct'], r['a_mbar'], r['cycles'], '' if r['steady'] else ', not steady',
                     kp, ti))
         kp0, fig, why, f, ups, downs, k = kp, None, '', 1.0, 0, 0, 0
+        scores, useless = [], False
         # every change of KP at this point is in self.cuts, in order (calm() adds its own)
         while True:
             k += 1
@@ -717,7 +768,19 @@ class AutoTuner(pmc_gains.Tuner):
             # Up at most `trims` times and never after a cut; down until it
             # passes, MAX_CUTS in all with the watchdog's.
             downs = sum(1 for c in self.cuts if c.startswith('x0'))
+            scores.append(badness(fig))
             if f == 1.0:
+                break
+            cut = 'x%.2f' % TRIM_DOWN
+            if (f == TRIM_DOWN and len(scores) >= 3 and self.cuts[-2:] == [cut, cut]
+                    and min(scores[-2:]) >= USELESS * scores[-3]):
+                # Two cuts and the check no better: the swing is not the
+                # gains' (the pressure's wander, the needle), and more cuts
+                # only make AUTO slower (9 Nov: six at 4 mbar, KP 0.17 to 0.04).
+                useless = True
+                self.calc('Not applied: the last two cuts (KP %.2f to %.2f) did not make the check 10 %% better '
+                          '(%.1f, %.1f, %.1f times the limit), so the swing is not from the gains; KP stays %.2f'
+                          % (kp / TRIM_DOWN ** 2, kp, scores[-3], scores[-2], scores[-1], kp))
                 break
             if (f > 1.0 and (ups >= self.a.trims or downs)) or (f < 1.0 and downs >= MAX_CUTS):
                 self.calc('Not applied: %s' % ('at most %d cuts at one setpoint' % MAX_CUTS if f < 1.0 else
@@ -738,7 +801,9 @@ class AutoTuner(pmc_gains.Tuner):
                                                                  if trims else ''))
         self.now('')
         note = ''
-        if f < 1.0:
+        if useless:
+            note = 'still %s; cuts stopped, two did not help' % why
+        elif f < 1.0:
             note = 'still %s after %d cuts' % (why, MAX_CUTS)
         elif f > 1.0 and not downs:
             note = 'still %s after %d trims' % (why, self.a.trims)

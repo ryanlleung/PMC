@@ -129,9 +129,26 @@ class Relay(unittest.TestCase):
         self.assertEqual(R.feed(1, 11.0, 5.0), 4.9)
         self.assertFalse(R.done)
         self.assertEqual(R.d, at.D_MIN)
-        R.feed(2, 11.0, 5.0)
+        # Still far the next second (9 Nov, 2 mbar): it waits for the pressure.
+        self.assertIsNone(R.feed(2, 11.0, 5.0))
+        self.assertFalse(R.done)
+        # Back: the test goes on; far again with the least step: it gives up.
+        R.feed(30, 5.2, 4.9)
+        self.assertFalse(R.done)
+        R.feed(31, 11.0, 4.9)
         self.assertTrue(R.done)
         self.assertIn('too far', R.why)
+
+    def test_gives_up_when_the_pressure_does_not_come_back(self):
+        R = at.Relay(5.0, 5.0, 0.4, 0.05)
+        R.feed(0, 5.0, 5.0)
+        R.feed(1, 11.0, 5.0)
+        for t in range(2, 2 + at.RUNOFF_S):
+            R.feed(t, 11.0, 4.9)
+        self.assertFalse(R.done)
+        R.feed(2 + at.RUNOFF_S, 11.0, 4.9)
+        self.assertTrue(R.done)
+        self.assertIn('not back', R.why)
 
 
 class Rules(unittest.TestCase):
@@ -427,6 +444,43 @@ class SteepValve(unittest.TestCase):
         self.assertFalse(r['note'].startswith('still'), r)
         self.assertLess(r['kp'], 0.5)
         self.assertIn('reach oscillated', r['note'])
+
+
+class Wander(unittest.TestCase):
+    def test_half_the_swing_about_the_drift(self):
+        rows = [(t, 4.0 + 0.01 * t + 0.15 * math.sin(t / 3.0)) for t in range(40)]
+        self.assertAlmostEqual(at.wander(rows), 0.15, delta=0.02)
+
+    def test_overshoot_counts_beyond_the_wander(self):
+        rows = [(0, 4.0, 3.2), (5, 4.6, 3.3), (10, 5.0, 3.3), (20, 4.8, 3.3)] + [(t, 4.8, 3.3) for t in range(21, 100)]
+        self.assertEqual(at.step_figures(rows, 4.0, 4.8, 0.04)['overshoot_pct'], 25.0)
+        self.assertEqual(at.step_figures(rows, 4.0, 4.8, 0.17, 0.17)['overshoot_pct'], 3.8)
+
+    def tuner(self, figs):
+        a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
+        t = at.AutoTuner(None, None, a, None)
+        t.say = lambda m: None
+        t.reach = lambda sp, kp, ti: 3.0
+        t.relay = lambda sp, x0, dd: {'Ku': 0.68, 'Pu_s': 8.2, 'd_pct': 0.2, 'a_mbar': 0.33, 'eps_mbar': 0.1,
+                                      'cycles': 4, 'asym': None, 'steady': True, 'noise': 0.03, 'wander': 0.17}
+        t.check = lambda sp, kp, ti, r, k: (figs[k - 1], kp)
+        return t
+
+    def test_cuts_stop_when_two_do_not_help(self):
+        # 4 mbar on 9 Nov: the check no better after each cut.
+        fig = lambda o, n: {'overshoot_pct': o, 'settle_s': None, 'reversals': n, 'saturated': False}   # noqa: E731
+        t = self.tuner([fig(24.5, 9), fig(65.9, 2), fig(32.4, 12), fig(29.2, 4)])
+        r = t.point(4.0, (0.1, 0.4), 0.4)
+        self.assertEqual(r['trims'], 'x0.80 x0.80')
+        self.assertAlmostEqual(r['kp'], at.clip_kp(0.17 * 0.64), places=2)
+        self.assertIn('cuts stopped', r['note'])
+
+    def test_cuts_go_on_while_they_help(self):
+        fig = lambda o, n: {'overshoot_pct': o, 'settle_s': 30, 'reversals': n, 'saturated': False}   # noqa: E731
+        t = self.tuner([fig(40, 1), fig(30, 1), fig(20, 1), fig(8, 1)])
+        r = t.point(4.0, (0.1, 0.4), 0.4)
+        self.assertEqual(r['trims'], 'x0.80 x0.80 x0.80')
+        self.assertEqual(r['note'], '')
 
 
 class Files(unittest.TestCase):
