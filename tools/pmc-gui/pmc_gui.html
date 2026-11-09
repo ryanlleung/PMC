@@ -66,6 +66,9 @@
   .reading .v { font-size: 32px; font-variant-numeric: tabular-nums; }
   .reading .u { color: var(--muted); font-size: 14px; }
   .reading.temp .v { font-size: 26px; }
+  .reading.corr .v { font-size: 22px; }
+  .reading .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .legend .rate { color: var(--muted); font-variant-numeric: tabular-nums; }
   .reading h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #chart { width: 100%; height: 300px; display: block; }
   #vchart { width: 100%; height: 130px; display: block; margin-top: 6px; }
@@ -141,10 +144,11 @@
       <div class="reading"><h2>Pressure</h2><span class="v" id="p">--</span> <span class="u">mbar</span></div>
       <div class="reading"><h2>Setpoint</h2><span class="v" id="sp">--</span> <span class="u">mbar</span></div>
       <div class="reading"><h2>Valve</h2><span class="v" id="v">--</span> <span class="u">%</span></div>
+      <div class="reading corr" title="Estimated from the pressure, setpoint, valve and the gains in use (PID?): P = KP x (setpoint - pressure); I = valve - P, the integral that holds the valve where it is; it moves KP x error / TI per minute"><h2>Valve from KP, TI</h2><span class="u">KP</span> <span class="v" id="cP">--</span> <span class="u">TI</span> <span class="v" id="cI">--</span> <span class="u">%</span><div class="sub" id="cSub">AUTO only</div></div>
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div class="legend"><span><i style="background:#2d5877"></i>Pressure</span><span><i style="background:#3f3f3f"></i>Setpoint</span><span><i style="background:#b9c9d6"></i>Test stage</span></div>
+        <div class="legend"><span><i style="background:#2d5877"></i>Pressure <span class="rate" id="rP"></span></span><span><i style="background:#3f3f3f"></i>Setpoint <span class="rate" id="rSp"></span></span><span><i style="background:#b9c9d6"></i>Test stage</span></div>
         <div><label>Show</label> <select id="win"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="3600">1 hour</option><option value="14400">4 hours</option></select></div>
       </div>
       <canvas id="chart"></canvas>
@@ -331,6 +335,36 @@ const val = id => $(id).value.trim();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TCOL = ['#b5541c', '#6b4fa0', '#2e7d4f', '#8a6d1d'];
 let calcKey = '';
+// The one-minute average rate of change of column k, per minute: the
+// least-squares slope through the last 60 s of samples (null with fewer than 10).
+function rate(k) {
+  if (!rows.length) return null;
+  const t1 = rows[rows.length - 1][0];
+  const pts = rows.filter(r => r[0] >= t1 - 60 && r[k] !== null && r[k] !== undefined);
+  if (pts.length < 10) return null;
+  const n = pts.length, mt = pts.reduce((a, r) => a + r[0], 0) / n, my = pts.reduce((a, r) => a + r[k], 0) / n;
+  let sxy = 0, sxx = 0;
+  pts.forEach(r => { sxy += (r[0] - mt) * (r[k] - my); sxx += (r[0] - mt) ** 2; });
+  return sxx ? sxy / sxx * 60 : null;
+}
+const sgn = v => (v >= 0 ? '+' : '\u2212') + Math.abs(v).toFixed(2);
+const rateTxt = (v, d, u) => v === null ? '' : (v >= 0 ? '+' : '\u2212') + Math.abs(v).toFixed(d) + ' ' + u + '/min';
+// P and I of the board's PI (ctrl.c: valve = KP x e + I, e = setpoint - pressure,
+// I moves KP x e / TI per minute), from the samples and the gains in use.
+function correction(s) {
+  const r = rows[rows.length - 1], g = s.pid;
+  if (!r || r[4] !== 'AUTO' || !g || r[1] === null || r[2] === null || r[3] === null) return null;
+  const e = r[1] - r[2], P = g[0] * e, I = r[3] - P;
+  const t1 = r[0], pts = rows.filter(x => x[0] >= t1 - 60 && x[4] === 'AUTO' && x[1] !== null && x[2] !== null && x[3] !== null);
+  let dP = null, dI = null, dV = null;
+  if (pts.length >= 10 && g[1] > 0) {
+    const a = pts[0], ea = a[1] - a[2];
+    let integ = 0;
+    for (let i = 1; i < pts.length; i++) integ += ((pts[i][1] - pts[i][2]) + (pts[i - 1][1] - pts[i - 1][2])) / 2 * (pts[i][0] - pts[i - 1][0]);
+    dP = g[0] * (e - ea); dI = g[0] / (g[1] * 60) * integ; dV = r[3] - a[3];
+  }
+  return { P, I, rate: g[1] > 0 ? g[0] * e / g[1] : null, dP, dI, dV, span: pts.length ? t1 - pts[0][0] : 0 };
+}
 let rows = [], last = -1, pidLoaded = false, lsLoaded = false, tab = 'live', S = null, inFlight = false, tKey = '';
 
 function go(t, card) {
@@ -484,6 +518,11 @@ async function refresh() {
   if (r) {
     $('sp').textContent = fmt(r[1], 1); $('p').textContent = fmt(r[2], 3); $('v').textContent = fmt(r[3], 2);
   }
+  const C = correction(s);
+  $('cP').textContent = C ? sgn(C.P) : '--'; $('cI').textContent = C ? C.I.toFixed(2) : '--';
+  $('cSub').textContent = !C ? 'AUTO only' : C.dP === null ? 'KP part / TI (integral) part of the valve' :
+    `Last ${Math.round(C.span)} s the valve moved ${sgn(C.dV)} %: KP ${sgn(C.dP)}, TI ${sgn(C.dI)}`;
+  $('rP').textContent = rateTxt(rate(2), 3, 'mbar'); $('rSp').textContent = rateTxt(rate(1), 2, 'mbar');
   const m = on && r ? r[4] : '';
   $('mode').textContent = on ? m || '--' : 'NO LINK';
   $('mode').className = m === 'AUTO' ? 'auto' : !on || /F-/.test((r && r[5]) || '') ? 'fault' : '';
@@ -569,7 +608,10 @@ async function refresh() {
     if (atEnd) box.scrollTop = box.scrollHeight;
     calcKey = ck;
   }
-  $('aNow').textContent = A && A.running && A.calc_now ? 'Now: ' + A.calc_now : '';
+  const Cn = correction(s);
+  $('aNow').textContent = A && A.running && A.calc_now ? 'Now: ' + A.calc_now + (!Cn ? '' :
+    `; valve ${(Cn.P + Cn.I).toFixed(2)} % = KP ${sgn(Cn.P)} + TI ${Cn.I.toFixed(2)}` +
+    (Cn.dP === null ? '' : `, last ${Math.round(Cn.span)} s KP ${sgn(Cn.dP)} and TI ${sgn(Cn.dI)} %`)) : '';
   $('aSetsCalc').textContent = A && A.sets_calc ? A.sets_calc.join('\n') : '';
   $('aLines').textContent = A && A.lines.length ? 'Sends ' + A.lines.join('; ') + (A.dir ? '. Also in write-to-board.txt in ' + A.dir + '.' : '.') : '';
   $('tName').textContent = s.table_name ? '(' + s.table_name + ')' : '';
@@ -659,6 +701,8 @@ function draw() {
     stages(g, X, Tt, h, false);
     g.textAlign = 'left'; g.fillStyle = '#5d6b78'; g.font = '600 12px system-ui, sans-serif';
     g.fillText('Valve, %', L, 12);
+    const vr = rateTxt(rate(3), 2, '%');
+    if (vr) { const tw = g.measureText('Valve, %').width; g.font = '12px system-ui, sans-serif'; g.fillStyle = '#5a646c'; g.fillText(vr + ', last min', L + tw + 10, 12); }
     pen(g, X, 3, Y, '#5d6b78', 2);
   }
   // Each 336 input on its own strip and its own scale, so a few mK of
@@ -675,6 +719,8 @@ function draw() {
     grid(g, a, Y, L, L + w);
     g.textAlign = 'left'; g.fillStyle = TCOL[k % 4]; g.font = '600 12px system-ui, sans-serif';
     g.fillText(`${x[1]} (${x[0]}), K`, L, 12);
+    const tr = rateTxt(rate(7 + k), 3, 'K');
+    if (tr) { const tw = g.measureText(`${x[1]} (${x[0]}), K`).width; g.font = '12px system-ui, sans-serif'; g.fillStyle = '#5a646c'; g.fillText(tr + ', last min', L + tw + 10, 12); }
     pen(g, X, 7 + k, Y, TCOL[k % 4], 2);
   });
 }
