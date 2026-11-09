@@ -12,7 +12,8 @@
 #include "lv_port_indev.h"
 
 /*
- * Settings > Motor override (0.11.32: option B, Ryan 22 Oct; three tabs
+ * Valve position > Motor override (Settings > Motor override to 0.14.13;
+ * 0.11.32: option B, Ryan 22 Oct; three tabs
  * since 0.11.33, Ryan 23 Oct). A framework screen: the standard header,
  * status strip and STOP; every MOT setting and move from the touchscreen,
  * and the screen follows MOT commands on the link.
@@ -457,7 +458,7 @@ static lv_obj_t *btn(lv_obj_t *p, int32_t x, int32_t y, int32_t w, const char *t
     return b;
 }
 
-// Segmented choice as Valve setup's tabs: grey track, the chosen segment
+// Segmented choice as the Valve settings tabs: grey track, the chosen segment
 // raised white (seg_show).
 // first > 0 makes the first segment that wide, the rest share what is left.
 static void seg(lv_obj_t *p, int32_t x, int32_t y, int32_t w, int n, const char *const *labels,

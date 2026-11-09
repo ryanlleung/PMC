@@ -10,7 +10,7 @@ The program has two parts:
 ## Needs
 
 - Python 3.8 or later. Nothing is installed with pip. On a Windows PC without admin rights, the "Windows embeddable package" zip from python.org runs after unzipping (`python.exe pmc_gains.py ...`).
-- The Ethernet build, with Settings > System setup > Remote control On.
+- The Ethernet build, with Menu > System > Remote control On.
 - `tune` works on firmware 0.13.0 and later. `run` needs the `PID?` and `PID SET` commands, from firmware 0.15.8.
 
 The board takes one text-port connection at a time, and a new one replaces the old. Do not run `run` beside the logger or a Frappy driver on the same board. A Frappy driver can import `load_table()` and `gains_for()` from this file and set KP and TI itself.

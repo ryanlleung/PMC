@@ -7,6 +7,10 @@
  *   ./ui_new <state> <out.raw>
  *   state: notcal | manual | calib | moving | nodruck | stop | neg | menu | keypad | confirm
  *          | valve | valvenc | limithit | calpage | faults | detail | diag | help
+ * Menu (0.16.2): three columns of 148 at x 10, 166, 322 (centres 84, 240,
+ * 396), rows y 48, 104, 160 (centres 72, 128, 184): Trend, Events, Valve
+ * position / Valve settings, PID tuning, Calibration / System, Diagnostics,
+ * Review and save.
  */
 #ifndef TVX
 #define TVX 444
@@ -379,11 +383,19 @@ int main(int argc, char **argv)
     size_t before = heap_used();
     // Header (common HMI template, 0.15.9): Home at x 0-44 on every page
     // but Home, Back at 44-88; on Home the power icon is at 0-44.
-    // Menu: Trend, Events / Valve position, Calibration / System, Settings
-    // at x 129 and 303, rows y 48, 104, 160. Settings: Choose sensor,
-    // Valve setup / PID tuning, Review and save at x 10 and 244.
+    // Menu (0.16.2): nine tiles, see the top of this file.
 #define HOME() tap(22, 20)
 #define BACK() tap(66, 20)
+#define MENU() tap(415, 184)
+#define M_TREND()  tap(84, 72)
+#define M_EVENTS() tap(240, 72)
+#define M_VPOS()   tap(396, 72)
+#define M_VSET()   tap(84, 128)
+#define M_TUNE()   tap(240, 128)
+#define M_CAL()    tap(396, 128)
+#define M_SYS()    tap(84, 184)
+#define M_DIAG()   tap(240, 184)
+#define M_REVIEW() tap(396, 184)
     for (int i = 0; i < 10; i++) {
         tap(415, 184);          // Menu
         HOME();
@@ -394,20 +406,19 @@ int main(int argc, char **argv)
         // The motor screen first (review, 16 Oct: it stayed built and a
         // settings keypad after it ran the heap out), opened as its Open
         // button does, from Valve position.
-        tap(415, 184); tap(212, 128); ui_service(); run(300);   // Valve position, Motor override
+        MENU(); M_VPOS(); ui_service(); run(300);               // Valve position, Motor override
         BACK(); run(300);
         HOME();
         tap(415, 72); BACK();                                   // PID tile: PID tuning
-        tap(415, 184); tap(212, 72); HOME();                    // Trend
-        tap(415, 184); tap(386, 72); HOME();                    // Events
-        tap(415, 184); tap(386, 128); HOME();                   // Calibrate sensor (0.15.19)
-        tap(415, 184); tap(212, 184);                           // System
+        MENU(); M_TREND(); HOME();                              // Trend
+        MENU(); M_EVENTS(); HOME();                             // Events
+        MENU(); M_CAL(); HOME();                                // Calibrate sensor
+        MENU(); M_SYS();                                        // System
         tap(298, 184); BACK(); HOME();                          //   Diagnostics (0.15.19)
-        tap(415, 184); tap(386, 184);                           // Settings (right, 0.15.23)
-        tap(123, 72); BACK();                                   //   Choose sensor
-        tap(357, 72); BACK();                                   //   Valve setup
-        tap(123, 128); BACK();                                  //   PID tuning
-        tap(357, 128); BACK();                                  //   Review and save (row 2, 0.15.22)
+        MENU(); M_VSET(); BACK();                               // Valve settings (0.16.2: on the Menu)
+        MENU(); M_TUNE(); BACK();                               // PID tuning
+        MENU(); M_DIAG(); BACK();                               // Diagnostics
+        MENU(); M_REVIEW(); BACK();                             // Review and save
         HOME();
     }
     run(1200);
@@ -422,7 +433,7 @@ int main(int argc, char **argv)
     }
 
     if (!strcmp(st, "stop")) tap(415, 240);
-    if (!strncmp(st, "motor", 5)) { tap(415, 184); tap(379, 184); ui_service(); }   // Settings > Motor override
+    if (!strncmp(st, "motor", 5)) { MENU(); M_VPOS(); ui_service(); }   // Valve position > Motor override
     if (!strcmp(st, "motor-held")) { extern bool fake_busy; fake_override = true; fake_busy = true; }   // Limit override held
     if (!strcmp(st, "motor-moving")) { extern bool fake_busy; fake_busy = true; ui_service(); }   // a move running
     if (!strcmp(st, "motor-speed")) tap(122, 72);
@@ -430,7 +441,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "motor-coils") || !strcmp(st, "motor-ask")) tap(194, 72);
     if (!strcmp(st, "motor-ask")) { v_cal = true; tap(120, 184); }   // Coil order while homed: asks
     if (!strcmp(st, "overon")) { fake_override = true; tap(415, 184); }   // Menu, override armed
-    if (!strcmp(st, "menu")) tap(415, 184);
+    if (!strcmp(st, "menu")) MENU();
     if (!strcmp(st, "keypad")) { tap(300, 184); tap(41, 184); tap(111, 240); tap(251, 240); tap(111, 184); tap(111, 184); }
     if (!strcmp(st, "confirm")) { v_mode = VALVE_NOT_CAL; v_cal = false; tap(269, 184); }   // Home valve: Home or Set position
     if (!strcmp(st, "autofirst") || !strcmp(st, "autoask")) tap(93, 184);   // Start AUTO (the Pressure tile)
@@ -464,17 +475,14 @@ int main(int argc, char **argv)
     if (!strcmp(st, "bootpick")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; }
     if (!strcmp(st, "bootask")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; }
     if (!strcmp(st, "bootmove")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; vp_moving = true; }
-    // Settings (stage 6).
+    // The settings pages (stage 6), each on the Menu from 0.16.2.
     bool set = !strncmp(st, "set-", 4);
-    if (set) { tap(415, 184); tap(379, 184); }
-    if (!strcmp(st, "set-sensor") || !strcmp(st, "set-pick") || !strncmp(st, "set-add", 7) ||
-        !strcmp(st, "set-caldetail")) tap(356, 72);
-    if (!strcmp(st, "set-pick")) tap(120, 72);
-    if (!strncmp(st, "set-name", 8)) { tap(120, 72); tap(120, 72); tap(331, 189); tap(331, 189); tap(24, 65); tap(338, 65); }
-    if (!strcmp(st, "set-named")) { tap(415, 128); tap(24, 20); tap(24, 20); tap(24, 20); }   // Use name, Settings, Home
+    if (set) MENU();
+    if (!strncmp(st, "set-name", 8) || !strncmp(st, "set-net", 7) || !strcmp(st, "set-remote")) M_SYS();
+    if (!strncmp(st, "set-name", 8)) { tap(120, 72); tap(331, 189); tap(331, 189); tap(24, 65); tap(338, 65); }
+    if (!strcmp(st, "set-named")) { tap(415, 128); tap(24, 20); tap(24, 20); }   // Use name, Home
     // System, IP address (0.12.13): keys at x 45/122/199, y 66/107/149/190.
-    if (!strncmp(st, "set-net", 7)) tap(120, 72);
-    if (!strcmp(st, "set-remote")) { tap(120, 72); tap(357, 184); }   // System, Remote control Off (On by default)
+    if (!strcmp(st, "set-remote")) tap(357, 128);   // Remote control Off (On by default)
     if (!strncmp(st, "set-netaddr", 11) || !strcmp(st, "set-netused")) tap(356, 72);
     if (!strcmp(st, "set-netaddr2") || !strcmp(st, "set-netused")) {
         for (int i = 0; i < 13; i++) tap(199, 190);
@@ -487,38 +495,33 @@ int main(int argc, char **argv)
         for (size_t i = 0; i < sizeof k2 / sizeof k2[0]; i++) tap(k2[i][0], k2[i][1]);   // 255.255.255.0
     }
     if (!strcmp(st, "set-netused")) tap(298, 184);
-    if (!strncmp(st, "set-add", 7)) { tap(298, 72); tap(41, 240); tap(111, 240); tap(181, 240); tap(321, 184); }
-    if (!strcmp(st, "set-addask") || !strcmp(st, "set-addcal")) tap(250, 84);   // 30 psi (second column)
-    if (!strcmp(st, "set-addcal")) tap(318, 164);   // Calibrate
-
-    if (!strcmp(st, "set-caldetail")) tap(120, 128);
-    if (!strncmp(st, "set-valve", 9)) tap(120, 128);
+    if (!strncmp(st, "set-valve", 9)) M_VSET();
     if (!strcmp(st, "set-valve2")) tap(182, 72);
     if (!strcmp(st, "set-valve3")) tap(294, 72);
     if (!strcmp(st, "set-valvepos")) tap(94, 128);
-    if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) tap(356, 128);
+    if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) M_TUNE();
     if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") ||
         !strcmp(st, "set-saved")) { tap(94, 72); tap(181, 240); tap(251, 240); tap(111, 184); }
     if (!strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(321, 184);
     if (!strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(415, 128);
     if (!strcmp(st, "set-saved")) tap(249, 136 + 40);
-    if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) tap(120, 184);
+    if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) M_REVIEW();
     if (!strcmp(st, "set-load")) tap(120, 184);
-    if (strstr(st, "trend")) { tap(415, 184); tap(210, 72); }   // Menu, Trend
+    if (strstr(st, "trend")) { MENU(); M_TREND(); }   // Menu, Trend
     if (!strcmp(st, "trend1h")) { tap(415, 72); tap(415, 72); }
     if (!strcmp(st, "trend1m")) { tap(415, 128); tap(415, 184); tap(415, 184); }
-    if (!strcmp(st, "calsensor") || !strcmp(st, "calvac")) { tap(415, 184); tap(379, 128); }
+    if (!strcmp(st, "calsensor") || !strcmp(st, "calvac")) { MENU(); M_CAL(); }
     if (!strcmp(st, "calvac")) tap(298, 128);
-    if (!strcmp(st, "back")) { tap(415, 184); tap(120, 184); tap(24, 20); }   // Diagnostics, Back: Menu
+    if (!strcmp(st, "back")) { MENU(); M_DIAG(); BACK(); }   // Diagnostics, Back: Menu
     if (!strcmp(st, "help") || !strcmp(st, "help2") || !strcmp(st, "help3")) { tap(415, 72); tap(415, 72); }   // PID tuning, Help
     if (!strcmp(st, "help2")) tap(TVX, 172);
     if (!strcmp(st, "help3")) { tap(TVX, 172); tap(TVX, 172); tap(TVX, 172); tap(TVX, 172); }
-    if (!strcmp(st, "faults") || !strcmp(st, "detail")) { tap(415, 184); tap(350, 72); }
+    if (!strcmp(st, "faults") || !strcmp(st, "detail")) { MENU(); M_EVENTS(); }
     if (!strcmp(st, "detail")) tap(150, 72);
-    if (!strcmp(st, "calpage") || !strcmp(st, "calpage2") || !strncmp(st, "calset", 6)) { tap(415, 184); tap(210, 128); }
-    if (!strcmp(st, "calhelp")) { tap(415, 184); tap(210, 128); tap(415, 72); }
+    if (!strcmp(st, "calpage") || !strcmp(st, "calpage2") || !strncmp(st, "calset", 6)) { MENU(); M_VPOS(); }
+    if (!strcmp(st, "calhelp")) { MENU(); M_VPOS(); tap(415, 72); }
     if (!strcmp(st, "bootpick")) { run(600); tap(240, 146); }   // start-up question, Set position
-    if (!strcmp(st, "diag")) { tap(415, 184); tap(200, 184); }
+    if (!strcmp(st, "diag")) { MENU(); M_DIAG(); }
     run(1200);
 
     FILE *f = fopen(argv[2], "wb");

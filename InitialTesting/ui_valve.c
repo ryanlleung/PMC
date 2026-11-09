@@ -36,7 +36,12 @@ static void right(lv_obj_t *l)
 }
 
 /* --------------------------------------------------------------------------
- * Calibrate valve
+ * Valve position: what is done to the valve now, from the Menu's valve
+ * tile (0.16.2, Ryan 9 Nov: "the functionality between valve position and
+ * valve setup is a bit confusing"). Home valve, the three ways to set the
+ * position, and Motor override act on the valve; the numbers they use
+ * (travel, direction, back-off, return, speeds) are drafts on Valve
+ * settings, and nothing here changes a saved setting.
  * ------------------------------------------------------------------------ */
 static struct {
     lv_obj_t *state, *state_cap, *turns, *start, *closed, *enter, *saved;
@@ -46,11 +51,14 @@ static struct {
  * state, turns and Help; then Home valve and the three ways to set the
  * position. */
 static const char *const calib_help =
+    "This page acts on the valve now. Its saved numbers (travel, direction, homing distances and speeds) "
+    "are on Valve settings.\n\n"
     "Home valve: fast close to the switch, back-off, slow close, Return off the switch = 0 % "
-    "(Valve setup > Homing). Seated reads about -0.6 %. STOP cancels.\n\n"
+    "(Valve settings > Homing). Seated reads about -0.6 %. STOP cancels.\n\n"
     "Set as 0 %, Set as other %, Use last saved: set the reference without moving; "
     "not verified against the switch. Use last saved: the position saved at power loss, "
     "offered until the valve moves or is homed.\n\n"
+    "Motor override: the motor by steps, past the valve's checks (engineering).\n\n"
     "F-3 switch not found, F-4 switch stuck: check switch and wiring, reset, home again.";
 
 static void start_cb(lv_event_t *e)
@@ -615,7 +623,7 @@ static void diag_refresh(void)
     ui_set_text(dp.v[8], any ? ui_fmt1(buf, sizeof buf, ms) : "--");
 
     // Raw readings only (0.13.2, Ryan 28 Oct); the firmware, address, MAC
-    // and Restart are on Settings > System setup. The strip is Home's
+    // and Restart are on System. The strip is Home's
     // status line from 0.13.4 (Ryan, 28 Oct).
     ui_set_text(dp.v[5], ui_fmt1(buf, sizeof buf, s->die_mc));
     ui_status_line();

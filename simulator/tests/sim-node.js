@@ -78,5 +78,5 @@ function load(file) {
 // cfg_key_t (InitialTesting/cfg.h), for save() and setting().
 const CFG = { POSMAX: 0, REVERSE: 1, BACKOFF: 2, RETURN: 3, FHOME: 4, FCREEP: 5, RATE: 6, START: 7, ACCEL: 8,
   KP: 9, TI: 10, OUTMIN: 11, DB: 12, KDIR: 13, BAND: 14, KD: 15,
-  KP2: 16, TI2: 17, KD2: 18, KP3: 19, TI3: 20, KD3: 21, SCHED: 22, B1: 23, B2: 24, HYST: 25, DBC: 26, SENSOR: 27 };
+  KP2: 16, TI2: 17, KD2: 18, KP3: 19, TI3: 20, KD3: 21, SCHED: 22, B1: 23, B2: 24, HYST: 25, DBC: 26 };   // SENSOR (27) went in 0.16.2
 module.exports = { load, CFG };

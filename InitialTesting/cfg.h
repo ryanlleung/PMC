@@ -20,9 +20,15 @@
  * defaults are used (and the old stand-alone cal record, if any) and an
  * event says so. Nothing moves at start-up either way.
  *
- * Version 2 (0.9.0) also holds the control tuning (used from stage 8), up
- * to four pressure sensors (serial, range, own cal; one in use) and the
- * save time. Version 1 records load as one sensor, s/n 5880156 at 15 psi.
+ * Version 2 (0.9.0) also holds the control tuning (used from stage 8), the
+ * pressure sensor (serial, range, own cal) and the save time. Version 1
+ * records load as one sensor, s/n 5880156 at 15 psi.
+ *
+ * One sensor per board from 0.16.2 (Ryan 9 Nov: "only one pressure sensor
+ * per mm4 and a new one will be recalibrated anyway"): the record keeps its
+ * version 8 layout, with room for four sensors and the one in use, so every
+ * saved record still loads; the firmware keeps the one that was in use and
+ * writes it alone at the next save. Its range is the 15 psia Druck's.
  *
  * Changes made over COM3 are live at once and stay unsaved until CFG SAVE.
  * The Settings screens instead keep their edits as drafts and apply and
@@ -35,7 +41,7 @@
  *   CFG SAVE                     save everything (CAL SAVE does the same)
  *   CFG LOAD LAST|PREVIOUS       the newest / the other saved record
  *   CFG LOAD DEFAULTS            factory motor, valve and tuning settings
- *                                (sensors and their cals kept)
+ *                                (the sensor's cal kept)
  *   CFG TEST CORRUPT             spoil the newest record's CRC (bench test)
  *   CFG NAME <text> | CFG NAME?  the cryostat name in the header (up to 12
  *                                characters; unsaved until CFG SAVE)
@@ -52,13 +58,12 @@ bool cfg_save(void);
 int cfg_unsaved(void);
 
 /* --------------------------------------------------------------------------
- * For the Settings screens
+ * For the settings screens
  * ------------------------------------------------------------------------ */
-#define CFG_SENS_MAX 4
 #define CFG_NAME_LEN 12
 
 // Cryostat name, shown as "<name> pressure controller" on Home. Set live,
-// unsaved until the next save, like a sensor change.
+// unsaved until the next save, like a captured calibration.
 const char *cfg_name(void);
 bool cfg_name_ok(const char *n);
 bool cfg_set_name(const char *n, const char **why);
@@ -109,28 +114,16 @@ typedef enum {
     CFG_B2,        // boundary set 2 / set 3, 0.1 mbar
     CFG_HYST,      // hysteresis on the pressure, % of the boundary
     CFG_DBC,       // deadband closing, steps (CFG_DB is the opening one)
-    CFG_SENSOR,    // serial number of the sensor in use
-    CFG_N
+    CFG_N          // (CFG_SENSOR, the sensor in use, went in 0.16.2: one sensor per board)
 } cfg_key_t;
 
 typedef enum { CFG_FROM_LIVE, CFG_FROM_SAVED, CFG_FROM_PREVIOUS, CFG_FROM_DEFAULTS } cfg_from_t;
 
-typedef struct {
-    uint32_t serial;
-    int32_t psi10;          // range, 0.1 psi
-    int32_t fs_mmbar;       // the same in 0.001 mbar
-    bool in_use;
-    bool has_cal;           // false: nominal over the range
-    bool saved;             // as in the newest save
-    const cal_rec_t *cal;   // NULL without a cal; valid until the next call
-} cfg_sensor_t;
-
-int32_t cfg_psi10_mmbar(int32_t psi10);
-// Writes one line per unsaved change the screens have no field for (new
-// cals, sensors added or removed, serial-only settings); 0 if none.
+// Writes one line per unsaved change the screens have no field for (a new
+// cal, serial-only settings); 0 if none.
 int cfg_unsaved_other(char *buf, size_t n);
 // A setting from the live values, a save or the defaults. False if that
-// record does not exist (or CFG_SENSOR from the defaults, which keep it).
+// record does not exist, or k is no key.
 bool cfg_value(cfg_from_t from, cfg_key_t k, int32_t *v);
 bool cfg_rev(cfg_from_t from, uint32_t *rev, const char **saved_at);
 void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi);
@@ -144,16 +137,11 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
 // Makes a save (or the defaults) the live values, unsaved until saved.
 bool cfg_load_live(cfg_from_t from, const char **why);
 
-int cfg_sensor_count(void);
-int cfg_sensor_active(void);
-bool cfg_sensor(int i, cfg_sensor_t *out);
-// The cal of that sensor in the newest save: false if not in it, cal NULL
-// if saved without a cal.
-bool cfg_saved_cal(uint32_t serial, const cal_rec_t **cal);
-bool cfg_sensor_add(uint32_t serial, int32_t psi10, const char **why);
-bool cfg_sensor_remove(uint32_t serial, const char **why);
-// Puts a sensor on the board in use now, with its own cal, unsaved until
-// the next save (as after a capture). Refused while the valve moves.
-bool cfg_sensor_use(uint32_t serial, const char **why);
+// The sensor's full scale, 0.001 mbar: the 15 psia Druck, 1034.214 mbar
+// (the setpoint's limit, W-5, the nominal conversion before a cal).
+int32_t cfg_sensor_range_mmbar(void);
+// The sensor's cal in the newest save: false with nothing saved, cal NULL
+// if saved without a cal (nominal).
+bool cfg_saved_cal(const cal_rec_t **cal);
 
 #endif // _CFG_H_

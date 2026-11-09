@@ -11,7 +11,7 @@ Map version 2, from firmware 0.15.15: version 1 (registers 0 to 25, checked agai
 
 ## Writes
 
-`PMC_MODBUS_WRITE` in `pmc_config.h` is 1 from 0.12.6, so anyone who can reach port 502 can set the target and run the valve. From 0.13.4 writes also need Settings > System setup > Remote control On on the screen (On by default from 0.13.7, Off to 0.13.6, kept by Save settings); while it is Off every write answers exception 1 and the reads go on as before. With `PMC_MODBUS_WRITE 0` the server is read only and every write (FC5, FC16) answers exception 1, whatever the switch says. A write to an address outside the map answers exception 2 either way.
+`PMC_MODBUS_WRITE` in `pmc_config.h` is 1 from 0.12.6, so anyone who can reach port 502 can set the target and run the valve. From 0.13.4 writes also need Menu > System > Remote control On on the screen (On by default from 0.13.7, Off to 0.13.6, kept by Save settings); while it is Off every write answers exception 1 and the reads go on as before. With `PMC_MODBUS_WRITE 0` the server is read only and every write (FC5, FC16) answers exception 1, whatever the switch says. A write to an address outside the map answers exception 2 either way.
 
 With writes on, the writable registers and command coils go through the same calls as the screen buttons, so the same checks and refusals apply. A write the controller refuses answers exception 4 and logs a NET event with the reason ("Switch to MANUAL first", "No target set", ...). While OFF or shutting down (mode 5 or 4), the AUTO coil and the valve going to register are refused ("Controller is off", "Shutting down"); STOP cancels a shut down; the target can still be written. Each accepted write is logged as a NET event with the client's IP address.
 
@@ -42,7 +42,7 @@ Rewriting the target with the value it already has changes nothing (no event; th
 | 12-13 | F32 W | Target | mbar, kept to 0.1 mbar, 0 to the sensor range. NaN until set. Write: as Set target on the screen, in any mode |
 | 14-15 | F32 | Valve position | % open. NaN when the position is not set |
 | 16-17 | F32 W | Valve going to | % open, where the valve is going. Write: as Go to % on Home, 0 to 100, MANUAL only |
-| 18-19 | F32 | Sensor range | mbar, full scale of the sensor in use |
+| 18-19 | F32 | Sensor range | mbar, full scale of the sensor, 1034.2 (15 psia; one sensor per board from 0.16.2) |
 | 20-21 | F32 | Excitation | V, the Druck supply. NaN if the Power Monitor does not answer |
 | 22-23 | F32 | Controller temperature | degC, Power Monitor die. NaN if it does not answer |
 | 24-25 | U32 | Uptime | Seconds since start-up, high word first |
@@ -59,7 +59,7 @@ Reading past address 50 answers exception 2. Read 0 to 50 (51 registers) in one 
 
 ### Gain schedule (registers 26 to 50)
 
-The same settings as Settings > PID tuning on the screen (PID and PID table tabs) and the text port's `PIDS` and `SCHED` commands. A write is a tuning save, as the screen's Save settings: it is taken in AUTO too, from the next control step, and kept through a power cycle. One FC16 can write any run of registers 27 to 50 (each float whole); the values are checked first, then saved together in one flash write. A write that changes nothing writes nothing. A value out of range or NaN answers exception 3 and changes nothing. Boundary 2 must be above boundary 1 by more than the hysteresis either side (B1 x (1 + H) below B2 x (1 - H)); a write that breaks this answers exception 4 and logs the reason. Register 26 is read only.
+The same settings as Menu > PID tuning on the screen (PID and PID table tabs) and the text port's `PIDS` and `SCHED` commands. A write is a tuning save, as the screen's Save settings: it is taken in AUTO too, from the next control step, and kept through a power cycle. One FC16 can write any run of registers 27 to 50 (each float whole); the values are checked first, then saved together in one flash write. A write that changes nothing writes nothing. A value out of range or NaN answers exception 3 and changes nothing. Boundary 2 must be above boundary 1 by more than the hysteresis either side (B1 x (1 + H) below B2 x (1 - H)); a write that breaks this answers exception 4 and logs the reason. Register 26 is read only.
 
 The set in use changes in AUTO when the pressure (schedule 2) passes a boundary by the hysteresis, or when the setpoint (schedule 1) crosses a boundary. Each change is logged ("AUTO PID set 3 to 2, pressure 16.9 mbar"). A change re-bases the integral, so the valve does not jump.
 

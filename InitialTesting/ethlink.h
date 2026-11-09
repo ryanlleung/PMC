@@ -6,8 +6,8 @@
 
 /**
  * @brief Ethernet text link: TCP server on PMC_TCP_PORT (pmc_config.h),
- * on a static address (no DHCP): the one saved under Settings > System
- * setup, else PMC_IP.
+ * on a static address (no DHCP): the one saved under Menu > System,
+ * else PMC_IP.
  * Uses the mikroSDK CycloneTCP stack and the board's LAN8720A.
  */
 

@@ -672,10 +672,7 @@ int valve_pid_set(void)
 
 int32_t valve_range_mmbar(void)
 {
-    cfg_sensor_t sn;
-    if (cfg_sensor(cfg_sensor_active(), &sn) && sn.fs_mmbar > 0)
-        return sn.fs_mmbar;
-    return cfg_psi10_mmbar(150);
+    return cfg_sensor_range_mmbar();   // the 15 psia Druck's (one sensor per board, 0.16.2)
 }
 
 static float range_mbar(void) { return (float)valve_range_mmbar() / 1000.0f; }

@@ -744,16 +744,40 @@ void ui_status_line(void)
 const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
 
 /* --------------------------------------------------------------------------
- * Menu: six tiles in three captioned rows, as the common HMI template:
- * Records (Trend, Events), Service (the valve page, Calibration: the
- * Calibrate sensor page; one line from 0.15.21),
- * Setup (System, Settings). From 0.15.19 (Ryan 6 Nov) Calibrate sensor is
- * back on the Menu in Diagnostics' place, and Diagnostics is on System;
- * the motor screen is on Valve position. From 0.15.23 (Ryan 6 Nov)
- * Settings is on the right of its row, filled dark blue.
+ * Menu: nine tiles in three rows of three, an icon over each name, no row
+ * captions (0.16.2, Ryan 9 Nov: "remove the settings page and put
+ * everything in the menu. remove the labels on the menu. show some icons
+ * for each button"). Every page is one tap away:
+ *   Trend           Events        Valve position     the records, the valve now
+ *   Valve settings  PID tuning    Calibration        the saved numbers
+ *   System          Diagnostics   Review and save    the controller, the saves
+ * Review and save is filled dark blue, as Ryan asked for it and Settings on
+ * 6 Nov (0.15.23); with Settings gone it is the one dark tile, bottom right
+ * where Settings was. Diagnostics stays on System too (0.15.19) and fills
+ * the ninth slot. To 0.16.1: six tiles in captioned rows Records (Trend,
+ * Events), Service (Valve position, Calibration), Setup (System, Settings),
+ * with Choose sensor, Valve setup, PID tuning and Review and save a tap
+ * further on Settings.
+ * Three columns of 148 (x 10, 166, 322): "Review and save" at 16 px is 136
+ * wide, too wide for the template's 109 columns, and Ryan does not want
+ * two-line tile names (6 Nov).
  * ------------------------------------------------------------------------ */
-static const ui_screen_t *const menu_scr[6] = { &ui_scr_trend, &ui_scr_faults, &ui_scr_calib, &ui_scr_sensor_cal,
-                                                &ui_scr_namenet, &ui_scr_settings };
+typedef struct {
+    const char *name, *icon;
+    const ui_screen_t *scr;
+} menu_item_t;
+
+static const menu_item_t menu_items[9] = {
+    { "Trend", UI_ICON_TREND, &ui_scr_trend },
+    { "Events", LV_SYMBOL_LIST, &ui_scr_faults },
+    { "Valve position", UI_ICON_VALVE, &ui_scr_calib },        // home, set the position, the motor: the valve now
+    { "Valve settings", LV_SYMBOL_EDIT, &ui_scr_valve_set },   // travel, homing, drive: saved numbers (the pencil, as a draft's)
+    { "PID tuning", LV_SYMBOL_LOOP, &ui_scr_tune },            // the loop, as the status line shows AUTO
+    { "Calibration", UI_ICON_TARGET, &ui_scr_sensor_cal },
+    { "System", LV_SYMBOL_SETTINGS, &ui_scr_namenet },
+    { "Diagnostics", LV_SYMBOL_EYE_OPEN, &ui_scr_diag },
+    { "Review and save", LV_SYMBOL_SAVE, &ui_scr_review },     // the header's unsaved icon
+};
 
 static void menu_tile_event(lv_event_t *e)
 {
@@ -762,21 +786,13 @@ static void menu_tile_event(lv_event_t *e)
 
 static void menu_build(lv_obj_t *scr)
 {
-    // Grouped in rows with a caption on the left, as on Diagnostics.
-    static const char *const rows[3] = { "Records", "Service", "Setup" };
-    static const char *const names[6] = { "Trend", "Events", "Valve position",
-                                          "Calibration", "System", "Settings" };   // one line (Ryan 6 Nov: not "Calibrate sensor" on two)
-    // Caption and two tiles in 1 : 1.5 : 1.5, the caption centred on its row.
-    for (int r = 0; r < 3; r++) {
-        lv_obj_t *l = ui_label(scr, 10, 0, 111, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);
-        lv_obj_update_layout(l);
-        lv_obj_set_y(l, 48 + r * 56 + (48 - lv_obj_get_height(l)) / 2);
-    }
-    for (int i = 0; i < 6; i++) {
-        lv_obj_t *b = ui_btn(scr, i % 2 ? 303 : 129, 48 + (i / 2) * 56, i % 2 ? 167 : 166, 48, UI_NAV, names[i],
-                             menu_tile_event, (void *)menu_scr[i]);
-        ui_btn_enable(b, menu_scr[i] != NULL);
-        if (menu_scr[i] == &ui_scr_settings)
+    for (int i = 0; i < 9; i++) {
+        const menu_item_t *m = &menu_items[i];
+        // Plain (centred) tiles, no chevron: the icon marks what opens.
+        lv_obj_t *b = ui_btn(scr, 10 + (i % 3) * 156, 48 + (i / 3) * 56, 148, 48, UI_SECONDARY, m->name,
+                             menu_tile_event, (void *)m->scr);
+        ui_btn_icon(b, m->icon);
+        if (m->scr == &ui_scr_review)
             ui_btn_blue(b);
     }
 }

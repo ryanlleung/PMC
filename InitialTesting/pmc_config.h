@@ -24,7 +24,7 @@
 #define PMC_LINK_WRITE    1
 
 // Remote control switch (0.13.4, Ryan 28 Oct, network plan A): set commands
-// on the text link need Settings > System > Remote control On, as
+// on the text link need Menu > System > Remote control On, as
 // do Modbus writes (PMC_MODBUS_WRITE). On by default from 0.13.7. PMC_LINK_WRITE and
 // PMC_MODBUS_WRITE 0 still mean never. 1 for the Ethernet build; the USB
 // link is local and not switched. The simulator builds with 1, as the board.
@@ -37,7 +37,7 @@
 // settings, tuning, saving and the motor are on the touch screen.
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.16.1"
+#define PMC_FW_VERSION    "0.16.2"
 
 // Valve limit switch: one NC dry contact to GND on S1 TX, PD5 (Adapter Click
 // IDC10 pad 8, printed RX: the Adapter labels from the Click's side; 0.14.6).
@@ -78,7 +78,7 @@
 #define PMC_MODBUS_WRITE   1
 #endif
 
-// The controller's address when none is saved under Settings > System setup
+// The controller's address when none is saved under Menu > System
 // (static only, no DHCP from 0.14.9). A conventional private address
 // (0.14.11; link-local 169.254.10.50/16 to 0.14.9, 169.254.1.1/16 in
 // 0.14.10): a PC talks to it from 192.168.1.x/24 with a fixed address.

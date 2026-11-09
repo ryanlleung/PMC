@@ -123,7 +123,7 @@ void ethlink_init(void)
     }
 
     // A static address only, no DHCP (0.14.9): the one saved under
-    // Settings > System setup, else the build's PMC_IP. No gateway: the
+    // Menu > System, else the build's PMC_IP. No gateway: the
     // controller answers on its own subnet only.
     Ipv4Addr a, m;
     char ip[16], mask[16];

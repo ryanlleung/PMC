@@ -5,7 +5,8 @@
  * Covers: a version 1 record (0.6.0 to 0.8.x) loading as one sensor; a save
  * from the screens (cfg_save_with) going to the other sector as version 2;
  * a restart; Load settings > Previous save; the IP address (version 4); a combination refused as a
- * whole; sensors added, switched and removed with their own cals; a motor
+ * whole; a record with several sensors (0.9.0 to 0.16.1) loading as the one
+ * in use at the 15 psia range and saving as one (0.16.2); a motor
  * direction change clearing the calibration; a spoiled record; and the
  * saved valve position written at standstill, withdrawn by a move, and
  * found again after the log wraps to the next sector.
@@ -291,6 +292,36 @@ static void corrupt_newest(void)
         flash[0x7FD000 + sl * 0x1000 + 12] ^= 0x5A;   // the rev: the CRC no longer matches
 }
 
+// nsens in a version 8 record: after the header, mot[7], valve[7], tune[18].
+#define REC_NSENS_AT (16 + 7 * 4 + 7 * 4 + 18 * 4)
+
+// Makes the version 8 record at addr one with three sensors, as 0.9.0 to
+// 0.16.1 could save: the one it holds (slot 0), then s/n 1234567 at 30 psi
+// and s/n 7654321 at 15 psi, both uncalibrated, with slot active in use.
+static void three_sensors(uint32_t addr, uint32_t active)
+{
+    static uint8_t rec[4096];
+    const uint8_t *r = flash + addr;
+    uint32_t size, nsens = 3, crc, zero = 0;
+    const uint32_t sens_sz = 12 + sizeof(cal_rec_t);
+    memcpy(&size, r + 8, 4);
+    memcpy(rec, r, size);
+    memcpy(rec + REC_NSENS_AT, &nsens, 4);
+    memcpy(rec + REC_NSENS_AT + 4, &active, 4);
+    const uint32_t sn[2] = { 1234567, 7654321 }, psi[2] = { 300, 150 };
+    for (int i = 0; i < 2; i++) {
+        uint8_t *q = rec + REC_NSENS_AT + 8 + (i + 1) * sens_sz;
+        memset(q, 0, sens_sz);
+        memcpy(q, &sn[i], 4);
+        memcpy(q + 4, &psi[i], 4);
+        memcpy(q + 8, &zero, 4);
+    }
+    crc = crc32(rec, size - 4);
+    memcpy(rec + size - 4, &crc, 4);
+    extflash_erase_4k(addr);
+    extflash_write(addr, rec, size);
+}
+
 static int32_t val(cfg_from_t f, cfg_key_t k)
 {
     int32_t v = -999999;
@@ -305,7 +336,6 @@ static void test_cfg(void)
     const char *why;
     uint32_t rev;
     const char *at;
-    cfg_sensor_t s;
 
     // A 0.8.x board: one version 1 record in A.
     write_v1(0x7FD000, 5);
@@ -313,8 +343,9 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 5);
     CHECK(!cfg_rev(CFG_FROM_PREVIOUS, &rev, &at));
     CHECK(m_rate == 350 && m_start == 180);
-    CHECK(cfg_sensor_count() == 1 && cfg_sensor(0, &s) && s.serial == 5880156 && s.psi10 == 150 && s.in_use);
-    CHECK(s.has_cal && s.saved && !cal_is_default());
+    CHECK(cfg_sensor_range_mmbar() == 1034214 && strncmp(cal_id(), "5880156 bench", 13) == 0);
+    CHECK(cal_saved() && !cal_is_default());
+    CHECK(!cfg_value(CFG_FROM_LIVE, (cfg_key_t)27, &v[0]) && !cfg_value(CFG_FROM_LIVE, (cfg_key_t)-1, &v[0]));   // CFG_SENSOR, gone in 0.16.2
     CHECK(val(CFG_FROM_LIVE, CFG_KP) == 400 && val(CFG_FROM_LIVE, CFG_BAND) == 10);
     CHECK(cfg_unsaved() == 0);
 
@@ -373,30 +404,41 @@ static void test_cfg(void)
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
 
-    // A second sensor: added (in use, unsaved), then selected and saved.
-    CHECK(cfg_sensor_add(1234567, 300, &why));
-    CHECK(!cfg_sensor_add(1234567, 300, &why));
-    CHECK(cfg_sensor_count() == 2 && cfg_unsaved() == 1);
-    memset(set, 0, sizeof set);
-    v[CFG_SENSOR] = 1234567; set[CFG_SENSOR] = true;
-    CHECK(cfg_save_with(v, set, &why));
-    CHECK(cfg_sensor(cfg_sensor_active(), &s) && s.serial == 1234567 && !s.has_cal && cal_is_default());
-    // Nominal over 30 psi: 10 mV/V is 2068.4 mbar.
-    CHECK(cal_pressure_mmbar(10000000) == cfg_psi10_mmbar(300));
-    CHECK(!cfg_sensor_remove(1234567, &why));   // in use
-    // Back to the first: its own cal comes back.
-    v[CFG_SENSOR] = 5880156;
-    CHECK(cfg_save_with(v, set, &why));
-    CHECK(!cal_is_default() && cal_pressure_mmbar(9300000) == 1013200);
-    CHECK(cfg_sensor_remove(1234567, &why) && cfg_sensor_count() == 1 && cfg_unsaved() == 1);
-    // Removed, then the previous save (which had it) put back.
-    CHECK(cfg_load_live(CFG_FROM_SAVED, &why) && cfg_sensor_count() == 2);
-    CHECK(cfg_sensor_remove(1234567, &why));
+    // A record from 0.9.0 to 0.16.1 with three sensors, the second (30 psi,
+    // uncalibrated) in use: one sensor per board from 0.16.2, so it loads
+    // as that sensor at the 15 psia range, nothing counts as unsaved, and
+    // the next save writes it alone.
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
+    three_sensors(0x7FE000, 1);   // the newest, rev 6, version 8, in B
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
+    CHECK(cal_is_default());   // the sensor in use is uncalibrated (the nominal id, not its serial, until a capture)
+    CHECK(cfg_sensor_range_mmbar() == 1034214 && cal_pressure_mmbar(10000000) == 1034214);   // 15 psia, not 30
+    CHECK(cfg_unsaved() == 0 && cal_saved());
+    const cal_rec_t *sv;
+    CHECK(cfg_saved_cal(&sv) && sv == NULL);   // saved without a cal
     CHECK(cfg_save());
+    {
+        uint32_t nsens, active, ver;
+        memcpy(&nsens, flash + 0x7FD000 + REC_NSENS_AT, 4);
+        memcpy(&active, flash + 0x7FD000 + REC_NSENS_AT + 4, 4);
+        memcpy(&ver, flash + 0x7FD004, 4);
+        CHECK(ver == 8 && nsens == 1 && active == 0);   // written as one sensor, rev 7 in A
+    }
+    // The same record with the bench Druck (s/n 5880156, calibrated) in use,
+    // as the previous save: loading it brings that cal.
+    three_sensors(0x7FE000, 0);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 7 && cal_is_default());
+    CHECK(cfg_load_live(CFG_FROM_PREVIOUS, &why));
+    CHECK(strncmp(cal_id(), "5880156 bench", 13) == 0 && !cal_is_default() && cal_pressure_mmbar(9300000) == 1013200);
+    CHECK(cfg_unsaved() == 1 && !cal_saved());   // the calibration differs from the newest save
+    CHECK(cfg_save());
+    CHECK(cfg_unsaved() == 0 && cal_saved());
 
-    // Factory defaults keep the sensors.
+    // Factory defaults keep the sensor's calibration.
     CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why));
-    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 400 && cfg_sensor_count() == 1 && !cal_is_default());
+    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 400 && !cal_is_default());
     CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
 
     // A latched fault locks the step mode: a load that would change it is
@@ -451,7 +493,7 @@ static void test_capture(void)
     CHECK(cal_pressure_mmbar(9310000) == 1012000 && cal_pressure_mmbar(51000) == 0);
     CHECK(strncmp(cal_id(), "5880156 bench 26-10-16", 22) == 0);
     const cal_rec_t *sv;
-    CHECK(cfg_saved_cal(5880156, &sv) && sv && cal_pressure_with(sv, 9300000) == 1013200);
+    CHECK(cfg_saved_cal(&sv) && sv && cal_pressure_with(sv, 9300000) == 1013200);
     CHECK(cfg_save_with(v, set, &why) && cal_saved() && cfg_unsaved() == 0);
 }
 

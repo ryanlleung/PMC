@@ -85,8 +85,38 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(a, 'home-ip');
   a.tap(415, 128); shot(a, 'home-ip-system');
   const b = homed(load());
-  b.tap(415, 184); b.tap(212, 184);   // Menu > System (left of Settings from 0.15.23)
+  b.tap(415, 184); b.tap(84, 184);   // Menu > System (bottom left from 0.16.2)
   check('Home IP tile opens System', hdr(a) === hdr(b) && hdr(a) !== home);
+}
+{ // The Menu (0.16.2, Ryan 9 Nov: no Settings page, no row captions, an icon on every tile): nine tiles in three
+  // rows of three, each opening its page in one tap; Review and save bottom right, dark blue (0.15.23).
+  const s = homed(load());
+  const screen = () => { const m = new Uint8Array(s.x.memory.buffer); let p = s.x.sim_screen(), e = p; while (m[e]) e++;
+    return Buffer.from(m.subarray(p, e)).toString(); };
+  // Home (its slot is the power icon on Home itself), then Menu: on the Menu that spot is its last tile.
+  const menu = () => { if (screen() !== 'Home') s.tap(22, 20); s.tap(415, 184); };
+  menu();
+  check('Menu opens', screen() === 'Menu', screen());
+  shot(s, 'menu');
+  const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'Valve position'], [84, 128, 'Valve settings'],
+    [240, 128, 'PID tuning'], [396, 128, 'Calibrate sensor'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
+    [396, 184, 'Review and save']];
+  const wrong = tiles.map(([x, y, t]) => { menu(); s.tap(x, y); return [t, screen()]; })
+    .filter(([t, got]) => t !== got).map(([t, got]) => t + ' -> ' + got);
+  check('every Menu tile opens its page', wrong.length === 0, wrong.join(', '));
+  menu(); s.tap(396, 184); const review = screen(); s.tap(66, 20);
+  check('Back from a page returns to the Menu', review === 'Review and save' && screen() === 'Menu', review + ' then ' + screen());
+  // Review and save is the one dark blue tile: white lettering on the Start AUTO blue, the others white cards.
+  const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
+  check('Review and save tile dark blue, the others white', px(330, 168) !== 0xFFFF && px(18, 168) === 0xFFFF && px(174, 168) === 0xFFFF,
+    [px(330, 168), px(18, 168), px(174, 168)].join());
+  s.tap(396, 72); shot(s, 'valve-position'); s.tap(66, 20);
+  s.tap(84, 128); shot(s, 'valve-settings'); s.tap(66, 20);
+  // Choose sensor is gone (one sensor per board): no CFG_SENSOR key (27), the sensor range is the 15 psia Druck's,
+  // and the old Settings slot now opens Review and save.
+  check('no sensor-in-use setting', s.setting(27) === -2147483648 && s.setting(CFG.DBC) === 8, s.setting(27) + ' ' + s.setting(CFG.DBC));
+  check('setpoint limit is the 15 psia range', s.cmd('PRES SP 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('PRES SP 1035'));
+  menu(); s.tap(386, 184); check('old Settings slot opens Review and save', screen() === 'Review and save', screen());
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
   const s = homed(load());
@@ -230,7 +260,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('F-6 no response', /F-6/.test(ev), ev);
   shot(s, 'f06');
   // Fault detail: its buttons sit in the strip's row, so the strip hides (0.14.13).
-  s.tap(415, 184); s.tap(386, 72); s.tap(180, 72);
+  s.tap(415, 184); s.tap(240, 72); s.tap(180, 72);   // Menu > Events (0.16.2), the fault
   shot(s, 'f06-detail');
   s.tap(181, 240);   // Reset fault
   check('fault detail Reset fault works', s.cmd('ALRM?') === 'ALRM NONE\r\n', s.cmd('ALRM?'));
@@ -266,7 +296,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  s.tap(415, 184); s.tap(212, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position > Motor override > Open (HMI template)
+  s.tap(415, 184); s.tap(396, 72); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position (0.16.2) > Motor override > Open
   s.set(7, 1); s.run(500);                                              // switch stuck pressed
   s.tap(186, 184, 1000);
   const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
@@ -366,7 +396,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('switch Off: PRES SP refused', s.cmd('PRES SP 5') === 'ERR 211 Read only over the network\r\n', s.cmd('PRES SP 5'));
   check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: queries answer', s.cmd('MODE?;PRES SP?') === 'MODE NOT HOMED;PRES SP NONE\r\n', s.cmd('MODE?;PRES SP?'));
-  s.tap(415, 184); s.tap(212, 184); s.tap(357, 128);   // Menu, System, Remote control (HMI template)
+  s.tap(415, 184); s.tap(84, 184); s.tap(357, 128);   // Menu, System (0.16.2: bottom left), Remote control
   check('switch On from the screen: PRES SP taken', s.cmd('PRES SP 5;PRES SP?') === 'PRES SP 5.0 mbar\r\n', s.cmd('PRES SP?'));
   check('switch On is a NET event', /NET,Remote control on \(screen\)/.test(events(s, 5)), events(s, 5));
   shot(s, 'system');
