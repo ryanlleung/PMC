@@ -74,7 +74,6 @@ HISTORY = 4 * 3600          # samples kept for the page (1 a second): 4 hours
 SHOW_SP = [1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 35, 50]
 POINT_GUESS_S = 900         # a gain table setpoint, until one has finished
 AUTO_GUESS_S = 1200         # an autotune setpoint, until one has finished
-HX_SPAN_K, HX_WINDOW_S = 0.5, 600   # autotune: heat exchanger (336 A) steady = moved less than this in that long
 RIDE_S = 120                # a gain table run waits this long for the link
 SETTLED_S = 60              # setpoint step test: held this long within the band = settled
 SETTLE_PCT = 5.0            # its band: this % of the step, or the Band box if larger
@@ -1036,37 +1035,12 @@ class Board:
             self.job = None
 
     # Autotune (pmc_autotune.py) ------------------------------------------
-    def hx_steady(self):
-        """'' when the heat exchanger (336 input A) has moved less than
-        HX_SPAN_K over the last HX_WINDOW_S, or there is no 336 to ask; else why not."""
-        ls = self.ls
-        if not (ls and ls.host and ls.state == 'connected'):
-            return ''
-        k = next((i for i, (inp, _) in enumerate(ls.inputs) if inp == 'A'), None)
-        if k is None:
-            return ''
-        t = self.now()
-        with self.lock:
-            vs = [(r[0], r[7 + k]) for r in self.hist
-                  if r[0] >= t - HX_WINDOW_S and len(r) > 7 + k and r[7 + k] is not None]
-        have = (t - vs[0][0]) if vs else 0
-        if have < HX_WINDOW_S - 30:
-            return ('the heat exchanger (336 A) has been read for %d of %d min: start again when it has %d min '
-                    'of readings, so it can be checked for steady' % (have // 60, HX_WINDOW_S // 60, HX_WINDOW_S // 60))
-        span = max(v for _, v in vs) - min(v for _, v in vs)
-        if span >= HX_SPAN_K:
-            return ('the heat exchanger (336 A) moved %.2f K in the last %d min: wait until it is steady '
-                    '(under %.1f K)' % (span, HX_WINDOW_S // 60, HX_SPAN_K))
-        return ''
-
-    def start_autotune(self, sps, d, div, b1, b2, h, heater, kp0=0.10, ti0=0.40):
+    def start_autotune(self, sps, d, div, b1, b2, h, kp0=0.10, ti0=0.40):
         if self.busy():
             return 'a test is already running'
         sps = sorted(set(round(x, 1) for x in sps if x > 0))
         if not sps:
             return 'give at least one setpoint'
-        if not heater:
-            return "tick Heater at the experiment's power first: the gains change with the heat load"
         if not 0 < b1 < b2:
             return 'B1 must be above 0 and below B2'
         if not 0 <= h <= 50:
@@ -1090,9 +1064,6 @@ class Board:
             return 'reset the fault first (Board tab): ' + parts[3][5:]
         if not parts[4].startswith('PID '):
             return 'this firmware has no PID SET (0.15.8 or later): ' + parts[4]
-        why = self.hx_steady()
-        if why:
-            return why
         r = self.send('PID SET ' + parts[4][4:])   # the same gains, so nothing is written: ERR 211 when Remote control is Off
         if r:
             return r
@@ -1104,8 +1075,6 @@ class Board:
         with self.lock:
             self.at = {'rows': [], 'sets': [], 'b1': b1, 'b2': b2, 'h': h, 'dir': self.run_dir, 'lines': [],
                        'written': '', 'running': True, 'calc': [], 'calc_now': '', 'sets_calc': []}
-        if not (self.ls and self.ls.host):
-            self.note('autotune: no Lake Shore 336, so the heat exchanger was not checked for steady')
         threading.Thread(target=self.autotune_job, args=(a,), daemon=True).start()
         return ''
 
@@ -1411,7 +1380,7 @@ def make_handler(board):
                 elif p == '/api/autotune':
                     r = board.start_autotune([float(x) for x in str(q['sps']).replace(',', ' ').split()],
                                              float(q.get('d', 0.4)), float(q.get('div', 4)), float(q.get('b1', 6)),
-                                             float(q.get('b2', 20)), int(float(q.get('h', 15))), bool(q.get('heater')),
+                                             float(q.get('b2', 20)), int(float(q.get('h', 15))),
                                              float(q.get('kp0', 0.10)), float(q.get('ti0', 0.40)))
                 elif p == '/api/autotune/write':
                     r = board.write_sets()
