@@ -18,14 +18,18 @@
  * status strip and STOP; every MOT setting and move from the touchscreen,
  * and the screen follows MOT commands on the link.
  * Body y 48-208, three 48 px rows (y 48, 104, 160). The top row is on every
- * tab: the tabs Move / Speed / Coils (x10 w226) and the position card (x244
- * w226). Below it:
+ * tab: the tabs Move / Speed / Coils / Switch (x10 w226) and the position
+ * card (x244 w226). Below it:
  *   Move   Hold to run (move while pressed, on by default) or a step size 1 to 10k, one
  *          choice; then Limit override, Close, Open and Set zero. Limit
  *          override is a two-finger deadman: hold it and press Close or
  *          Open with another finger (Close then goes past the switch)
  *   Speed  Run, Start and Accel [-] value [+], and the time for a full open or close
  *   Coils  Mode WAVE/FULL/HALF, Hold torque, Coils off, Coil order, Direction
+ *   Switch Pass 10 to 20 % (on/off) and the switch now (0.16.5, Ryan 9 Nov):
+ *          the valve binds about 13 % and the force switch trips there;
+ *          while on and homed, between 10 and 20 % open the switch does not
+ *          stop closing (valve.h). Off at every power-up.
  * Coil order, Direction and Set zero ask first while the valve is homed.
  * The strip reads the motor state and the limit line (a latched fault, the
  * limit override or a message over it, as on every screen).
@@ -40,7 +44,7 @@
 static const int32_t R[3] = { 48, 104, 160 };
 #define H 48
 
-enum { TAB_MOVE, TAB_SPEED, TAB_COILS, TAB_N };
+enum { TAB_MOVE, TAB_SPEED, TAB_COILS, TAB_SWITCH, TAB_N };
 
 static struct {
     lv_obj_t *tabs[TAB_N], *page[TAB_N];
@@ -48,6 +52,7 @@ static struct {
     lv_obj_t *size[6], *mode[3], *turns, *travel;
     lv_obj_t *rate, *start, *accel, *adj[6];
     lv_obj_t *close, *open, *zero, *over, *hold, *off, *order, *dir;
+    lv_obj_t *band, *band_sw, *band_text, *sw_now;   // Switch tab
     lv_obj_t *held;   // the Close or Open button driving a hold move
     int32_t held_to;  // that move's target, so a release stops only it
     int32_t held2_to; // the same for held2
@@ -441,6 +446,16 @@ static void two_delete(lv_event_t *e)
 
 static void tab_show(void);
 
+// Switch tab: a press anywhere on the card turns the pass band on or off,
+// live at once, as the Remote control card on System.
+static void band_event(lv_event_t *e)
+{
+    (void)e;
+    valve_limit_band_set(!valve_limit_band());
+    lv_obj_set_state(m.band_sw, LV_STATE_CHECKED, valve_limit_band());
+    ui_refresh_soon();
+}
+
 static void tab_event(lv_event_t *e)
 {
     tab_sel = (int)event_arg(e);
@@ -538,7 +553,7 @@ static void motor_build(lv_obj_t *scr)
     const int32_t y2 = 0, y3 = R[2] - R[1];
 
     // Top row: the tabs and the position (room for -2147483648, Ryan 22 Oct).
-    static const char *const tabs[TAB_N] = { "Move", "Speed", "Coils" };
+    static const char *const tabs[TAB_N] = { "Move", "Speed", "Coils", "Switch" };
     seg(scr, 10, R[0], 226, TAB_N, tabs, m.tabs, tab_event, 0);
     lv_obj_t *pc = ui_card(scr, 244, R[0], 226, H);
     ui_label(pc, 8, 3, 210, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "Steps (+ open)");
@@ -590,6 +605,27 @@ static void motor_build(lv_obj_t *scr)
     m.off = btn(p, 361, y2, 109, "Coils off", off_event, 0);
     m.order = btn(p, 10, y3, 226, "", order_event, 0);
     m.dir = btn(p, 244, y3, 226, "", dir_event, 0);
+
+    // Switch: the pass band card with its toggle, the switch now, and what
+    // the band does.
+    p = m.page[TAB_SWITCH] = page(scr);
+    lv_obj_t *c = m.band = ui_card(p, 10, y2, 226, H);
+    lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(c, band_event, LV_EVENT_PRESSED, NULL);
+    ui_label(c, 12, 6, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Pass 10 to 20 %");
+    m.band_text = ui_label(c, 12, 26, 150, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
+    lv_obj_t *sw = m.band_sw = lv_switch_create(c);
+    lv_obj_set_size(sw, 52, 28);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -12, 0);
+    lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);   // the card takes the press
+    lv_obj_set_style_bg_color(sw, TRACK, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_anim_duration(sw, 0, 0);
+    m.sw_now = ui_info(p, 244, y2, 226, H, "Limit switch");
+    lv_obj_t *n = ui_card(p, 10, y3, 460, H);
+    ui_label(n, 12, 6, 436, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT,
+             "When on, between 10 and 20 % open the switch does not stop closing.\n"
+             "Below 10 % it stops as always. Off again after a restart.");
 
     tab_show();
     motor_fast();
@@ -697,6 +733,14 @@ static void motor_fast(void)
     ui_btn_enable(m.order, !busy && !stepper3_locked());
     ui_btn_enable(m.dir, !busy && !stepper3_locked());
     ui_btn_enable(m.hold, !busy);
+
+    bool band = valve_limit_band();
+    if (lv_obj_has_state(m.band_sw, LV_STATE_CHECKED) != band)
+        lv_obj_set_state(m.band_sw, LV_STATE_CHECKED, band);
+    ui_set_text(m.band_text, !band ? "Off: the switch stops closing" : valve_calibrated() ? "On: passed there"
+                                                                                       : "On, once homed");
+    ui_set_text(m.sw_now, !stepper3_limit_pressed() ? "Released" : stepper3_limit_ignored() ? "Pressed, passed"
+                                                                                           : "Pressed");
 }
 
 // The strip: the motor state, then the limit switch (released or pressed,
@@ -716,6 +760,8 @@ static void motor_refresh(void)
                                                                                    : "Switch not read yet";
     else if (lim == LIMIT_CLOSED)
         ls = "Switch released, closing allowed";
+    else if (lim == LIMIT_OPEN && stepper3_limit_ignored())
+        ls = "Switch pressed, passed (10 to 20 %)";
     else {
         ls = lim == LIMIT_OPEN ? "Switch pressed, closing blocked" : "Switch not read yet, closing blocked";
         warn = true;

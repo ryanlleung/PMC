@@ -70,6 +70,12 @@ bool valve_calibrated(void);
 typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
+// Pass band (0.16.5, Ryan 9 Nov: the valve binds about 13 % and the force
+// switch trips there, off the seat): while on and homed, between 10 and
+// 20 % open the switch neither stops closing nor raises W-1, W-4 or F-4.
+// Motor override > Switch. RAM only, off at power-up.
+bool valve_limit_band(void);
+void valve_limit_band_set(bool on);
 int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
 bool valve_fault_latched(void);
 bool valve_motion_blocked(void); // a latched fault that stops the motor (not F-1, F-2)

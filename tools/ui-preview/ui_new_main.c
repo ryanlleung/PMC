@@ -186,6 +186,9 @@ void valve_settings(int32_t v[VALVE_N_SETTINGS]) { memcpy(v, v_set, sizeof v_set
 const char *valve_settings_check(const int32_t v[VALVE_N_SETTINGS]) { (void)v; return NULL; }
 bool valve_set_settings(const int32_t v[VALVE_N_SETTINGS]) { memcpy(v_set, v, sizeof v_set); return true; }
 int32_t valve_pos_max(void) { return v_set[0]; }
+static bool v_band;
+bool valve_limit_band(void) { return v_band; }
+void valve_limit_band_set(bool on) { v_band = on; }
 void valve_uncalibrate(const char *why) { (void)why; v_cal = false; v_mode = VALVE_NOT_CAL; }
 void valve_event(const char *tag, const char *fmt, ...) { (void)tag; (void)fmt; }
 static bool vp_offer, vp_moving;
@@ -437,9 +440,10 @@ int main(int argc, char **argv)
     if (!strncmp(st, "motor", 5)) { MENU(); M_VPOS(); ui_service(); }   // Valve position > Motor override
     if (!strcmp(st, "motor-held")) { extern bool fake_busy; fake_override = true; fake_busy = true; }   // Limit override held
     if (!strcmp(st, "motor-moving")) { extern bool fake_busy; fake_busy = true; ui_service(); }   // a move running
-    if (!strcmp(st, "motor-speed")) tap(122, 72);
+    if (!strcmp(st, "motor-speed")) tap(95, 72);
     if (!strcmp(st, "motor-steps")) { tap(301, 128); ui_service(); }   // 100 steps instead of Hold to run
-    if (!strcmp(st, "motor-coils") || !strcmp(st, "motor-ask")) tap(194, 72);
+    if (!strcmp(st, "motor-coils") || !strcmp(st, "motor-ask")) tap(149, 72);
+    if (!strcmp(st, "motor-switch")) { tap(203, 72); tap(120, 128); }   // Switch tab, Pass 10 to 20 % on
     if (!strcmp(st, "motor-ask")) { v_cal = true; tap(120, 184); }   // Coil order while homed: asks
     if (!strcmp(st, "overon")) { fake_override = true; tap(415, 184); }   // Menu, override armed
     if (!strcmp(st, "menu")) MENU();

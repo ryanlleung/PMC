@@ -191,6 +191,11 @@ static bool sw_far_said;  // W-4 raised for this occurrence
 // it"; to 0.16.3 two 1 s reads, so up to 2 s after Home's limit edge).
 // Long enough that one glitch on the wire does not end AUTO.
 #define SW_FAR_MS 200
+// Pass band (0.16.5, Ryan 9 Nov): asked for on Motor override > Switch; in
+// force (stepper3_limit_band) only while homed. RAM only, off at power-up.
+#define BAND_LO_PCT 10
+#define BAND_HI_PCT 20
+static bool band_req;
 static int over_n;        // W-5: consecutive reads above the sensor range in AUTO
 
 // Shut down (valve.h): the move to 0 % running, and where it started.
@@ -625,6 +630,11 @@ void valve_task(void)
     running = true;
     evt_dump_task();
     seq_check();
+    // The pass band in counts from 0 %, again each pass (Valve settings can
+    // change the travel); not while not homed or homing: the count is not
+    // the valve's then.
+    stepper3_limit_band(band_req && calibrated && mode != VALVE_CALIBRATING && mode != VALVE_OFF,
+                        pm() * BAND_LO_PCT / 100, pm() * BAND_HI_PCT / 100);
     far_check();
     if (hold_on && !stepper3_busy())
         hold_on = false;   // the held move has ended (released, the switch, its end)
@@ -703,7 +713,7 @@ static void auto_end(const char *strip)
 // clearing move and the back-off of homing, where it has always released.
 static bool switch_far(void)
 {
-    return calibrated && mode != VALVE_CALIBRATING && limit_open_now() &&
+    return calibrated && mode != VALVE_CALIBRATING && limit_open_now() && !stepper3_limit_ignored() &&
            stepper3_position() > sc(n_clear + (n_backoff > n_return ? n_backoff : n_return));
 }
 
@@ -759,7 +769,8 @@ static void auto_step(void)
         return;
     }
     ctrl_tune_t k = tune_now();
-    ctrl_in_t in = { lv_tick_get(), pv_mbar, stepper3_position(), stepper3_busy(), limit_open_now(), range_mbar() };
+    ctrl_in_t in = { lv_tick_get(), pv_mbar, stepper3_position(), stepper3_busy(),
+                     limit_open_now() && !stepper3_limit_ignored(), range_mbar() };
     const int set0 = ctl.set;
     const ctrl_result_t res = ctrl_step(&ctl, &k, &in);
     if (ctl.set != set0 && set0 >= 1) {
@@ -1013,6 +1024,17 @@ valve_mode_t valve_mode(void)   { return mode; }
 bool valve_calibrated(void)     { return calibrated; }
 valve_ref_t valve_reference(void) { return calibrated ? ref_how : VALVE_REF_NONE; }
 int32_t valve_pos_max(void)     { return pm(); }   // in motor counts
+
+bool valve_limit_band(void) { return band_req; }
+
+void valve_limit_band_set(bool on)
+{
+    if (on == band_req)
+        return;
+    band_req = on;
+    valve_event("LIM", on ? "Switch passed between %d and %d %% open: on (screen)"
+                          : "Switch passed between %d and %d %% open: off (screen)", BAND_LO_PCT, BAND_HI_PCT);
+}
 int32_t valve_pct10(void)       { return pct10_of(stepper3_position()); }
 bool valve_fault_latched(void)  { return any_latched(); }
 bool valve_motion_blocked(void) { return any_latched(); }

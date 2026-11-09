@@ -131,10 +131,37 @@ void stepper3_override_arm(void)
     override_armed = true;
 }
 
+/*
+ * Pass band (0.16.5, Ryan 9 Nov, PR #43: the valve needs more torque about
+ * 13 +- 2.5 % open and the force switch trips there, off the seat; "add a
+ * mode where triggering the limit is not blocking temporarily from 10 to
+ * 20 % open, so that it allows me to continue the pid tuning test"): while
+ * on, between the counts lo and hi the switch is neither the closing stop
+ * nor the opening check. valve.c sets it every pass, only while homed. RAM
+ * only, off at reset.
+ */
+static volatile bool band_on;
+static volatile int32_t band_lo, band_hi;
+
+void stepper3_limit_band(bool on, int32_t lo, int32_t hi)
+{
+    band_lo = lo;
+    band_hi = hi;
+    band_on = on;
+}
+
+bool stepper3_limit_ignored(void)
+{
+    int32_t p = position;
+    return band_on && p >= band_lo && p <= band_hi;
+}
+
+bool stepper3_limit_pressed(void) { return LIMIT_FITTED && limit_open_now(); }
+
 // True when a closing step must not be taken now.
 bool stepper3_limit_open(void)
 {
-    return LIMIT_FITTED && limit_open_now() && !override_armed && !override_active;
+    return LIMIT_FITTED && limit_open_now() && !override_armed && !override_active && !stepper3_limit_ignored();
 }
 
 /* --------------------------------------------------------------------------
@@ -273,7 +300,10 @@ void TIM7_IRQHandler(void)
     // drive the needle into the seat with nothing to stop it.
     // The pin itself, in steps: PRESSED_N in a row once armed (one glitch on
     // a long pulled-up line is not a press).
-    if (dir > 0 && LIMIT_FITTED) {
+    if (dir > 0 && LIMIT_FITTED && stepper3_limit_ignored()) {
+        free_steps = 0;   // in the pass band; re-armed once it reads free above it
+        pressed_steps = 0;
+    } else if (dir > 0 && LIMIT_FITTED) {
         if (!limit_pin_open()) {
             pressed_steps = 0;
             if (free_steps < FREE_ARM)
@@ -614,6 +644,7 @@ const char *stepper3_status(void)
                 (unsigned long)(run_state == ST_MOVING ? move_rate : rate_run),
                 !LIMIT_FITTED ? "stop off (PMC_LIMIT_STOP 0)"
                 : stepper3_override() ? (limit_open_now() ? "pressed, override" : "free, override armed")
+                : stepper3_limit_ignored() && limit_open_now() ? "pressed, passed (pass band)"
                 : stepper3_limit_open() ? "pressed" : "free");
     return status_text;
 }

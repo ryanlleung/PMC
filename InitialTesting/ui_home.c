@@ -28,7 +28,8 @@
  *   HOMING     Valve: the Go to box, greyed, "----".
  * A yellow edge round the Valve tile while the limit switch is pressed
  * (0.16.4; a "Limit" tag beside the caption in 0.16.1-0.16.3); a valve
- * fault's red edge wins.
+ * fault's red edge wins. While the switch pass band is on (0.16.5, Motor
+ * override > Switch), 10 to 20 % is yellow on the valve bar.
  * The strip shows the status line, with the 5 min pressure sparkline on its
  * right as on the operator screens (ui.c, Ryan 21 Oct). A tap on the
  * sparkline opens Trend.
@@ -54,6 +55,7 @@ typedef struct {
     lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev, *sp_cap;
     int32_t fill;             // bar fill to here, px; -1 no value (no marker)
     bool log;                 // pressure: decade lines; valve: 0/50/100
+    bool band;                // valve: the switch pass band (10 to 20 %) marked yellow on the track
 } tile_t;
 
 static tile_t pt, vt;
@@ -145,6 +147,13 @@ static void bar_draw(lv_event_t *e)
         bar.x2 = a.x1 + t->fill - 1;
         r.bg_color = UI_FILL;
         lv_draw_rect(layer, &r, &bar);
+    }
+    // The switch pass band (0.16.5), over the track and fill: where the
+    // switch does not stop closing.
+    if (t->band) {
+        lv_area_t b = { a.x1 + (BAR_W - 1) / 10, y1, a.x1 + (BAR_W - 1) / 5, y2 };
+        r.bg_color = UI_YELLOW;
+        lv_draw_rect(layer, &r, &b);
     }
     // Lines and end labels.
     lv_draw_label_dsc_t text;
@@ -649,8 +658,14 @@ static void home_fast(void)
     // Valve tile at 10 Hz, whatever the mode; a valve fault's red wins
     // (0.16.4, Ryan PR #43: "add yellow border instead of having the word
     // limit"; a yellow "Limit" tag beside the caption in 0.16.1-0.16.3).
-    bool lim = stepper3_limit_open();
+    bool lim = stepper3_limit_pressed();   // passed in the pass band or not
     edge_set(&vt, vt_fault || lim, vt_fault ? UI_FAULT : UI_YELLOW);
+    // The pass band on the valve bar while it is on (Motor override > Switch).
+    bool band = valve_limit_band();
+    if (band != vt.band) {
+        vt.band = band;
+        lv_obj_invalidate(vt.bar);
+    }
 }
 
 static void home_refresh(void)
