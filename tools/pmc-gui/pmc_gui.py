@@ -1035,7 +1035,29 @@ class Board:
             self.job = None
 
     # Autotune (pmc_autotune.py) ------------------------------------------
-    def start_autotune(self, sps, d, div, b1, b2, h, kp0=0.10, ti0=0.40):
+    def learned_path(self):
+        return os.path.join(self.logger.folder, pmc_autotune.LEARNED_FILE)
+
+    def learned_load(self):
+        """The learned gains. With no learned file yet, built from the earlier
+        autotune runs' results.csv in the log folder and saved."""
+        path = self.learned_path()
+        if os.path.exists(path):
+            return pmc_autotune.load_learned(path)
+        learned = pmc_autotune.seed_learned(self.logger.folder)
+        if learned:
+            try:
+                pmc_autotune.save_learned(path, learned)
+            except OSError:
+                pass
+        return learned
+
+    def learned_list(self):
+        """[(setpoint, kp, ti, when)] from the learned file, for the card."""
+        L = self.learned_load()
+        return [[L[k]['sp_mbar'], L[k]['kp'], L[k]['ti_min'], L[k].get('when') or ''] for k in sorted(L, key=float)]
+
+    def start_autotune(self, sps, d, div, b1, b2, h, kp0=0.10, ti0=0.40, start='learned'):
         if self.busy():
             return 'a test is already running'
         sps = sorted(set(round(x, 1) for x in sps if x > 0))
@@ -1067,7 +1089,8 @@ class Board:
         r = self.send('PID SET ' + parts[4][4:])   # the same gains, so nothing is written: ERR 211 when Remote control is Off
         if r:
             return r
-        a = SimpleNamespace(sps=sps, d=d, div=div, ti_pu=2.0, trims=2, b1=b1, b2=b2, h=h, kp0=kp0, ti0=ti0)
+        a = SimpleNamespace(sps=sps, d=d, div=div, ti_pu=2.0, trims=2, b1=b1, b2=b2, h=h, kp0=kp0, ti0=ti0,
+                            learned=start != 'fresh')
         self.job, self.stop_job, self.abort = 'autotune', False, False
         self.begin('autotune', 'PID autotune', ['%g mbar' % x for x in sps] + ['PID table sets'], None,
                    'setpoints %s mbar, first gains KP %.2f TI %.2f, first relay step %.1f %%, KP = Ku / %g, TI = 2 Pu, '
@@ -1125,10 +1148,23 @@ class Board:
             pmc_autotune.pid_table_off(link, f)
             gains = (a.kp0, a.ti0)      # to reach the first point; each later one uses the point before's
             ku = None
+            # Learned gains (Ryan, 9 Nov: refine, not start fresh): a point
+            # with a learned row reaches with its own gains, sizes the relay
+            # from its own Ku and starts the check from its own KP and TI.
+            path = self.learned_path()
+            learned = self.learned_load()
+            use = learned if a.learned else {}
+            t.say('%s: %s' % ('learned gains' if a.learned else 'fresh (learned gains not used)',
+                              ', '.join('%s mbar KP %.2f TI %.2f' % (k, v['kp'], v['ti_min'])
+                                        for k, v in sorted(learned.items(), key=lambda kv: float(kv[0])))
+                              or 'none yet'))
             for i, sp in enumerate(a.sps):
                 self.step(i, 'now')
+                prior = use.get(pmc_autotune.learned_key(sp))
                 try:
-                    r = t.point(sp, gains, pmc_autotune.next_d(sp, ku, a.d))
+                    r = t.point(sp, (prior['kp'], prior['ti_min']) if prior else gains,
+                                pmc_autotune.next_d(sp, prior.get('Ku') if prior and prior.get('Ku') else ku, a.d),
+                                prior)
                 except RuntimeError as e:
                     # One point with no usable oscillation (or a warning that
                     # dropped AUTO) should not lose the others.
@@ -1138,6 +1174,11 @@ class Board:
                     continue
                 rows.append(r)
                 self.result('results.csv', r)
+                pmc_autotune.learn(learned, r, time.strftime('%d/%m/%y %H:%M'))
+                try:
+                    pmc_autotune.save_learned(path, learned)
+                except OSError as e:
+                    self.note('could not save the learned gains: %s' % e)
                 self.step(i, 'done', 'Ku %.2f, KP %.2f, TI %.2f%s' % (r['Ku'], r['kp'], r['ti_min'],
                                                                      ', trimmed ' + r['trims'] if r['trims'] else ''))
                 self.at_rows(rows, a)
@@ -1293,6 +1334,7 @@ class Board:
     # For the page --------------------------------------------------------
     def snapshot(self, since):
         ls = self.ls.view() if self.ls else None
+        learned = self.learned_list()
         with self.lock:
             rows = [r for r in self.hist if r[0] > since]
             blended = [[sp] + list(gains_for(self.table, sp)) for sp in SHOW_SP] if self.table else []
@@ -1301,7 +1343,8 @@ class Board:
                     'log': self.state['log'], 'rows': rows, 'results': self.results, 'vresults': self.vresults,
                     'prog': self.prog_view(), 'last_prog': self.last_prog,
                     'table': self.table_rows, 'table_name': self.table_name, 'blended': blended,
-                    'schedule': self.schedule, 'logger': self.logger.view(), 'ls': ls, 'autotune': self.at}
+                    'schedule': self.schedule, 'logger': self.logger.view(), 'ls': ls, 'autotune': self.at,
+                    'learned': learned}
 
     def csv_text(self):
         f = io.StringIO()
@@ -1381,7 +1424,8 @@ def make_handler(board):
                     r = board.start_autotune([float(x) for x in str(q['sps']).replace(',', ' ').split()],
                                              float(q.get('d', 0.4)), float(q.get('div', 4)), float(q.get('b1', 10)),
                                              float(q.get('b2', 20)), int(float(q.get('h', 15))),
-                                             float(q.get('kp0', 0.10)), float(q.get('ti0', 0.40)))
+                                             float(q.get('kp0', 0.10)), float(q.get('ti0', 0.40)),
+                                             str(q.get('start', 'learned')))
                 elif p == '/api/autotune/write':
                     r = board.write_sets()
                 elif p == '/api/tune':

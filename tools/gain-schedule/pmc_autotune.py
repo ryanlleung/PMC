@@ -30,6 +30,18 @@ pressure 1 to 10 mbar every 14 s).
 Then the three PID table sets are the geometric means of the rows in each
 band (below B1, B1 to B2, above B2; 6 and 20 mbar by default).
 
+Learned gains (Ryan, 9 Nov: "it should refine the numbers rather than
+starting fresh every time"): each point's result is kept in
+autotune-learned.csv in the log folder. On the next run a point with a
+learned row reaches its setpoint with its own learned gains, sizes the relay
+step from its learned Ku, and starts the check from its learned KP and TI
+rather than Ku / 4 and 2 Pu, so the trims carry on from run to run. If the
+new relay test's Ku is more than LEARNED_AGREE times off the learned one the
+plant has changed, and that point starts fresh. Fresh ignores the file (its
+results still go in it). With no learned file yet, it is built from the
+results.csv of the earlier autotune runs in the same log folder (newest per
+setpoint), so runs made before learning existed count too.
+
 While it runs, the PID table is Off and set 1 carries the gains under test
 (PID SET); at the end set 1, the PID table, the setpoint and the mode are put
 back as found. Writing the sets to the board (PIDS SET, SCHED SET PV) is a
@@ -42,6 +54,7 @@ import cmath
 import csv
 import math
 import os
+import time
 
 import pmc_gains
 from pmc_gains import KP_MIN, KP_MAX, TI_MIN, TI_MAX, Refused, value
@@ -81,6 +94,9 @@ WILD_PP_MIN = 0.2              # ...and at least this, mbar
 WILD_CYCLES = 2                # ...so many cycles in a row: oscillating
 WILD_SPAN_S = 400              # ...all within this long
 WILD_CUT, WILD_CUT_BIG = 0.5, 0.25   # KP x this; x BIG when the swing is larger than the setpoint
+LEARNED_FILE = 'autotune-learned.csv'
+LEARNED_COLS = ['sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valve_pct', 'trims', 'note', 'when']
+LEARNED_AGREE = 2.0            # learned Ku within this factor of the new relay's: refine from it
 MAX_CUTS = 6                   # most KP cuts at one point (watchdog and check trims down together)
 
 
@@ -563,9 +579,9 @@ class AutoTuner(pmc_gains.Tuner):
             'Held' if ok else 'Not held', sp, '--' if x0 is None else '%.1f' % x0, span, sum(ps) / len(ps)))
         return x0, ok, sum(ps) / len(ps), kp
 
-    def reach(self, sp, kp, ti):
-        self.calc('Reach %g mbar: AUTO with KP %.2f TI %.2f (the setpoint before\'s gains, or the first gains)' %
-                  (sp, kp, ti))
+    def reach(self, sp, kp, ti, why=None):
+        self.calc('Reach %g mbar: AUTO with KP %.2f TI %.2f (%s)' % (
+            sp, kp, ti, why or 'the setpoint before\'s gains, or the first gains'))
         self.pid(kp, ti)
         self.link.do('PRES SP %.1f' % sp)
         if self.sample()[2] != 'AUTO':
@@ -731,11 +747,18 @@ class AutoTuner(pmc_gains.Tuner):
         if gone:
             self.calc('Check %d missed spec: %s deleted' % (k, ', '.join(gone)))
 
-    def point(self, sp, reach_gains, d):
-        """One test point: a result row for the table."""
+    def point(self, sp, reach_gains, d, prior=None):
+        """One test point: a result row for the table. prior: the point's
+        learned row (load_learned), to refine from."""
         self.calc('%g mbar' % sp)        # a heading line: the setpoint alone
+        if prior:
+            self.calc('Learned %s: KP %.2f TI %.2f, Ku %s, Pu %s s%s' % (
+                prior.get('when') or 'earlier', prior['kp'], prior['ti_min'],
+                '--' if prior.get('Ku') is None else '%.3f' % prior['Ku'],
+                '--' if prior.get('Pu_s') is None else '%.1f' % prior['Pu_s'],
+                ' (trims ' + prior['trims'] + ')' if prior.get('trims') else ''))
         self.cuts = []
-        x0 = self.reach(sp, *reach_gains)
+        x0 = self.reach(sp, *reach_gains, why='its learned gains' if prior else None)
         reach_cuts, self.cuts = self.cuts, []   # the reach gains are the point before's, not this point's
         r = self.relay(sp, x0, d)
         kp, ti = relay_gains(r['Ku'], r['Pu_s'], self.a.div, self.a.ti_pu)
@@ -745,6 +768,20 @@ class AutoTuner(pmc_gains.Tuner):
                  % (sp, r['Ku'], r['Pu_s'], r['d_pct'], r['a_mbar'], r['cycles'], '' if r['steady'] else ', not steady',
                     kp, ti))
         kp0, fig, why, f, ups, downs, k = kp, None, '', 1.0, 0, 0, 0
+        refined = False
+        if prior:
+            old = prior.get('Ku')
+            ratio = r['Ku'] / old if old else None
+            if ratio is not None and 1 / LEARNED_AGREE <= ratio <= LEARNED_AGREE:
+                kp, ti, refined = clip_kp(prior['kp']), clip_ti(prior['ti_min']), True
+                self.calc('Refine: the new Ku is %.2f times the learned %.3f (within %g x), so the check starts from '
+                          'the learned KP %.2f TI %.2f, not the rule\'s KP %.2f TI %.2f' % (
+                              ratio, old, LEARNED_AGREE, kp, ti, kp0, relay_gains(r['Ku'], r['Pu_s'], self.a.div,
+                                                                                   self.a.ti_pu)[1]))
+            else:
+                self.calc('Fresh: %s, so the check starts from the rule\'s KP %.2f TI %.2f' % (
+                    'no learned Ku' if ratio is None else 'the new Ku is %.2f times the learned %.3f (more than %g x '
+                    'off: the plant has changed)' % (ratio, old, LEARNED_AGREE), kp, ti))
         scores, useless = [], False
         # every change of KP at this point is in self.cuts, in order (calm() adds its own)
         while True:
@@ -811,6 +848,8 @@ class AutoTuner(pmc_gains.Tuner):
             note = (note + '; ' if note else '') + 'relay not steady'
         if reach_cuts:
             note = (note + '; ' if note else '') + 'reach oscillated, its KP cut ' + ' '.join(reach_cuts)
+        if refined:
+            note = (note + '; ' if note else '') + 'refined from learned KP %.2f TI %.2f' % (prior['kp'], prior['ti_min'])
         fig = fig or {}
         return {'sp_mbar': sp, 'kp': kp, 'ti_min': ti, 'Ku': round(r['Ku'], 3), 'Pu_s': round(r['Pu_s'], 1),
                 'kp_rule': kp0, 'd_pct': r['d_pct'], 'a_mbar': round(r['a_mbar'], 3), 'eps_mbar': round(r['eps_mbar'], 3),
@@ -818,6 +857,79 @@ class AutoTuner(pmc_gains.Tuner):
                 'trims': ' '.join(trims), 'overshoot_pct': fig.get('overshoot_pct'),
                 'settle_s': None if fig.get('settle_s') is None else round(fig['settle_s']),
                 'reversals': fig.get('reversals'), 'note': note}
+
+
+def learned_key(sp):
+    return '%g' % float(sp)
+
+
+def _learned_rows(path):
+    """The usable rows of a learned or results CSV (numbers as floats); a row
+    with no KP or TI (a point that failed) is left out."""
+    rows = []
+    try:
+        with open(path, newline='', encoding='utf-8') as f:
+            for row in csv.DictReader(f):
+                try:
+                    r = dict(row)
+                    for k in ('sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valve_pct'):
+                        r[k] = float(r[k]) if r.get(k) not in (None, '') else None
+                    if r['sp_mbar'] is None or not r['kp'] or r['ti_min'] is None:
+                        continue
+                    rows.append(r)
+                except (TypeError, ValueError):
+                    continue
+    except OSError:
+        pass
+    return rows
+
+
+def load_learned(path):
+    """{'16': row} from autotune-learned.csv; {} if there is none or it
+    cannot be read."""
+    return {learned_key(r['sp_mbar']): r for r in _learned_rows(path)}
+
+
+def seed_learned(folder):
+    """The learned table built from the results.csv of every earlier autotune
+    run in the log folder (autotune_<date>_<time>/), newest per setpoint: so
+    runs made before the learned file existed still count. {} if none."""
+    learned = {}
+    try:
+        runs = sorted(d for d in os.listdir(folder) if d.startswith('autotune_'))
+    except OSError:
+        return learned
+    for d in runs:
+        for r in _learned_rows(os.path.join(folder, d, 'results.csv')):
+            t = r.get('time') or ''
+            try:
+                when = time.strftime('%d/%m/%y %H:%M', time.strptime(t, '%Y-%m-%d %H:%M:%S'))
+            except ValueError:
+                when = t
+            learn(learned, r, when)
+    return learned
+
+
+def save_learned(path, learned):
+    """Writes every learned row, lowest setpoint first (replaced whole, so a
+    half-written file is never left: written beside it and renamed)."""
+    tmp = path + '.tmp'
+    with open(tmp, 'w', newline='', encoding='utf-8') as f:
+        w = csv.DictWriter(f, fieldnames=LEARNED_COLS, extrasaction='ignore')
+        w.writeheader()
+        for k in sorted(learned, key=float):
+            row = {c: '' if learned[k].get(c) is None else learned[k][c] for c in LEARNED_COLS}
+            row['sp_mbar'] = k          # '%g': 4, not 4.0
+            w.writerow(row)
+    os.replace(tmp, path)
+
+
+def learn(learned, r, when):
+    """A point's result row into the learned table."""
+    row = {c: r.get(c) for c in LEARNED_COLS}
+    row['valve_pct'] = r.get('valve_pct')
+    row['when'] = when
+    learned[learned_key(r['sp_mbar'])] = row
 
 
 def next_d(sp, ku, first):

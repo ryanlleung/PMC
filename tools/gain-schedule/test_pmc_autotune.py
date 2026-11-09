@@ -460,7 +460,7 @@ class Wander(unittest.TestCase):
         a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
         t = at.AutoTuner(None, None, a, None)
         t.say = lambda m: None
-        t.reach = lambda sp, kp, ti: 3.0
+        t.reach = lambda sp, kp, ti, why=None: 3.0
         t.relay = lambda sp, x0, dd: {'Ku': 0.68, 'Pu_s': 8.2, 'd_pct': 0.2, 'a_mbar': 0.33, 'eps_mbar': 0.1,
                                       'cycles': 4, 'asym': None, 'steady': True, 'noise': 0.03, 'wander': 0.17}
         t.check = lambda sp, kp, ti, r, k: (figs[k - 1], kp)
@@ -489,7 +489,7 @@ class Files(unittest.TestCase):
         a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
         t = at.AutoTuner(None, None, a, d)
         t.say = lambda m: None
-        t.reach = lambda sp, kp, ti: 3.0
+        t.reach = lambda sp, kp, ti, why=None: 3.0
         t.relay = lambda sp, x0, dd: {'Ku': 2.0, 'Pu_s': 10.0, 'd_pct': 0.4, 'a_mbar': 0.1, 'eps_mbar': 0.02,
                                       'cycles': 2, 'asym': None, 'steady': True, 'noise': 0.004}
         figs = [{'overshoot_pct': 30.0, 'settle_s': 40, 'reversals': 1, 'saturated': False},
@@ -505,6 +505,82 @@ class Files(unittest.TestCase):
         self.assertEqual(r['trims'], 'x0.80 x0.80')
         self.assertEqual(sorted(os.listdir(d)), ['check_2mbar_3_back.csv', 'check_2mbar_3_up.csv'])
         self.assertIn('Check 1 missed spec: check_2mbar_1_up.csv, check_2mbar_1_back.csv deleted', t.calcs)
+
+
+
+class Learned(unittest.TestCase):
+    """Ryan, 9 Nov: refine the numbers from run to run, not start fresh."""
+    def tuner(self, ku):
+        a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
+        t = at.AutoTuner(None, None, a, None)
+        t.say = lambda m: None
+        t.reach = lambda sp, kp, ti, why=None: 7.0
+        t.relay = lambda sp, x0, dd: {'Ku': ku, 'Pu_s': 18.0, 'd_pct': 0.8, 'a_mbar': 0.95, 'eps_mbar': 0.05,
+                                      'cycles': 2, 'asym': None, 'steady': True, 'noise': 0.01}
+        self.used = []
+
+        def check(sp, kp, ti, r, k):
+            self.used.append((kp, ti))
+            return {'overshoot_pct': 0.0, 'settle_s': 60, 'reversals': 0, 'saturated': False}, kp
+        t.check = check
+        return t
+
+    def test_file_round_trip(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, at.LEARNED_FILE)
+        self.assertEqual(at.load_learned(path), {})
+        L = {}
+        at.learn(L, {'sp_mbar': 16.0, 'kp': 0.42, 'ti_min': 0.6, 'Ku': 1.07, 'Pu_s': 18.0, 'd_pct': 0.8,
+                     'a_mbar': 0.95, 'valve_pct': 6.8, 'trims': 'x1.25 x1.25', 'note': ''}, '09/11/26 16:30')
+        at.learn(L, {'sp_mbar': 4.0, 'kp': 0.3, 'ti_min': 0.5, 'Ku': 2.0, 'Pu_s': 15.0}, '09/11/26 16:00')
+        at.save_learned(path, L)
+        back = at.load_learned(path)
+        self.assertEqual(sorted(back), ['16', '4'])
+        self.assertEqual((back['16']['kp'], back['16']['ti_min'], back['16']['Ku']), (0.42, 0.6, 1.07))
+        self.assertEqual(back['16']['trims'], 'x1.25 x1.25')
+        with open(path) as f:
+            self.assertTrue(f.readlines()[1].startswith('4,'))   # lowest setpoint first
+
+    def test_seeded_from_earlier_runs(self):
+        d = tempfile.mkdtemp()
+        cols = 'time,sp_mbar,kp,ti_min,Ku,Pu_s,kp_rule,note\n'
+        runs = {'autotune_20261109_150000': cols + '2026-11-09 15:10:00,16.0,0.30,0.50,1.0,17,0.27,\n'
+                                              '2026-11-09 15:20:00,24.0,,,,,,no relay cycles\n',
+                'autotune_20261109_160000': cols + '2026-11-09 16:30:00,16.0,0.42,0.60,1.07,18,0.27,\n'
+                                              '2026-11-09 16:45:00,24.0,0.43,0.67,1.70,20,0.43,\n'}
+        for name, text in runs.items():
+            os.mkdir(os.path.join(d, name))
+            with open(os.path.join(d, name, 'results.csv'), 'w') as f:
+                f.write(text)
+        L = at.seed_learned(d)
+        self.assertEqual(sorted(L), ['16', '24'])
+        self.assertEqual((L['16']['kp'], L['16']['ti_min'], L['16']['Ku']), (0.42, 0.6, 1.07))   # newest
+        self.assertEqual(L['16']['when'], '09/11/26 16:30')
+        self.assertEqual(L['24']['kp'], 0.43)       # the failed 24 mbar row is skipped
+        self.assertEqual(at.seed_learned(os.path.join(d, 'none')), {})
+
+    def test_check_starts_from_the_learned_gains(self):
+        t = self.tuner(1.2)   # within 2 x of the learned 1.07
+        prior = {'sp_mbar': 16.0, 'kp': 0.42, 'ti_min': 0.6, 'Ku': 1.07, 'Pu_s': 18.0, 'trims': 'x1.25 x1.25'}
+        r = t.point(16.0, (0.42, 0.6), 0.8, prior)
+        self.assertEqual(self.used[0], (0.42, 0.6))           # not the rule's 1.2 / 4 = 0.30
+        self.assertEqual(r['kp_rule'], 0.3)
+        self.assertIn('refined from learned KP 0.42 TI 0.60', r['note'])
+        self.assertTrue(any(c.startswith('Refine:') for c in t.calcs))
+
+    def test_fresh_when_the_plant_has_changed(self):
+        t = self.tuner(3.3)   # 3 x the learned Ku
+        prior = {'sp_mbar': 16.0, 'kp': 0.42, 'ti_min': 0.6, 'Ku': 1.07, 'Pu_s': 18.0}
+        r = t.point(16.0, (0.42, 0.6), 0.8, prior)
+        self.assertEqual(self.used[0], (round(3.3 / 4, 2), 0.6))
+        self.assertNotIn('refined', r['note'])
+        self.assertTrue(any(c.startswith('Fresh:') and 'the plant has changed' in c for c in t.calcs))
+
+    def test_no_prior_is_the_old_behaviour(self):
+        t = self.tuner(1.2)
+        t.point(16.0, (0.1, 0.4), 0.8)
+        self.assertEqual(self.used[0], (0.3, 0.6))
+        self.assertFalse(any(c.startswith(('Refine:', 'Fresh:', 'Learned')) for c in t.calcs))
 
 
 if __name__ == '__main__':

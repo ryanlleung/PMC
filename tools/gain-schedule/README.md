@@ -59,7 +59,7 @@ It starts AUTO at `--start`, waits until the pressure holds within `--band` (0.1
 
 ## Autotune for the PID table
 
-`pmc_autotune.py` holds the autotune that the control test GUI runs from its Gains tab (Autotune the PID table; the GUI's README describes it). At each setpoint a relay test in MANUAL measures the ultimate gain Ku and period Pu, KP = Ku / 4 and TI = 2 Pu, and a setpoint step up and back trims KP. Whenever AUTO runs, a watchdog cuts KP at once (by half, or to a quarter) when the pressure oscillates hard: four swings in a row, each over 30 % of the setpoint. Each sum is passed to the GUI as a line of working. The rows are then combined into the firmware's three PID sets. It has no command line of its own: run it from the GUI.
+`pmc_autotune.py` holds the autotune that the control test GUI runs from its Gains tab (Autotune the PID table; the GUI's README describes it). At each setpoint a relay test in MANUAL measures the ultimate gain Ku and period Pu, KP = Ku / 4 and TI = 2 Pu, and a setpoint step up and back trims KP. Whenever AUTO runs, a watchdog cuts KP at once (by half, or to a quarter) when the pressure oscillates hard: four swings in a row, each over 30 % of the setpoint. Each sum is passed to the GUI as a line of working. Each setpoint's result is kept in `autotune-learned.csv` in the log folder; the next run starts that setpoint's check from its learned KP and TI and refines them, unless its new Ku is over 2 times off (the plant has changed: fresh). The rows are then combined into the firmware's three PID sets. It has no command line of its own: run it from the GUI.
 
 ## Tests
 
