@@ -371,7 +371,9 @@ class Sequence(unittest.TestCase):
             self.assertGreater(r['kp'], 0)
         self.assertGreater(rows[1]['kp'], rows[0]['kp'])   # lower gain at 12 mbar: more KP
         self.assertTrue(os.path.exists(os.path.join(d, 'relay_4mbar.csv')))
-        self.assertTrue(os.path.exists(os.path.join(d, 'check_12mbar_1_up.csv')))
+        for sp in (4, 12):   # only the check each result came from is kept
+            ups = [n for n in os.listdir(d) if n.startswith('check_%gmbar_' % sp) and n.endswith('_up.csv')]
+            self.assertEqual(len(ups), 1, ups)
         for line in at.put_back_lines(f):
             b.do(line)
         self.assertEqual((b.mode, b.sets[0], b.table), ('MANUAL', [4.0, 0.25, 0.0], 'OFF,6.0,20.0,15'))
@@ -425,6 +427,30 @@ class SteepValve(unittest.TestCase):
         self.assertFalse(r['note'].startswith('still'), r)
         self.assertLess(r['kp'], 0.5)
         self.assertIn('reach oscillated', r['note'])
+
+
+class Files(unittest.TestCase):
+    def test_a_check_that_misses_spec_is_deleted_when_redone(self):
+        d = tempfile.mkdtemp()
+        a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
+        t = at.AutoTuner(None, None, a, d)
+        t.say = lambda m: None
+        t.reach = lambda sp, kp, ti: 3.0
+        t.relay = lambda sp, x0, dd: {'Ku': 2.0, 'Pu_s': 10.0, 'd_pct': 0.4, 'a_mbar': 0.1, 'eps_mbar': 0.02,
+                                      'cycles': 2, 'asym': None, 'steady': True, 'noise': 0.004}
+        figs = [{'overshoot_pct': 30.0, 'settle_s': 40, 'reversals': 1, 'saturated': False},
+                {'overshoot_pct': 15.0, 'settle_s': 40, 'reversals': 1, 'saturated': False},
+                {'overshoot_pct': 5.0, 'settle_s': 40, 'reversals': 1, 'saturated': False}]
+
+        def check(sp, kp, ti, r, k):
+            for leg in ('up', 'back'):
+                open(os.path.join(d, 'check_%gmbar_%d_%s.csv' % (sp, k, leg)), 'w').close()
+            return figs[k - 1], kp
+        t.check = check
+        r = t.point(2.0, (0.1, 0.4), 0.4)
+        self.assertEqual(r['trims'], 'x0.80 x0.80')
+        self.assertEqual(sorted(os.listdir(d)), ['check_2mbar_3_back.csv', 'check_2mbar_3_up.csv'])
+        self.assertIn('Check 1 missed spec: check_2mbar_1_up.csv, check_2mbar_1_back.csv deleted', t.calcs)
 
 
 if __name__ == '__main__':

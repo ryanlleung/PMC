@@ -57,7 +57,7 @@ Everything is written as it happens, each row flushed to disk, in `pmc-logs` in 
   - `messages.txt`: every message the test gave, with the time.
   - `results.csv`: each step's result (valve and setpoint tests).
   - `table.csv`: the gain table, rewritten after every setpoint; `steps.csv`: each valve step's fit as soon as it has one; `sp<mbar>_up.csv` and `sp<mbar>_down.csv`: each valve step's raw data (gain table).
-  - Autotune: `results.csv`, one row per setpoint (Ku, Pu, relay step and swing, KP, TI, trims, the check); `sets.csv`, the three PID table sets; `write-to-board.txt`, the lines Write to board sends, to paste into PuTTY if wanted; `working.txt`, the Working card's lines with the PC time; `table.csv`, the rows as a gain table; `relay_<mbar>mbar.csv` and `check_<mbar>mbar_<n>_up.csv` / `_back.csv`, each relay test's and check step's samples.
+  - Autotune: `results.csv`, one row per setpoint (Ku, Pu, relay step and swing, KP, TI, trims, the check); `sets.csv`, the three PID table sets; `write-to-board.txt`, the lines Write to board sends, to paste into PuTTY if wanted; `working.txt`, the Working card's lines with the PC time; `table.csv`, the rows as a gain table; `relay_<mbar>mbar.csv` and `check_<mbar>mbar_<n>_up.csv` / `_back.csv`, each relay test's and check step's samples. A check that missed spec is deleted as soon as it is run again, so only the check each result came from is kept (the session log still has every sample).
 
 So a test that is stopped, stalls, loses the link or is cut short by closing the GUI keeps everything up to there. The run bar says which step it ended in and what it was doing.
 

@@ -664,6 +664,23 @@ class AutoTuner(pmc_gains.Tuner):
                 break
         return worse(*legs) if len(legs) == 2 else legs[0], kp
 
+    def drop_check(self, sp, k):
+        """Check k missed spec and is run again: its files go at once, so
+        the run folder keeps only the check each result came from (Ryan,
+        9 Nov). The session log still has every sample."""
+        if not self.log_dir:
+            return
+        gone = []
+        for leg in ('up', 'back'):
+            name = 'check_%gmbar_%d_%s.csv' % (sp, k, leg)
+            try:
+                os.remove(os.path.join(self.log_dir, name))
+                gone.append(name)
+            except OSError:
+                pass
+        if gone:
+            self.calc('Check %d missed spec: %s deleted' % (k, ', '.join(gone)))
+
     def point(self, sp, reach_gains, d):
         """One test point: a result row for the table."""
         self.calc('%g mbar' % sp)        # a heading line: the setpoint alone
@@ -715,6 +732,7 @@ class AutoTuner(pmc_gains.Tuner):
             kp = new
             self.cuts.append('x%.2f' % f)
             self.say('%g mbar: %s, KP x %.2f -> %.2f' % (sp, why, f, kp))
+            self.drop_check(sp, k)
         trims = self.cuts
         self.calc('Result at %g mbar: KP %.2f, TI %.2f min%s' % (sp, kp, ti, ' (KP changed ' + ' '.join(trims) + ')'
                                                                  if trims else ''))
