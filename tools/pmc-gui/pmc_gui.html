@@ -68,6 +68,9 @@
   .reading.temp .v { font-size: 26px; }
   .reading h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #chart { width: 100%; height: 300px; display: block; }
+  #vchart { width: 100%; height: 130px; display: block; margin-top: 6px; }
+  #aCalc { max-height: 340px; overflow-y: auto; }
+  #aCalc b { color: var(--text); }
   .tchart { width: 100%; height: 110px; display: block; margin-top: 6px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
   label { font-size: 13px; color: var(--muted); }
@@ -141,10 +144,11 @@
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div class="legend"><span><i style="background:#2d5877"></i>Pressure</span><span><i style="background:#3f3f3f"></i>Setpoint</span><span><i style="background:#9aa6b0"></i>Valve (right axis)</span><span><i style="background:#b9c9d6"></i>Test stage</span></div>
+        <div class="legend"><span><i style="background:#2d5877"></i>Pressure</span><span><i style="background:#3f3f3f"></i>Setpoint</span><span><i style="background:#b9c9d6"></i>Test stage</span></div>
         <div><label>Show</label> <select id="win"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="3600">1 hour</option><option value="14400">4 hours</option></select></div>
       </div>
       <canvas id="chart"></canvas>
+      <canvas id="vchart"></canvas>
       <div id="tWrap"></div>
       <div id="alarm"></div>
     </div>
@@ -164,8 +168,14 @@
     </div>
     <div class="tab col" data-tab="gains">
       <div class="card">
+        <h2>Autotune: working</h2>
+        <div class="est" id="aNow"></div>
+        <div id="aCalc" class="mono"></div>
+      </div>
+      <div class="card">
         <h2>Autotune: PID table</h2>
         <table><thead><tr><th>Set</th><th>Pressure, mbar</th><th>KP, %/mbar</th><th>TI, min</th><th>From the setpoints</th></tr></thead><tbody id="aSets"></tbody></table>
+        <div class="hint mono" id="aSetsCalc" style="margin-top:6px"></div>
         <div class="row" style="margin-top:8px"><button id="aWrite" class="primary" onclick="writeSets(this)">Write to board</button><span class="hint" id="aWritten"></span></div>
         <div class="hint" id="aLines"></div>
       </div>
@@ -271,7 +281,7 @@
         <div class="row"><label style="color:var(--text)"><input type="checkbox" id="aHeat"> Heater at the experiment's power</label></div>
         <div class="est" id="aEst"></div>
         <div class="row"><button class="primary run" onclick="startAuto(this)">Run autotune</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
-        <div class="hint">Start with the heat exchanger cold and steady and AUTO holding a mid setpoint. Each setpoint, lowest first: AUTO until it holds, a relay test in MANUAL for Ku and Pu, KP = Ku / 4 and TI = 2 Pu, then a 20 % step up and back that trims KP, twice at most. Set 1, the PID table, setpoint and mode are put back at the end. The board's PID table changes only with Write to board.</div>
+        <div class="hint">Start with the heat exchanger cold and steady and AUTO holding a mid setpoint. Each setpoint, lowest first: AUTO until it holds, a relay test in MANUAL for Ku and Pu, KP = Ku / 4 and TI = 2 Pu, then a 20 % step up and back that trims KP. If AUTO swings hard (four big swings in a row) at any stage, KP is cut at once, by half or to a quarter, and the step is tried again; trims down go on until the step passes. The working shows each sum as it is done. Set 1, the PID table, setpoint and mode are put back at the end. The board's PID table changes only with Write to board.</div>
       </div>
       <div class="card" data-kind="gains">
         <h2>Make a gain table<span class="badge">Running</span></h2>
@@ -321,6 +331,7 @@ const $ = id => document.getElementById(id);
 const val = id => $(id).value.trim();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TCOL = ['#b5541c', '#6b4fa0', '#2e7d4f', '#8a6d1d'];
+let calcKey = '';
 let rows = [], last = -1, pidLoaded = false, lsLoaded = false, tab = 'live', S = null, inFlight = false, tKey = '';
 
 function go(t, card) {
@@ -551,6 +562,16 @@ async function refresh() {
     `<td>${x[1].toFixed(2)}</td><td>${x[2].toFixed(2)}</td><td>${x[3].join(', ')}</td>`) + '</tr>').join('') : none(5);
   $('aWrite').disabled = !(A && A.sets.some(x => x[1] !== null)) || !!kind;
   $('aWritten').textContent = !A ? '' : A.written ? 'Written to the board at ' + A.written + '.' : A.running ? 'Running: the sets fill in as each setpoint finishes.' : A.sets.length ? 'Not written to the board yet.' : '';
+  const cl = A && A.calc ? A.calc : [], ck = cl.length + '|' + (cl[cl.length - 1] || '');
+  if (ck !== calcKey) {
+    const box = $('aCalc'), atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+    box.innerHTML = cl.length ? cl.map(x => /^\d[\d.]* mbar$/.test(x) ? '<b>' + esc(x) + '</b>' : esc(x)).join('\n') :
+      '<span class="hint">Nothing yet. Run autotune: each setpoint\'s sums show here as they are done.</span>';
+    if (atEnd) box.scrollTop = box.scrollHeight;
+    calcKey = ck;
+  }
+  $('aNow').textContent = A && A.running && A.calc_now ? 'Now: ' + A.calc_now : '';
+  $('aSetsCalc').textContent = A && A.sets_calc ? A.sets_calc.join('\n') : '';
   $('aLines').textContent = A && A.lines.length ? 'Sends ' + A.lines.join('; ') + (A.dir ? '. Also in write-to-board.txt in ' + A.dir + '.' : '.') : '';
   $('tName').textContent = s.table_name ? '(' + s.table_name + ')' : '';
   const gv = (o, k, d) => o[k] === undefined || o[k] === null ? '--' : (+o[k]).toFixed(d);
@@ -598,31 +619,48 @@ function draw() {
       g.textAlign = 'right'; g.fillText(p.toFixed(a.d), x0 - 6, Y(p) + 4);
     }
   };
-  // Pressure, setpoint, valve, and a dotted line where each test stage starts.
-  let c = canvas($('chart'));
-  if (c) {
-    const { g, W, H } = c, w = W - L - R, h = H - T - B;
-    let lo = Infinity, hi = -Infinity;
-    vis.forEach(r => [r[1], r[2]].forEach(x => { if (x !== null) { lo = Math.min(lo, x); hi = Math.max(hi, x); } }));
-    const a = nice(lo, hi, 0.5);
-    const X = t => L + (t - t0) / win * w, Y = p => T + (1 - (p - a.lo) / (a.hi - a.lo)) * h, YV = v => T + (1 - v / 100) * h;
-    grid(g, a, Y, L, L + w);
-    g.textAlign = 'left';
-    for (let v = 0; v <= 100; v += 25) g.fillText(v, L + w + 6, YV(v) + 4);
-    g.fillText('-' + (win >= 3600 ? win / 3600 + ' h' : win / 60 + ' min'), L, H - 6);
-    g.textAlign = 'right'; g.fillText('now', L + w, H - 6);
+  // Pressure, setpoint and a dotted line where each test stage starts.
+  const stages = (g, X, Tp, h, label) => {
     let prev = null, lab = -1e9;
     g.font = '11px system-ui, sans-serif'; g.textAlign = 'left';
     vis.forEach(r => {
       const ph = r[6] || '';
       if (prev !== null && ph && ph !== prev) {
         const x = X(r[0]);
-        g.strokeStyle = '#b9c9d6'; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + h); g.stroke(); g.setLineDash([]);
-        if (x - lab > 110) { g.fillStyle = '#5a646c'; g.fillText(ph.length > 28 ? ph.slice(0, 27) + '…' : ph, x + 3, T + 11); lab = x; }
+        g.strokeStyle = '#b9c9d6'; g.setLineDash([2, 3]); g.beginPath(); g.moveTo(x, Tp); g.lineTo(x, Tp + h); g.stroke(); g.setLineDash([]);
+        if (label && x - lab > 110) { g.fillStyle = '#5a646c'; g.fillText(ph.length > 28 ? ph.slice(0, 27) + '…' : ph, x + 3, Tp + 11); lab = x; }
       }
       prev = ph;
     });
-    pen(g, X, 3, YV, '#9aa6b0', 1.5); pen(g, X, 1, Y, '#3f3f3f', 1.5, [5, 4]); pen(g, X, 2, Y, '#2d5877', 2);
+  };
+  let c = canvas($('chart'));
+  if (c) {
+    const { g, W, H } = c, w = W - L - R, h = H - T - B;
+    let lo = Infinity, hi = -Infinity;
+    vis.forEach(r => [r[1], r[2]].forEach(x => { if (x !== null) { lo = Math.min(lo, x); hi = Math.max(hi, x); } }));
+    const a = nice(lo, hi, 0.5);
+    const X = t => L + (t - t0) / win * w, Y = p => T + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
+    grid(g, a, Y, L, L + w);
+    g.textAlign = 'left';
+    g.fillText('-' + (win >= 3600 ? win / 3600 + ' h' : win / 60 + ' min'), L, H - 6);
+    g.textAlign = 'right'; g.fillText('now', L + w, H - 6);
+    stages(g, X, T, h, true);
+    pen(g, X, 1, Y, '#3f3f3f', 1.5, [5, 4]); pen(g, X, 2, Y, '#2d5877', 2);
+  }
+  // The valve on its own chart and its own scale, so a move of a few
+  // tenths of a percent shows as clearly as one of tens.
+  c = canvas($('vchart'));
+  if (c) {
+    const { g, W, H } = c, Tt = 18, w = W - L - R, h = H - Tt - 6;
+    let lo = Infinity, hi = -Infinity;
+    vis.forEach(r => { const v = r[3]; if (v !== null && v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+    const a = nice(lo, hi, 0.5, 4);
+    const X = t => L + (t - t0) / win * w, Y = p => Tt + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
+    grid(g, a, Y, L, L + w);
+    stages(g, X, Tt, h, false);
+    g.textAlign = 'left'; g.fillStyle = '#5d6b78'; g.font = '600 12px system-ui, sans-serif';
+    g.fillText('Valve, %', L, 12);
+    pen(g, X, 3, Y, '#5d6b78', 2);
   }
   // Each 336 input on its own strip and its own scale, so a few mK of
   // change in one shows up beside kelvins in another.

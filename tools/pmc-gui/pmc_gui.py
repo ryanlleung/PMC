@@ -415,6 +415,20 @@ class GuiAutoTuner(pmc_autotune.AutoTuner):
     def stage(self, text, phase=None, most=None):
         self.board.stage(text, phase, most)
 
+    def show(self):
+        with self.board.lock:
+            if self.board.at is not None:
+                self.board.at['calc'], self.board.at['calc_now'] = list(self.calcs), self.calc_now
+
+    def calc(self, text):
+        super().calc(text)
+        if self.log_dir:     # the working, as it was worked out
+            try:
+                with open(os.path.join(self.log_dir, 'working.txt'), 'a', encoding='utf-8') as f:
+                    f.write(pc_time() + '  ' + text + '\n')
+            except OSError:
+                pass
+
     def left(self, want, mode):
         alarm = self.board.hist[-1][5] if self.board.hist else ''
         return 'the board left %s (now %s%s)' % (want, mode or 'no mode',
@@ -1089,7 +1103,7 @@ class Board:
                    'PID table B1 %g B2 %g H %d %%' % (' '.join('%g' % x for x in sps), kp0, ti0, d, div, b1, b2, h))
         with self.lock:
             self.at = {'rows': [], 'sets': [], 'b1': b1, 'b2': b2, 'h': h, 'dir': self.run_dir, 'lines': [],
-                       'written': '', 'running': True}
+                       'written': '', 'running': True, 'calc': [], 'calc_now': '', 'sets_calc': []}
         if not (self.ls and self.ls.host):
             self.note('autotune: no Lake Shore 336, so the heat exchanger was not checked for steady')
         threading.Thread(target=self.autotune_job, args=(a,), daemon=True).start()
@@ -1099,8 +1113,18 @@ class Board:
         """The results so far: the sets, and the files that hold them."""
         sets = pmc_autotune.table_sets(rows, a.b1, a.b2)
         lines = pmc_autotune.write_lines(sets, a.b1, a.b2, a.h)
+        how = []
+        for n, kp, ti, pts in sets:
+            if kp is None:
+                continue
+            rs = [r for r in rows if r['sp_mbar'] in pts]
+            if len(rs) == 1:
+                how.append('Set %d: KP %.2f and TI %.2f min, from %g mbar alone' % (n, kp, ti, pts[0]))
+            else:
+                how.append('Set %d: KP = geometric mean of %s = %.2f; TI = geometric mean of %s = %.2f min' % (
+                    n, ', '.join('%.2f' % r['kp'] for r in rs), kp, ', '.join('%.2f' % r['ti_min'] for r in rs), ti))
         with self.lock:
-            self.at.update(rows=list(rows), sets=[list(x) for x in sets], lines=lines)
+            self.at.update(rows=list(rows), sets=[list(x) for x in sets], lines=lines, sets_calc=how)
         if not self.run_dir:
             return
         try:

@@ -18,7 +18,15 @@ For each test point, low to high (1 2 4 8 12 16 24 48 mbar by default):
      rings), TI = 2 Pu, KD 0.
   4. Check: AUTO with those gains, setpoint 20 % up and back. Overshoot over
      10 % or more than two reversals: KP x 0.8; no overshoot and slower than
-     6 Pu to settle: KP x 1.25. At most two trims.
+     6 Pu to settle: KP x 1.25. At most two trims up, and none after a trim
+     down; trims down go on until the check passes (at most MAX_CUTS).
+Whenever AUTO runs (reaching a point, holding it, the check steps), a
+watchdog looks for a sustained oscillation: two full cycles in a row (four
+swings), each swing more than 30 % of the setpoint. It then cuts KP at once (x 0.5, or
+x 0.25 when the swing is larger than the setpoint itself) with PID SET and
+carries on with the lower gain (Ryan, 9 Nov: "make sure it tunes down the
+gains when it oscillates like crazy"; at 2 mbar the 1 mbar gains swung the
+pressure 1 to 10 mbar every 14 s).
 Then the three PID table sets are the geometric means of the rows in each
 band (below B1, B1 to B2, above B2; 6 and 20 mbar by default).
 
@@ -63,6 +71,14 @@ TRIM_DOWN, TRIM_UP = 0.8, 1.25
 # Reaching a point in AUTO.
 REACH_MAX_S = 600
 CHECK_HOLD_MAX_S = 300
+
+# The oscillation watchdog in AUTO.
+WILD_PP = 0.30                 # a full cycle swinging more than this fraction of the setpoint...
+WILD_PP_MIN = 0.2              # ...and at least this, mbar
+WILD_CYCLES = 2                # ...so many cycles in a row: oscillating
+WILD_SPAN_S = 400              # ...all within this long
+WILD_CUT, WILD_CUT_BIG = 0.5, 0.25   # KP x this; x BIG when the swing is larger than the setpoint
+MAX_CUTS = 6                   # most KP cuts at one point (watchdog and check trims down together)
 
 
 def clip_kp(kp):
@@ -141,7 +157,12 @@ class Relay:
         if p is None:
             return None
         if p > 2 * self.sp + 0.5 or p < 0.4 * self.sp:
-            return self.fail('pressure %.2f mbar, too far from %g mbar' % (p, self.sp))
+            # Too far: a smaller step (a steep valve, Ryan 9 Nov: 0.4 % moved
+            # 2 mbar by 7), and only when that is already the least, give up.
+            if self.d <= D_MIN or self.changes >= D_CHANGES + 2:
+                return self.fail('pressure %.2f mbar, too far from %g mbar' % (p, self.sp))
+            self.hi = p < self.sp
+            return self.restart(t, max(self.d / 4, D_MIN), 'pressure %.2f mbar, too far from %g mbar' % (p, self.sp))
         if self.hi is None:
             self.hi = p < self.sp
             self.rows[-1] = (t, p, x, self.valve())
@@ -182,6 +203,18 @@ class Relay:
     def fail(self, why):
         self.done, self.why = True, why
         return None
+
+    def live(self):
+        """What the relay has so far, in words, for the page."""
+        hs = self.usable()
+        a = self.swing()
+        txt = 'valve %.1f %% +/- %.1f %%, switching at %g +/- %.2f mbar; %d switches' % (
+            self.x0, self.d, self.sp, self.eps, len(self.sw))
+        if a is not None:
+            txt += ', last swing +/- %.3f mbar (keep between %.3f and %.3f)' % (a, AMP_LO * self.sp, AMP_HI * self.sp)
+        if len(hs) >= 2:
+            txt += ', last period %.1f s' % (hs[-1][0] + hs[-2][0])
+        return txt
 
     def swing(self):
         """Half the last peak-to-trough, mbar (None before one of each)."""
@@ -237,8 +270,69 @@ class Relay:
         hi_t = [h for h, hi, _ in win if hi]
         lo_t = [h for h, hi, _ in win if not hi]
         return {'Ku': ku, 'Ku_relay': ku_relay, 'Pu_s': pu, 'a_mbar': a, 'd_pct': self.d, 'eps_mbar': self.eps,
+                'hx_pct': abs(hx), 'hp_mbar': abs(hp), 'harmonic': ku is not ku_relay,
                 'cycles': m // 2, 'steady': self.steady,
                 'asym': (sum(hi_t) / len(hi_t)) / (sum(lo_t) / len(lo_t)) if hi_t and lo_t else None}
+
+
+class Wild:
+    """The watchdog: a sustained oscillation in AUTO, fed one reading a
+    second. The pressure's turns are taken as a zigzag: a turn counts once
+    the pressure has come back from it by more than WILD_PP of the setpoint
+    (at least WILD_PP_MIN), so the reading's noise and the needle's small
+    limit cycle make none. feed(p) turns True at the 2 x WILD_CYCLES-th
+    such swing in a row, all within WILD_SPAN_S. It does not need the
+    setpoint to be crossed: a swing held off to one side (the pump's floor
+    under a low setpoint, or windup) counts the same. A step's overshoot
+    and ring-down make one or two swings at most."""
+
+    def __init__(self, sp):
+        self.sp = sp
+        self.big = max(WILD_PP * sp, WILD_PP_MIN)
+        self.t, self.dir = 0, 0
+        self.lo = self.hi = None     # before the first turn: the range so far, (p, t)
+        self.ext = None              # the running extreme of the swing under way, (p, t)
+        self.turns = []              # (p, t) of each turn
+        self.pp = 0.0                # the smallest swing of those that tripped it, mbar
+        self.wild = False
+
+    def feed(self, p):
+        self.t += 1
+        if p is None or self.wild:
+            return self.wild
+        t, big = self.t, self.big
+        if self.dir == 0:
+            self.lo = min(self.lo or (p, t), (p, t))
+            self.hi = max(self.hi or (p, t), (p, t))
+            if p >= self.lo[0] + big:
+                self.turns, self.dir, self.ext = [self.lo], 1, (p, t)
+            elif p <= self.hi[0] - big:
+                self.turns, self.dir, self.ext = [self.hi], -1, (p, t)
+            return False
+        if (p - self.ext[0]) * self.dir > 0:
+            self.ext = (p, t)
+        elif (self.ext[0] - p) * self.dir >= big:
+            self.turns = (self.turns + [self.ext])[-2 * WILD_CYCLES - 1:]
+            self.dir, self.ext = -self.dir, (p, t)
+        pts = self.turns + ([self.ext] if abs(self.ext[0] - self.turns[-1][0]) >= big else [])
+        pts = pts[-2 * WILD_CYCLES - 1:]
+        if len(pts) == 2 * WILD_CYCLES + 1 and t - pts[0][1] <= WILD_SPAN_S:
+            self.wild = True
+            # the size from the finished swings (the one under way may have only just passed `big`)
+            done = [abs(a[0] - b[0]) for a, b in zip(self.turns, self.turns[1:])][-(2 * WILD_CYCLES - 1):]
+            self.pp = min(done) if done else big
+        return self.wild
+
+    def status(self):
+        """Swings in a row so far that count (each over `big`), for the page."""
+        if not self.turns:
+            return 0
+        n = len(self.turns) - 1 + (abs(self.ext[0] - self.turns[-1][0]) >= self.big)
+        return n
+
+    def cut(self):
+        """The KP factor for this oscillation."""
+        return WILD_CUT_BIG if self.pp > self.sp else WILD_CUT
 
 
 def step_figures(rows, p0, p1, band):
@@ -278,6 +372,9 @@ def trim_rule(fig, pu_s):
     """KP factor from a check: (factor, why); 1.0 keeps KP."""
     if fig is None:
         return 1.0, ''
+    if fig.get('wild_pp'):
+        return (WILD_CUT_BIG if fig.get('wild_big') else WILD_CUT,
+                'oscillating (swing %.2f mbar)' % fig['wild_pp'])
     if fig['overshoot_pct'] > OVERSHOOT_MAX or fig['reversals'] > REVERSALS_MAX:
         return TRIM_DOWN, 'overshoot %.0f %%, %d reversals' % (fig['overshoot_pct'], fig['reversals'])
     slow = fig['settle_s'] is None or fig['settle_s'] > SLOW_PU * pu_s
@@ -292,8 +389,12 @@ def worse(a, b):
     if a is None or b is None:
         return a or b
     s = None if a['settle_s'] is None or b['settle_s'] is None else max(a['settle_s'], b['settle_s'])
-    return {'overshoot_pct': max(a['overshoot_pct'], b['overshoot_pct']), 'settle_s': s,
-            'reversals': max(a['reversals'], b['reversals']), 'saturated': a['saturated'] or b['saturated']}
+    out = {'overshoot_pct': max(a['overshoot_pct'], b['overshoot_pct']), 'settle_s': s,
+           'reversals': max(a['reversals'], b['reversals']), 'saturated': a['saturated'] or b['saturated']}
+    w = max((x for x in (a, b) if x.get('wild_pp')), key=lambda x: x['wild_pp'], default=None)
+    if w:
+        out['wild_pp'], out['wild_big'] = w['wild_pp'], w.get('wild_big', False)
+    return out
 
 
 def geomean(xs):
@@ -329,6 +430,21 @@ class AutoTuner(pmc_gains.Tuner):
     def stage(self, text, phase=None, most=None):
         self.say(text)
 
+    # The working, for the page: the lines of this setpoint's calculations
+    # (calc) and one line that changes while a stage runs (now).
+    calcs, calc_now = [], ''
+
+    def calc(self, text):
+        self.calcs = (self.calcs + [text])[-400:]
+        self.show()
+
+    def now(self, text):
+        self.calc_now = text
+        self.show()
+
+    def show(self):
+        """The GUI shows calcs and calc_now; nothing here."""
+
     def left(self, want, mode):
         return 'the board left %s (now %s)' % (want, mode or 'no mode')
 
@@ -348,14 +464,29 @@ class AutoTuner(pmc_gains.Tuner):
             self.still()
         self.link.do('PID SET %.2f,%.2f,0' % (kp, ti))
 
-    def hold(self, sp, most):
-        """AUTO at sp until the minute's mean is on the point and level.
-        Returns (valve % it holds at, held, the last 30 s mean pressure)."""
+    def calm(self, sp, kp, ti, w):
+        """The watchdog tripped: KP cut at once (in AUTO), the new KP."""
+        new = clip_kp(kp * w.cut())
+        if new >= kp:
+            raise RuntimeError('AUTO oscillating at %g mbar (swing %.2f mbar) with KP already at %.2f'
+                               % (sp, w.pp, kp))
+        self.say('%g mbar: AUTO oscillating (swing %.2f mbar), KP x %.2f -> %.2f' % (sp, w.pp, w.cut(), new))
+        self.calc('Oscillating: %d swings in a row, the smallest %.2f mbar, each over %.2f mbar (%d %% of %g mbar). '
+                  'KP x %.2f%s: %.2f x %.2f = %.2f (PID SET, AUTO carries on)' % (
+                      2 * WILD_CYCLES, w.pp, w.big, WILD_PP * 100, sp, w.cut(),
+                      ', the swing larger than the setpoint' if w.cut() == WILD_CUT_BIG else '', kp, w.cut(), new))
+        self.pid(new, ti)
+        self.cuts.append('x%.2f osc' % w.cut())
+        return new
+
+    def hold(self, sp, most, kp, ti):
+        """AUTO at sp until the minute's mean is on the point and level,
+        cutting KP while it oscillates (each cut starts the wait again).
+        Returns (valve % it holds at, held, the last 30 s mean pressure,
+        the KP in use)."""
         tol = max(0.05 * sp, 0.1)
 
-        def held(rows):
-            if rows[-1][3] != 'AUTO':
-                raise RuntimeError(self.left('AUTO', rows[-1][3]))
+        def level(rows):
             t = rows[-1][0]
             if t < 60:
                 return False
@@ -365,23 +496,44 @@ class AutoTuner(pmc_gains.Tuner):
                 return False
             ma, mb = sum(a) / len(a), sum(b) / len(b)
             return abs((ma + mb) / 2 - sp) < tol and abs(ma - mb) < tol / 2
-        rows = self.samples(most, held)
+        for _ in range(MAX_CUTS + 1):
+            w = Wild(sp)
+
+            def held(rows):
+                if rows[-1][3] != 'AUTO':
+                    raise RuntimeError(self.left('AUTO', rows[-1][3]))
+                if w.feed(rows[-1][1]):
+                    return True
+                self.now('AUTO at %g mbar, KP %.2f TI %.2f, %.0f s: pressure %.3f mbar; watchdog %d of %d swings over '
+                         '%.2f mbar' % (sp, kp, ti, rows[-1][0], rows[-1][1], w.status(), 2 * WILD_CYCLES, w.big))
+                return level(rows)
+            rows = self.samples(most, held)
+            if not w.wild:
+                break
+            kp = self.calm(sp, kp, ti, w)
+        else:
+            raise RuntimeError('AUTO still oscillating at %g mbar after %d cuts' % (sp, MAX_CUTS))
         if not rows:
             raise RuntimeError('no pressure reading')
-        ok = held(rows)
+        ok = level(rows)
         span = 60 if ok else 30      # not held: where it was last, nearest to where it would hold
         xs = [r[2] for r in rows if r[0] >= rows[-1][0] - span and r[2] is not None]
         ps = [r[1] for r in rows if r[0] >= rows[-1][0] - 30]
-        return (round(sum(xs) / len(xs), 1) if xs else None), ok, sum(ps) / len(ps)
+        x0 = round(sum(xs) / len(xs), 1) if xs else None
+        self.calc('%s at %g mbar: x0 = %s %% (mean valve, last %d s), pressure %.3f mbar (mean, last 30 s)' % (
+            'Held' if ok else 'Not held', sp, '--' if x0 is None else '%.1f' % x0, span, sum(ps) / len(ps)))
+        return x0, ok, sum(ps) / len(ps), kp
 
     def reach(self, sp, kp, ti):
+        self.calc('Reach %g mbar: AUTO with KP %.2f TI %.2f (the setpoint before\'s gains, or the first gains)' %
+                  (sp, kp, ti))
         self.pid(kp, ti)
         self.link.do('PRES SP %.1f' % sp)
         if self.sample()[2] != 'AUTO':
             self.auto()
         self.stage('AUTO at %g mbar with KP %.2f TI %.2f, waiting for it to hold' % (sp, kp, ti),
                    '%g mbar reach' % sp, REACH_MAX_S)
-        x0, ok, p = self.hold(sp, REACH_MAX_S)
+        x0, ok, p, _ = self.hold(sp, REACH_MAX_S, kp, ti)
         if x0 is None:
             raise RuntimeError('no valve reading')
         if not ok and abs(p - sp) > 0.3 * sp:
@@ -398,6 +550,8 @@ class AutoTuner(pmc_gains.Tuner):
         rows = self.samples(NOISE_S)
         sd = noise([r[1] for r in rows])
         eps = max(3 * sd, 0.01 * sp, 0.02)
+        self.calc('Noise: sigma = %.4f mbar (sample to sample, %d s in MANUAL at x0). Switch band eps = '
+                  'max(3 sigma, 1 %% of %g, 0.02) = %.3f mbar' % (sd, NOISE_S, sp, eps))
         R = Relay(sp, x0, d, eps)
         self.stage('relay test: valve %.1f %% +/- %.1f %%, switching at %g +/- %.2f mbar' % (x0, d, sp, eps),
                    '%g mbar relay' % sp, RELAY_MAX_S)
@@ -415,7 +569,9 @@ class AutoTuner(pmc_gains.Tuner):
                     sent = cmd
                 if R.note:
                     self.say('%g mbar relay: %s' % (sp, R.note))
+                    self.calc('Relay: ' + R.note)
                     R.note = ''
+                self.now('Relay, %d s: %s' % (n, R.live()))
         finally:
             if self.log_dir:
                 with open(os.path.join(self.log_dir, 'relay_%gmbar.csv' % sp), 'w', newline='') as f:
@@ -431,11 +587,23 @@ class AutoTuner(pmc_gains.Tuner):
         if r is None:
             raise RuntimeError('relay test: too few cycles')
         r['x0'], r['noise'] = R.x0, sd
+        self.calc('Relay result over %d cycles: period Pu = %.1f s, pressure swing a = +/- %.3f mbar, relay step d = %.1f %%' %
+                  (r['cycles'], r['Pu_s'], r['a_mbar'], r['d_pct']))
+        if r.get('harmonic'):
+            self.calc('Ku = valve swing / pressure swing at Pu (first harmonics) = %.3f %% / %.3f mbar = %.3f %%/mbar '
+                      '(relay formula 4d / (pi sqrt(a^2 - eps^2)) gives %.3f)' %
+                      (r['hx_pct'], r['hp_mbar'], r['Ku'], r['Ku_relay']))
+        else:
+            self.calc('Ku = 4d / (pi sqrt(a^2 - eps^2)) = 4 x %.1f / (pi x sqrt(%.3f^2 - %.3f^2)) = %.3f %%/mbar' %
+                      (r['d_pct'], r['a_mbar'], r['eps_mbar'], r['Ku']))
         return r
 
     def leg(self, sp, p0, p1, band, most, name):
+        """One step of a check. Ends early when the watchdog trips; the
+        figures then carry the swing (wild_pp)."""
         self.link.do('PRES SP %.1f' % p1)
         t0, n, rows, since = self.clock.now(), 0, [], None
+        wd = Wild(p1)
         while True:
             n += 1
             self.clock.wait_until(t0 + n)
@@ -445,8 +613,12 @@ class AutoTuner(pmc_gains.Tuner):
             t = self.clock.now() - t0
             rows.append((t, p, x))
             if p is not None:
+                self.now('Check step %g -> %g mbar, %.0f s: pressure %.3f mbar, %s; watchdog %d of %d swings over %.2f mbar'
+                         % (p0, p1, t, p, 'in the band %.0f s of %d' % (t - since, SETTLED_S) if since is not None
+                            else 'outside the band +/- %.2f' % band, wd.status(), 2 * WILD_CYCLES, wd.big))
+            if p is not None:
                 since = (since if since is not None else t) if abs(p - p1) <= band else None
-            if (since is not None and t - since >= SETTLED_S) or t >= most:
+            if (since is not None and t - since >= SETTLED_S) or t >= most or wd.feed(p):
                 break
         if self.log_dir:
             with open(os.path.join(self.log_dir, '%s.csv' % name), 'w', newline='') as f:
@@ -455,15 +627,21 @@ class AutoTuner(pmc_gains.Tuner):
                 for r in rows:
                     w.writerow(['%.1f' % r[0], '' if r[1] is None else '%.3f' % r[1],
                                 '' if r[2] is None else '%.2f' % r[2], p0, p1])
-        return step_figures(rows, p0, p1, band)
+        fig = step_figures(rows, p0, p1, band)
+        if fig is not None and wd.wild:
+            fig['wild_pp'], fig['wild_big'] = round(wd.pp, 3), wd.pp > p1
+        return fig
 
     def check(self, sp, kp, ti, r, k):
-        """AUTO with kp, ti; setpoint up 20 % and back. The worse leg's figures."""
+        """AUTO with kp, ti; setpoint up 20 % and back. The worse leg's
+        figures, and the KP it ended with (lower if the watchdog cut it
+        while it held; then the steps run with that). A leg that oscillates
+        ends the check there."""
         self.pid(kp, ti)
         self.auto()
         self.stage('check %d: AUTO at %g mbar with KP %.2f TI %.2f, waiting for it to hold' % (k, sp, kp, ti),
                    '%g mbar check %d hold' % (sp, k), CHECK_HOLD_MAX_S)
-        self.hold(sp, CHECK_HOLD_MAX_S)
+        kp = self.hold(sp, CHECK_HOLD_MAX_S, kp, ti)[3]
         hi = round(max(sp * (1 + CHECK_UP), sp + 0.2), 1)
         band = max(0.05 * (hi - sp), 2 * r['noise'], 0.02)
         most = min(max(12 * r['Pu_s'] + 90, 150), 360)
@@ -472,35 +650,84 @@ class AutoTuner(pmc_gains.Tuner):
             self.stage('check %d: setpoint %g -> %g mbar, waiting for it to hold within %.2f mbar for %d s' %
                        (k, a, b, band, SETTLED_S), '%g mbar check %d %s' % (sp, k, 'up' if k2 == 0 else 'back'), most)
             legs.append(self.leg(sp, a, b, band, most, 'check_%gmbar_%d_%s' % (sp, k, 'up' if k2 == 0 else 'back')))
-        return worse(*legs)
+            fg = legs[-1]
+            if fg:
+                self.calc('Check %d %s %g -> %g mbar (KP %.2f): %s' % (
+                    k, 'up' if k2 == 0 else 'back', a, b, kp,
+                    'oscillating, ended early (swing %.2f mbar)' % fg['wild_pp'] if fg.get('wild_pp') else
+                    'overshoot %.1f %% (limit %.0f), %s, %d reversals (limit %d)' % (
+                        fg['overshoot_pct'], OVERSHOOT_MAX,
+                        'not settled' if fg['settle_s'] is None else 'settled in %.0f s' % fg['settle_s'],
+                        fg['reversals'], REVERSALS_MAX)))
+            if legs[-1] and legs[-1].get('wild_pp'):
+                self.link.do('PRES SP %.1f' % sp)
+                break
+        return worse(*legs) if len(legs) == 2 else legs[0], kp
 
     def point(self, sp, reach_gains, d):
         """One test point: a result row for the table."""
+        self.calc('%g mbar' % sp)        # a heading line: the setpoint alone
+        self.cuts = []
         x0 = self.reach(sp, *reach_gains)
+        reach_cuts, self.cuts = self.cuts, []   # the reach gains are the point before's, not this point's
         r = self.relay(sp, x0, d)
         kp, ti = relay_gains(r['Ku'], r['Pu_s'], self.a.div, self.a.ti_pu)
+        self.calc('KP = Ku / %g = %.3f / %g = %.2f %%/mbar; TI = %g x Pu = %g x %.1f s = %.0f s = %.2f min' % (
+            self.a.div, r['Ku'], self.a.div, kp, self.a.ti_pu, self.a.ti_pu, r['Pu_s'], self.a.ti_pu * r['Pu_s'], ti))
         self.say('%g mbar: Ku %.2f %%/mbar, Pu %.1f s (relay %.1f %%, swing %.3f mbar, %d cycles%s) -> KP %.2f TI %.2f'
                  % (sp, r['Ku'], r['Pu_s'], r['d_pct'], r['a_mbar'], r['cycles'], '' if r['steady'] else ', not steady',
                     kp, ti))
-        kp0, trims, fig, why = kp, [], None, ''
-        for k in range(self.a.trims + 1):
-            fig = self.check(sp, kp, ti, r, k + 1)
+        kp0, fig, why, f, ups, downs, k = kp, None, '', 1.0, 0, 0, 0
+        # every change of KP at this point is in self.cuts, in order (calm() adds its own)
+        while True:
+            k += 1
+            fig, kp = self.check(sp, kp, ti, r, k)
             f, why = trim_rule(fig, r['Pu_s'])
+            if f != 1.0:
+                self.calc('Rule: %s, so KP x %.2f' % (why, f))
+            elif fig:
+                self.calc('Rule: keep KP %.2f. Overshoot %.1f %% (a trim down over %.0f %%), %d reversals (down over %d); '
+                          'a trim up needs under 1 %% overshoot and settling slower than %g Pu = %.0f s%s' % (
+                              kp, fig['overshoot_pct'], OVERSHOOT_MAX, fig['reversals'], REVERSALS_MAX, SLOW_PU,
+                              SLOW_PU * r['Pu_s'], ', or the valve at an end' if fig['saturated'] else ''))
             if fig:
-                self.say('%g mbar check %d (KP %.2f): overshoot %.1f %%, %s, %d reversals%s' %
-                         (sp, k + 1, kp, fig['overshoot_pct'],
-                          'not settled' if fig['settle_s'] is None else 'settled in %.0f s' % fig['settle_s'],
-                          fig['reversals'], ', valve at an end' if fig['saturated'] else ''))
-            if f == 1.0 or k == self.a.trims:
+                self.say('%g mbar check %d (KP %.2f): %s' % (
+                    sp, k, kp, 'oscillating, swing %.2f mbar' % fig['wild_pp'] if fig.get('wild_pp') else
+                    'overshoot %.1f %%, %s, %d reversals%s' % (
+                        fig['overshoot_pct'], 'not settled' if fig['settle_s'] is None else
+                        'settled in %.0f s' % fig['settle_s'], fig['reversals'],
+                        ', valve at an end' if fig['saturated'] else '')))
+            # Up at most `trims` times and never after a cut; down until it
+            # passes, MAX_CUTS in all with the watchdog's.
+            downs = sum(1 for c in self.cuts if c.startswith('x0'))
+            if f == 1.0:
                 break
-            kp = clip_kp(kp * f)
-            trims.append('x%.2f' % f)
+            if (f > 1.0 and (ups >= self.a.trims or downs)) or (f < 1.0 and downs >= MAX_CUTS):
+                self.calc('Not applied: %s' % ('at most %d cuts at one setpoint' % MAX_CUTS if f < 1.0 else
+                                               'no trim up after a cut' if downs else
+                                               'at most %d trims up' % self.a.trims))
+                break
+            new = clip_kp(kp * f)
+            if new == kp:
+                break
+            if f > 1.0:
+                ups += 1
+            kp = new
+            self.cuts.append('x%.2f' % f)
             self.say('%g mbar: %s, KP x %.2f -> %.2f' % (sp, why, f, kp))
+        trims = self.cuts
+        self.calc('Result at %g mbar: KP %.2f, TI %.2f min%s' % (sp, kp, ti, ' (KP changed ' + ' '.join(trims) + ')'
+                                                                 if trims else ''))
+        self.now('')
         note = ''
-        if f != 1.0:
+        if f < 1.0:
+            note = 'still %s after %d cuts' % (why, MAX_CUTS)
+        elif f > 1.0 and not downs:
             note = 'still %s after %d trims' % (why, self.a.trims)
         if not r['steady']:
             note = (note + '; ' if note else '') + 'relay not steady'
+        if reach_cuts:
+            note = (note + '; ' if note else '') + 'reach oscillated, its KP cut ' + ' '.join(reach_cuts)
         fig = fig or {}
         return {'sp_mbar': sp, 'kp': kp, 'ti_min': ti, 'Ku': round(r['Ku'], 3), 'Pu_s': round(r['Pu_s'], 1),
                 'kp_rule': kp0, 'd_pct': r['d_pct'], 'a_mbar': round(r['a_mbar'], 3), 'eps_mbar': round(r['eps_mbar'], 3),

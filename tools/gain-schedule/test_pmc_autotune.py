@@ -122,14 +122,16 @@ class Relay(unittest.TestCase):
         self.assertLess(R.d, 3.0)
         self.assertLess(R.result()['a_mbar'], at.AMP_HI * sp * 1.2)
 
-    def test_fails_when_the_pressure_runs_away(self):
-        plant = Plant(K=2.0, L=2.0, tau=10.0)
+    def test_smaller_step_then_fails_when_the_pressure_runs_away(self):
         R = at.Relay(5.0, 5.0, 0.4, 0.05)
         R.feed(0, 5.0, 5.0)
-        R.feed(1, 11.0, 5.0)
+        # Too far: the step is cut to a quarter (the least), the valve below x0.
+        self.assertEqual(R.feed(1, 11.0, 5.0), 4.9)
+        self.assertFalse(R.done)
+        self.assertEqual(R.d, at.D_MIN)
+        R.feed(2, 11.0, 5.0)
         self.assertTrue(R.done)
         self.assertIn('too far', R.why)
-        del plant
 
 
 class Rules(unittest.TestCase):
@@ -186,6 +188,45 @@ class Rules(unittest.TestCase):
         f.update(mode='MANUAL', sched=None)
         self.assertEqual(at.put_back_lines(f), ['PID SET 0.10,0.40,0.00', 'PRES SP 8.0', 'MODE MANUAL',
                                                 'VALV SET 4.2'])
+
+
+class Watchdog(unittest.TestCase):
+    def feed(self, sp, ps):
+        w = at.Wild(sp)
+        for p in ps:
+            if w.feed(p):
+                break
+        return w
+
+    def test_trips_on_ryans_swing(self):
+        # 9 Nov, 2 mbar reach with the 1 mbar gains: 1 to 10 mbar every 14 s.
+        ps = [1.0 + 4.5 * (1 - math.cos(2 * math.pi * t / 14)) for t in range(60)]
+        w = self.feed(2.0, ps)
+        self.assertTrue(w.wild)
+        self.assertEqual(w.cut(), at.WILD_CUT_BIG)    # swing larger than the setpoint
+
+    def test_trips_when_the_floor_cuts_the_low_side(self):
+        # 1 mbar, the pump's floor 0.93: only the top swings.
+        ps = [max(0.93, 1.0 + 0.6 * math.sin(2 * math.pi * t / 12)) for t in range(60)]
+        w = self.feed(1.0, ps)
+        self.assertTrue(w.wild)
+        self.assertEqual(w.cut(), at.WILD_CUT)
+
+    def test_quiet_on_a_step_that_rings_down(self):
+        # 10 to 12 mbar, 40 % overshoot, ringing down within a few cycles.
+        ps = [12 - 2 * math.exp(-t / 6) * math.cos(t / 3) for t in range(200)]
+        self.assertFalse(self.feed(12.0, ps).wild)
+
+    def test_quiet_on_the_needle_limit_cycle(self):
+        # 10 mbar, 0.4 mbar peak to peak (stick-slip, 4 Nov): not a reason to cut.
+        ps = [10 + 0.2 * math.sin(2 * math.pi * t / 40) for t in range(600)]
+        self.assertFalse(self.feed(10.0, ps).wild)
+
+    def test_trim_rule_cuts_harder_than_overshoot(self):
+        f, why = at.trim_rule({'overshoot_pct': 0, 'settle_s': None, 'reversals': 9, 'saturated': False,
+                               'wild_pp': 3.0, 'wild_big': True}, 10)
+        self.assertEqual(f, at.WILD_CUT_BIG)
+        self.assertIn('oscillating', why)
 
 
 class FakeBoard:
@@ -334,6 +375,56 @@ class Sequence(unittest.TestCase):
         for line in at.put_back_lines(f):
             b.do(line)
         self.assertEqual((b.mode, b.sets[0], b.table), ('MANUAL', [4.0, 0.25, 0.0], 'OFF,6.0,20.0,15'))
+
+
+class SteepValve(unittest.TestCase):
+    """Ryan's valve on 9 Nov: almost no flow change below about 3.1 %, then
+    about 18 mbar per % (3.0 % gave 1 mbar, 3.6 % 10 mbar)."""
+
+    @staticmethod
+    def plant():
+        curve = lambda v: 0.67 + 0.12 * max(v, 0) + 18 * max(v - 3.1, 0)   # noqa: E731
+        p = Plant(curve=curve, L=2.0, tau=3.0, noise=0.005)
+        p.v = p.cmd = p.eff = 3.0
+        p.x = curve(3.0)
+        return p
+
+    def tuner(self, b):
+        a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
+        t = at.AutoTuner(b, Clock(b), a, None)
+        t.say = lambda m: None
+        t.cuts = []
+        return t
+
+    def test_reach_cuts_kp_until_it_holds(self):
+        # The 1 mbar result (KP about 3) used to reach 2 mbar: it swung 1 to
+        # 10 mbar. The watchdog cuts KP until AUTO holds.
+        b = FakeBoard(self.plant())
+        b.advance(30)
+        t = self.tuner(b)
+        x0 = t.reach(2.0, 3.0, 0.40)
+        self.assertTrue(t.cuts)
+        self.assertTrue(all(c.endswith('osc') for c in t.cuts))
+        self.assertLess(b.sets[0][0], 0.5)
+        self.assertGreater(x0, 3.0)
+        self.assertLess(x0, 3.3)
+        self.assertAlmostEqual(b.P.p(), 2.0, delta=0.3)
+
+    def test_point_ends_with_gains_that_do_not_oscillate(self):
+        # Less steep above the knee (6 mbar per %), so the relay at 2 mbar
+        # works with a 0.1 % step; the reach with KP 3 still swings wildly.
+        curve = lambda v: 0.67 + 0.12 * max(v, 0) + 6 * max(v - 3.1, 0)   # noqa: E731
+        p = Plant(curve=curve, L=2.0, tau=3.0, noise=0.005)
+        p.v = p.cmd = p.eff = 3.0
+        p.x = curve(3.0)
+        b = FakeBoard(p)
+        b.advance(30)
+        t = self.tuner(b)
+        r = t.point(2.0, (3.0, 0.40), 0.4)
+        # The check's figures with the gains it kept: no oscillation.
+        self.assertFalse(r['note'].startswith('still'), r)
+        self.assertLess(r['kp'], 0.5)
+        self.assertIn('reach oscillated', r['note'])
 
 
 if __name__ == '__main__':
