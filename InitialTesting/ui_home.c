@@ -748,9 +748,12 @@ const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
  * captions (0.16.2, Ryan 9 Nov: "remove the settings page and put
  * everything in the menu. remove the labels on the menu. show some icons
  * for each button"). Every page is one tap away:
- *   Trend           Events        Valve position     the records, the valve now
- *   Valve settings  PID tuning    Calibration        the saved numbers
- *   System          Diagnostics   Review and save    the controller, the saves
+ *   Trend           Events          PID tuning
+ *   Valve settings  Valve position  Calibration
+ *   System          Diagnostics     Review and save
+ * Valve position and PID tuning swapped places in 0.16.3 (Ryan 9 Nov, PR #43:
+ * "swap location of valve position and pid tuning"): the two valve tiles
+ * side by side in the middle row.
  * Review and save is filled dark blue, as Ryan asked for it and Settings on
  * 6 Nov (0.15.23); with Settings gone it is the one dark tile, bottom right
  * where Settings was. Diagnostics stays on System too (0.15.19) and fills
@@ -770,9 +773,9 @@ typedef struct {
 static const menu_item_t menu_items[9] = {
     { "Trend", UI_ICON_TREND, &ui_scr_trend },
     { "Events", LV_SYMBOL_LIST, &ui_scr_faults },
-    { "Valve position", UI_ICON_VALVE, &ui_scr_calib },        // home, set the position, the motor: the valve now
-    { "Valve settings", LV_SYMBOL_EDIT, &ui_scr_valve_set },   // travel, homing, drive: saved numbers (the pencil, as a draft's)
     { "PID tuning", LV_SYMBOL_LOOP, &ui_scr_tune },            // the loop, as the status line shows AUTO
+    { "Valve settings", LV_SYMBOL_EDIT, &ui_scr_valve_set },   // travel, homing, drive: saved numbers (the pencil, as a draft's)
+    { "Valve position", UI_ICON_VALVE, &ui_scr_calib },        // home, set the position, the motor: the valve now
     { "Calibration", UI_ICON_TARGET, &ui_scr_sensor_cal },
     { "System", LV_SYMBOL_SETTINGS, &ui_scr_namenet },
     { "Diagnostics", LV_SYMBOL_EYE_OPEN, &ui_scr_diag },

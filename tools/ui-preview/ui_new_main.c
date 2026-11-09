@@ -8,9 +8,10 @@
  *   state: notcal | manual | calib | moving | nodruck | stop | neg | menu | keypad | confirm
  *          | valve | valvenc | limithit | calpage | faults | detail | diag | help
  * Menu (0.16.2): three columns of 148 at x 10, 166, 322 (centres 84, 240,
- * 396), rows y 48, 104, 160 (centres 72, 128, 184): Trend, Events, Valve
- * position / Valve settings, PID tuning, Calibration / System, Diagnostics,
- * Review and save.
+ * 396), rows y 48, 104, 160 (centres 72, 128, 184): Trend, Events, PID
+ * tuning / Valve settings, Valve position, Calibration / System,
+ * Diagnostics, Review and save (Valve position and PID tuning swapped in
+ * 0.16.3).
  */
 #ifndef TVX
 #define TVX 444
@@ -389,9 +390,9 @@ int main(int argc, char **argv)
 #define MENU() tap(415, 184)
 #define M_TREND()  tap(84, 72)
 #define M_EVENTS() tap(240, 72)
-#define M_VPOS()   tap(396, 72)
+#define M_VPOS()   tap(240, 128)
 #define M_VSET()   tap(84, 128)
-#define M_TUNE()   tap(240, 128)
+#define M_TUNE()   tap(396, 72)
 #define M_CAL()    tap(396, 128)
 #define M_SYS()    tap(84, 184)
 #define M_DIAG()   tap(240, 184)

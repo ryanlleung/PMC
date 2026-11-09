@@ -98,8 +98,8 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   menu();
   check('Menu opens', screen() === 'Menu', screen());
   shot(s, 'menu');
-  const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'Valve position'], [84, 128, 'Valve settings'],
-    [240, 128, 'PID tuning'], [396, 128, 'Calibrate sensor'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
+  const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'PID tuning'], [84, 128, 'Valve settings'],
+    [240, 128, 'Valve position'], [396, 128, 'Calibrate sensor'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
     [396, 184, 'Review and save']];
   const wrong = tiles.map(([x, y, t]) => { menu(); s.tap(x, y); return [t, screen()]; })
     .filter(([t, got]) => t !== got).map(([t, got]) => t + ' -> ' + got);
@@ -110,7 +110,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
   check('Review and save tile dark blue, the others white', px(330, 168) !== 0xFFFF && px(18, 168) === 0xFFFF && px(174, 168) === 0xFFFF,
     [px(330, 168), px(18, 168), px(174, 168)].join());
-  s.tap(396, 72); shot(s, 'valve-position'); s.tap(66, 20);
+  s.tap(240, 128); shot(s, 'valve-position'); s.tap(66, 20);
   s.tap(84, 128); shot(s, 'valve-settings'); s.tap(66, 20);
   // Choose sensor is gone (one sensor per board): no CFG_SENSOR key (27), the sensor range is the 15 psia Druck's,
   // and the old Settings slot now opens Review and save.
@@ -296,7 +296,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  s.tap(415, 184); s.tap(396, 72); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position (0.16.2) > Motor override > Open
+  s.tap(415, 184); s.tap(240, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position (middle from 0.16.3) > Motor override > Open
   s.set(7, 1); s.run(500);                                              // switch stuck pressed
   s.tap(186, 184, 1000);
   const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
