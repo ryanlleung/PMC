@@ -25,11 +25,15 @@ function load(file) {
     // default from 0.13.7, so the link takes set commands. opts.reset: 0
     // power-on (default), 1 watchdog, 2 software (Restart). Every start is
     // OFF (0.15.1): turned on at once (the double tap) unless opts.off.
+    // opts.plant: 1 the physics flow line (default here: the scenarios test
+    // the firmware, and the factory gains suit it), 0 the bench cryostat
+    // fitted to the bench logs (the page's and tcp-board.js's default).
     boot(flash, opts = {}) {
       // application_init() runs once per instance, as on the board: use a new load() per boot.
       if (sim.booted) throw new Error('boot() twice on one instance: use a new load()');
       sim.booted = true;
       x.sim_bench_init();
+      x.sim_set(22, opts.plant === undefined ? 1 : opts.plant);
       const f = new Uint8Array(x.memory.buffer, x.sim_flash(), x.sim_flash_size());
       if (flash) f.set(flash); else f.fill(0xff);
       const d = new Date(2026, 9, 24, 14, 0, 0);

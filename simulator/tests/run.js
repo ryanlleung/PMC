@@ -682,5 +682,30 @@ let parkedFlash;
     /VALV 11\.0/.test(at11) && /VALV (9\.9|10\.0)/.test(at10) && /W-1/.test(ev),
     [on, a1.trim(), at11.trim(), at10.trim(), ev.slice(-300)].join(' | '));
 }
+{ // The bench cryostat (the page's flow line, fitted to the bench logs): AUTO holds 16 mbar with
+  // bench gains, a relay there cycles at about the bench's period, and opening sticks at low openings.
+  const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
+  const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
+  s.cmd('PID SET 0.40,0.75,0'); s.cmd('PRES SP 16'); s.cmd('MODE AUTO');
+  s.run(600000);
+  const p16 = num(s.cmd('PRES?')), x0 = num(s.cmd('VALV?'));
+  check('bench cryostat: AUTO holds 16 mbar (KP 0.40, TI 0.75)', s.reg() >= 2 && Math.abs(p16 - 16) < 0.5,
+    'regulation ' + s.reg() + ', ' + p16 + ' mbar at ' + x0 + ' %');
+  s.cmd('MODE MANUAL');
+  let hi = null, last = 0; const ups = [];
+  for (let t = 0; t < 300; t++) {
+    s.run(1000); const p = num(s.cmd('PRES?', 50));
+    const want = p < 15.84 ? true : p > 16.16 ? false : hi === null ? p < 16 : hi;   // starts on the sign of the error
+    if (want !== hi) { hi = want; s.cmd('VALV SET ' + (x0 + (hi ? 0.8 : -0.8)).toFixed(1), 50); if (hi && t > 60) ups.push(t); }
+  }
+  const pu = ups.length > 2 ? (ups[ups.length - 1] - ups[0]) / (ups.length - 1) : 0;
+  check('bench cryostat: relay at 16 mbar cycles in 12 to 30 s (bench 18 s)', pu >= 12 && pu <= 30, 'period ' + pu + ' s');
+  s.cmd('VALV SET 3.0', 30000); s.run(120000);
+  const p0 = num(s.cmd('PRES?')); s.cmd('VALV SET 3.2', 10000); s.run(20000);
+  const pOpen = num(s.cmd('PRES?')); s.cmd('VALV SET 3.0', 10000); s.run(20000);
+  const pBack = num(s.cmd('PRES?'));
+  check('bench cryostat: 0.2 % opening sticks, closing follows', Math.abs(pOpen - p0) < 0.1 * p0 + 0.05,
+    [p0, pOpen, pBack].join(' -> '));
+}
 console.log(failed ? failed + ' failed' : 'all passed');
 process.exit(failed ? 1 : 0);

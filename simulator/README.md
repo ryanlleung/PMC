@@ -9,11 +9,13 @@ From 0.11.38 the simulator runs the mm4 firmware itself. `pmc-wasm.js` is the fi
 | Display and touch panel | 480 x 272 canvas, mouse or finger (a press lasts at least 80 ms) |
 | Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so the step mode, direction and coil order selected on Settings > Motor override > Coils act as on the bench |
 | Needle valve, limit switch | flow-line needle, 16512 steps a turn, seats 30 steps past the switch; switch faults: broken wire, stuck, trips early |
-| Druck through the INA228 | the cryostat flow line (the v63 model, as `tools/ctrl-test/model.c`) read through the 5 % input loading; open to room air for calibration |
+| Druck through the INA228 | the cryostat flow line read through the 5 % input loading; open to room air for calibration. Two flow lines (Cryostat > Flow line): the bench cryostat (default), fitted to the bench logs of 6 and 9 Nov 2026, and the physics model (v63, as `tools/ctrl-test/model.c`) |
 | Boost 10, motor 12 V supply (the motor stalls without it; the firmware does not sense it from 0.14.3), INA228 die temperature | bench controls (excitation, supply volts, controller temperature) |
 | Serial flash (settings, saved position) | 8 MB in memory, kept in the browser between visits |
 | USB COM port / port 8888 | the console under the screen (the page shows each line sent; the board does not echo) |
 | RTC | the computer's clock at power-up |
+
+The bench cryostat is the bench as its logs show it (valve, pressure and the Lake Shore's heat exchanger temperature): the pressure heads for a value set by the needle's opening and how cold the heat exchanger is, after a 2 s dead time, through a lag of 25 to 70 s while the heat exchanger holds liquid (under about 3.5 K) and about 5 s when it is dry. The heat exchanger follows the pressure over minutes, colder from 1 to 12 mbar and warmer again above, so the pressure creeps after a move: on up at 4 to 12 mbar (the valve's knee) and back above 12 mbar. Below about 3 % open there is almost no flow. At low openings the needle sticks when opening (it slips all at once after a 0.37 % move) and follows at once when closing. Run from the logged valve, it gives each setpoint's pressure within 1 to 2 mbar and each relay test's swing and phase within about a third of the bench's. Run as a board under the same relay tests, the period comes out within about a quarter of the bench's (9 to 28 s from 4 to 24 mbar) and the swing within a factor of two, as the heat exchanger's state depends on what came before. `wasm/fit_bench.py <log.csv> ...` prints that comparison for any GUI session or autotune log; its numbers are bench.c's. The heat exchanger temperature shows under Cryostat. At power-on it is 3 K (the cryostat has been running).
 
 The bench panel switches the helium supply and the rotary pump, unplugs the Druck or the Power Monitor, lowers the excitation, sets the motor supply, slips the needle, breaks or sticks the limit switch, heats the controller and turns the needle by hand. Speed runs at real time, 10 x, 60 x or as fast as the computer allows (about 1000 x with the screen still; a finger on the screen always runs at real time). Power cycle restarts the firmware with the flash kept; New board erases it.
 
@@ -25,9 +27,9 @@ The stand-ins are in `wasm/`: `include/` (register structs for GPIO, RCC, TIM7, 
 
 ## Tests
 
-- `node simulator/tests/run.js [--png dir]`: bench scenarios against the build, in node: boot and bundled firmware-version checks, homing from the screen, Set position, MANUAL move prerequisites, independent homing Return, motor power loss, tuning saves in AUTO, F-1 to F-6 (except F-5), W-2, W-3, settings and saved position over a power cycle, and the remote command set's reply rules and error codes (0.13.0).
+- `node simulator/tests/run.js [--png dir]`: bench scenarios against the build, in node, on the physics flow line unless a case says otherwise: boot and bundled firmware-version checks, homing from the screen, Set position, MANUAL move prerequisites, independent homing Return, motor power loss, tuning saves in AUTO, F-1 to F-6 (except F-5), W-2, W-3, settings and saved position over a power cycle, and the remote command set's reply rules and error codes (0.13.0); on the bench cryostat, AUTO holding 16 mbar with KP 0.40 TI 0.75, a relay there cycling at about the bench's period and a small opening move sticking.
 - `node simulator/tests/remote-only.js`: the text port's command set: unrecognised commands answer ERR 100 with Remote control On (ERR 211 with it Off), homing on the screen, then the valve and AUTO from the link.
-- `node simulator/tests/tcp-board.js [port] [speed] [--remote-off]`: serves the simulated board on a TCP port (8888 by default), homed and in MANUAL at 5 % open. Homing uses the `sim_home` test hook, as the screen does; startup fails if homing or the move fails. Remote control is On unless `--remote-off` is passed. Pass port 0 to request an available local port.
+- `node simulator/tests/tcp-board.js [port] [speed] [--remote-off] [--physics]`: serves the simulated board on a TCP port (8888 by default), homed and in MANUAL at 5 % open, on the bench cryostat (`--physics`: the physics flow line). Homing uses the `sim_home` test hook, as the screen does; startup fails if homing or the move fails. Remote control is On unless `--remote-off` is passed. Pass port 0 to request an available local port.
 - `node simulator/tests/tcp-board-test.js`: starts that helper with remote writes On and Off, and checks its homed 5 % startup, query replies, setpoint writes and STOP refusals.
 - `node simulator/tests/page.js [shot.png]`: the page in Chromium (Playwright): taps, homing, a console command, settings kept over a reload.
 
@@ -36,7 +38,7 @@ The stand-ins are in `wasm/`: `include/` (register structs for GPIO, RCC, TIM7, 
 - F-5 (motion timeout): the step interrupt is never late here, so a move cannot overrun its time.
 - Ethernet / Modbus TCP (the build is the USB one, as `pmc_config.h`), the mikroBootloader, the watchdog's timing (an LVGL assert stops the page and restarts the firmware with reset reason watchdog).
 - Real speed: redraw times are the browser's, not the STM32's. `PERF?` is no longer a text-port command (ERR 100 with Remote control On). The simulator uses the USB build's 64 + 24 KB LVGL heap; the default Ethernet firmware has 64 KB only, so a simulator pass does not verify the Ethernet build's heap margin.
-- The Druck, Power Monitor and cryostat are models: noise, drift and the cryostat's response are not the bench's.
+- The Druck and Power Monitor are models. The bench cryostat is fitted to two days of one bench's logs: another cryostat, or this one on another day (heater power, helium level), will differ, and its noise and wander are only roughly the bench's.
 
 ## Before 0.11.38: the JavaScript simulator (v1 to v62)
 

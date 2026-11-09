@@ -90,4 +90,4 @@ The 336 can also be connected from the page (Live tab, Lake Shore 336: its IP, t
 - A fault (F-) ends a gain table run, since the board refuses AUTO and valve moves until it is reset: reset it on the Board tab and start the run again with the setpoints left. A warning that drops the board to MANUAL (W-2, W-4, W-5) skips that setpoint only.
 - Every Set and save that changes a gain is written to flash, and so is every setpoint change while the schedule is on (only when the gains differ). Set gains when they change, not in a loop.
 
-To try it without the board, run `node simulator/tests/tcp-board.js` and use `127.0.0.1` as the address.
+To try it without the board, run `node simulator/tests/tcp-board.js` and use `127.0.0.1` as the address. Its flow line is the bench cryostat fitted to the bench logs, so an autotune there sees roughly the bench's gains, periods, creep and needle stick; a speed above 1 (the second argument) shortens the cryostat's times but not the GUI's 1 s samples, so run an autotune at speed 1.

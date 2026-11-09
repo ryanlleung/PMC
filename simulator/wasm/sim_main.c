@@ -332,6 +332,8 @@ EXPORT(sim_get) double sim_get(int id)
     case 19: return B.room_mbar;
     case 20: return B.baro;
     case 21: return B.baro_err;
+    case 22: return B.plant;
+    case 23: return B.hx;
     case 30: return stepper3_position();
     case 31: return valve_pct_milli();
     default: return 0;
@@ -355,7 +357,9 @@ EXPORT(sim_set) void sim_set(int id, double v)
     case 19: B.room_mbar = v; break;
     case 20: B.baro = v != 0; break;
     case 21: B.baro_err = v; break;
-    case 40: B.P = v; break;
+    case 22: bench_plant((int)v); break;
+    case 23: B.hx = v; break;
+    case 40: bench_set_pressure(v); break;
     case 41: B.T = v; break;
     case 42: B.mL = v; break;
     default: break;

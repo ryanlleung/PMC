@@ -143,6 +143,95 @@ static void fl_tick(double dt)
     mEv = mev;
 }
 
+/* ---- bench cryostat, fitted to the bench logs ----------------------------- */
+// The flow line as the bench logs of 6 and 9 Nov 2026 show it (valve,
+// pressure and the Lake Shore's heat exchanger temperature, 1 s samples;
+// simulator/wasm/fit_bench.py checks a set of these numbers against logs).
+// The pressure heads for
+//   floor + F(needle) x exp(-(Thx - 4 K) / KA)
+// after a dead time, through a lag that depends on the heat exchanger:
+// with liquid in it (Thx under about 3.5 K) the pressure follows the valve
+// over 25 to 70 s, dry (5.5 K and over) in about 5 s. That is why the
+// relay period and swing change so much from one setpoint to the next.
+// Thx heads over minutes for a steady value that falls from 1 to 12 mbar
+// (more flow, colder, so the pressure creeps on up: the valve's knee) and
+// rises again above 12 mbar (the creep runs back). The needle sticks when
+// opening at low openings (it slips all at once after a 0.37 % move) and
+// follows at once when closing.
+#define BX_N 16
+static const double BX_Y[BX_N] = { 0, 2.4, 2.6, 3.0, 3.2, 3.45, 3.7, 4.6, 7.0, 8.0, 9.4, 10.7, 13.5, 20, 32, 50 };       // valve %
+static const double BX_F[BX_N] = { 0, 0, 0.9, 2.5, 5.5, 7.0, 8.6, 12.3, 18.0, 20.5, 25.3, 27.7, 33.6, 48.5, 76, 98 };  // mbar at 4 K
+#define BT_N 9
+static const double BT_T[BT_N] = { 1.8, 2.0, 2.75, 3.5, 4.5, 5.7, 7, 12, 30 };    // heat exchanger K
+static const double BT_LAG[BT_N] = { 70, 64, 26, 24, 12, 5, 5, 5, 5 };           // s, pressure lag
+#define BH_N 10
+static const double BH_P[BH_N] = { 0.67, 1, 2, 4, 8, 12, 16, 20, 28, 50 };        // mbar
+static const double BH_T[BH_N] = { 20, 16, 14, 7, 3.2, 1.9, 4.5, 5.6, 6.5, 8.8 };  // K, steady
+#define BX_FLOOR  0.67     // mbar, valve shut (the pump's floor with the line)
+#define BX_KA     10.0     // K: the heat exchanger's effect on the pressure
+#define BX_DEAD   2.0      // s, dead time
+#define BX_STICK0 0.37     // % of travel an opening move sticks for, up to 5 % open
+#define BX_STICK1 0.05     // the same from 10 % open
+#define BX_HXTAU  340.0    // s, heat exchanger
+#define BX_HX0    3.0      // K at power-on: the cryostat has been running
+#define BX_NOISE  0.004    // flow noise, fraction (2 s correlation)
+#define BX_WANDER 0.004    // slow wander, fraction (200 s correlation)
+#define BX_PUMPOFF 1000.0  // mbar the line fills towards with the pump off (60 s)
+#define BX_RING   1000     // 10 s of 10 ms ticks
+static double bx_ring[BX_RING];
+static int bx_ri;
+static double bx_y, bx_fn, bx_wn;
+
+static double table(const double *xs, const double *ys, int n, double x)
+{
+    if (x <= xs[0]) return ys[0];
+    for (int i = 1; i < n; i++)
+        if (x <= xs[i]) return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+    return ys[n - 1] + (ys[n - 1] - ys[n - 2]) * (x - xs[n - 1]) / (xs[n - 1] - xs[n - 2]);   // on as the last piece
+}
+// The needle's opening as the firmware counts valve % (POSMAX 66048 steps,
+// 0 % at RETURN 400 steps above the switch): the logs are in these units.
+static double bx_valve_pct(void) { return (B.needle_half / 2.0 - 400.0) / 660.48; }
+static double bx_stick(double y)
+{
+    double f = clamp((y - 5.0) / 5.0, 0, 1);
+    return BX_STICK0 * (1 - f) + BX_STICK1 * f;
+}
+static double bx_target(void)
+{
+    if (!B.pump) return BX_PUMPOFF;
+    double f = B.he && bx_y > 0 ? table(BX_Y, BX_F, BX_N, bx_y) : 0;
+    return BX_FLOOR + f * exp(-(B.hx - 4.0) / BX_KA) * (1 + bx_fn + bx_wn);
+}
+static void bx_fill(double mbar)
+{
+    for (int i = 0; i < BX_RING; i++) bx_ring[i] = mbar;
+    B.P = mbar;
+}
+static void bx_reset(double hx)
+{
+    bx_y = bx_valve_pct();
+    bx_fn = bx_wn = 0;
+    B.hx = hx;
+    bx_ri = 0;
+    bx_fill(bx_target());
+}
+static void bx_tick(double dt)
+{
+    double x = bx_valve_pct();
+    if (x < bx_y) bx_y = x;                          // closing: follows at once
+    else if (x - bx_y > bx_stick(bx_y)) bx_y = x;    // opening: sticks, then slips
+    bx_fn += -bx_fn * dt / 2 + BX_NOISE * sqrt(dt) * gauss();
+    bx_wn += -bx_wn * dt / 200 + BX_WANDER * sqrt(2 * dt / 200) * gauss();
+    bx_ring[bx_ri] = bx_target();
+    double in = bx_ring[(bx_ri - (int)lround(BX_DEAD / dt) + BX_RING) % BX_RING];
+    bx_ri = (bx_ri + 1) % BX_RING;
+    double lag = B.pump ? table(BT_T, BT_LAG, BT_N, B.hx) : 60.0;   // the pump off: the line fills
+    B.P += (in - B.P) * (1 - exp(-dt / lag));
+    if (B.P < 0) B.P = 0;
+    B.hx += (table(BH_P, BH_T, BH_N, B.P) - B.hx) * (1 - exp(-dt / BX_HXTAU));
+}
+
 /* ---- motor and needle ----------------------------------------------------- */
 // Half-step sequence as stepper3.c; index = rotor phase.
 static const uint8_t seq[8] = { 0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9 };
@@ -228,6 +317,7 @@ void bench_init(void)
     ri = rn = 0;
     fn_ = mEv = 0;
     B.P = 2.0; B.T = 1.34; B.mL = 10;
+    B.plant = PLANT_BENCH;
     B.he = B.pump = B.coupled = B.druck = B.pm = true;
     B.exc_v = 10.051;
     B.room_mbar = 1013.2;
@@ -239,9 +329,23 @@ void bench_init(void)
     B.needle_half = 0;
     B.lim_raw = true;
     B.rotor = 1;
+    bx_reset(BX_HX0);         // the bench model starts shut, with the heat exchanger cold
+}
+
+void bench_set_pressure(double mbar)
+{
+    if (B.plant == PLANT_BENCH) bx_fill(mbar);
+    else B.P = mbar;
+}
+
+void bench_plant(int plant)
+{
+    B.plant = plant == PLANT_PHYSICS ? PLANT_PHYSICS : PLANT_BENCH;
+    if (B.plant == PLANT_BENCH) bx_reset(BX_HX0);
 }
 
 void bench_tick_10ms(void)
 {
-    fl_tick(0.01);
+    if (B.plant == PLANT_BENCH) bx_tick(0.01);
+    else fl_tick(0.01);
 }

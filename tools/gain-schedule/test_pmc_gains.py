@@ -136,12 +136,13 @@ class Tests(unittest.TestCase):
 
 
 def sim_tune():
-    """One setpoint on the simulated board (simulator/tests/tcp-board.js) at 20x speed."""
+    """One setpoint on the simulated board (simulator/tests/tcp-board.js) at 20x speed, on the
+    physics flow line: this tests the tool, and its numbers do not move with the bench fit."""
     s = socket.socket()
     s.bind(('127.0.0.1', 0))
     port = s.getsockname()[1]
     s.close()
-    board = subprocess.Popen(['node', os.path.join(ROOT, 'simulator', 'tests', 'tcp-board.js'), str(port), '20'],
+    board = subprocess.Popen(['node', os.path.join(ROOT, 'simulator', 'tests', 'tcp-board.js'), str(port), '20', '--physics'],
                              stdout=subprocess.PIPE, text=True)
     try:
         print(board.stdout.readline().strip())
