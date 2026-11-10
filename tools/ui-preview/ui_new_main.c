@@ -9,7 +9,7 @@
  *          | valve | valvenc | limithit | calpage | faults | detail | diag | help
  * Menu (0.16.2): three columns of 148 at x 10, 166, 322 (centres 84, 240,
  * 396), rows y 48, 104, 160 (centres 72, 128, 184): Trend, Events, PID
- * tuning / Valve settings, Valve position, Calibration / System,
+ * tuning / Valve settings, Valve position, Pressure setup / System,
  * Diagnostics, Review and save (Valve position and PID tuning swapped in
  * 0.16.3).
  */

@@ -1328,7 +1328,7 @@ static void rv_refresh(void)
 const ui_screen_t ui_scr_review = { "Review and save", rv_build, rv_refresh, NULL };
 
 /* --------------------------------------------------------------------------
- * Calibrate sensor (Menu > Calibration): CAL VAC / CAL AIR on the screen.
+ * Calibrate sensor (Menu > Pressure setup): CAL VAC / CAL AIR on the screen.
  * The new cal is in use once both points are held, unsaved until Save
  * settings (as on COM3). One sensor per board from 0.16.2: a new sensor is
  * calibrated here, nothing else to choose (the header named the serial,
