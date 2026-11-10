@@ -34,6 +34,10 @@ static int32_t val(const trend_pt_t *q, tkey_t k) { return k == K_P ? q->p : k =
 // The pressure pen draws each slot through its first sample, the two either
 // side of its largest change and its last, so a step draws upright, not as
 // a slope across the slot (Ryan, 21 Oct); lo and hi set the scale.
+// The target is not a mean: each slot keeps its last target and when that
+// began, so a step is one straight up or down line, one pixel wide, at the
+// second it changed (Ryan, 10 Nov: a step mid-slot drew a mean level
+// between the two, so it leaned and spread over two pixels).
 #define PTS_MAX 128   // the most any range plots is 121 (win / slot + 1)
 static struct {
     float age;            // seconds before the newest sample
@@ -42,6 +46,7 @@ static struct {
     // and after the largest change, last.
     int32_t p[4], p_lo, p_hi;
     int16_t p_age[4];
+    int16_t sp_age;       // age (s) of the slot's first sample with its last target
 } pts[PTS_MAX];
 static int pts_n;
 
@@ -81,8 +86,8 @@ static void pts_build(uint32_t win, int n)
         if (t_new - s0 > win + slot) continue;
         int64_t sum[3] = { 0, 0, 0 };
         int cnt[3] = { 0, 0, 0 };
-        int32_t pp[4] = { 0, 0, 0, 0 }, p_lo = 0, p_hi = 0, jump = -1;
-        int16_t pa[4] = { 0, 0, 0, 0 };
+        int32_t pp[4] = { 0, 0, 0, 0 }, p_lo = 0, p_hi = 0, jump = -1, sp = TREND_NONE;
+        int16_t pa[4] = { 0, 0, 0, 0 }, sp_age = 0;
         // Samples in the slot, newest second at age 0; a 10 s mean is read
         // once per 10 s (trend_coarse gives the 1 s samples still filling).
         for (uint32_t t = s0; t <= s1; t += r) {
@@ -110,6 +115,10 @@ static void pts_build(uint32_t win, int n)
                     if (v < p_lo) p_lo = v;
                     if (v > p_hi) p_hi = v;
                 }
+                if (k == K_SP && (!cnt[k] || v != sp)) {   // oldest first: the last change wins
+                    sp = v;
+                    sp_age = (int16_t)age;
+                }
                 sum[k] += v;
                 cnt[k]++;
             }
@@ -119,6 +128,8 @@ static void pts_build(uint32_t win, int n)
         if (age > (float)win) continue;
         for (int k = 0; k < 3; k++)
             pts[pts_n].v[k] = cnt[k] ? (int32_t)(sum[k] / cnt[k]) : TREND_NONE;
+        pts[pts_n].v[K_SP] = cnt[K_SP] ? sp : TREND_NONE;
+        pts[pts_n].sp_age = sp_age;
         for (int q = 0; q < 4; q++) {
             pts[pts_n].p[q] = pp[q];
             pts[pts_n].p_age[q] = pa[q];
@@ -201,15 +212,19 @@ static void dot(lv_layer_t *layer, lv_color_t c, float x, float y)
 
 // One pen through the points of pts_build(), win seconds from x0 to x1;
 // y from yof. Gaps (no reading) lift the pen. Returns the last point drawn.
+// stepped (the target): one dashed line across while it holds, then one
+// straight up or down on a whole pixel column at the second it changed.
 typedef float (*yof_t)(void *ctx, int32_t v);
 static bool pen(lv_layer_t *layer, uint32_t win, tkey_t k, float x0, float x1, yof_t yof, void *ctx,
                 lv_color_t c, int32_t w, bool stepped, float *lx, float *ly)
 {
     bool have = false, any = false;
-    float px = 0, py = 0;
+    float px = 0, py = 0, rx = 0;   // rx: where the target's run at py began
     for (int i = 0; i < pts_n; i++) {
         int32_t v = pts[i].v[k];
         if (v == TREND_NONE) {
+            if (have && stepped && px > rx)
+                line(layer, c, w, rx, py, px, py, true);
             have = false;
             continue;
         }
@@ -225,16 +240,26 @@ static bool pen(lv_layer_t *layer, uint32_t win, tkey_t k, float x0, float x1, y
             }
             continue;
         }
-        if (have) {
-            if (stepped && y != py) {   // a target holds, then steps
-                line(layer, c, w, px, py, x, py, true);
-                line(layer, c, w, x, py, x, y, true);
-            } else {
-                line(layer, c, w, px, py, x, y, stepped);
+        if (stepped) {
+            if (!have) {
+                rx = x;
+            } else if (y != py) {
+                float xs = roundf(x1 - (x1 - x0) * (float)pts[i].sp_age / (float)win);
+                if (xs < rx) xs = rx;
+                if (xs > rx)
+                    line(layer, c, w, rx, py, xs, py, true);
+                line(layer, c, w, xs, py, xs, y, true);
+                rx = xs;
             }
+            px = x; py = y; have = any = true;
+            continue;
         }
+        if (have)
+            line(layer, c, w, px, py, x, y, false);
         px = x; py = y; have = any = true;
     }
+    if (have && stepped && px > rx)
+        line(layer, c, w, rx, py, px, py, true);
     if (any) { *lx = px; *ly = py; }
     return any;
 }
