@@ -576,6 +576,34 @@ class Learned(unittest.TestCase):
         self.assertEqual(L['24']['kp'], 0.43)       # the failed 24 mbar row is skipped
         self.assertEqual(at.seed_learned(os.path.join(d, 'none')), {})
 
+    def test_analysed_gains_go_in_once_over_older_rows(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, 'analysed.csv')
+        with open(path, 'w') as f:
+            f.write(','.join(at.LEARNED_COLS) + '\n'
+                    '1,0.10,0.80,7.46,12.5,,,2.7,,analysed,10/11/26 12:15\n'
+                    '16,0.42,0.60,1.07,18.0,0.8,1.05,6.8,x1.25 x1.25,analysed,10/11/26 12:15\n'
+                    '24,0.43,0.67,1.70,20.0,,,,,analysed,10/11/26 12:15\n')
+        L = {}
+        at.learn(L, {'sp_mbar': 1.0, 'kp': 1.2, 'ti_min': 0.42, 'Ku': 7.46}, '09/11/26 14:00')   # older
+        at.learn(L, {'sp_mbar': 16.0, 'kp': 0.5, 'ti_min': 0.7}, '11/11/26 09:00')               # a later run
+        at.learn(L, {'sp_mbar': 8.0, 'kp': 0.1, 'ti_min': 0.83}, '09/11/26 14:00')               # not analysed
+        self.assertEqual(sorted(at.merge_analysed(L, path)), ['1', '24'])
+        self.assertEqual((L['1']['kp'], L['1']['ti_min'], L['1']['when']), (0.1, 0.8, '10/11/26 12:15'))
+        self.assertEqual(L['16']['kp'], 0.5)        # the later autotune result wins
+        self.assertEqual(L['8']['kp'], 0.1)
+        self.assertEqual(L['24']['Ku'], 1.7)
+        self.assertEqual(at.merge_analysed(L, path), [])   # once only
+        self.assertEqual(at.merge_analysed(L, os.path.join(d, 'none.csv')), [])
+
+    def test_the_shipped_analysed_table_reads(self):
+        L = {}
+        at.merge_analysed(L)
+        self.assertEqual(sorted(L, key=float), ['1', '2', '4', '8', '12', '16', '24'])
+        for k, r in L.items():
+            self.assertTrue(g.KP_MIN <= r['kp'] <= g.KP_MAX and g.TI_MIN <= r['ti_min'] <= g.TI_MAX, k)
+        self.assertEqual((L['1']['kp'], L['16']['kp'], L['16']['ti_min']), (0.1, 0.42, 0.6))
+
     def test_check_starts_from_the_learned_gains(self):
         t = self.tuner(1.2)   # within 2 x of the learned 1.07
         prior = {'sp_mbar': 16.0, 'kp': 0.42, 'ti_min': 0.6, 'Ku': 1.07, 'Pu_s': 18.0, 'trims': 'x1.25 x1.25'}

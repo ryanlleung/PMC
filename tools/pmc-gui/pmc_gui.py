@@ -471,6 +471,7 @@ class Board:
         self.sock, self.buf = None, b''
         self.lock = threading.Lock()
         self.tlock = threading.RLock()     # the step tests' state: poll thread and page
+        self.llock = threading.Lock()      # the learned file: page refreshes and the autotune
         self.cmds = queue.Queue()
         self.hist = []            # COLS + one per 336 input
         self.t0 = time.time()
@@ -1066,16 +1067,18 @@ class Board:
 
     def learned_load(self):
         """The learned gains. With no learned file yet, built from the earlier
-        autotune runs' results.csv in the log folder and saved."""
+        autotune runs' results.csv in the log folder. The gains analysed from
+        the bench logs (autotune-analysed.csv) go in once, over older rows.
+        Saved when anything changed."""
         path = self.learned_path()
-        if os.path.exists(path):
-            return pmc_autotune.load_learned(path)
-        learned = pmc_autotune.seed_learned(self.logger.folder)
-        if learned:
-            try:
-                pmc_autotune.save_learned(path, learned)
-            except OSError:
-                pass
+        with self.llock:
+            have = os.path.exists(path)
+            learned = pmc_autotune.load_learned(path) if have else pmc_autotune.seed_learned(self.logger.folder)
+            if pmc_autotune.merge_analysed(learned) or (learned and not have):
+                try:
+                    pmc_autotune.save_learned(path, learned)
+                except OSError:
+                    pass
         return learned
 
     def learned_list(self):
@@ -1202,7 +1205,8 @@ class Board:
                 self.result('results.csv', r)
                 pmc_autotune.learn(learned, r, time.strftime('%d/%m/%y %H:%M'))
                 try:
-                    pmc_autotune.save_learned(path, learned)
+                    with self.llock:
+                        pmc_autotune.save_learned(path, learned)
                 except OSError as e:
                     self.note('could not save the learned gains: %s' % e)
                 self.step(i, 'done', 'Ku %.2f, KP %.2f, TI %.2f%s' % (r['Ku'], r['kp'], r['ti_min'],

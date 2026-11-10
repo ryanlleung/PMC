@@ -40,7 +40,9 @@ new relay test's Ku is more than LEARNED_AGREE times off the learned one the
 plant has changed, and that point starts fresh. Fresh ignores the file (its
 results still go in it). With no learned file yet, it is built from the
 results.csv of the earlier autotune runs in the same log folder (newest per
-setpoint), so runs made before learning existed count too.
+setpoint), so runs made before learning existed count too. The gains worked
+out by hand from the bench logs (autotune-analysed.csv beside this file) go
+in once, over any older learned row (merge_analysed).
 
 While it runs, the PID table is Off and set 1 carries the gains under test
 (PID SET); at the end set 1, the PID table, the setpoint and the mode are put
@@ -97,6 +99,8 @@ WILD_CUT, WILD_CUT_BIG = 0.5, 0.25   # KP x this; x BIG when the swing is larger
 LEARNED_FILE = 'autotune-learned.csv'
 LEARNED_COLS = ['sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valve_pct', 'trims', 'note', 'when']
 LEARNED_AGREE = 2.0            # learned Ku within this factor of the new relay's: refine from it
+# Gains worked out from the bench logs, merged into the learned file (merge_analysed).
+ANALYSED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'autotune-analysed.csv')
 MAX_CUTS = 6                   # most KP cuts at one point (watchdog and check trims down together)
 
 
@@ -930,6 +934,34 @@ def learn(learned, r, when):
     row['valve_pct'] = r.get('valve_pct')
     row['when'] = when
     learned[learned_key(r['sp_mbar'])] = row
+
+
+def _when(s):
+    """A learned row's 'when' (DD/MM/YY HH:MM) as a tuple that sorts by
+    time; None if it is not one."""
+    try:
+        return tuple(time.strptime(s or '', '%d/%m/%y %H:%M'))[:5]
+    except ValueError:
+        return None
+
+
+def merge_analysed(learned, path=ANALYSED_FILE):
+    """The gains worked out by hand from the bench logs (autotune-analysed.csv
+    beside this file; Ryan, 10 Nov: "put your analysed new kp ti kd values in
+    the learned values") into the learned table. Each replaces the learned
+    row for its setpoint when that row is older or has no date, so it goes in
+    once and a later autotune result still wins. The setpoints it replaced."""
+    put = []
+    for r in _learned_rows(path):
+        new = _when(r.get('when'))
+        if new is None:
+            continue
+        k = learned_key(r['sp_mbar'])
+        old = _when((learned.get(k) or {}).get('when'))
+        if old is None or old < new:
+            learn(learned, r, r['when'])
+            put.append(k)
+    return put
 
 
 def next_d(sp, ku, first):
