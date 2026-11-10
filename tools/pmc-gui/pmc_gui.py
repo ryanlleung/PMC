@@ -1089,7 +1089,9 @@ class Board:
     def start_autotune(self, sps, d, div, b1, b2, h, kp0=0.10, ti0=0.40, start='learned'):
         if self.busy():
             return 'a test is already running'
-        sps = sorted(set(round(x, 1) for x in sps if x > 0))
+        # In the order typed (Ryan 10 Nov asked about going down in mbar:
+        # "24 16 12 8 4 2" runs high to low); a repeat runs once.
+        sps = list(dict.fromkeys(round(x, 1) for x in sps if x > 0))
         if not sps:
             return 'give at least one setpoint'
         if not 0 < b1 < b2:

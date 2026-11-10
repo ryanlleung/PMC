@@ -4,7 +4,7 @@
 The control test GUI (tools/pmc-gui) runs it from its Gains tab; this file
 holds the sequence so it can be tested on a model without a board.
 
-For each test point, low to high (1 2 4 8 12 16 24 48 mbar by default):
+For each test point, in the order given (the GUI: as typed, 2 4 8 12 16 24 48 mbar by default):
   1. Reach: AUTO at the point with safe gains until the pressure holds; the
      valve position it holds at is x0.
   2. Relay test (Astrom and Hagglund, as industrial autotuners do): MANUAL,
