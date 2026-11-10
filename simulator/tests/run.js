@@ -665,22 +665,22 @@ let parkedFlash;
     after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
 }
 { // Switch pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): Motor override >
-  // Switch turns it on; between 10 and 20 % the pressed switch neither stops closing nor raises W-4; below 10 % it
-  // stops as always.
+  // Switch turns it on; between 5 and 25 % (10 to 20 % until 0.16.8) the pressed switch neither stops closing nor
+  // raises W-4; below 5 % it stops as always.
   const s = homed(load()); s.cmd('VALV SET 15', 60000);
   s.tap(415, 184); s.tap(240, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position > Motor override > Open
-  s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 10 to 20 % on
+  s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 25 % on
   shot(s, 'motor-switch');
-  const on = /Switch passed between 10 and 20 % open: on/.test(events(s, 5));
+  const on = /Switch passed between 5 and 25 % open: on/.test(events(s, 5));
   s.set(7, 1); s.run(1000);                            // the switch reads pressed at 15 %
   const a1 = s.cmd('ALRM?');
-  s.cmd('VALV SET 11', 30000);
-  const at11 = s.cmd('VALV?');
-  s.cmd('VALV SET 5', 30000);
-  const at10 = s.cmd('VALV?'), ev = events(s, 5);
-  check('pass band: no W-4 at 15 %, closes to 11 % past the pressed switch, stops at 10 %', on && a1 === 'ALRM NONE\r\n' &&
-    /VALV 11\.0/.test(at11) && /VALV (9\.9|10\.0)/.test(at10) && /W-1/.test(ev),
-    [on, a1.trim(), at11.trim(), at10.trim(), ev.slice(-300)].join(' | '));
+  s.cmd('VALV SET 6', 30000);
+  const at6 = s.cmd('VALV?'), a6 = s.cmd('ALRM?');
+  s.cmd('VALV SET 2', 30000);
+  const at5 = s.cmd('VALV?'), ev = events(s, 5);
+  check('pass band: no W-4 at 15 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALRM NONE\r\n' &&
+    /VALV 6\.0/.test(at6) && a6 === 'ALRM NONE\r\n' && /VALV (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
+    [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
 }
 { // The bench cryostat (the page's flow line, fitted to the bench logs): AUTO holds 16 mbar with
   // bench gains, a relay there cycles at about the bench's period, and opening sticks at low openings.

@@ -26,10 +26,11 @@
  *          Open with another finger (Close then goes past the switch)
  *   Speed  Run, Start and Accel [-] value [+], and the time for a full open or close
  *   Coils  Mode WAVE/FULL/HALF, Hold torque, Coils off, Coil order, Direction
- *   Switch Pass 10 to 20 % (on/off) and the switch now (0.16.5, Ryan 9 Nov):
+ *   Switch Pass 5 to 25 % (on/off) and the switch now (0.16.5, Ryan 9 Nov):
  *          the valve binds about 13 % and the force switch trips there;
- *          while on and homed, between 10 and 20 % open the switch does not
- *          stop closing (valve.h). Off at every power-up.
+ *          while on and homed, between 5 and 25 % open the switch does not
+ *          stop closing (valve.h; 10 to 20 % until 0.16.8). Off at every
+ *          power-up.
  * Coil order, Direction and Set zero ask first while the valve is homed.
  * The strip reads the motor state and the limit line (a latched fault, the
  * limit override or a message over it, as on every screen).
@@ -446,6 +447,12 @@ static void two_delete(lv_event_t *e)
 
 static void tab_show(void);
 
+// The pass band's edges as text, for the Switch tab and the strip.
+#define BAND_STR_(x) #x
+#define BAND_STR(x) BAND_STR_(x)
+#define BAND_LO BAND_STR(VALVE_BAND_LO_PCT)
+#define BAND_HI BAND_STR(VALVE_BAND_HI_PCT)
+
 // Switch tab: a press anywhere on the card turns the pass band on or off,
 // live at once, as the Remote control card on System.
 static void band_event(lv_event_t *e)
@@ -612,7 +619,7 @@ static void motor_build(lv_obj_t *scr)
     lv_obj_t *c = m.band = ui_card(p, 10, y2, 226, H);
     lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(c, band_event, LV_EVENT_PRESSED, NULL);
-    ui_label(c, 12, 6, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Pass 10 to 20 %");
+    ui_label(c, 12, 6, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Pass " BAND_LO " to " BAND_HI " %");
     m.band_text = ui_label(c, 12, 26, 150, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
     lv_obj_t *sw = m.band_sw = lv_switch_create(c);
     lv_obj_set_size(sw, 52, 28);
@@ -624,8 +631,8 @@ static void motor_build(lv_obj_t *scr)
     m.sw_now = ui_info(p, 244, y2, 226, H, "Limit switch");
     lv_obj_t *n = ui_card(p, 10, y3, 460, H);
     ui_label(n, 12, 6, 436, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT,
-             "When on, between 10 and 20 % open the switch does not stop closing.\n"
-             "Below 10 % it stops as always. Off again after a restart.");
+             "When on, between " BAND_LO " and " BAND_HI " % open the switch does not stop closing.\n"
+             "Below " BAND_LO " % it stops as always. Off again after a restart.");
 
     tab_show();
     motor_fast();
@@ -761,7 +768,7 @@ static void motor_refresh(void)
     else if (lim == LIMIT_CLOSED)
         ls = "Switch released, closing allowed";
     else if (lim == LIMIT_OPEN && stepper3_limit_ignored())
-        ls = "Switch pressed, passed (10 to 20 %)";
+        ls = "Switch pressed, passed (" BAND_LO " to " BAND_HI " %)";
     else {
         ls = lim == LIMIT_OPEN ? "Switch pressed, closing blocked" : "Switch not read yet, closing blocked";
         warn = true;

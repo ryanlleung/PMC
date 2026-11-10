@@ -193,8 +193,9 @@ static bool sw_far_said;  // W-4 raised for this occurrence
 #define SW_FAR_MS 200
 // Pass band (0.16.5, Ryan 9 Nov): asked for on Motor override > Switch; in
 // force (stepper3_limit_band) only while homed. RAM only, off at power-up.
-#define BAND_LO_PCT 10
-#define BAND_HI_PCT 20
+// Its edges are VALVE_BAND_LO_PCT and VALVE_BAND_HI_PCT (valve.h).
+#define BAND_LO_PCT VALVE_BAND_LO_PCT
+#define BAND_HI_PCT VALVE_BAND_HI_PCT
 static bool band_req;
 static int over_n;        // W-5: consecutive reads above the sensor range in AUTO
 

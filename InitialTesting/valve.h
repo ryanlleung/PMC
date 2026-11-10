@@ -71,9 +71,14 @@ typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED,
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
 // Pass band (0.16.5, Ryan 9 Nov: the valve binds about 13 % and the force
-// switch trips there, off the seat): while on and homed, between 10 and
-// 20 % open the switch neither stops closing nor raises W-1, W-4 or F-4.
-// Motor override > Switch. RAM only, off at power-up.
+// switch trips there, off the seat): while on and homed, between
+// VALVE_BAND_LO_PCT and VALVE_BAND_HI_PCT open the switch neither stops
+// closing nor raises W-1, W-4 or F-4. Motor override > Switch. RAM only, off
+// at power-up. 10 to 20 % until 0.16.8 (Ryan 10 Nov: the switch was still
+// pressed at 10 % closing from 13.5 % and W-4 ended AUTO there; "Just
+// extend it to go as low as 5% and 25% high").
+#define VALVE_BAND_LO_PCT 5
+#define VALVE_BAND_HI_PCT 25
 bool valve_limit_band(void);
 void valve_limit_band_set(bool on);
 int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX

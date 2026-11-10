@@ -135,10 +135,10 @@ void stepper3_override_arm(void)
  * Pass band (0.16.5, Ryan 9 Nov, PR #43: the valve needs more torque about
  * 13 +- 2.5 % open and the force switch trips there, off the seat; "add a
  * mode where triggering the limit is not blocking temporarily from 10 to
- * 20 % open, so that it allows me to continue the pid tuning test"): while
- * on, between the counts lo and hi the switch is neither the closing stop
- * nor the opening check. valve.c sets it every pass, only while homed. RAM
- * only, off at reset.
+ * 20 % open, so that it allows me to continue the pid tuning test"; 5 to
+ * 25 % from 0.16.8): while on, between the counts lo and hi the switch is
+ * neither the closing stop nor the opening check. valve.c sets it every
+ * pass, only while homed. RAM only, off at reset.
  */
 static volatile bool band_on;
 static volatile int32_t band_lo, band_hi;

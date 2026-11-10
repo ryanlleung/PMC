@@ -29,7 +29,8 @@
  * A yellow edge round the Valve tile while the limit switch is pressed
  * (0.16.4; a "Limit" tag beside the caption in 0.16.1-0.16.3); a valve
  * fault's red edge wins. While the switch pass band is on (0.16.5, Motor
- * override > Switch), 10 to 20 % is yellow on the valve bar.
+ * override > Switch), 5 to 25 % (10 to 20 % until 0.16.8) is yellow on the
+ * valve bar.
  * The strip shows the status line, with the 5 min pressure sparkline on its
  * right as on the operator screens (ui.c, Ryan 21 Oct). A tap on the
  * sparkline opens Trend.
@@ -55,7 +56,7 @@ typedef struct {
     lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev, *sp_cap;
     int32_t fill;             // bar fill to here, px; -1 no value (no marker)
     bool log;                 // pressure: decade lines; valve: 0/50/100
-    bool band;                // valve: the switch pass band (10 to 20 %) marked yellow on the track
+    bool band;                // valve: the switch pass band (5 to 25 %) marked yellow on the track
 } tile_t;
 
 static tile_t pt, vt;
@@ -151,7 +152,8 @@ static void bar_draw(lv_event_t *e)
     // The switch pass band (0.16.5), over the track and fill: where the
     // switch does not stop closing.
     if (t->band) {
-        lv_area_t b = { a.x1 + (BAR_W - 1) / 10, y1, a.x1 + (BAR_W - 1) / 5, y2 };
+        lv_area_t b = { a.x1 + (BAR_W - 1) * VALVE_BAND_LO_PCT / 100, y1,
+                        a.x1 + (BAR_W - 1) * VALVE_BAND_HI_PCT / 100, y2 };
         r.bg_color = UI_YELLOW;
         lv_draw_rect(layer, &r, &b);
     }
