@@ -61,7 +61,7 @@ Reading past address 50 answers exception 2. Read 0 to 50 (51 registers) in one 
 
 The same settings as Menu > PID tuning on the screen (PID and PID table tabs) and the text port's `PIDS` and `SCHED` commands. A write is a tuning save, as the screen's Save settings: it is taken in AUTO too, from the next control step, and kept through a power cycle. One FC16 can write any run of registers 27 to 50 (each float whole); the values are checked first, then saved together in one flash write. A write that changes nothing writes nothing. A value out of range or NaN answers exception 3 and changes nothing. Boundary 2 must be above boundary 1 by more than the hysteresis either side (B1 x (1 + H) below B2 x (1 - H)); a write that breaks this answers exception 4 and logs the reason. Register 26 is read only.
 
-The set in use changes in AUTO when the pressure (schedule 2) passes a boundary by the hysteresis, or when the setpoint (schedule 1) crosses a boundary. Each change is logged ("AUTO PID set 3 to 2, pressure 16.9 mbar"). A change re-bases the integral, so the valve does not jump.
+The set in use changes in AUTO when the lower of the pressure and the setpoint (schedule 2; the lower of the two since 0.16.9, so going down the setpoint's set takes over at once) passes a boundary by the hysteresis. Each change is logged ("AUTO PID set 3 to 2, pressure 16.9 mbar"). A change re-bases the integral, so the valve does not jump.
 
 ### Status bits (register 3, and status coils 16-25)
 

@@ -148,7 +148,7 @@ static const field_t F[CFG_N] = {
     [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
-    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Off: set 1 only. On: set picked by the pressure" },
+    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Off: set 1 only. On: set by the lower of pressure and setpoint" },
     [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
     [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },

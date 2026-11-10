@@ -82,7 +82,7 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
 void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_t now_pos)
 {
     float e = (float)k->kdir * (c->sp - pv);
-    c->set = ctrl_pick_set(k, 0, pv);
+    c->set = ctrl_pick_set(k, 0, fminf(pv, c->sp));   // the lower of the two (0.16.9, ctrl.h)
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     c->i = (float)now_pos - steps_of(g.kp, k) * e;   // bumpless: first output is the position in force
     c->pos_cmd = c->last_sent = now_pos;
@@ -144,7 +144,7 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->pv_f = pv;
     const float pf = c->pv_f;
     const float e = (float)k->kdir * (c->sp - pf);
-    c->set = ctrl_pick_set(k, c->set, pf);
+    c->set = ctrl_pick_set(k, c->set, fminf(pf, c->sp));   // the lower of the two (0.16.9, ctrl.h)
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     const float kp = steps_of(g.kp, k), ki = g.ti > 0 ? kp / (60.0f * g.ti) : 0, kd = steps_of(g.kd, k);
     const float d = -kd * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
@@ -186,10 +186,11 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     int32_t step = c->pos_cmd - c->last_sent;
     if (step >= db_open || step <= -db_close) {
         // Reversal hysteresis: turning round for less than this is lost in
-        // the drive's backlash and only makes the motor hunt.
+        // the drive's backlash and only makes the motor hunt. CTRL_REV_MBAR
+        // of error at this set's KP, at most rev_pct (0.16.9, ctrl.h).
         const int32_t to_go = c->pos_cmd - in->pos;
         const int way = to_go > 0 ? 1 : to_go < 0 ? -1 : 0;
-        const float rev = c->rev_pct / 100.0f * pos_max;
+        const float rev = fminf(c->rev_pct, CTRL_REV_MBAR * g.kp) / 100.0f * pos_max;
         if (way && !(c->last_dir && way != c->last_dir && fabsf((float)to_go) < rev)) {
             c->move = true;
             c->move_to = c->pos_cmd;

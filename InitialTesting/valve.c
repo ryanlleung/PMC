@@ -676,8 +676,8 @@ static ctrl_tune_t tune_now(void)
 }
 
 // The PID set in use: in AUTO the one the schedule has switched to; else
-// the one AUTO would start with now (the pressure for PV, the setpoint for
-// SP; 1 with the schedule Off).
+// the one AUTO would start with now (the lower of the pressure and the
+// setpoint, as ctrl_start; 1 with the schedule Off).
 int valve_pid_set(void)
 {
     ctrl_tune_t k = tune_now();
@@ -685,7 +685,7 @@ int valve_pid_set(void)
         return 1;
     if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 3)
         return ctl.set;
-    return pv_ok ? ctrl_pick_set(&k, 0, pv_mbar) : 1;
+    return pv_ok ? ctrl_pick_set(&k, 0, ctl.sp_set ? fminf(pv_mbar, ctl.sp) : pv_mbar) : 1;
 }
 
 int32_t valve_range_mmbar(void)

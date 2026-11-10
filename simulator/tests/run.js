@@ -619,7 +619,7 @@ let parkedFlash;
   s.cmd('VALV SET 40', 60000);
   s.run(240000);
   s.cmd('PRES SP 10;MODE AUTO', 1000);
-  check('AUTO starts on the set for the pressure (3.8 mbar: set 2)', /Auto at setpoint 10\.0 mbar, valve [\d.]+ %, PID set 2/.test(events(s, 3)),
+  check('AUTO starts on the set for the lower of pressure and setpoint (3.8 mbar: set 2)', /Auto at setpoint 10\.0 mbar, valve [\d.]+ %, PID set 2/.test(events(s, 3)),
     events(s, 3));
   s.run(600000);
   check('PV schedule: set 3 at 10 mbar', /^PIDS 3,/.test(one('PIDS?')) && one('PID?') === 'PID 4.00,0.25,0.00\r\n',
@@ -632,16 +632,16 @@ let parkedFlash;
     s.setting(CFG.KP) === 600, s.setting(CFG.KP3) + ' ' + s.setting(CFG.KP));
   s.cmd('PRES SP 2', 1000);
   s.run(900000);
+  // Going down the set follows the setpoint at once (0.16.9: the lower of
+  // pressure and setpoint), so a big step down does not start on set 3.
   const sw = sws().slice(1);
-  check('10 -> 2: set 3 to 2 under 6.8 mbar (B2 x 0.85)', sw.length >= 1 && sw[0][0] === 3 && sw[0][1] === 2 && sw[0][2] <= 6.8 &&
-    sw[0][2] > 5.5, JSON.stringify(sw));
-  check('10 -> 2: then set 2 to 1 under 2.55 mbar (B1 x 0.85), no other change', sw.length === 2 && sw[1][0] === 2 && sw[1][1] === 1 &&
-    sw[1][2] <= 2.6 && sw[1][2] > 2.0, JSON.stringify(sw));
+  check('10 -> 2: set 3 to 1 at once, still at 10 mbar (the setpoint\'s set), no other change', sw.length === 1 && sw[0][0] === 3 &&
+    sw[0][1] === 1 && sw[0][2] > 9, JSON.stringify(sw));
   check('10 -> 2: AUTO kept, near 2 mbar, set 1', one('MODE?') === 'MODE AUTO\r\n' && Math.abs(parseFloat(one('PRES?').slice(5)) - 2) < 0.3 &&
     /^PIDS 1,/.test(one('PIDS?')) && one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('MODE?;PRES?;PIDS?;PID?'));
   s.cmd('PRES SP 10', 1000);
   s.run(900000);
-  const up = sws().slice(3);
+  const up = sws().slice(2);
   check('2 -> 10: set 1 to 2 over 3.45, set 2 to 3 over 9.2 mbar', up.length === 2 && up[0][0] === 1 && up[0][1] === 2 &&
     up[0][2] >= 3.4 && up[0][2] < 4.5 && up[1][0] === 2 && up[1][1] === 3 && up[1][2] >= 9.2 && up[1][2] < 10.5, JSON.stringify(up));
   shot(s, 'gain-schedule');
