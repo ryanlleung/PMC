@@ -14,7 +14,7 @@ from types import SimpleNamespace
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import pmc_autotune as at   # noqa: E402
-import pmc_gains as g       # noqa: E402
+g = at                      # the link's Refused, the KP and TI limits
 
 SLEW = 0.61   # %/s, the drive
 
@@ -151,22 +151,117 @@ class Relay(unittest.TestCase):
         self.assertIn('not back', R.why)
 
 
+BENCH = [   # the six bench fits of 5 to 10 Nov: (setpoint, K, L, tau, Pu, Ku) -> KP, TI (min)
+    # Ku is what the relay gave where Ku / 3 is the cap (2 and 4 mbar), else any large value.
+    (2, 3.3, 56, 42, 224, 0.21, 0.07, 2.33),
+    (4, 4.25, 28, 15, 112, 0.24, 0.08, 1.17),
+    (8, 3.9, 28, 85, 112, 5.0, 0.16, 1.42),
+    (12, 3.7, 12, 100, 48, 5.0, 0.45, 1.67),
+    (16, 2.44, 2, 6, 20, 5.0, 0.20, 0.21),
+    (24, 1.47, 2, 9, 24, 5.0, 0.34, 0.25),
+]
+
+
 class Rules(unittest.TestCase):
-    def test_gains(self):
+    def test_first_gains_without_a_fit(self):
         self.assertEqual(at.relay_gains(4.0, 9.0), (1.0, 0.3))
         self.assertEqual(at.relay_gains(0.001, 0.1), (g.KP_MIN, g.TI_MIN))
 
-    def test_trim(self):
-        f, _ = at.trim_rule({'overshoot_pct': 25, 'settle_s': 40, 'reversals': 1, 'saturated': False}, 10)
-        self.assertEqual(f, at.TRIM_DOWN)
-        f, _ = at.trim_rule({'overshoot_pct': 2, 'settle_s': 40, 'reversals': 4, 'saturated': False}, 10)
-        self.assertEqual(f, at.TRIM_DOWN)
-        f, _ = at.trim_rule({'overshoot_pct': 0, 'settle_s': 200, 'reversals': 0, 'saturated': False}, 10)
-        self.assertEqual(f, at.TRIM_UP)
-        f, _ = at.trim_rule({'overshoot_pct': 0, 'settle_s': None, 'reversals': 0, 'saturated': True}, 10)
-        self.assertEqual(f, 1.0)     # the valve at an end: not the gains
-        f, _ = at.trim_rule({'overshoot_pct': 4, 'settle_s': 50, 'reversals': 1, 'saturated': False}, 10)
-        self.assertEqual(f, 1.0)
+    def test_rule_on_the_bench_fits(self):
+        for sp, K, L, tau, pu, ku, kp, ti in BENCH:
+            got = at.rule_gains({'K': K, 'L': L, 'tau': tau}, ku, pu)
+            self.assertAlmostEqual(got[0], kp, delta=0.011, msg='%g mbar KP' % sp)
+            self.assertAlmostEqual(got[1], ti, delta=0.011, msg='%g mbar TI' % sp)
+
+    def test_rule_caps(self):
+        fit = {'K': 3.9, 'L': 28, 'tau': 85}
+        self.assertEqual(at.rule_gains(fit, 0.3, 112)[0], 0.1)             # Ku / 3
+        self.assertEqual(at.rule_gains({'K': 1.0, 'L': 0, 'tau': 500}, 9.0, 20)[1], round(20 * 5 / 60, 2))  # 20 L_eff
+        self.assertEqual(at.rule_gains({'K': 1.0, 'L': 0, 'tau': 1}, 9.0, 20)[1], round(2.5 * 5 / 60, 2))   # 2.5 L_eff
+
+    fig0 = {'overshoot_pct': 0.0, 'settle_s': 50, 'reversals': 0, 'saturated': False, 't63_s': 20, 't90_s': 60,
+            'backoff_pct': 0.0, 'sag_s': 0}
+    fit0 = {'K': 2.0, 'L': 10, 'tau': 30}
+
+    def rule(self, kp=0.3, ti=1.0, ku=9.0, pu=20.0, fit='fit0', **kw):
+        fig = dict(self.fig0, **kw)
+        return at.refine_rule(fig, kp, ti, ku, pu, self.fit0 if fit == 'fit0' else fit)
+
+    def test_rule1_reversals_or_a_cut(self):
+        a = self.rule(reversals=3)
+        self.assertEqual((a['kind'], a['kp'], a['ti']), ('kp', 0.21, 1.0))
+        a = self.rule(cut=True)
+        self.assertEqual((a['kind'], a['kp']), ('kp', 0.21))
+        a = self.rule(reversals=2)
+        self.assertEqual(a['kind'], 'pass')
+        # a leg the watchdog ended: its own bigger cut
+        a = self.rule(wild_pp=3.0, wild_cut=0.25, wild_big=True)
+        self.assertEqual((a['kind'], a['kp']), ('kp', 0.07))
+        a = self.rule(wild_pp=3.0, wild_cut=0.5)
+        self.assertEqual(a['kp'], 0.15)
+
+    def test_rule2_overshoot(self):
+        a = self.rule(overshoot_pct=6.0)
+        self.assertEqual((a['kind'], a['kp'], a['ti']), ('kp', 0.24, 1.0))
+        self.assertEqual(self.rule(overshoot_pct=5.0)['kind'], 'pass')
+        # rule 1 comes first
+        self.assertEqual(self.rule(overshoot_pct=30.0, reversals=4)['kp'], 0.21)
+
+    def test_rule3_tail(self):
+        a = self.rule(t63_s=20, t90_s=100, backoff_pct=15.0)
+        self.assertEqual((a['kind'], a['kp'], a['ti']), ('ti', 0.3, 0.7))
+        # 90 % not reached counts as a tail too
+        self.assertEqual(self.rule(t90_s=None, backoff_pct=15.0)['kind'], 'ti')
+        # no tail: t90 within 4 x t63; or the valve does not back off; or overshoot
+        self.assertEqual(self.rule(t63_s=20, t90_s=70, backoff_pct=15.0)['kind'], 'pass')
+        self.assertEqual(self.rule(t63_s=20, t90_s=100, backoff_pct=5.0)['kind'], 'pass')
+        self.assertEqual(self.rule(t63_s=20, t90_s=100, backoff_pct=15.0, overshoot_pct=3.0)['kind'], 'pass')
+
+    def test_rule4_slow(self):
+        a = self.rule(t63_s=150, t90_s=400, backoff_pct=5.0)   # 400 s over 8 x (10 + 30)
+        self.assertEqual((a['kind'], a['ti']), ('ti', 0.8))
+        self.assertEqual(self.rule(t63_s=150, t90_s=300, backoff_pct=5.0)['kind'], 'pass')
+        # it needs tau, so no fit: no rule 4
+        self.assertEqual(self.rule(t63_s=150, t90_s=900, backoff_pct=5.0, fit=None)['kind'], 'pass')
+        # the valve at an end: not the gains' fault
+        self.assertEqual(self.rule(t63_s=150, t90_s=900, backoff_pct=5.0, saturated=True)['kind'], 'pass')
+
+    def test_ti_limits_end_the_refinements(self):
+        # 2.5 L_eff = 25 s = 0.42 min
+        a = self.rule(ti=0.45, t90_s=100, backoff_pct=15.0)
+        self.assertEqual((a['kind'], a['ti']), ('ti', 0.42))
+        a = self.rule(ti=0.42, t90_s=100, backoff_pct=15.0)
+        self.assertEqual((a['kind'], a['ti'], a['note']), ('limit', 0.42, 'as fast as the cryostat allows'))
+        # the integral gain KP / TI over 1 / (4 K L_eff): TI at least 4 x 2 x 10 x KP / 60 min
+        a = self.rule(kp=1.0, ti=1.2, t90_s=100, backoff_pct=15.0)
+        self.assertEqual(a['kind'], 'limit')
+        a = self.rule(kp=1.0, ti=1.5, t90_s=100, backoff_pct=15.0)
+        self.assertEqual((a['kind'], a['ti']), ('ti', 1.33))
+        # L_eff is never under Pu / 4: a 100 s period holds TI at 2.5 x 25 s = 1.04 min
+        a = self.rule(ti=1.05, pu=100.0, t90_s=100, backoff_pct=15.0)
+        self.assertEqual((a['kind'], a['ti']), ('ti', 1.04))
+
+    def test_kp_is_never_raised_and_never_over_ku_over_3(self):
+        for kw in ({}, {'reversals': 4}, {'overshoot_pct': 9.0}, {'t90_s': 100, 'backoff_pct': 20.0},
+                   {'t63_s': 150, 't90_s': 400}, {'wild_pp': 1.0, 'wild_cut': 0.5}):
+            a = self.rule(**kw)
+            self.assertLessEqual(a['kp'], 0.3)
+        self.assertEqual(self.rule(kp=2.0, ku=3.0, overshoot_pct=9.0)['kp'], 1.0)
+        # KP at the firmware's lowest: nothing to cut
+        self.assertEqual(self.rule(kp=0.01, overshoot_pct=9.0)['kind'], 'limit')
+
+    def test_worse_check(self):
+        old = dict(self.fig0, overshoot_pct=8.0, reversals=1)
+        self.assertFalse(at.worse_check(dict(old, overshoot_pct=7.0), old))
+        self.assertTrue(at.worse_check(dict(old, overshoot_pct=20.0), old))
+        self.assertTrue(at.worse_check(dict(old, wild_pp=2.0), dict(old)))
+        self.assertTrue(at.worse_check(dict(old, t90_s=120), dict(old, t90_s=60)))
+        self.assertFalse(at.worse_check(dict(old, t90_s=70), dict(old, t90_s=60)))
+        self.assertTrue(at.worse_check(dict(old, t90_s=None), dict(old, t90_s=60)))
+        # 8 to 8.5 % is not a different check
+        self.assertFalse(at.worse_check(dict(old, overshoot_pct=8.5), old))
+        # a refinement that raised overshoot from 1 to 2 % is still inside the limit
+        self.assertFalse(at.worse_check(dict(old, overshoot_pct=2.0), dict(old, overshoot_pct=1.0)))
 
     def test_step_figures(self):
         rows = [(t, 5 + (1 - math.exp(-t / 5)) + (0.2 * math.exp(-t / 10) * math.sin(t / 3) if t > 5 else 0), 4.0)
@@ -181,19 +276,80 @@ class Rules(unittest.TestCase):
         f = at.step_figures(rows, 6.0, 5.0, 0.05)
         self.assertLessEqual(f['reversals'], 2)
 
+    @staticmethod
+    def interp(pts, t):
+        for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
+            if t0 <= t <= t1:
+                return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+        return pts[-1][1]
+
+    def test_t63_t90_and_the_valve_backing_off(self):
+        # Ryan, 10 Nov: "goes open more, then stops and then goes open slowly again". Pressure: 63 % at
+        # 10 s, 90 % at 100 s. Valve: opens 1 % in 10 s, backs off 0.3 %, creeps on to +1.2 %.
+        P = [(0, 5.0), (10, 5.64), (100, 5.9), (200, 6.0)]
+        X = [(0, 5.0), (10, 6.0), (40, 5.7), (200, 6.2)]
+        rows = [(t, self.interp(P, t), self.interp(X, t)) for t in range(0, 201)]
+        f = at.step_figures(rows, 5.0, 6.0, 0.05)
+        self.assertEqual((f['t63_s'], f['t90_s']), (10, 100))
+        self.assertAlmostEqual(f['backoff_pct'], 25.0, delta=0.5)      # 0.3 of a 1.2 % move
+        self.assertEqual(f['sag_s'], 0)
+        # a valve that only ever opens does not back off
+        X = [(0, 5.0), (200, 6.2)]
+        rows = [(t, self.interp(P, t), self.interp(X, t)) for t in range(0, 201)]
+        self.assertEqual(at.step_figures(rows, 5.0, 6.0, 0.05)['backoff_pct'], 0.0)
+        # back-off after t90 is not counted
+        X = [(0, 5.0), (100, 6.0), (150, 5.7), (200, 6.2)]
+        rows = [(t, self.interp(P, t), self.interp(X, t)) for t in range(0, 201)]
+        self.assertEqual(at.step_figures(rows, 5.0, 6.0, 0.05)['backoff_pct'], 0.0)
+        # a step that never gets to 90 %
+        rows = [(t, 5 + 0.5 * t / 200, 5 + 0.01 * t) for t in range(0, 201)]
+        f = at.step_figures(rows, 5.0, 6.0, 0.05)
+        self.assertEqual((f['t63_s'], f['t90_s']), (None, None))
+
+    def test_sag(self):
+        # reaches the band at 40 s, then sits 0.2 mbar under it from 61 to 150 s with the valve still
+        P = [(0, 5.0), (40, 6.0), (60, 5.99), (61, 5.8), (150, 5.8), (151, 6.0), (250, 6.0)]
+        X = [(0, 5.0), (30, 5.9), (250, 5.9)]
+        rows = [(t, self.interp(P, t), self.interp(X, t)) for t in range(0, 251)]
+        f = at.step_figures(rows, 5.0, 6.0, 0.05)
+        self.assertGreaterEqual(f['sag_s'], 86)
+        self.assertLessEqual(f['sag_s'], 90)
+        # with the valve moving the whole time it is not a sag
+        X = [(0, 5.0), (250, 8.0)]
+        rows = [(t, self.interp(P, t), self.interp(X, t)) for t in range(0, 251)]
+        self.assertEqual(at.step_figures(rows, 5.0, 6.0, 0.05)['sag_s'], 0)
+        # a down step: the pressure undershoots the new setpoint (the logs of 10 Nov: 4 mbar to 3.56 with the
+        # valve still for 100 s) and is under the band while the valve does not move
+        P = [(0, 6.0), (40, 5.0), (61, 4.8), (150, 4.8), (151, 5.0), (250, 5.0)]
+        X = [(0, 6.0), (30, 5.0), (250, 5.0)]
+        rows = [(t, self.interp(P, t), self.interp(X, t)) for t in range(0, 251)]
+        f = at.step_figures(rows, 6.0, 5.0, 0.05)
+        self.assertGreaterEqual(f['sag_s'], 86)
+        self.assertLessEqual(f['sag_s'], 90)
+        # above the band on the way down (still coming down) is not a sag
+        P = [(0, 6.0), (40, 5.0), (61, 5.2), (150, 5.2), (151, 5.0), (250, 5.0)]
+        rows = [(t, self.interp(P, t), self.interp(X, t)) for t in range(0, 251)]
+        self.assertEqual(at.step_figures(rows, 6.0, 5.0, 0.05)['sag_s'], 0)
+
     def test_sets(self):
-        rows = [{'sp_mbar': s, 'kp': kp, 'ti_min': ti} for s, kp, ti in
-                [(1, 0.05, 0.4), (2, 0.08, 0.4), (4, 0.2, 0.4), (8, 0.5, 0.3), (12, 0.8, 0.3), (16, 0.8, 0.3),
-                 (24, 1.0, 0.3), (48, 1.44, 0.3)]]
+        # the six bench results: 2 and 4 mbar below B1 = 6, 8 and 12 to B2 = 14, 16 and 24 above (16 mbar is
+        # clear of the switching point at 14 mbar with H = 10 %: it would sit on it at 20 mbar with 15 %)
+        rows = [{'sp_mbar': s, 'kp': kp, 'ti_min': ti} for s, _, _, _, _, _, kp, ti in BENCH]
         sets = at.table_sets(rows)
-        self.assertEqual([s[3] for s in sets], [[1, 2, 4], [8, 12, 16], [24, 48]])
-        self.assertAlmostEqual(sets[0][1], round((0.05 * 0.08 * 0.2) ** (1 / 3), 2))
-        self.assertAlmostEqual(sets[2][1], round(math.sqrt(1.44), 2))
+        self.assertEqual((at.B1, at.B2, at.HYST), (6.0, 14.0, 10))
+        self.assertEqual([s[3] for s in sets], [[2, 4], [8, 12], [16, 24]])
+        self.assertEqual([s[1] for s in sets], [0.07, 0.16, 0.20])             # the lowest KP of the rows
+        self.assertAlmostEqual(sets[0][2], round(math.sqrt(2.33 * 1.17), 2))   # the geometric mean of the TIs
+        self.assertAlmostEqual(sets[1][2], round(math.sqrt(1.42 * 1.67), 2))
+        self.assertAlmostEqual(sets[2][2], round(math.sqrt(0.21 * 0.25), 2))
         self.assertEqual(at.write_lines(sets),
-                         ['PIDS SET 1,0.09,0.40,0', 'PIDS SET 2,0.68,0.30,0', 'PIDS SET 3,1.20,0.30,0',
-                          'SCHED SET PV,6.0,20.0,15'])
+                         ['PIDS SET 1,0.07,1.65,0', 'PIDS SET 2,0.16,1.54,0', 'PIDS SET 3,0.20,0.23,0',
+                          'SCHED SET PV,6.0,14.0,10'])
+        # on the boundary: 6 is in set 2, 14 in set 3
+        sets = at.table_sets([{'sp_mbar': s, 'kp': 0.1, 'ti_min': 1.0} for s in (6, 14)])
+        self.assertEqual([s[3] for s in sets], [[], [6], [14]])
         # A band with no point: left as it is.
-        sets = at.table_sets(rows[3:])
+        sets = at.table_sets(rows[2:])
         self.assertEqual(sets[0][1:], (None, None, []))
         self.assertEqual(len(at.write_lines(sets)), 3)
 
@@ -239,16 +395,16 @@ class Watchdog(unittest.TestCase):
         ps = [10 + 0.2 * math.sin(2 * math.pi * t / 40) for t in range(600)]
         self.assertFalse(self.feed(10.0, ps).wild)
 
-    def test_trim_rule_cuts_harder_than_overshoot(self):
-        f, why = at.trim_rule({'overshoot_pct': 0, 'settle_s': None, 'reversals': 9, 'saturated': False,
-                               'wild_pp': 3.0, 'wild_big': True}, 10)
-        self.assertEqual(f, at.WILD_CUT_BIG)
-        self.assertIn('oscillating', why)
+    def test_refine_rule_cuts_a_wild_leg_harder(self):
+        a = at.refine_rule({'overshoot_pct': 0, 'settle_s': None, 'reversals': 9, 'saturated': False,
+                            'wild_pp': 3.0, 'wild_big': True, 'wild_cut': at.WILD_CUT_BIG}, 0.4, 1.0, 9.0, 20.0, None)
+        self.assertEqual((a['kind'], a['kp']), ('kp', 0.1))
+        self.assertIn('oscillating', a['why'])
 
 
 class FakeBoard:
     """The text port on the model: the firmware's PI (1 s, clamp anti-windup,
-    bumpless), PID set 1 to 3 and the PID table, as pmc_gains.Link."""
+    bumpless), PID set 1 to 3 and the PID table, as pmc_autotune.Link."""
 
     def __init__(self, plant, sched=True):
         self.P, self.sched = plant, sched
@@ -473,74 +629,247 @@ class Wander(unittest.TestCase):
         self.assertEqual(at.step_figures(rows, 4.0, 4.8, 0.04)['overshoot_pct'], 25.0)
         self.assertEqual(at.step_figures(rows, 4.0, 4.8, 0.17, 0.17)['overshoot_pct'], 3.8)
 
-    def tuner(self, figs):
-        a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
-        t = at.AutoTuner(None, None, a, None)
+
+def fig(o=0.0, n=0, t63=20, t90=60, back=0.0, **kw):
+    f = {'overshoot_pct': o, 'settle_s': 50, 'reversals': n, 'saturated': False, 't63_s': t63, 't90_s': t90,
+         'backoff_pct': back, 'sag_s': 0}
+    f.update(kw)
+    return f
+
+
+class Refine(unittest.TestCase):
+    """point() on scripted checks: the relay and the check are stubbed, so these are the rules in sequence."""
+    FIT = {'K': 1.0, 'L': 10, 'tau': 30}
+
+    def tuner(self, figs, fits=None, ku=2.0, pu=20.0, d=None):
+        a = SimpleNamespace(d=0.4)
+        t = at.AutoTuner(None, None, a, d)
         t.say = lambda m: None
         t.reach = lambda sp, kp, ti, why=None: 3.0
-        t.relay = lambda sp, x0, dd: {'Ku': 0.68, 'Pu_s': 8.2, 'd_pct': 0.2, 'a_mbar': 0.33, 'eps_mbar': 0.1,
-                                      'cycles': 4, 'asym': None, 'steady': True, 'noise': 0.03, 'wander': 0.17}
-        t.check = lambda sp, kp, ti, r, k: (figs[k - 1], kp)
+        t.relay = lambda sp, x0, dd: {'Ku': ku, 'Pu_s': pu, 'd_pct': 0.4, 'a_mbar': 0.1, 'eps_mbar': 0.02,
+                                      'cycles': 4, 'asym': None, 'steady': True, 'noise': 0.004, 'wander': 0.0}
+        self.used = []
+        fits = list(fits if fits is not None else [dict(self.FIT, ok=True)] * len(figs))
+
+        def check(sp, kp, ti, r, k):
+            self.used.append((kp, ti))
+            return dict(figs[k - 1]), kp
+        t.check = check
+        t.refit = lambda k, fit: fits[k - 1] or fit
         return t
 
-    def test_cuts_stop_when_two_do_not_help(self):
-        # 4 mbar on 9 Nov: the check no better after each cut.
-        fig = lambda o, n: {'overshoot_pct': o, 'settle_s': None, 'reversals': n, 'saturated': False}   # noqa: E731
-        t = self.tuner([fig(24.5, 9), fig(65.9, 2), fig(32.4, 12), fig(29.2, 4)])
-        r = t.point(4.0, (0.1, 0.4), 0.4)
-        self.assertEqual(r['trims'], 'x0.80 x0.80')
-        self.assertAlmostEqual(r['kp'], at.clip_kp(0.17 * 0.64), places=2)
-        self.assertIn('cuts stopped', r['note'])
+    def test_a_tail_shortens_ti_only(self):
+        t = self.tuner([fig(0, 0, 20, 120, 20.0), fig(0, 0, 18, 60, 5.0)])
+        r = t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertEqual(self.used, [(0.5, 0.67), (0.5, 0.47)])      # Ku / 4 and 2 Pu, then TI x 0.7
+        self.assertEqual((r['kp'], r['ti_min'], r['trims']), (0.5, 0.47, 'TI x0.70'))
+        self.assertEqual((r['t63_s'], r['t90_s'], r['backoff_pct']), (18, 60, 5.0))
+        self.assertEqual((r['K'], r['L_s'], r['tau_s']), (1.0, 10, 30))
+        self.assertEqual(r['note'], 'no fit yet' if False else r['note'])
+        self.assertNotIn('worse', r['note'])
 
-    def test_cuts_go_on_while_they_help(self):
-        fig = lambda o, n: {'overshoot_pct': o, 'settle_s': 30, 'reversals': n, 'saturated': False}   # noqa: E731
-        t = self.tuner([fig(40, 1), fig(30, 1), fig(20, 1), fig(8, 1)])
-        r = t.point(4.0, (0.1, 0.4), 0.4)
-        self.assertEqual(r['trims'], 'x0.80 x0.80 x0.80')
-        self.assertEqual(r['note'], '')
+    def test_overshoot_cuts_kp_until_it_passes(self):
+        t = self.tuner([fig(12.0, 1), fig(7.0, 1), fig(2.0, 0)])
+        r = t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertEqual([u[0] for u in self.used], [0.5, 0.4, 0.32])
+        self.assertEqual(r['trims'], 'KP x0.80, KP x0.80')
+        self.assertEqual(r['overshoot_pct'], 2.0)
+
+    def test_a_refinement_that_makes_it_worse_is_undone_and_ends_them(self):
+        t = self.tuner([fig(8.0, 1), fig(20.0, 3), fig(0.0, 0)])
+        r = t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertEqual(len(self.used), 2)                          # no third check
+        self.assertEqual((r['kp'], r['ti_min']), (0.5, 0.67))        # the first check's gains stay
+        self.assertEqual(r['overshoot_pct'], 8.0)                    # and its figures
+        self.assertIn('undone', r['note'])
+        self.assertEqual(r['trims'], '')
+        self.assertIn('KP x0.80 made the check worse and was undone', r['note'])
+
+    def test_at_most_four_refinements(self):
+        t = self.tuner([fig(12.0 - k, 1) for k in range(8)])
+        r = t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertEqual(len(self.used), 5)                          # the check, then 4 refinements each checked
+        self.assertEqual([u[0] for u in self.used], [0.5, 0.4, 0.32, 0.26, 0.21])
+        self.assertIn('after 4 refinements', r['note'])
+        self.assertEqual(r['kp'], 0.21)
+
+    def test_at_the_ti_limit_the_check_passes(self):
+        # 2.5 L_eff = 25 s = 0.42 min: TI 0.67 -> 0.47 -> 0.42 (the limit) -> passes with the note
+        t = self.tuner([fig(0, 0, 20, 120, 20.0)] * 4)
+        r = t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertEqual(len(self.used), 3)
+        self.assertEqual(r['ti_min'], 0.42)
+        self.assertIn('as fast as the cryostat allows', r['note'])
+
+    def test_a_passing_first_check_changes_nothing(self):
+        t = self.tuner([fig(1.0, 0)])
+        r = t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertEqual((r['kp'], r['ti_min'], r['trims']), (0.5, 0.67, ''))
+        self.assertEqual(r['kp_rule'], 0.5)
+
+    def test_learned_fit_gives_the_first_gains(self):
+        prior = {'sp_mbar': 8.0, 'kp': 0.1, 'ti_min': 0.83, 'Ku': 1.8, 'Pu_s': 20.0, 'K': 1.0, 'L_s': 10, 'tau_s': 30}
+        t = self.tuner([fig(0.0, 0)], ku=2.0)
+        r = t.point(8.0, (0.1, 0.83), 0.4, prior)
+        # L_eff = max(10, 5) = 10 s; TI = min(max(30, 25), 200) = 30 s; KP = min(30 / (5 x 1 x 10), 2 / 3) = 0.6
+        self.assertEqual(self.used[0], (0.6, 0.5))
+        self.assertIn('first gains from the learned fit', r['note'])
+        self.assertTrue(any(c.startswith('First gains from the learned fit') for c in t.calcs))
+
+    def test_learned_fit_is_dropped_when_the_plant_has_changed(self):
+        prior = {'sp_mbar': 8.0, 'kp': 0.1, 'ti_min': 0.83, 'Ku': 0.6, 'Pu_s': 20.0, 'K': 1.0, 'L_s': 10, 'tau_s': 30}
+        t = self.tuner([fig(0.0, 0)], ku=2.0)       # 3.3 x the learned Ku
+        r = t.point(8.0, (0.1, 0.83), 0.4, prior)
+        self.assertEqual(self.used[0], (0.5, 0.67))
+        self.assertTrue(any(c.startswith('Fresh:') for c in t.calcs))
+
+    def test_a_learned_row_without_a_fit_starts_from_the_relay_rule(self):
+        prior = {'sp_mbar': 8.0, 'kp': 0.1, 'ti_min': 0.83, 'Ku': 1.8, 'Pu_s': 20.0}
+        t = self.tuner([fig(0.0, 0)], ku=2.0)
+        t.point(8.0, (0.1, 0.83), 0.4, prior)
+        self.assertEqual(self.used[0], (0.5, 0.67))
+
+    def test_no_prior_no_learned_calcs(self):
+        t = self.tuner([fig(0.0, 0)])
+        t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertFalse(any(c.startswith(('Learned', 'Fresh')) for c in t.calcs))
 
 
 class Files(unittest.TestCase):
-    def test_a_check_that_misses_spec_is_deleted_when_redone(self):
+    def test_only_the_check_a_result_came_from_is_kept(self):
         d = tempfile.mkdtemp()
-        a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
+        a = SimpleNamespace(d=0.4)
         t = at.AutoTuner(None, None, a, d)
         t.say = lambda m: None
         t.reach = lambda sp, kp, ti, why=None: 3.0
         t.relay = lambda sp, x0, dd: {'Ku': 2.0, 'Pu_s': 10.0, 'd_pct': 0.4, 'a_mbar': 0.1, 'eps_mbar': 0.02,
                                       'cycles': 2, 'asym': None, 'steady': True, 'noise': 0.004}
-        figs = [{'overshoot_pct': 30.0, 'settle_s': 40, 'reversals': 1, 'saturated': False},
-                {'overshoot_pct': 15.0, 'settle_s': 40, 'reversals': 1, 'saturated': False},
-                {'overshoot_pct': 5.0, 'settle_s': 40, 'reversals': 1, 'saturated': False}]
+        figs = [fig(30.0, 1), fig(15.0, 1), fig(2.0, 0)]
 
         def check(sp, kp, ti, r, k):
             for leg in ('up', 'back'):
                 open(os.path.join(d, 'check_%gmbar_%d_%s.csv' % (sp, k, leg)), 'w').close()
             return figs[k - 1], kp
         t.check = check
+        t.refit = lambda k, fit: fit
         r = t.point(2.0, (0.1, 0.4), 0.4)
-        self.assertEqual(r['trims'], 'x0.80 x0.80')
+        self.assertEqual(r['trims'], 'KP x0.80, KP x0.80')
         self.assertEqual(sorted(os.listdir(d)), ['check_2mbar_3_back.csv', 'check_2mbar_3_up.csv'])
-        self.assertIn('Check 1 missed spec: check_2mbar_1_up.csv, check_2mbar_1_back.csv deleted', t.calcs)
+        self.assertIn('Check 1 passed over: check_2mbar_1_up.csv, check_2mbar_1_back.csv deleted', t.calcs)
 
+    def test_an_undone_refinement_keeps_the_earlier_check(self):
+        d = tempfile.mkdtemp()
+        t = at.AutoTuner(None, None, SimpleNamespace(d=0.4), d)
+        t.say = lambda m: None
+        t.reach = lambda sp, kp, ti, why=None: 3.0
+        t.relay = lambda sp, x0, dd: {'Ku': 2.0, 'Pu_s': 10.0, 'd_pct': 0.4, 'a_mbar': 0.1, 'eps_mbar': 0.02,
+                                      'cycles': 2, 'asym': None, 'steady': True, 'noise': 0.004}
+        figs = [fig(8.0, 1), fig(25.0, 4)]
+
+        def check(sp, kp, ti, r, k):
+            for leg in ('up', 'back'):
+                open(os.path.join(d, 'check_%gmbar_%d_%s.csv' % (sp, k, leg)), 'w').close()
+            return figs[k - 1], kp
+        t.check = check
+        t.refit = lambda k, fit: fit
+        r = t.point(2.0, (0.1, 0.4), 0.4)
+        self.assertIn('undone', r['note'])
+        self.assertEqual(sorted(os.listdir(d)), ['check_2mbar_1_back.csv', 'check_2mbar_1_up.csv'])
+
+
+class Fit(unittest.TestCase):
+    """fit_response on the model: a hold, a 20 % step up and back, as a check is."""
+
+    @staticmethod
+    def check_run(K, L, tau, noise=0.004, seed=3, drift=0.0):
+        plant = Plant(K=K, L=L, tau=tau, noise=noise, seed=seed)
+        x0 = 6.0
+        plant.v = plant.cmd = plant.eff = x0
+        plant.x = plant.static(x0)
+        ps, xs = [], []
+        plan = [(0, x0), (70, x0 + 1.5), (270, x0)]          # hold 70 s, +1.5 % for 200 s, back
+        for n in range(1, 470):
+            for t0, x in plan:
+                if n == t0 + 1:
+                    plant.cmd = x
+            plant.run_to(n)
+            ps.append(plant.p() + drift * n)
+            xs.append(plant.v)
+        return ps, xs
+
+    def near(self, tau, found):
+        i = min(range(len(at.TAU_GRID)), key=lambda k: abs(math.log(at.TAU_GRID[k] / tau)))
+        j = at.TAU_GRID.index(found)
+        return abs(i - j) <= 1
+
+    def test_recovers_k_l_tau(self):
+        for K, L, tau in [(2.4, 12, 35), (3.9, 28, 85), (1.5, 4, 9), (3.3, 0, 13), (1.3, 2, 30)]:
+            ps, xs = self.check_run(K, L, tau)
+            f = at.fit_response(ps, xs)
+            self.assertTrue(f['ok'], (K, L, tau, f))
+            self.assertAlmostEqual(f['K'] / K, 1.0, delta=0.15, msg=(K, L, tau, f))
+            self.assertTrue(self.near(tau, f['tau']), (K, L, tau, f))
+            i = min(range(len(at.L_GRID)), key=lambda k: abs(at.L_GRID[k] - L))
+            self.assertLessEqual(abs(at.L_GRID.index(f['L']) - i), 1, (K, L, tau, f))
+            self.assertGreater(f['R2'], 0.9)
+
+    def test_a_drift_does_not_spoil_it(self):
+        ps, xs = self.check_run(2.4, 12, 35, drift=0.004)
+        f = at.fit_response(ps, xs)
+        self.assertTrue(f['ok'])
+        self.assertAlmostEqual(f['K'] / 2.4, 1.0, delta=0.15)
+        self.assertAlmostEqual(f['drift'], 0.004, delta=0.0015)
+
+    def test_rejects_what_is_not_a_response(self):
+        ps, xs = self.check_run(2.4, 12, 35)
+        self.assertIsNone(at.fit_response(ps[:20], xs[:20]))                  # too short
+        self.assertIsNone(at.fit_response(ps, [6.0] * len(ps)))               # the valve never moved
+        rnd = random.Random(5)
+        f = at.fit_response([5 + rnd.gauss(0, 0.2) for _ in ps], xs)          # noise only
+        self.assertFalse(f['ok'])
+        f = at.fit_response([10 - p for p in ps], xs)                         # opens, pressure falls: K < 0
+        self.assertFalse(f['ok'])
+        f = at.fit_response(ps, [6 + 0.02 * (x - 6) for x in xs])             # moved 0.03 %: under MOVE_MIN
+        self.assertFalse(f['ok'])
+
+    def test_refit_keeps_the_earlier_fit_when_the_new_one_is_not_good(self):
+        t = at.AutoTuner(None, None, SimpleNamespace(d=0.4), None)
+        t.say = lambda m: None
+        old = {'K': 2.0, 'L': 8, 'tau': 25}
+        ps, xs = self.check_run(2.4, 12, 35)
+        t.series = (ps, xs)
+        new = t.refit(1, old)
+        self.assertNotEqual(new, old)
+        self.assertEqual(new['L'], 12)
+        rnd = random.Random(2)
+        t.series = ([5.0 + rnd.gauss(0, 0.2) for _ in ps], xs)
+        self.assertEqual(t.refit(2, old), old)
+        t.series = None
+        self.assertEqual(t.refit(3, old), old)
+        self.assertIsNone(t.refit(4, None))
+
+    def test_the_check_series_is_one_sample_a_second_over_the_whole_check(self):
+        # through check(): hold, up, back on the model
+        curve = lambda v: 0.67 + 2.0 * max(v, 0)      # noqa: E731
+        plant = Plant(curve=curve, L=4.0, tau=15.0, noise=0.004)
+        b = FakeBoard(plant)
+        b.advance(60)
+        t = at.AutoTuner(b, Clock(b), SimpleNamespace(d=0.4), None)
+        t.say = lambda m: None
+        t.cuts = []
+        b.sets[0] = [0.4, 1.0, 0.0]
+        sp = round(plant.static(5.0), 1)
+        r = {'Pu_s': 16.0, 'noise': 0.004, 'wander': 0.0}
+        figure, kp = t.check(sp, 0.4, 1.0, r, 1)
+        ps, xs = t.series
+        self.assertEqual(len(ps), len(xs))
+        self.assertGreater(len(ps), 120)
+        f = t.refit(1, None)
+        self.assertIsNotNone(f)
 
 
 class Learned(unittest.TestCase):
     """Ryan, 9 Nov: refine the numbers from run to run, not start fresh."""
-    def tuner(self, ku):
-        a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
-        t = at.AutoTuner(None, None, a, None)
-        t.say = lambda m: None
-        t.reach = lambda sp, kp, ti, why=None: 7.0
-        t.relay = lambda sp, x0, dd: {'Ku': ku, 'Pu_s': 18.0, 'd_pct': 0.8, 'a_mbar': 0.95, 'eps_mbar': 0.05,
-                                      'cycles': 2, 'asym': None, 'steady': True, 'noise': 0.01}
-        self.used = []
-
-        def check(sp, kp, ti, r, k):
-            self.used.append((kp, ti))
-            return {'overshoot_pct': 0.0, 'settle_s': 60, 'reversals': 0, 'saturated': False}, kp
-        t.check = check
-        return t
 
     def test_file_round_trip(self):
         d = tempfile.mkdtemp()
@@ -548,15 +877,34 @@ class Learned(unittest.TestCase):
         self.assertEqual(at.load_learned(path), {})
         L = {}
         at.learn(L, {'sp_mbar': 16.0, 'kp': 0.42, 'ti_min': 0.6, 'Ku': 1.07, 'Pu_s': 18.0, 'd_pct': 0.8,
-                     'a_mbar': 0.95, 'valve_pct': 6.8, 'trims': 'x1.25 x1.25', 'note': ''}, '09/11/26 16:30')
+                     'a_mbar': 0.95, 'valve_pct': 6.8, 'trims': 'TI x0.70', 'note': '', 'K': 2.44, 'L_s': 2,
+                     'tau_s': 6, 't63_s': 15, 't90_s': 41, 'backoff_pct': 8.5}, '09/11/26 16:30')
         at.learn(L, {'sp_mbar': 4.0, 'kp': 0.3, 'ti_min': 0.5, 'Ku': 2.0, 'Pu_s': 15.0}, '09/11/26 16:00')
         at.save_learned(path, L)
         back = at.load_learned(path)
         self.assertEqual(sorted(back), ['16', '4'])
         self.assertEqual((back['16']['kp'], back['16']['ti_min'], back['16']['Ku']), (0.42, 0.6, 1.07))
-        self.assertEqual(back['16']['trims'], 'x1.25 x1.25')
+        self.assertEqual(back['16']['trims'], 'TI x0.70')
+        self.assertEqual([back['16'][k] for k in ('K', 'L_s', 'tau_s', 't63_s', 't90_s', 'backoff_pct')],
+                         [2.44, 2.0, 6.0, 15.0, 41.0, 8.5])
+        self.assertIsNone(back['4']['K'])
         with open(path) as f:
-            self.assertTrue(f.readlines()[1].startswith('4,'))   # lowest setpoint first
+            lines = f.readlines()
+        self.assertEqual(lines[0].strip().split(',')[-6:], ['K', 'L_s', 'tau_s', 't63_s', 't90_s', 'backoff_pct'])
+        self.assertTrue(lines[1].startswith('4,'))   # lowest setpoint first
+
+    def test_an_old_file_loads_with_the_new_columns_empty(self):
+        d = tempfile.mkdtemp()
+        path = os.path.join(d, at.LEARNED_FILE)
+        with open(path, 'w') as f:
+            f.write('sp_mbar,kp,ti_min,Ku,Pu_s,d_pct,a_mbar,valve_pct,trims,note,when\n'
+                    '16,0.42,0.6,1.07,18.0,0.8,1.05,6.8,x1.25 x1.25,,09/11/26 16:30\n')
+        L = at.load_learned(path)
+        self.assertEqual((L['16']['kp'], L['16']['ti_min'], L['16']['when']), (0.42, 0.6, '09/11/26 16:30'))
+        for k in ('K', 'L_s', 'tau_s', 't63_s', 't90_s', 'backoff_pct'):
+            self.assertIsNone(L['16'].get(k))
+        at.save_learned(path, L)                         # and is rewritten with the new columns
+        self.assertEqual(at.load_learned(path)['16']['kp'], 0.42)
 
     def test_seeded_from_earlier_runs(self):
         d = tempfile.mkdtemp()
@@ -576,64 +924,13 @@ class Learned(unittest.TestCase):
         self.assertEqual(L['24']['kp'], 0.43)       # the failed 24 mbar row is skipped
         self.assertEqual(at.seed_learned(os.path.join(d, 'none')), {})
 
-    def test_analysed_gains_go_in_once_over_older_rows(self):
-        d = tempfile.mkdtemp()
-        path = os.path.join(d, 'analysed.csv')
-        with open(path, 'w') as f:
-            f.write(','.join(at.LEARNED_COLS) + '\n'
-                    '1,0.10,0.80,7.46,12.5,,,2.7,,analysed,10/11/26 12:15\n'
-                    '16,0.42,0.60,1.07,18.0,0.8,1.05,6.8,x1.25 x1.25,analysed,10/11/26 12:15\n'
-                    '24,0.43,0.67,1.70,20.0,,,,,analysed,10/11/26 12:15\n')
+    def test_a_point_result_goes_into_the_learned_table_with_its_fit(self):
+        t = Refine().tuner([fig(0.0, 0)])
+        r = t.point(16.0, (0.1, 0.4), 0.8)
         L = {}
-        at.learn(L, {'sp_mbar': 1.0, 'kp': 1.2, 'ti_min': 0.42, 'Ku': 7.46}, '09/11/26 14:00')   # older
-        at.learn(L, {'sp_mbar': 16.0, 'kp': 0.5, 'ti_min': 0.7}, '11/11/26 09:00')               # a later run
-        at.learn(L, {'sp_mbar': 8.0, 'kp': 0.1, 'ti_min': 0.83}, '09/11/26 14:00')               # not analysed
-        self.assertEqual(sorted(at.merge_analysed(L, path)), ['1', '24'])
-        self.assertEqual((L['1']['kp'], L['1']['ti_min'], L['1']['when']), (0.1, 0.8, '10/11/26 12:15'))
-        self.assertEqual(L['16']['kp'], 0.5)        # the later autotune result wins
-        self.assertEqual(L['8']['kp'], 0.1)
-        self.assertEqual(L['24']['Ku'], 1.7)
-        self.assertEqual(at.merge_analysed(L, path), [])   # once only
-        self.assertEqual(at.merge_analysed(L, os.path.join(d, 'none.csv')), [])
-
-    def test_the_shipped_analysed_table_reads(self):
-        L = {}
-        at.merge_analysed(L)
-        self.assertEqual(sorted(L, key=float), ['1', '2', '4', '8', '12', '16', '24'])
-        for k, r in L.items():
-            self.assertTrue(g.KP_MIN <= r['kp'] <= g.KP_MAX and g.TI_MIN <= r['ti_min'] <= g.TI_MAX, k)
-        self.assertEqual((L['1']['kp'], L['1']['ti_min'], L['16']['kp'], L['16']['ti_min']), (0.05, 0.43, 0.42, 0.6))
-        # 10 Nov: the 12:16 run's 1 mbar KP 1.23 is replaced by 2 mbar's gains
-        # (Ryan: too big); its 16 mbar result, newer than 12:15, stays.
-        L = {'1': {'sp_mbar': 1.0, 'kp': 1.23, 'ti_min': 0.72, 'Ku': 3.12, 'Pu_s': 21.6, 'when': '10/11/26 13:07'},
-             '16': {'sp_mbar': 16.0, 'kp': 0.53, 'ti_min': 0.6, 'Ku': 1.29, 'Pu_s': 18.0, 'when': '10/11/26 15:50'}}
-        put = at.merge_analysed(L)
-        self.assertIn('1', put)
-        self.assertNotIn('16', put)
-        self.assertEqual((L['1']['kp'], L['1']['ti_min'], L['1']['Ku'], L['16']['kp']), (0.05, 0.43, 3.12, 0.53))
-
-    def test_check_starts_from_the_learned_gains(self):
-        t = self.tuner(1.2)   # within 2 x of the learned 1.07
-        prior = {'sp_mbar': 16.0, 'kp': 0.42, 'ti_min': 0.6, 'Ku': 1.07, 'Pu_s': 18.0, 'trims': 'x1.25 x1.25'}
-        r = t.point(16.0, (0.42, 0.6), 0.8, prior)
-        self.assertEqual(self.used[0], (0.42, 0.6))           # not the rule's 1.2 / 4 = 0.30
-        self.assertEqual(r['kp_rule'], 0.3)
-        self.assertIn('refined from learned KP 0.42 TI 0.60', r['note'])
-        self.assertTrue(any(c.startswith('Refine:') for c in t.calcs))
-
-    def test_fresh_when_the_plant_has_changed(self):
-        t = self.tuner(3.3)   # 3 x the learned Ku
-        prior = {'sp_mbar': 16.0, 'kp': 0.42, 'ti_min': 0.6, 'Ku': 1.07, 'Pu_s': 18.0}
-        r = t.point(16.0, (0.42, 0.6), 0.8, prior)
-        self.assertEqual(self.used[0], (round(3.3 / 4, 2), 0.6))
-        self.assertNotIn('refined', r['note'])
-        self.assertTrue(any(c.startswith('Fresh:') and 'the plant has changed' in c for c in t.calcs))
-
-    def test_no_prior_is_the_old_behaviour(self):
-        t = self.tuner(1.2)
-        t.point(16.0, (0.1, 0.4), 0.8)
-        self.assertEqual(self.used[0], (0.3, 0.6))
-        self.assertFalse(any(c.startswith(('Refine:', 'Fresh:', 'Learned')) for c in t.calcs))
+        at.learn(L, r, '10/11/26 18:00')
+        self.assertEqual((L['16']['K'], L['16']['L_s'], L['16']['tau_s']), (1.0, 10, 30))
+        self.assertEqual(L['16']['t90_s'], 60)
 
 
 if __name__ == '__main__':

@@ -1,8 +1,0 @@
-sp_mbar,kp,ti_min,Ku,Pu_s,d_pct,a_mbar,valve_pct,trims,note,when
-1,0.05,0.43,3.12,21.6,,,2.4,,analysed from the bench logs: the 10 Nov 12:16 run learned KP 1.23 TI 0.72 here but set 1 runs to 10 mbar where the valve is about 6 times steeper at 2 mbar (Ryan 10 Nov: too big); 2 mbar's gains with this point's Ku and Pu,10/11/26 16:45
-2,0.10,0.80,,,,,3.3,,analysed from the bench logs: no relay result yet (the pressure ran off); the low band's gains,10/11/26 12:15
-4,0.10,0.80,0.68,8.0,,,3.2,,analysed from the bench logs: the autotune cut KP to 0.04 on the pressure's own wander (0.3 mbar with the valve still); the low band's gains,10/11/26 12:15
-8,0.10,0.83,0.61,25.0,,,3.7,,analysed from the bench logs: the 9 Nov autotune result,10/11/26 12:15
-12,0.80,0.94,3.2,28.0,,,,,analysed from the bench logs: the 9 Nov autotune result,10/11/26 12:15
-16,0.42,0.60,1.07,18.0,0.8,1.05,6.8,x1.25 x1.25,analysed from the bench logs: Ku / 4 = 0.27; three slow checks with no overshoot trimmed it up,10/11/26 12:15
-24,0.43,0.67,1.70,20.0,1.0,0.8,10.7,,analysed from the bench logs: Ku / 4 and 2 Pu from the relay; the checks were cut short (provisional),10/11/26 12:15
