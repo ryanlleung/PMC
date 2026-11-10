@@ -602,7 +602,15 @@ class Learned(unittest.TestCase):
         self.assertEqual(sorted(L, key=float), ['1', '2', '4', '8', '12', '16', '24'])
         for k, r in L.items():
             self.assertTrue(g.KP_MIN <= r['kp'] <= g.KP_MAX and g.TI_MIN <= r['ti_min'] <= g.TI_MAX, k)
-        self.assertEqual((L['1']['kp'], L['16']['kp'], L['16']['ti_min']), (0.1, 0.42, 0.6))
+        self.assertEqual((L['1']['kp'], L['1']['ti_min'], L['16']['kp'], L['16']['ti_min']), (0.05, 0.43, 0.42, 0.6))
+        # 10 Nov: the 12:16 run's 1 mbar KP 1.23 is replaced by 2 mbar's gains
+        # (Ryan: too big); its 16 mbar result, newer than 12:15, stays.
+        L = {'1': {'sp_mbar': 1.0, 'kp': 1.23, 'ti_min': 0.72, 'Ku': 3.12, 'Pu_s': 21.6, 'when': '10/11/26 13:07'},
+             '16': {'sp_mbar': 16.0, 'kp': 0.53, 'ti_min': 0.6, 'Ku': 1.29, 'Pu_s': 18.0, 'when': '10/11/26 15:50'}}
+        put = at.merge_analysed(L)
+        self.assertIn('1', put)
+        self.assertNotIn('16', put)
+        self.assertEqual((L['1']['kp'], L['1']['ti_min'], L['1']['Ku'], L['16']['kp']), (0.05, 0.43, 3.12, 0.53))
 
     def test_check_starts_from_the_learned_gains(self):
         t = self.tuner(1.2)   # within 2 x of the learned 1.07
