@@ -2,7 +2,8 @@
 """PID autotune for the board's PID table, run from a PC over the text port.
 
 The control test GUI (tools/pmc-gui) runs it from its Gains tab; this file
-holds the sequence so it can be tested on a model without a board.
+holds the sequence so it can be tested on a model without a board. It also
+holds the text-port link and clock the GUI uses.
 
 For each test point, in the order given (the GUI: as typed, 2 4 8 12 16 24 48 mbar by default):
   1. Reach: AUTO at the point with safe gains until the pressure holds; the
@@ -14,12 +15,23 @@ For each test point, in the order given (the GUI: as typed, 2 4 8 12 16 24 48 mb
      gain Ku (the KP at which AUTO would oscillate) and its period Pu, with
      no curve fit and no settled baseline. d grows when nothing crosses and
      shrinks when the swing is too big.
-  3. Gains: KP = Ku / 4 (a margin of about 2 in plant gain before anything
-     rings), TI = 2 Pu, KD 0.
-  4. Check: AUTO with those gains, setpoint 20 % up and back. Overshoot over
-     10 % or more than two reversals: KP x 0.8; no overshoot and slower than
-     6 Pu to settle: KP x 1.25. At most two trims up, and none after a trim
-     down; trims down go on until the check passes (at most MAX_CUTS).
+  3. First gains. With a learned fit of the cryostat's response (K, L, tau)
+     for this point: L_eff = max(L, Pu / 4), TI = min(max(tau, 2.5 L_eff),
+     20 L_eff), KP = min(TI / (5 K L_eff), Ku / 3), KD 0. Without one:
+     KP = Ku / 4, TI = 2 Pu.
+  4. Check, then refine, up to four times. Check: AUTO with those gains,
+     setpoint 20 % up and back. After every check the pressure is fitted to
+     the valve over that check's samples,
+         p(t) = c + drift x t + K x lag_tau( valve(t - L) ),
+     on a grid of L and tau, and the fit is kept when it is good. The check
+     is judged on overshoot and reversals, and on the shape of the answer:
+     the seconds to 63 % and 90 % of the step, how far the valve backs off
+     before 90 %, and how long the pressure sags under the setpoint with the
+     valve still. The first rule that applies is applied (refine_rule):
+     too many reversals or a watchdog cut, KP x 0.7; overshoot, KP x 0.8; a
+     long tail with the valve backing off, TI x 0.7; slow, TI x 0.8. KP is
+     never raised. A refinement that makes the check worse is undone and
+     ends the refinements.
 Whenever AUTO runs (reaching a point, holding it, the check steps), a
 watchdog looks for a sustained oscillation: two full cycles in a row (four
 swings), each swing more than 30 % of the setpoint. It then cuts KP at once (x 0.5, or
@@ -27,22 +39,20 @@ x 0.25 when the swing is larger than the setpoint itself) with PID SET and
 carries on with the lower gain (Ryan, 9 Nov: "make sure it tunes down the
 gains when it oscillates like crazy"; at 2 mbar the 1 mbar gains swung the
 pressure 1 to 10 mbar every 14 s).
-Then the three PID table sets are the geometric means of the rows in each
-band (below B1, B1 to B2, above B2; 6 and 20 mbar by default).
+Then the three PID table sets come from the rows in each band (below B1, B1
+to B2, above B2; 6 and 14 mbar by default): the lowest KP of the rows in the
+band and the geometric mean of their TIs.
 
 Learned gains (Ryan, 9 Nov: "it should refine the numbers rather than
-starting fresh every time"): each point's result is kept in
-autotune-learned.csv in the log folder. On the next run a point with a
-learned row reaches its setpoint with its own learned gains, sizes the relay
-step from its learned Ku, and starts the check from its learned KP and TI
-rather than Ku / 4 and 2 Pu, so the trims carry on from run to run. If the
-new relay test's Ku is more than LEARNED_AGREE times off the learned one the
-plant has changed, and that point starts fresh. Fresh ignores the file (its
-results still go in it). With no learned file yet, it is built from the
-results.csv of the earlier autotune runs in the same log folder (newest per
-setpoint), so runs made before learning existed count too. The gains worked
-out by hand from the bench logs (autotune-analysed.csv beside this file) go
-in once, over any older learned row (merge_analysed).
+starting fresh every time"): each point's result, with the fit it ended on,
+is kept in autotune-learned.csv in the log folder. On the next run a point
+with a learned row reaches its setpoint with its own learned gains, sizes
+the relay step from its learned Ku and, when the row has a fit, starts the
+check from the first-gains rule on that fit. If the new relay test's Ku is
+more than LEARNED_AGREE times off the learned one the plant has changed, and
+that point starts fresh. Fresh ignores the file (its results still go in
+it). With no learned file yet, it is built from the results.csv of the
+earlier autotune runs in the same log folder (newest per setpoint).
 
 While it runs, the PID table is Off and set 1 carries the gains under test
 (PID SET); at the end set 1, the PID table, the setpoint and the mode are put
@@ -56,13 +66,17 @@ import cmath
 import csv
 import math
 import os
+import socket
 import time
 
-import pmc_gains
-from pmc_gains import KP_MIN, KP_MAX, TI_MIN, TI_MAX, Refused, value
+TCP_PORT = 8888
+
+# Firmware limits for KP and TI (cfg.c tune_lo/tune_hi, two decimals).
+KP_MIN, KP_MAX = 0.01, 100.0
+TI_MIN, TI_MAX = 0.01, 100.0
 
 POINTS = [1, 2, 4, 8, 12, 16, 24, 48]
-B1, B2, HYST = 6.0, 20.0, 15
+B1, B2, HYST = 6.0, 14.0, 10
 
 # Relay test limits.
 D_MIN, D_MAX = 0.1, 5.0        # valve half swing, %
@@ -75,16 +89,39 @@ D_CHANGES = 4                  # most changes of d in one test
 SHIFTS = 3                     # most moves of x0 when nothing crosses
 NOISE_S = 40                   # MANUAL at x0 first, for the noise
 
+# First gains without a fit: the old relay rule.
+FIRST_DIV, FIRST_TI_PU = 4.0, 2.0   # KP = Ku / 4, TI = 2 Pu
+
 # Check step.
 CHECK_UP = 0.20                # setpoint up by this fraction, then back
 SETTLED_S = 60
-OVERSHOOT_MAX = 10.0           # % of the step
+OVERSHOOT_MAX = 5.0            # % of the step, beyond the wander
 REVERSALS_MAX = 2
-SLOW_PU = 6.0                  # settled later than this many Pu = slow
-TRIM_DOWN, TRIM_UP = 0.8, 1.25
 WANDER_MAX = 0.25              # the wander allowed for in a check: at most this fraction of the step
-USELESS = 0.9                  # a cut whose check is not 10 % better did not help; two such end the cuts
 RUNOFF_S = 120                 # after a run-off, how long the pressure has to come back
+
+# Fit of the response to the valve (fit_response).
+L_GRID = [0, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64]                       # dead time, s
+TAU_GRID = [2, 4, 6, 9, 13, 18, 25, 35, 50, 70, 100, 140, 200]         # lag, s
+R2_MIN = 0.8                   # a fit is kept when it explains this much
+MOVE_MIN = 0.05                # ...and the valve moved more than this, %, in the window
+KU_CAP = 3.0                   # KP never over Ku / this
+
+# Refine rules (refine_rule).
+MAX_REFINES = 4                # most refinements at one point
+R1_KP = 0.7                    # too many reversals, or the watchdog cut KP
+R2_KP = 0.8                    # overshoot
+R3_TI = 0.7                    # a tail: the valve backs off, then opens slowly again
+R4_TI = 0.8                    # slow with no overshoot or back-off
+TAIL_RATIO = 4.0               # t90 over this times t63 = a tail
+BACKOFF_MAX = 10.0             # % of the valve's move
+SLOW_RATIO = 8.0               # t90 over this times (L_eff + tau) = slow
+NO_OVERSHOOT = 1.0             # under this % of the step counts as none
+TI_MIN_LEFF = 2.5              # TI never under this times L_eff
+KI_LEFF = 4.0                  # integral gain KP / TI never over 1 / (this x K x L_eff)
+VALVE_STILL = 0.01             # the valve moved less than this, %, in 30 s = not moving
+WORSE_T90 = 1.5                # a check this many times slower to 90 % is worse
+WORSE_BAD = 1.15               # ...or this many times as far over the overshoot and reversal limits
 
 # Reaching a point in AUTO.
 REACH_MAX_S = 600
@@ -97,11 +134,114 @@ WILD_CYCLES = 2                # ...so many cycles in a row: oscillating
 WILD_SPAN_S = 400              # ...all within this long
 WILD_CUT, WILD_CUT_BIG = 0.5, 0.25   # KP x this; x BIG when the swing is larger than the setpoint
 LEARNED_FILE = 'autotune-learned.csv'
-LEARNED_COLS = ['sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valve_pct', 'trims', 'note', 'when']
-LEARNED_AGREE = 2.0            # learned Ku within this factor of the new relay's: refine from it
-# Gains worked out from the bench logs, merged into the learned file (merge_analysed).
-ANALYSED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'autotune-analysed.csv')
-MAX_CUTS = 6                   # most KP cuts at one point (watchdog and check trims down together)
+LEARNED_COLS = ['sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valve_pct', 'trims', 'note', 'when',
+                'K', 'L_s', 'tau_s', 't63_s', 't90_s', 'backoff_pct']
+LEARNED_NUM = ('sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valve_pct',
+               'K', 'L_s', 'tau_s', 't63_s', 't90_s', 'backoff_pct')
+LEARNED_AGREE = 2.0            # learned Ku within this factor of the new relay's: use its fit
+MAX_CUTS = 6                   # most KP cuts by the watchdog while reaching or holding one point
+
+
+# ---------------------------------------------------------------------------
+# The text port, the clock and the sampling the sequence stands on.
+# ---------------------------------------------------------------------------
+
+class Refused(Exception):
+    """The board answered ERR."""
+
+
+class Link:
+    def __init__(self, host, timeout=10.0):
+        h, _, p = host.partition(':')
+        self.addr = (h, int(p) if p else TCP_PORT)
+        self.timeout = timeout
+        self.sock = None
+        self.buf = b''
+
+    def connect(self):
+        self.close()
+        self.sock = socket.create_connection(self.addr, timeout=self.timeout)
+        self.buf = b''
+
+    def close(self):
+        if self.sock:
+            try:
+                self.sock.close()
+            except OSError:
+                pass
+        self.sock = None
+
+    def ask(self, line):
+        """Send one line, return the reply's parts; raise Refused on ERR."""
+        if not self.sock:
+            self.connect()
+        self.sock.sendall(line.encode('ascii') + b'\r\n')
+        while b'\n' not in self.buf:
+            d = self.sock.recv(4096)
+            if not d:
+                raise ConnectionError('board closed the connection')
+            self.buf += d
+        reply, _, self.buf = self.buf.partition(b'\n')
+        parts = reply.decode('latin1').strip().split(';')
+        if parts and parts[0].startswith('ERR'):
+            raise Refused(parts[0])
+        return parts
+
+    def do(self, cmd):
+        """A set command (silent when accepted), followed by MODE? so there is a reply."""
+        return self.ask(cmd + ';MODE?')
+
+
+def value(part, head):
+    """'PRES 2.913 mbar' -> 2.913; 'PRES NONE' -> None."""
+    if not part.startswith(head):
+        raise ValueError(f'expected {head}, got {part!r}')
+    v = part[len(head):].split()
+    if not v or v[0] == 'NONE':
+        return None
+    return float(v[0])
+
+
+class Clock:
+    """Board seconds; --speed > 1 only for a simulator run faster than real time."""
+    def __init__(self, speed=1.0):
+        self.speed = speed
+        self.t0 = time.monotonic()
+
+    def now(self):
+        return (time.monotonic() - self.t0) * self.speed
+
+    def wait_until(self, t):
+        dt = (t - self.now()) / self.speed
+        if dt > 0:
+            time.sleep(dt)
+
+
+class Tuner:
+    def __init__(self, link, clock, a, log_dir):
+        self.link, self.clock, self.a, self.log_dir = link, clock, a, log_dir
+
+    def say(self, msg):
+        print(f'[{self.clock.now():7.0f} s] {msg}', flush=True)
+
+    def sample(self):
+        p, x, m = self.link.ask('PRES?;VALV?;MODE?')
+        return value(p, 'PRES'), value(x, 'VALV'), m.partition(' ')[2]
+
+    def samples(self, seconds, stop=None):
+        """Read once a board second for up to `seconds`; stop(rows) ends early."""
+        rows, t0 = [], self.clock.now()
+        nxt = t0
+        while True:
+            self.clock.wait_until(nxt)
+            nxt += 1.0
+            p, x, m = self.sample()
+            if p is not None:
+                rows.append((self.clock.now() - t0, p, x, m))
+            if rows and rows[-1][0] >= seconds:
+                return rows
+            if stop and stop(rows):
+                return rows
 
 
 def clip_kp(kp):
@@ -112,8 +252,9 @@ def clip_ti(ti):
     return round(min(max(ti, TI_MIN), TI_MAX), 2)
 
 
-def relay_gains(ku, pu_s, div=4.0, ti_pu=2.0):
-    """KP (% per mbar) and TI (min) from the ultimate gain and period."""
+def relay_gains(ku, pu_s, div=FIRST_DIV, ti_pu=FIRST_TI_PU):
+    """KP (% per mbar) and TI (min) from the ultimate gain and period: the
+    first gains of a point that has no fit yet."""
     return clip_kp(ku / div), clip_ti(ti_pu * pu_s / 60.0)
 
 
@@ -140,6 +281,90 @@ def wander(rows):
     b = sum((t - mt) * (p - mp) for t, p in tp) / vt if vt else 0.0
     res = [p - mp - b * (t - mt) for t, p in tp]
     return (max(res) - min(res)) / 2
+
+
+
+def lag_filter(u, tau):
+    """First-order lag of the samples u (one a second), starting at u[0]."""
+    a = 1.0 - math.exp(-1.0 / tau)
+    y, out = u[0], []
+    for v in u:
+        y += a * (v - y)
+        out.append(y)
+    return out
+
+
+def fit_response(ps, xs):
+    """Fit the pressure to the valve, both one sample a second:
+
+        p(t) = c + drift x t + K x lag_tau( valve(t - L) )
+
+    over the grids L_GRID and TAU_GRID, each pair by least squares in c,
+    drift and K (the normal equations), keeping the pair with the least
+    squared error. Returns {'K' mbar per %, 'L' s, 'tau' s, 'R2', 'drift'
+    mbar per s, 'n', 'ok'} or None with too few samples or a valve that never
+    moved; ok says it is good enough to keep: R2 >= R2_MIN, K > 0 and the
+    valve moved more than MOVE_MIN % in the window. (The delay and the lag
+    commute, so each lag is filtered once and shifted for every L.)"""
+    n = len(ps)
+    if n < 30 or len(xs) != n:
+        return None
+    moved = max(xs) - min(xs)
+    mp = sum(ps) / n
+    tt = [i - (n - 1) / 2.0 for i in range(n)]
+    pc = [p - mp for p in ps]
+    spp = sum(v * v for v in pc)
+    stt = sum(t * t for t in tt)
+    stp = sum(t * v for t, v in zip(tt, pc))
+    if spp <= 0 or moved <= 0:
+        return None
+    best = None
+    for tau in TAU_GRID:
+        y = lag_filter(xs, tau)
+        for L in L_GRID:
+            if L >= n // 2:
+                continue
+            x = [y[0]] * L + y[:n - L] if L else y
+            mx = sum(x) / n
+            xc = [v - mx for v in x]
+            sxx = sum(v * v for v in xc)
+            if sxx <= 1e-12:
+                continue
+            stx = sum(t * v for t, v in zip(tt, xc))
+            sxp = sum(a * b for a, b in zip(xc, pc))
+            det = stt * sxx - stx * stx
+            if det <= 1e-9 * stt * sxx:
+                continue
+            drift = (sxx * stp - stx * sxp) / det
+            k = (stt * sxp - stx * stp) / det
+            sse = spp - drift * stp - k * sxp
+            if best is None or sse < best[0]:
+                best = (sse, k, drift, L, tau)
+    if best is None:
+        return None
+    sse, k, drift, L, tau = best
+    r2 = 1.0 - max(sse, 0.0) / spp
+    return {'K': k, 'L': L, 'tau': tau, 'R2': r2, 'drift': drift, 'n': n, 'moved': moved,
+            'ok': r2 >= R2_MIN and k > 0 and moved > MOVE_MIN}
+
+
+def l_eff(fit, pu_s):
+    """The dead time the loop has to allow for, s: the fit's, but never under
+    a quarter of the relay's period."""
+    return max(fit['L'] if fit else 0.0, pu_s / 4.0)
+
+
+def rule_gains(fit, ku, pu_s):
+    """KP (% per mbar) and TI (min) from a fit {K, L, tau} and the relay
+    test's Ku and Pu:
+        L_eff = max(L, Pu / 4)
+        TI    = min(max(tau, 2.5 L_eff), 20 L_eff)    seconds
+        KP    = min(TI / (5 K L_eff), Ku / 3)
+    KD is 0."""
+    le = l_eff(fit, pu_s)
+    ti_s = min(max(fit['tau'], TI_MIN_LEFF * le), 20.0 * le)
+    kp = min(ti_s / (5.0 * fit['K'] * le), ku / KU_CAP)
+    return clip_kp(kp), clip_ti(ti_s / 60.0)
 
 
 def badness(fig):
@@ -393,10 +618,21 @@ class Wild:
 
 
 def step_figures(rows, p0, p1, band, slack=0.0):
-    """rows [(s from the change, p, x)]: overshoot %, settled at (s, None if
-    not), error reversals after the first crossing, and whether the valve
-    sat at an end (then a slow step is not the gains' fault). Overshoot
-    counts only beyond slack mbar (the pressure's own wander)."""
+    """rows [(s from the change, p, x)]: the figures of one leg of a check.
+
+    overshoot_pct   beyond slack mbar (the pressure's own wander), % of the step
+    settle_s        when it settled in the band for SETTLED_S (None if not)
+    reversals       error reversals after the first crossing
+    t63_s, t90_s    seconds to cover 63 % and 90 % of the step (None if never)
+    backoff_pct     the largest retreat of the valve from its furthest point
+                    before t90 (all of the leg if it never got there), as %
+                    of the valve's whole move in the leg (the furthest it got
+                    from where it started, so never over 100 %)
+    sag_s           the longest stretch, once the pressure has reached the
+                    band, under the band (short of the setpoint, on the way
+                    back down as well as up) with the valve not moving
+                    (under VALVE_STILL % in 30 s)
+    saturated       the valve sat at an end (a slow step is then not the gains' fault)"""
     step = p1 - p0
     ps = [(t, p) for t, p, _ in rows if p is not None]
     if not ps or abs(step) < 1e-6:
@@ -423,37 +659,137 @@ def step_figures(rows, p0, p1, band, slack=0.0):
             side = s
     xs = [x for _, _, x in rows if x is not None]
     over = max(0.0, (peak - 1) * abs(step) - slack)
+    t63 = next((t for t, p in ps if (p - p0) / step >= 0.63), None)
+    t90 = next((t for t, p in ps if (p - p0) / step >= 0.90), None)
+    # The valve's back-off.
+    back = 0.0
+    xt = [(t, x) for t, _, x in rows if x is not None]
+    if len(xt) >= 2:
+        sg = 1 if xt[-1][1] >= xt[0][1] else -1          # the way the valve went
+        move = max((x - xt[0][1]) * sg for _, x in xt)    # its whole move: the furthest it got
+        if move >= MOVE_MIN:
+            far = retreat = None
+            for t, x in xt:
+                if t90 is not None and t > t90:
+                    break
+                if far is None or (x - far) * sg > 0:
+                    far = x
+                retreat = max(retreat or 0.0, (far - x) * sg)
+            back = (retreat or 0.0) / move * 100
+    # The sag: the pressure falling under the setpoint, the valve still.
+    sag, start, reached = 0.0, None, False
+    for i, (t, p, x) in enumerate(rows):
+        if p is None:
+            continue
+        if abs(p - p1) <= band:
+            reached, start = True, None
+            continue
+        short = p < p1 - band                # under the setpoint, on either leg
+        j = max(0, i - 30)
+        still = x is not None and rows[j][2] is not None and abs(x - rows[j][2]) < VALVE_STILL
+        if reached and short and still:
+            start = t if start is None else start
+            sag = max(sag, t - start)
+        else:
+            start = None
     return {'overshoot_pct': round(over / abs(step) * 100, 1), 'settle_s': settle, 'reversals': rev,
+            't63_s': None if t63 is None else round(t63), 't90_s': None if t90 is None else round(t90),
+            'backoff_pct': round(back, 1), 'sag_s': round(sag),
             'saturated': bool(xs) and (max(xs) >= 99.5 or min(xs) <= 0.05)}
 
 
-def trim_rule(fig, pu_s):
-    """KP factor from a check: (factor, why); 1.0 keeps KP."""
+def refine_rule(fig, kp, ti, ku, pu_s, fit):
+    """What to change after a check: the first rule that applies.
+
+      1. more than REVERSALS_MAX reversals, or the watchdog cut KP: KP x 0.7
+         (a watchdog-ended leg: its own cut, x 0.5 or x 0.25, if that is more)
+      2. overshoot over OVERSHOOT_MAX % of the step, on either leg: KP x 0.8
+      3. tail: no overshoot, t90 over 4 x t63 and the valve backing off over
+         10 %: TI x 0.7, KP kept
+      4. slow: no overshoot, no back-off, t90 over 8 x (L_eff + tau): TI x 0.8
+      5. otherwise the check passes.
+
+    Rules 3 and 4 never take TI under 2.5 L_eff (in min) or the integral gain
+    KP / TI over 1 / (4 K L_eff); at the limit the check passes ('limit').
+    KP is never raised, and never over Ku / 3.
+
+    Returns {'kind': 'kp' | 'ti' | 'pass' | 'limit', 'kp', 'ti', 'why', 'f' (the factor), 'note'}."""
+    keep = {'kind': 'pass', 'kp': kp, 'ti': ti, 'why': '', 'note': ''}
     if fig is None:
-        return 1.0, ''
-    if fig.get('wild_pp'):
-        return (WILD_CUT_BIG if fig.get('wild_big') else WILD_CUT,
-                'oscillating (swing %.2f mbar)' % fig['wild_pp'])
-    if fig['overshoot_pct'] > OVERSHOOT_MAX or fig['reversals'] > REVERSALS_MAX:
-        return TRIM_DOWN, 'overshoot %.0f %%, %d reversals' % (fig['overshoot_pct'], fig['reversals'])
-    slow = fig['settle_s'] is None or fig['settle_s'] > SLOW_PU * pu_s
-    if fig['overshoot_pct'] < 1.0 and slow and not fig['saturated']:
-        return TRIM_UP, 'no overshoot and %s' % ('not settled' if fig['settle_s'] is None else
-                                                 'settled in %.0f s (over %d Pu)' % (fig['settle_s'], SLOW_PU))
-    return 1.0, ''
+        return keep
+    le = l_eff(fit, pu_s)
+
+    def cut(f, why):
+        new = clip_kp(min(kp * f, ku / KU_CAP))
+        if new >= kp:
+            return dict(keep, kind='limit', why=why + ', KP already at its lowest', note='KP already at its lowest, still ' + why)
+        return {'kind': 'kp', 'kp': new, 'ti': ti, 'why': why, 'f': f}
+
+    def shorten(f, why):
+        floor = TI_MIN_LEFF * le / 60.0
+        if fit:
+            floor = max(floor, KI_LEFF * fit['K'] * le * kp / 60.0)
+        new = clip_ti(max(ti * f, floor))
+        if new >= ti:
+            return dict(keep, kind='limit', why=why + ', as fast as the cryostat allows', note='as fast as the cryostat allows')
+        return {'kind': 'ti', 'kp': kp, 'ti': new, 'why': why, 'f': f}
+
+    if fig.get('wild_pp') or fig['reversals'] > REVERSALS_MAX or fig.get('cut'):
+        f = R1_KP
+        if fig.get('wild_pp'):
+            f = min(R1_KP, fig.get('wild_cut', 1.0))
+        return cut(f, 'oscillating (swing %.2f mbar)' % fig['wild_pp'] if fig.get('wild_pp') else
+                   '%d reversals' % fig['reversals'] if fig['reversals'] > REVERSALS_MAX else 'the watchdog cut KP')
+    if fig['overshoot_pct'] > OVERSHOOT_MAX:
+        return cut(R2_KP, 'overshoot %.0f %%' % fig['overshoot_pct'])
+    if fig['overshoot_pct'] < NO_OVERSHOOT and not fig['saturated']:
+        t63, t90 = fig.get('t63_s'), fig.get('t90_s')
+        far = float('inf')
+        if t63 is not None and (t90 is None or t90 > TAIL_RATIO * max(t63, 1)) and \
+                fig.get('backoff_pct', 0.0) > BACKOFF_MAX:
+            return shorten(R3_TI, 'a tail: 90 %% in %s s against 63 %% in %d s, the valve backing off %.0f %%' % (
+                '--' if t90 is None else '%d' % t90, t63, fig['backoff_pct']))
+        if fit and fig.get('backoff_pct', 0.0) <= BACKOFF_MAX and \
+                (t90 if t90 is not None else far) > SLOW_RATIO * (le + fit['tau']):
+            return shorten(R4_TI, 'slow: 90 %% in %s s, over %g x (%.0f + %d s)' % (
+                '--' if t90 is None else '%d' % t90, SLOW_RATIO, le, fit['tau']))
+    return keep
 
 
 def worse(a, b):
     """The two legs of a check as one: the worse of each figure."""
     if a is None or b is None:
         return a or b
-    s = None if a['settle_s'] is None or b['settle_s'] is None else max(a['settle_s'], b['settle_s'])
-    out = {'overshoot_pct': max(a['overshoot_pct'], b['overshoot_pct']), 'settle_s': s,
-           'reversals': max(a['reversals'], b['reversals']), 'saturated': a['saturated'] or b['saturated']}
+
+    def mx(k):
+        x, y = a.get(k), b.get(k)
+        return None if x is None or y is None else max(x, y)
+    out = {'overshoot_pct': max(a['overshoot_pct'], b['overshoot_pct']), 'settle_s': mx('settle_s'),
+           'reversals': max(a['reversals'], b['reversals']), 'saturated': a['saturated'] or b['saturated'],
+           't63_s': mx('t63_s'), 't90_s': mx('t90_s'),
+           'backoff_pct': max(a.get('backoff_pct', 0.0), b.get('backoff_pct', 0.0)),
+           'sag_s': max(a.get('sag_s', 0), b.get('sag_s', 0))}
     w = max((x for x in (a, b) if x.get('wild_pp')), key=lambda x: x['wild_pp'], default=None)
     if w:
-        out['wild_pp'], out['wild_big'] = w['wild_pp'], w.get('wild_big', False)
+        out['wild_pp'], out['wild_big'], out['wild_cut'] = w['wild_pp'], w.get('wild_big', False), w.get('wild_cut', 1.0)
     return out
+
+
+def worse_check(new, old):
+    """True when a refinement made the check worse: it oscillates where it did
+    not, it is over the overshoot or reversal limits by WORSE_BAD times as much
+    as the check before, or it takes WORSE_T90 times as long to reach 90 %."""
+    if new is None or old is None:
+        return False
+    if new.get('wild_pp') and not old.get('wild_pp'):
+        return True
+    bn, bo = badness(new), badness(old)
+    if bn > 1.0 and bn > WORSE_BAD * bo:
+        return True
+    tn, to = new.get('t90_s'), old.get('t90_s')
+    if to is not None and (tn is None or tn > WORSE_T90 * max(to, 1)):
+        return True
+    return False
 
 
 def geomean(xs):
@@ -462,13 +798,15 @@ def geomean(xs):
 
 def table_sets(rows, b1=B1, b2=B2):
     """The three PID table sets from the rows: [(set, kp, ti, [points])],
-    kp and ti None where no point fell in that band."""
+    kp and ti None where no point fell in that band. Per band: the lowest KP
+    of the rows in it (so no setpoint in the band gets more KP than it was
+    tuned for) and the geometric mean of their TIs; KD is 0."""
     bands = [lambda s: s < b1, lambda s: b1 <= s < b2, lambda s: s >= b2]
     out = []
     for n, inside in enumerate(bands, 1):
         rs = [r for r in rows if inside(r['sp_mbar'])]
         if rs:
-            out.append((n, clip_kp(geomean([r['kp'] for r in rs])), clip_ti(geomean([r['ti_min'] for r in rs])),
+            out.append((n, clip_kp(min(r['kp'] for r in rs)), clip_ti(geomean([r['ti_min'] for r in rs])),
                         [r['sp_mbar'] for r in rs]))
         else:
             out.append((n, None, None, []))
@@ -482,9 +820,11 @@ def write_lines(sets, b1=B1, b2=B2, h=HYST):
     return lines
 
 
-class AutoTuner(pmc_gains.Tuner):
-    """The sequence on the board, one point at a time. a: div (KP = Ku /
-    div), ti_pu (TI = ti_pu Pu), trims, d (first relay step %)."""
+class AutoTuner(Tuner):
+    """The sequence on the board, one point at a time."""
+
+    series = []     # (pressure, valve) of the check just run, one a second, for the fit
+    held_rows = []  # the samples of the last hold(), for the same
 
     def stage(self, text, phase=None, most=None):
         self.say(text)
@@ -578,6 +918,7 @@ class AutoTuner(pmc_gains.Tuner):
             raise RuntimeError('AUTO still oscillating at %g mbar after %d cuts' % (sp, MAX_CUTS))
         if not rows:
             raise RuntimeError('no pressure reading')
+        self.held_rows = rows
         ok = level(rows)
         span = 60 if ok else 30      # not held: where it was last, nearest to where it would hold
         xs = [r[2] for r in rows if r[0] >= rows[-1][0] - span and r[2] is not None]
@@ -690,9 +1031,10 @@ class AutoTuner(pmc_gains.Tuner):
                 for r in rows:
                     w.writerow(['%.1f' % r[0], '' if r[1] is None else '%.3f' % r[1],
                                 '' if r[2] is None else '%.2f' % r[2], p0, p1])
+        self.leg_rows = rows
         fig = step_figures(rows, p0, p1, band, slack)
         if fig is not None and wd.wild:
-            fig['wild_pp'], fig['wild_big'] = round(wd.pp, 3), wd.pp > p1
+            fig['wild_pp'], fig['wild_big'], fig['wild_cut'] = round(wd.pp, 3), wd.pp > p1, wd.cut()
         return fig
 
     def check(self, sp, kp, ti, r, k):
@@ -714,30 +1056,61 @@ class AutoTuner(pmc_gains.Tuner):
                       'overshoot counted beyond the wander, %.3f mbar (at most %d %% of the step)' % (
                           band, hi - sp, slack, WANDER_MAX * 100))
         most = min(max(12 * r['Pu_s'] + 90, 150), 360)
+        rows = list(self.held_rows)     # the hold, then the two legs: one series for the fit
         legs = []
         for k2, (a, b) in enumerate([(sp, hi), (hi, sp)]):
             self.stage('check %d: setpoint %g -> %g mbar, waiting for it to hold within %.2f mbar for %d s' %
                        (k, a, b, band, SETTLED_S), '%g mbar check %d %s' % (sp, k, 'up' if k2 == 0 else 'back'), most)
             legs.append(self.leg(sp, a, b, band, most, 'check_%gmbar_%d_%s' % (sp, k, 'up' if k2 == 0 else 'back'),
                                  slack))
+            rows += self.leg_rows
             fg = legs[-1]
             if fg:
                 self.calc('Check %d %s %g -> %g mbar (KP %.2f): %s' % (
                     k, 'up' if k2 == 0 else 'back', a, b, kp,
                     'oscillating, ended early (swing %.2f mbar)' % fg['wild_pp'] if fg.get('wild_pp') else
-                    'overshoot %.1f %% (limit %.0f), %s, %d reversals (limit %d)' % (
+                    'overshoot %.1f %% (limit %.0f), %s, %d reversals (limit %d), 63 %% in %s, 90 %% in %s, '
+                    'valve back-off %.0f %%, sag %d s' % (
                         fg['overshoot_pct'], OVERSHOOT_MAX,
                         'not settled' if fg['settle_s'] is None else 'settled in %.0f s' % fg['settle_s'],
-                        fg['reversals'], REVERSALS_MAX)))
+                        fg['reversals'], REVERSALS_MAX,
+                        'not reached' if fg['t63_s'] is None else '%d s' % fg['t63_s'],
+                        'not reached' if fg['t90_s'] is None else '%d s' % fg['t90_s'],
+                        fg['backoff_pct'], fg['sag_s'])))
             if legs[-1] and legs[-1].get('wild_pp'):
                 self.link.do('PRES SP %.1f' % sp)
                 break
+        # One sample a second, the valve held over a missing reading.
+        xs, ps, last = [], [], None
+        for row in rows:
+            if row[1] is None:
+                continue
+            last = row[2] if row[2] is not None else last
+            if last is not None:
+                ps.append(row[1])
+                xs.append(last)
+        self.series = (ps, xs)
         return worse(*legs) if len(legs) == 2 else legs[0], kp
 
+    def refit(self, k, fit):
+        """The check's pressure fitted to its valve (fit_response). Returns the
+        fit to carry on with: the new one when it is good, else `fit`."""
+        ps, xs = self.series if self.series else ([], [])
+        new = fit_response(ps, xs)
+        if new is None:
+            self.calc('Fit after check %d: nothing to fit (%d samples, valve moved %.2f %%), keeping %s' % (
+                k, len(ps), max(xs) - min(xs) if xs else 0.0, 'the earlier fit' if fit else 'none'))
+            return fit
+        self.calc('Fit after check %d (%d samples): K %.2f mbar/%%, L %d s, tau %d s, R2 %.2f, valve moved %.2f %%: %s' % (
+            k, new['n'], new['K'], new['L'], new['tau'], new['R2'], new['moved'],
+            'kept' if new['ok'] else 'not kept (needs R2 %.1f, K > 0, valve moved over %g %%), %s' % (
+                R2_MIN, MOVE_MIN, 'keeping the earlier fit' if fit else 'no fit yet')))
+        return new if new['ok'] else fit
+
     def drop_check(self, sp, k):
-        """Check k missed spec and is run again: its files go at once, so
-        the run folder keeps only the check each result came from (Ryan,
-        9 Nov). The session log still has every sample."""
+        """Check k was passed over (a refinement replaced it, or was undone): its
+        files go, so the run folder keeps only the check each result came
+        from (Ryan, 9 Nov). The session log still has every sample."""
         if not self.log_dir:
             return
         gone = []
@@ -749,118 +1122,137 @@ class AutoTuner(pmc_gains.Tuner):
             except OSError:
                 pass
         if gone:
-            self.calc('Check %d missed spec: %s deleted' % (k, ', '.join(gone)))
+            self.calc('Check %d passed over: %s deleted' % (k, ', '.join(gone)))
 
     def point(self, sp, reach_gains, d, prior=None):
         """One test point: a result row for the table. prior: the point's
-        learned row (load_learned), to refine from."""
+        learned row (load_learned), whose fit gives the first gains."""
         self.calc('%g mbar' % sp)        # a heading line: the setpoint alone
         if prior:
-            self.calc('Learned %s: KP %.2f TI %.2f, Ku %s, Pu %s s%s' % (
+            self.calc('Learned %s: KP %.2f TI %.2f, Ku %s, Pu %s s%s%s' % (
                 prior.get('when') or 'earlier', prior['kp'], prior['ti_min'],
                 '--' if prior.get('Ku') is None else '%.3f' % prior['Ku'],
                 '--' if prior.get('Pu_s') is None else '%.1f' % prior['Pu_s'],
-                ' (trims ' + prior['trims'] + ')' if prior.get('trims') else ''))
+                ', fit K %.2f mbar/%%, L %g s, tau %g s' % (prior['K'], prior['L_s'], prior['tau_s'])
+                if prior.get('K') and prior.get('L_s') is not None and prior.get('tau_s') else ', no fit',
+                ' (changed ' + prior['trims'] + ')' if prior.get('trims') else ''))
         self.cuts = []
         x0 = self.reach(sp, *reach_gains, why='its learned gains' if prior else None)
         reach_cuts, self.cuts = self.cuts, []   # the reach gains are the point before's, not this point's
         r = self.relay(sp, x0, d)
-        kp, ti = relay_gains(r['Ku'], r['Pu_s'], self.a.div, self.a.ti_pu)
-        self.calc('KP = Ku / %g = %.3f / %g = %.2f %%/mbar; TI = %g x Pu = %g x %.1f s = %.0f s = %.2f min' % (
-            self.a.div, r['Ku'], self.a.div, kp, self.a.ti_pu, self.a.ti_pu, r['Pu_s'], self.a.ti_pu * r['Pu_s'], ti))
-        self.say('%g mbar: Ku %.2f %%/mbar, Pu %.1f s (relay %.1f %%, swing %.3f mbar, %d cycles%s) -> KP %.2f TI %.2f'
-                 % (sp, r['Ku'], r['Pu_s'], r['d_pct'], r['a_mbar'], r['cycles'], '' if r['steady'] else ', not steady',
-                    kp, ti))
-        kp0, fig, why, f, ups, downs, k = kp, None, '', 1.0, 0, 0, 0
-        refined = False
-        if prior:
+        ku, pu = r['Ku'], r['Pu_s']
+        self.say('%g mbar: Ku %.2f %%/mbar, Pu %.1f s (relay %.1f %%, swing %.3f mbar, %d cycles%s)'
+                 % (sp, ku, pu, r['d_pct'], r['a_mbar'], r['cycles'], '' if r['steady'] else ', not steady'))
+
+        # First gains: the rule on the learned fit, else Ku / 4 and 2 Pu.
+        fit, first = None, ''
+        if prior and prior.get('K') and prior.get('L_s') is not None and prior.get('tau_s'):
             old = prior.get('Ku')
-            ratio = r['Ku'] / old if old else None
-            if ratio is not None and 1 / LEARNED_AGREE <= ratio <= LEARNED_AGREE:
-                kp, ti, refined = clip_kp(prior['kp']), clip_ti(prior['ti_min']), True
-                self.calc('Refine: the new Ku is %.2f times the learned %.3f (within %g x), so the check starts from '
-                          'the learned KP %.2f TI %.2f, not the rule\'s KP %.2f TI %.2f' % (
-                              ratio, old, LEARNED_AGREE, kp, ti, kp0, relay_gains(r['Ku'], r['Pu_s'], self.a.div,
-                                                                                   self.a.ti_pu)[1]))
+            ratio = ku / old if old else None
+            if ratio is None or 1 / LEARNED_AGREE <= ratio <= LEARNED_AGREE:
+                fit = {'K': prior['K'], 'L': prior['L_s'], 'tau': prior['tau_s']}
             else:
-                self.calc('Fresh: %s, so the check starts from the rule\'s KP %.2f TI %.2f' % (
-                    'no learned Ku' if ratio is None else 'the new Ku is %.2f times the learned %.3f (more than %g x '
-                    'off: the plant has changed)' % (ratio, old, LEARNED_AGREE), kp, ti))
-        scores, useless = [], False
-        # every change of KP at this point is in self.cuts, in order (calm() adds its own)
+                self.calc('Fresh: the new Ku is %.2f times the learned %.3f (more than %g x off: the plant has '
+                          'changed), so the learned fit is not used' % (ratio, old, LEARNED_AGREE))
+        if fit:
+            kp, ti = rule_gains(fit, ku, pu)
+            le = l_eff(fit, pu)
+            ti_s = min(max(fit['tau'], TI_MIN_LEFF * le), 20.0 * le)
+            self.calc('First gains from the learned fit (K %.2f, L %g s, tau %g s): L_eff = max(L, Pu / 4) = max(%g, %.1f) '
+                      '= %.1f s; TI = min(max(tau, 2.5 L_eff), 20 L_eff) = min(max(%g, %.1f), %.0f) = %.0f s = %.2f min; '
+                      'KP = min(TI / (5 K L_eff), Ku / 3) = min(%.0f / (5 x %.2f x %.1f), %.3f / 3) = %.2f %%/mbar' % (
+                          fit['K'], fit['L'], fit['tau'], fit['L'], pu / 4, le, fit['tau'], TI_MIN_LEFF * le,
+                          20 * le, ti_s, ti, ti_s, fit['K'], le, ku, kp))
+            first = 'first gains from the learned fit'
+        else:
+            kp, ti = relay_gains(ku, pu)
+            self.calc('First gains, no fit yet: KP = Ku / %g = %.3f / %g = %.2f %%/mbar; TI = %g x Pu = %g x %.1f s = '
+                      '%.0f s = %.2f min' % (FIRST_DIV, ku, FIRST_DIV, kp, FIRST_TI_PU, FIRST_TI_PU, pu,
+                                             FIRST_TI_PU * pu, ti))
+        self.say('%g mbar: KP %.2f TI %.2f for the first check' % (sp, kp, ti))
+        kp0 = kp
+
+        # Check and refine: after every check the fit is redone, then the first
+        # rule that applies changes KP or TI, until the check passes, a
+        # refinement makes it worse (undone), or MAX_REFINES.
+        steps, k, refines, prev, end_note = [], 0, 0, None, ''
+        fig = None
         while True:
             k += 1
-            fig, kp = self.check(sp, kp, ti, r, k)
-            f, why = trim_rule(fig, r['Pu_s'])
-            if f != 1.0:
-                self.calc('Rule: %s, so KP x %.2f' % (why, f))
-            elif fig:
-                self.calc('Rule: keep KP %.2f. Overshoot %.1f %% (a trim down over %.0f %%), %d reversals (down over %d); '
-                          'a trim up needs under 1 %% overshoot and settling slower than %g Pu = %.0f s%s' % (
-                              kp, fig['overshoot_pct'], OVERSHOOT_MAX, fig['reversals'], REVERSALS_MAX, SLOW_PU,
-                              SLOW_PU * r['Pu_s'], ', or the valve at an end' if fig['saturated'] else ''))
+            self.series = None
+            fig, kp_after = self.check(sp, kp, ti, r, k)
+            if fig is not None and kp_after < kp - 1e-9:
+                fig['cut'] = True            # the watchdog cut KP while the check held
+            kp = kp_after
+            fit = self.refit(k, fit)
             if fig:
-                self.say('%g mbar check %d (KP %.2f): %s' % (
-                    sp, k, kp, 'oscillating, swing %.2f mbar' % fig['wild_pp'] if fig.get('wild_pp') else
-                    'overshoot %.1f %%, %s, %d reversals%s' % (
-                        fig['overshoot_pct'], 'not settled' if fig['settle_s'] is None else
-                        'settled in %.0f s' % fig['settle_s'], fig['reversals'],
-                        ', valve at an end' if fig['saturated'] else '')))
-            # Up at most `trims` times and never after a cut; down until it
-            # passes, MAX_CUTS in all with the watchdog's.
-            downs = sum(1 for c in self.cuts if c.startswith('x0'))
-            scores.append(badness(fig))
-            if f == 1.0:
+                self.say('%g mbar check %d (KP %.2f TI %.2f): %s' % (
+                    sp, k, kp, ti, 'oscillating, swing %.2f mbar' % fig['wild_pp'] if fig.get('wild_pp') else
+                    'overshoot %.1f %%, %d reversals, 63 %% in %s, 90 %% in %s, valve back-off %.0f %%, sag %d s%s' % (
+                        fig['overshoot_pct'], fig['reversals'],
+                        '--' if fig['t63_s'] is None else '%d s' % fig['t63_s'],
+                        '--' if fig['t90_s'] is None else '%d s' % fig['t90_s'],
+                        fig['backoff_pct'], fig['sag_s'], ', valve at an end' if fig['saturated'] else '')))
+            if prev is not None:
+                if worse_check(fig, prev['fig']):
+                    self.calc('Undone: check %d is worse than check %d (overshoot %s against %s %%, %s against %s '
+                              'reversals, 90 %% in %s against %s s), so KP %.2f TI %.2f stays and the refinements end' % (
+                                  k, prev['k'], '--' if not fig else fig['overshoot_pct'], prev['fig']['overshoot_pct'],
+                                  '--' if not fig else fig['reversals'], prev['fig']['reversals'],
+                                  '--' if not fig or fig['t90_s'] is None else fig['t90_s'],
+                                  '--' if prev['fig']['t90_s'] is None else prev['fig']['t90_s'], prev['kp'], prev['ti']))
+                    self.drop_check(sp, k)
+                    kp, ti, fig = prev['kp'], prev['ti'], prev['fig']
+                    end_note = '%s made the check worse and was undone' % steps.pop()
+                    break
+                self.drop_check(sp, prev['k'])
+            act = refine_rule(fig, kp, ti, ku, pu, fit)
+            if act['kind'] == 'pass':
+                if fig:
+                    self.calc('Rule: the check passes with KP %.2f TI %.2f (overshoot %.1f %%, limit %g; %d reversals, '
+                              'limit %d; no tail, not slow)' % (kp, ti, fig['overshoot_pct'], OVERSHOOT_MAX,
+                                                                  fig['reversals'], REVERSALS_MAX))
                 break
-            cut = 'x%.2f' % TRIM_DOWN
-            if (f == TRIM_DOWN and len(scores) >= 3 and self.cuts[-2:] == [cut, cut]
-                    and min(scores[-2:]) >= USELESS * scores[-3]):
-                # Two cuts and the check no better: the swing is not the
-                # gains' (the pressure's wander, the needle), and more cuts
-                # only make AUTO slower (9 Nov: six at 4 mbar, KP 0.17 to 0.04).
-                useless = True
-                self.calc('Not applied: the last two cuts (KP %.2f to %.2f) did not make the check 10 %% better '
-                          '(%.1f, %.1f, %.1f times the limit), so the swing is not from the gains; KP stays %.2f'
-                          % (kp / TRIM_DOWN ** 2, kp, scores[-3], scores[-2], scores[-1], kp))
+            if act['kind'] == 'limit':
+                self.calc('Rule: %s: at its limit, so the check passes with KP %.2f TI %.2f' % (act['why'], kp, ti))
+                end_note = act['note']
                 break
-            if (f > 1.0 and (ups >= self.a.trims or downs)) or (f < 1.0 and downs >= MAX_CUTS):
-                self.calc('Not applied: %s' % ('at most %d cuts at one setpoint' % MAX_CUTS if f < 1.0 else
-                                               'no trim up after a cut' if downs else
-                                               'at most %d trims up' % self.a.trims))
+            if refines >= MAX_REFINES:
+                self.calc('Not applied: %s, but at most %d refinements at one setpoint' % (act['why'], MAX_REFINES))
+                end_note = 'still %s after %d refinements' % (act['why'], MAX_REFINES)
                 break
-            new = clip_kp(kp * f)
-            if new == kp:
-                break
-            if f > 1.0:
-                ups += 1
-            kp = new
-            self.cuts.append('x%.2f' % f)
-            self.say('%g mbar: %s, KP x %.2f -> %.2f' % (sp, why, f, kp))
-            self.drop_check(sp, k)
-        trims = self.cuts
-        self.calc('Result at %g mbar: KP %.2f, TI %.2f min%s' % (sp, kp, ti, ' (KP changed ' + ' '.join(trims) + ')'
+            self.calc('Rule: %s, so %s x %.2f: KP %.2f -> %.2f, TI %.2f -> %.2f' % (
+                act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f'], kp, act['kp'], ti, act['ti']))
+            self.say('%g mbar: %s, %s x %.2f' % (sp, act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f']))
+            prev = {'kp': kp, 'ti': ti, 'fig': fig, 'k': k}
+            kp, ti = act['kp'], act['ti']
+            refines += 1
+            steps.append('%s x%.2f' % ('KP' if act['kind'] == 'kp' else 'TI', act['f']))
+        trims = self.cuts + steps
+        self.calc('Result at %g mbar: KP %.2f, TI %.2f min%s' % (sp, kp, ti, ' (changed ' + ', '.join(trims) + ')'
                                                                  if trims else ''))
         self.now('')
-        note = ''
-        if useless:
-            note = 'still %s; cuts stopped, two did not help' % why
-        elif f < 1.0:
-            note = 'still %s after %d cuts' % (why, MAX_CUTS)
-        elif f > 1.0 and not downs:
-            note = 'still %s after %d trims' % (why, self.a.trims)
+        notes = []
+        if end_note:
+            notes.append(end_note)
         if not r['steady']:
-            note = (note + '; ' if note else '') + 'relay not steady'
+            notes.append('relay not steady')
         if reach_cuts:
-            note = (note + '; ' if note else '') + 'reach oscillated, its KP cut ' + ' '.join(reach_cuts)
-        if refined:
-            note = (note + '; ' if note else '') + 'refined from learned KP %.2f TI %.2f' % (prior['kp'], prior['ti_min'])
+            notes.append('reach oscillated, its KP cut ' + ' '.join(reach_cuts))
+        if first:
+            notes.append(first)
+        if not fit:
+            notes.append('no good fit (R2 under %g)' % R2_MIN)
         fig = fig or {}
-        return {'sp_mbar': sp, 'kp': kp, 'ti_min': ti, 'Ku': round(r['Ku'], 3), 'Pu_s': round(r['Pu_s'], 1),
+        return {'sp_mbar': sp, 'kp': kp, 'ti_min': ti, 'Ku': round(ku, 3), 'Pu_s': round(pu, 1),
                 'kp_rule': kp0, 'd_pct': r['d_pct'], 'a_mbar': round(r['a_mbar'], 3), 'eps_mbar': round(r['eps_mbar'], 3),
                 'cycles': r['cycles'], 'asym': None if r['asym'] is None else round(r['asym'], 2), 'valve_pct': x0,
-                'trims': ' '.join(trims), 'overshoot_pct': fig.get('overshoot_pct'),
+                'trims': ', '.join(trims), 'overshoot_pct': fig.get('overshoot_pct'),
                 'settle_s': None if fig.get('settle_s') is None else round(fig['settle_s']),
-                'reversals': fig.get('reversals'), 'note': note}
+                'reversals': fig.get('reversals'), 't63_s': fig.get('t63_s'), 't90_s': fig.get('t90_s'),
+                'backoff_pct': fig.get('backoff_pct'), 'sag_s': fig.get('sag_s'),
+                'K': round(fit['K'], 3) if fit else None, 'L_s': fit['L'] if fit else None,
+                'tau_s': fit['tau'] if fit else None, 'note': '; '.join(notes)}
 
 
 def learned_key(sp):
@@ -876,7 +1268,7 @@ def _learned_rows(path):
             for row in csv.DictReader(f):
                 try:
                     r = dict(row)
-                    for k in ('sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valve_pct'):
+                    for k in LEARNED_NUM:
                         r[k] = float(r[k]) if r.get(k) not in (None, '') else None
                     if r['sp_mbar'] is None or not r['kp'] or r['ti_min'] is None:
                         continue
@@ -936,34 +1328,6 @@ def learn(learned, r, when):
     learned[learned_key(r['sp_mbar'])] = row
 
 
-def _when(s):
-    """A learned row's 'when' (DD/MM/YY HH:MM) as a tuple that sorts by
-    time; None if it is not one."""
-    try:
-        return tuple(time.strptime(s or '', '%d/%m/%y %H:%M'))[:5]
-    except ValueError:
-        return None
-
-
-def merge_analysed(learned, path=ANALYSED_FILE):
-    """The gains worked out by hand from the bench logs (autotune-analysed.csv
-    beside this file; Ryan, 10 Nov: "put your analysed new kp ti kd values in
-    the learned values") into the learned table. Each replaces the learned
-    row for its setpoint when that row is older or has no date, so it goes in
-    once and a later autotune result still wins. The setpoints it replaced."""
-    put = []
-    for r in _learned_rows(path):
-        new = _when(r.get('when'))
-        if new is None:
-            continue
-        k = learned_key(r['sp_mbar'])
-        old = _when((learned.get(k) or {}).get('when'))
-        if old is None or old < new:
-            learn(learned, r, r['when'])
-            put.append(k)
-    return put
-
-
 def next_d(sp, ku, first):
     """Relay step for a point from the last point's Ku: a swing of about 6 %."""
     if not ku:
@@ -1012,3 +1376,4 @@ def pid_table_off(link, f):
     """The PID table Off (set 1 in use, so PID SET writes set 1)."""
     if f.get('sched') and not f['sched'].startswith('OFF'):
         link.do('SCHED SET OFF,' + f['sched'].split(',', 1)[1])
+

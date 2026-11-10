@@ -115,7 +115,7 @@
 <header>
   <b>iPC control test</b>
   <span id="build" title="This GUI's build: commits on its branch (commit), commit time; edited = its files differ from that commit. Firmware: the board's *IDN? answer"></span>
-  <nav><button data-tab="live" class="on">Live</button><button data-tab="tests">Tests</button><button data-tab="gains">Gains</button><button data-tab="board">Board</button></nav>
+  <nav><button data-tab="live" class="on">Live</button><button data-tab="gains">Gains</button><button data-tab="board">Board</button></nav>
   <div class="pills">
     <button class="pill" id="pBoard" onclick="go('board')"><i></i><span id="link">Board: connecting</span></button>
     <button class="pill" id="pLs" onclick="go('live', 'lsCard')"><i></i><span id="lsPill">Lake Shore off</span></button>
@@ -126,7 +126,7 @@
 
 <section id="runbar" class="idle">
   <div class="rb-main">
-    <div><span class="tag" id="rbTag">IDLE</span><b id="rbName">No test running</b><span id="rbStep"></span></div>
+    <div><span class="tag" id="rbTag">IDLE</span><b id="rbName">No autotune running</b><span id="rbStep"></span></div>
     <div id="rbStage"></div>
     <div class="bar"><div id="rbBar"></div></div>
     <ol id="rbSteps" class="steps"></ol>
@@ -136,7 +136,7 @@
     <span class="k">Elapsed</span><b id="rbEl">--</b>
     <span class="k">Left</span><b id="rbLeft">--</b>
     <span class="k">Done at</span><b id="rbEta">--</b>
-    <button class="stoptest" onclick="stopTest(this)" title="Ends the test and puts back the setpoint and mode it found">Stop test</button>
+    <button class="stoptest" onclick="stopTest(this)" title="Ends the autotune and puts back the setpoint, mode and PID table it found">Stop autotune</button>
   </div>
 </section>
 
@@ -150,7 +150,7 @@
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div class="legend"><span><i style="background:#2d5877"></i>Pressure <span class="rate" id="rP"></span></span><span><i style="background:#3f3f3f"></i>Setpoint <span class="rate" id="rSp"></span></span><span><i style="background:#b9c9d6"></i>Test stage</span></div>
+        <div class="legend"><span><i style="background:#2d5877"></i>Pressure <span class="rate" id="rP"></span></span><span><i style="background:#3f3f3f"></i>Setpoint <span class="rate" id="rSp"></span></span><span><i style="background:#b9c9d6"></i>Autotune stage</span></div>
         <div><label>Show</label> <select id="win"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="3600">1 hour</option><option value="14400">4 hours</option></select></div>
       </div>
       <canvas id="chart"></canvas>
@@ -161,16 +161,6 @@
 
     <div class="tab col on" data-tab="live">
       <div class="card"><h2>Activity, newest first</h2><div id="log" class="mono"></div></div>
-    </div>
-    <div class="tab col" data-tab="tests">
-      <div class="card">
-        <h2>1. Valve step results (MANUAL)</h2>
-        <table><thead><tr><th>Valve, %</th><th>From, mbar</th><th>Change</th><th>Gain K</th><th>Delay</th><th>Time constant</th><th>Suggested KP, TI</th><th></th></tr></thead><tbody id="vres"></tbody></table>
-      </div>
-      <div class="card">
-        <h2>2. Setpoint step results (AUTO)</h2>
-        <table><thead><tr><th>Step, mbar</th><th>KP, TI</th><th>90 % in</th><th>Overshoot</th><th>Settled in</th><th>Last minute</th></tr></thead><tbody id="res"></tbody></table>
-      </div>
     </div>
     <div class="tab col" data-tab="gains">
       <div class="card">
@@ -187,15 +177,7 @@
       </div>
       <div class="card">
         <h2>Autotune: each setpoint</h2>
-        <table><thead><tr><th>Setpoint, mbar</th><th>Ku, %/mbar</th><th>Pu, s</th><th>Relay, %</th><th>KP</th><th>TI, min</th><th>Check</th><th>Note</th></tr></thead><tbody id="aRows"></tbody></table>
-      </div>
-      <div class="card">
-        <h2>Gain table <span id="tName" style="text-transform:none"></span></h2>
-        <table><thead><tr><th>Setpoint, mbar</th><th>KP, %/mbar</th><th>TI, min</th><th>Gain K, mbar/%</th><th>Delay, s</th><th>Time constant, s</th><th>Valve, %</th></tr></thead><tbody id="tRows"></tbody></table>
-      </div>
-      <div class="card">
-        <h2>KP and TI the schedule uses (blended log-log between rows)</h2>
-        <table><thead><tr><th>Setpoint, mbar</th><th>KP</th><th>TI, min</th></tr></thead><tbody id="tBlend"></tbody></table>
+        <div style="overflow-x:auto"><table><thead><tr><th>Setpoint, mbar</th><th>Ku, %/mbar</th><th>Pu, s</th><th>Relay, %</th><th>KP</th><th>TI, min</th><th title="The fit of the pressure to the valve: gain K in mbar per %, dead time L and lag tau in s">Fit K, L, tau</th><th title="Seconds to cover 63 % and 90 % of the step, the worse leg">63 % / 90 %, s</th><th title="The largest retreat of the valve from its furthest point before 90 %, % of its move">Back-off, %</th><th title="The longest time under the band, once the pressure has reached it, with the valve not moving">Sag, s</th><th>Check</th><th>Note</th></tr></thead><tbody id="aRows"></tbody></table></div>
       </div>
     </div>
     <div class="tab col" data-tab="board">
@@ -217,7 +199,7 @@
   <div class="col">
     <div>
       <button class="stop" onclick="stopAll(this)">STOP</button>
-      <div class="hint" style="margin-top:4px">The valve stops where it is and any test ends. Nothing is put back.</div>
+      <div class="hint" style="margin-top:4px">The valve stops where it is and the autotune ends. Nothing is put back.</div>
     </div>
 
     <div class="tab col on" data-tab="live">
@@ -240,7 +222,7 @@
         <h2>Logger</h2>
         <div id="logInfo" class="info"></div>
         <div class="row"><button id="logBtn" onclick="toggleLog(this)">Stop logging</button><button onclick="post('/api/log', { new: true }, this, 'New log file')">New file</button><button onclick="location.href='/api/csv'">Download session CSV</button></div>
-        <div class="hint">Every sample, one a second, is written to the file as it comes, with the temperatures and the test stage. Each test also saves its own folder beside it: its samples, its results after every step and its messages, so a test that stops or stalls keeps everything up to there.</div>
+        <div class="hint">Every sample, one a second, is written to the file as it comes, with the temperatures and the test stage. Each autotune also saves its own folder beside it: its samples, its results after every setpoint, its messages and the working, so a run that stops or stalls keeps everything up to there.</div>
       </div>
       <div class="card" id="lsCard">
         <h2>Lake Shore 336</h2>
@@ -252,30 +234,6 @@
       </div>
     </div>
 
-    <div class="tab col" data-tab="tests">
-      <div class="card" data-kind="valve">
-        <h2>1. Valve step test (MANUAL)<span class="badge">Running</span></h2>
-        <div class="row"><label class="w">At</label><input id="vAt" type="number" step="0.1" value="35"><label>% open</label></div>
-        <div class="row"><label class="w">Step</label><input id="vStep" type="number" step="0.1" value="1"><label>%, then back</label></div>
-        <div class="row"><label class="w">Settle</label><input id="vHold" type="number" value="180"><label>s before the step</label></div>
-        <div class="row"><label class="w">Record</label><input id="vRec" type="number" value="600"><label>s per step</label></div>
-        <div class="est" id="vEst"></div>
-        <div class="row"><button class="primary run" onclick="startVtest(this)">Run valve test</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
-        <div class="hint">MANUAL, the valve to At, a wait, then open by Step and close back, each recorded and fitted. Start At near where AUTO holds your setpoint.</div>
-      </div>
-      <div class="card" data-kind="setpoint">
-        <h2>2. Setpoint step test (AUTO)<span class="badge">Running</span></h2>
-        <div class="row"><label class="w">Setpoints</label><input id="tSps" type="text" class="wide" value="1 2 3 5 8 12 18 25 50"><label>mbar</label></div>
-        <div class="row"><label class="w">Limit</label><input id="tRec" type="number" value="300"><label>s a step, at most</label></div>
-        <div class="row"><label class="w">Band</label><input id="tBand" type="number" step="0.01" value="0.1"><label>mbar or 5 % of step</label></div>
-        <div class="row"><label><input id="tBack" type="checkbox" checked> Then step back through them</label></div>
-        <div class="est" id="tEst"></div>
-        <div class="est" id="tSched"></div>
-        <div class="row"><button class="primary run" onclick="startTest(this)">Run setpoint test</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
-        <div class="hint">AUTO at the first setpoint until it holds within the band for 1 min (or 10 min have passed), then a step to each next one. A step ends once the pressure has held within 5 % of the step (or the band, if larger) for 1 min, or at the limit. Settled in is the time from the step to the start of that minute.</div>
-      </div>
-    </div>
-
     <div class="tab col" data-tab="gains">
       <div class="card" data-kind="autotune">
         <h2>Autotune the PID table<span class="badge">Running</span></h2>
@@ -284,30 +242,10 @@
         <div class="est" id="aLearned"></div>
         <div class="row"><label class="w">First gains</label><label>KP</label><input id="aKp" type="number" step="0.01" value="0.10" style="width:60px"><label>TI</label><input id="aTi" type="number" step="0.01" value="0.40" style="width:60px"><label>min</label></div>
         <div class="row"><label class="w">Relay step</label><input id="aD" type="number" step="0.1" min="0.1" max="5" value="0.4"><label>% valve, first setpoint</label></div>
-        <div class="row"><label class="w">KP = Ku /</label><input id="aDiv" type="number" step="0.5" min="2" max="8" value="4"><label>TI = 2 Pu</label></div>
-        <div class="row"><label class="w">PID table</label><label>B1</label><input id="aB1" type="number" step="0.5" value="10" style="width:48px"><label>B2</label><input id="aB2" type="number" step="0.5" value="20" style="width:48px"><label>H %</label><input id="aH" type="number" step="1" value="15" style="width:44px"></div>
+        <div class="row"><label class="w">PID table</label><label>B1</label><input id="aB1" type="number" step="0.5" value="6" style="width:48px"><label>B2</label><input id="aB2" type="number" step="0.5" value="14" style="width:48px"><label>H %</label><input id="aH" type="number" step="1" value="10" style="width:44px"></div>
         <div class="est" id="aEst"></div>
-        <div class="row"><button class="primary run" onclick="startAuto(this)">Run autotune</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
-        <div class="hint">Start with AUTO holding a mid setpoint. Each setpoint in the order typed (high to low tests on the way down): AUTO until it holds, a relay test in MANUAL for Ku and Pu, KP = Ku / 4 and TI = 2 Pu, then a 20 % step up and back that trims KP. If AUTO swings hard (four big swings in a row) at any stage, KP is cut at once, by half or to a quarter, and the step is tried again; trims down go on until the step passes. The working shows each sum as it is done. Every result is kept as that setpoint's learned gains; with Start from Learned gains, a setpoint learned before gets there with its own gains, sizes the relay from its own Ku and starts the step from its learned KP and TI, so the trims carry on from the last run (fresh if the new Ku is over 2 times off). The first time, the earlier autotune runs in the log folder are learned from. First gains are for a setpoint with nothing learned. Set 1, the PID table, setpoint and mode are put back at the end. The board's PID table changes only with Write to board.</div>
-      </div>
-      <div class="card" data-kind="gains">
-        <h2>Make a gain table<span class="badge">Running</span></h2>
-        <div class="row"><label class="w">Setpoints</label><input id="gSps" type="text" class="wide" value="1 2 3 5 8 12 18 25 50"><label>mbar</label></div>
-        <div class="row"><label class="w">First step</label><input id="gStep" type="number" step="0.1" value="0.5"><label>% valve</label></div>
-        <div class="row"><label class="w">Speed</label><select id="gTc"><option value="0.7">Faster (tc 0.7)</option><option value="1" selected>Normal (tc 1)</option><option value="1.5">Calmer (tc 1.5)</option></select></div>
-        <div class="est" id="gEst"></div>
-        <div class="row"><button class="primary run" onclick="startTune(this)">Run gain table</button><button class="stopbtn" onclick="stopTest(this)">Stop test</button></div>
-        <div class="hint">At each setpoint: AUTO until it holds, then MANUAL valve steps up and back, fitted to a KP and TI. A setpoint that gives no usable step is skipped and the run carries on. The table is saved after every setpoint. At the end it puts back the setpoint and mode it found, with the valve where the last setpoint held.</div>
-      </div>
-      <div class="card">
-        <h2>Table file</h2>
-        <div class="row"><button onclick="location.href='/api/table.csv'">Download table</button><label><input type="file" id="tFile" accept=".csv" style="width:190px"></label></div>
-        <div class="hint">A table from pmc_gains.py tune works too. Only sp_mbar, kp and ti_min are used.</div>
-      </div>
-      <div class="card">
-        <h2>Gain schedule</h2>
-        <div class="row"><div class="seg"><button id="schOn" onclick="post('/api/schedule', { on: true }, this, 'Gain schedule on')">On</button><button id="schOff" onclick="post('/api/schedule', { on: false }, this, 'Gain schedule off')">Off</button></div></div>
-        <div class="hint" id="schState"></div>
+        <div class="row"><button class="primary run" onclick="startAuto(this)">Run autotune</button><button class="stopbtn" onclick="stopTest(this)">Stop autotune</button></div>
+        <div class="hint">Start with AUTO holding a mid setpoint. Each setpoint in the order typed (high to low tests on the way down): AUTO until it holds, then a relay test in MANUAL for Ku and Pu. The first gains come from a fit of the cryostat's response learned at that setpoint (K, dead time L, lag tau): L<sub>eff</sub> = max(L, Pu / 4), TI = min(max(tau, 2.5 L<sub>eff</sub>), 20 L<sub>eff</sub>), KP = min(TI / (5 K L<sub>eff</sub>), Ku / 3); with no fit yet, KP = Ku / 4 and TI = 2 Pu. Then a check: the setpoint 20 % up and back. After every check the pressure is fitted to the valve and the check is measured: overshoot, reversals, the time to 63 % and 90 % of the step, how far the valve backs off before 90 %, and the sag under the setpoint. The first rule that applies changes the gains: more than 2 reversals or a watchdog cut, KP x 0.7; overshoot over 5 %, KP x 0.8; a long tail with the valve backing off, TI x 0.7; slow, TI x 0.8. KP is never raised. At most 4 refinements; one that makes the check worse is undone. If AUTO swings hard (four big swings in a row) at any stage, KP is cut at once, by half or to a quarter. The working shows each sum as it is done. Every result, with its fit, is kept as that setpoint's learned gains; with Start from Learned gains, a setpoint learned before starts from the rule on its learned fit (fresh if the new Ku is over 2 times off). First gains are for a setpoint with nothing learned. Set 1, the PID table, setpoint and mode are put back at the end. The board's PID table changes only with Write to board.</div>
       </div>
     </div>
 
@@ -405,30 +343,19 @@ async function post(url, body, btn, what, okText) {
 }
 const cmd = (line, btn) => post('/api/cmd', { line }, btn, line).then(j => j.reply);
 const stopAll = btn => post('/api/stop', {}, btn, 'STOP', 'valve stopped');
-const stopTest = btn => post('/api/test/stop', {}, btn, 'Stop test', 'stopping');
+const stopTest = btn => post('/api/test/stop', {}, btn, 'Stop autotune', 'stopping');
 function setPid(btn) {
   const kd = val('kd');
   cmd('PID SET ' + val('kp') + ',' + val('ti') + (kd !== '' ? ',' + kd : ''), btn).then(r => { if (!r) pidLoaded = false; });
 }
 function readBack(btn) { pidLoaded = false; toast(hhmmss() + '  PID boxes read back from the board'); refresh(); }
-const startVtest = btn => post('/api/vtest', { at: +val('vAt'), step: +val('vStep'), hold: +val('vHold'), record: +val('vRec') }, btn, 'Valve step test', 'started');
-const startTest = btn => post('/api/test', { sps: val('tSps'), record: +val('tRec'), band: +val('tBand'), back: $('tBack').checked, hold: 60 }, btn, 'Setpoint step test', 'started');
-const startAuto = btn => post('/api/autotune', { sps: val('aSps'), d: +val('aD'), div: +val('aDiv'), b1: +val('aB1'), b2: +val('aB2'), h: +val('aH'), kp0: +val('aKp'), ti0: +val('aTi'), start: val('aStart') }, btn, 'Autotune', 'started');
+const startAuto = btn => post('/api/autotune', { sps: val('aSps'), d: +val('aD'), b1: +val('aB1'), b2: +val('aB2'), h: +val('aH'), kp0: +val('aKp'), ti0: +val('aTi'), start: val('aStart') }, btn, 'Autotune', 'started');
 const writeSets = btn => post('/api/autotune/write', {}, btn, 'Write PID table', 'written to the board');
-const startTune = btn => post('/api/tune', { sps: val('gSps'), step: +val('gStep'), tc: +val('gTc') }, btn, 'Gain table', 'started');
 const toggleLog = btn => post('/api/log', { on: !(S && S.logger.on) }, btn, S && S.logger.on ? 'Logging stopped' : 'Logging started');
 function lsConnect(btn) {
   if (!val('lsHost')) { toast('Type the 336 IP address first', true); return; }
   post('/api/ls', { host: val('lsHost'), inputs: val('lsIn') }, btn, 'Lake Shore 336', 'connecting');
 }
-function useGains(kp, ti) {
-  $('kp').value = kp.toFixed(2); $('ti').value = ti.toFixed(2); pidLoaded = true;
-  go('live'); toast('KP and TI filled in: press Set and save to use them');
-}
-$('tFile').onchange = async e => {
-  const f = e.target.files[0]; if (!f) return;
-  await post('/api/table', { csv: await f.text(), name: f.name }, null, 'Load ' + f.name, 'loaded'); e.target.value = '';
-};
 async function readEvents(btn) {
   const j = await post('/api/events', { n: +val('evN') }, btn, 'Read events', 'read');
   const ls = (j.lines || []).slice(1).map(l => { const a = l.split(','); return [a[0], a[1], a.slice(2).join(',')]; });
@@ -457,19 +384,12 @@ function fmtClock(s) {
 }
 function setPill(id, cls, text, title) { $(id).className = 'pill ' + cls; $(id).lastElementChild.textContent = text; $(id).title = title || text; }
 
-// What each test will take, from its boxes.
+// What the autotune will take, from its boxes.
 function estimates() {
-  const hold = +val('vHold') || 0, rec = +val('vRec') || 0;
-  $('vEst').textContent = `Takes ${fmtDur(hold + 2 * rec)}: ${hold} s settling, then 2 steps of ${rec} s.`;
-  const ts = val('tSps').split(/[\s,]+/).filter(x => +x > 0), tr = +val('tRec') || 0;
-  const n = Math.max(ts.length - 1, 0) * ($('tBack').checked ? 2 : 1);
-  $('tEst').textContent = n ? `At most ${fmtDur(600 + n * tr)}: up to 10 min for ${ts[0]} mbar to hold, then ${n} step${n > 1 ? 's' : ''} of up to ${tr} s each, less where the pressure settles sooner.` : 'Give two or more setpoints.';
-  const k = val('gSps').split(/[\s,]+/).filter(x => +x > 0).length;
   const ka = val('aSps').split(/[\s,]+/).filter(x => +x > 0).length;
-  $('aEst').textContent = ka ? `${ka} setpoint${ka > 1 ? 's' : ''}: about ${fmtDur(ka * 900)} to ${fmtDur(ka * 1800)} (15 to 30 min each, the longer with trims).` : 'Give at least one setpoint.';
-  $('gEst').textContent = k ? `${k} setpoint${k > 1 ? 's' : ''}: about ${fmtDur(k * 600)} to ${fmtDur(k * 1200)} (10 to 20 min each).` : 'Give at least one setpoint.';
+  $('aEst').textContent = ka ? `${ka} setpoint${ka > 1 ? 's' : ''}: about ${fmtDur(ka * 900)} to ${fmtDur(ka * 2100)} (15 to 35 min each, the longer with refinements).` : 'Give at least one setpoint.';
 }
-document.querySelectorAll('#vHold,#vRec,#tSps,#tRec,#tBack,#gSps,#aSps').forEach(e => e.addEventListener('input', estimates));
+document.querySelectorAll('#aSps').forEach(e => e.addEventListener('input', estimates));
 estimates();
 
 const ICON = { done: '✓', now: '▶', todo: '○', failed: '✗', stopped: '■' };
@@ -482,9 +402,9 @@ function runbar(s) {
   const P = s.prog, rb = $('runbar');
   if (!P) {
     rb.className = 'idle';
-    $('rbTag').textContent = 'IDLE'; $('rbName').textContent = 'No test running'; $('rbStep').textContent = '';
+    $('rbTag').textContent = 'IDLE'; $('rbName').textContent = 'No autotune running'; $('rbStep').textContent = '';
     const L = s.last_prog;
-    $('rbStage').textContent = L ? `Last: ${L.name}, ${L.outcome}, at ${L.at}.` : 'Start a test on the Tests or Gains tab. The logger records either way.';
+    $('rbStage').textContent = L ? `Last: ${L.name}, ${L.outcome}, at ${L.at}.` : 'Start the autotune on the Gains tab. The logger records either way.';
     $('rbSteps').innerHTML = L ? stepsHtml(L.steps) : '';
     $('rbDir').textContent = L && L.dir ? 'Saved in ' + L.dir : '';
     return;
@@ -585,21 +505,14 @@ async function refresh() {
   document.querySelectorAll('button.run').forEach(b => { b.disabled = !!kind; b.title = kind ? s.prog.name + ' is running' : ''; });
 
   $('log').textContent = s.log.slice().reverse().join('\n');
-  $('vres').innerHTML = s.vresults.length ? s.vresults.slice().reverse().map(m =>
-    `<tr><td>${m.from.toFixed(1)} to ${m.to.toFixed(1)}</td><td>${m.p0.toFixed(3)}</td><td>${m.dp === null ? '--' : (m.dp > 0 ? '+' : '') + m.dp.toFixed(3) + ' mbar'}</td>` +
-    (m.K === null ? '<td colspan="5" style="color:var(--amber)">No usable response: try a larger step</td>' :
-    `<td>${m.K.toFixed(3)} mbar/%</td><td>${m.delay_s} s</td><td>${m.tau_s} s</td><td>${m.kp.toFixed(2)}, ${m.ti.toFixed(2)} min</td>` +
-    `<td><button onclick="useGains(${m.kp},${m.ti})">Use</button></td>`) + '</tr>').join('') : none(8);
-  $('res').innerHTML = s.results.length ? s.results.slice().reverse().map(m =>
-    `<tr><td>${m.from.toFixed(1)} to ${m.to.toFixed(1)}</td><td>${m.kp == null ? '--' : m.kp.toFixed(2) + ', ' + m.ti.toFixed(2) + ' min'}</td>` +
-    `<td>${m.t90_s === null ? 'not reached' : m.t90_s + ' s'}</td><td>${m.overshoot_pct} %</td>` +
-    `<td>${m.settle_s === null ? 'not settled' : m.settle_s + ' s'}${m.band == null ? '' : ' (±' + m.band.toFixed(2) + ')'}</td>` +
-    `<td>${m.mean.toFixed(3)} ± ${m.spread.toFixed(3)}</td></tr>`).join('') : none(6);
   const A = s.autotune;
+  const dash = (x, d, u) => x === null || x === undefined ? '--' : (+x).toFixed(d) + (u || '');
   $('aRows').innerHTML = A && A.rows.length ? A.rows.map(m => `<tr><td>${m.sp_mbar}</td><td>${m.Ku.toFixed(2)}</td><td>${m.Pu_s.toFixed(1)}</td>` +
     `<td>±${m.d_pct.toFixed(1)}</td><td>${m.kp.toFixed(2)}${m.trims ? ' <span class="hint">(' + esc(m.trims) + ')</span>' : ''}</td><td>${m.ti_min.toFixed(2)}</td>` +
+    `<td>${m.K === null || m.K === undefined ? 'none' : dash(m.K, 2) + ', ' + dash(m.L_s, 0) + ', ' + dash(m.tau_s, 0)}</td>` +
+    `<td>${dash(m.t63_s, 0)} / ${dash(m.t90_s, 0)}</td><td>${dash(m.backoff_pct, 0)}</td><td>${dash(m.sag_s, 0)}</td>` +
     `<td>${m.overshoot_pct == null ? '--' : 'overshoot ' + m.overshoot_pct + ' %, ' + (m.settle_s == null ? 'not settled' : 'settled in ' + m.settle_s.toFixed(0) + ' s') + ', ' + m.reversals + (m.reversals === 1 ? ' reversal' : ' reversals')}</td>` +
-    `<td>${esc(m.note || '')}</td></tr>`).join('') : none(8);
+    `<td>${esc(m.note || '')}</td></tr>`).join('') : none(12);
   const range = n => !A ? '' : n === 1 ? 'below ' + A.b1 : n === 2 ? A.b1 + ' to ' + A.b2 : 'above ' + A.b2;
   $('aSets').innerHTML = A && A.sets.length ? A.sets.map(x => `<tr><td>${x[0]}</td><td>${range(x[0])}</td>` +
     (x[1] === null ? '<td colspan="3" class="hint">No setpoint measured here: the board keeps this set as it is</td>' :
@@ -626,18 +539,6 @@ async function refresh() {
     (Cn.dP === null ? '' : `, last ${Math.round(Cn.span)} s KP ${sgn(Cn.dP)} and TI ${sgn(Cn.dI)} %`)) : '';
   $('aSetsCalc').textContent = A && A.sets_calc ? A.sets_calc.join('\n') : '';
   $('aLines').textContent = A && A.lines.length ? 'Sends ' + A.lines.join('; ') + (A.dir ? '. Also in write-to-board.txt in ' + A.dir + '.' : '.') : '';
-  $('tName').textContent = s.table_name ? '(' + s.table_name + ')' : '';
-  const gv = (o, k, d) => o[k] === undefined || o[k] === null ? '--' : (+o[k]).toFixed(d);
-  $('tRows').innerHTML = s.table.length ? s.table.map(t => `<tr><td>${gv(t, 'sp_mbar', 1)}</td><td>${gv(t, 'kp', 2)}</td><td>${gv(t, 'ti_min', 2)}</td>` +
-    `<td>${gv(t, 'K_mbar_per_pct', 3)}</td><td>${gv(t, 'delay_s', 0)}</td><td>${gv(t, 'tau_s', 0)}</td><td>${gv(t, 'valve_pct', 1)}</td></tr>`).join('') : none(7);
-  $('tBlend').innerHTML = s.blended.length ? s.blended.map(b => `<tr><td>${b[0]}</td><td>${b[1].toFixed(2)}</td><td>${b[2].toFixed(2)}</td></tr>`).join('') : none(3);
-  $('schOn').classList.toggle('on', s.schedule); $('schOff').classList.toggle('on', !s.schedule);
-  $('schOn').disabled = !s.table.length && !s.schedule;
-  $('schState').textContent = (s.schedule ? 'On: each setpoint change sets KP and TI from the table.' :
-    s.table.length ? 'Off. On sets KP and TI from the table at each setpoint change.' : 'Off. Make or load a gain table first.') +
-    ' It also runs during setpoint step tests and pauses while a gain table is made.';
-  $('tSched').innerHTML = s.schedule ? `Gain schedule <b>On</b>${s.table_name ? ' (' + esc(s.table_name) + ')' : ''}: each step uses the table's KP and TI for its new setpoint.` :
-    'Gain schedule <b>Off</b>: every step uses the KP and TI on the board. To check a table, load it on the Gains tab and turn the schedule On first.';
   draw();
 }
 
