@@ -14,8 +14,11 @@ The model is bench.c's, with the same numbers (keep them the same):
            the needle slips to it
   target   FLOOR + F(needle) x exp(-(Thx - 4 K) / KA)
   pressure the target after DEAD s, through a lag LAG(Thx): 25 to 70 s with
-           liquid in the heat exchanger (Thx under about 3.5 K), 5 s dry
-  Thx      towards HXSS(pressure) over HXTAU s
+           liquid in the heat exchanger (Thx under about 3.5 K), 5 s dry,
+           and never more than DRY(pressure): 2 s at 2 mbar, 8 s at 6
+           mbar (no liquid in it at low pressure, whatever Thx reads)
+  Thx      towards HXSS(pressure): up to HXCAP K over HXFAST s, the rest
+           over HXTAU s
 
 For each stage of each log this prints the bench pressure and the model's,
 run from the logged valve with the logged Thx and with the model's own Thx;
@@ -24,6 +27,10 @@ valve), and the lag that would match that relay alone. The 9 Nov 2026
 numbers came from these comparisons on the 16:23 session and that day's two
 autotune runs (1 to 24 mbar): F and HXSS from the held setpoints, LAG from
 the relays (the per-relay lags against Thx), STICK from the 6 Nov steps.
+DRY, HXFAST and HXCAP came on 10 Nov from a reach from 10 down to 1 mbar
+with KP 1.20 (it swung 1 to 10 mbar, about 18 s a cycle; the heat
+exchanger went 2.5 to 4 K in 15 s) and the 9 Nov 2 mbar reach that swung,
+matched in closed loop on the simulator (simulator/tests/run.js).
 """
 import csv
 import math
@@ -37,7 +44,9 @@ LAG_T = np.array([1.8, 2.0, 2.75, 3.5, 4.5, 5.7, 7, 12, 30])
 LAG_S = np.array([70, 64, 26, 24, 12, 5, 5, 5, 5.0])
 HX_P = np.array([0.67, 1, 2, 4, 8, 12, 16, 20, 28, 50])
 HX_T = np.array([20, 16, 14, 7, 3.2, 1.9, 4.5, 5.6, 6.5, 8.8])
-FLOOR, KA, DEAD, HXTAU = 0.67, 10.0, 2, 340.0
+DRY_P = np.array([1, 2, 4, 6, 8, 12])
+DRY_S = np.array([1.5, 2, 4, 8, 30, 1000.0])
+FLOOR, KA, DEAD, HXTAU, HXFAST, HXCAP = 0.67, 10.0, 2, 340.0, 15.0, 4.5
 
 
 def stick(y):
@@ -49,6 +58,8 @@ def model(x, hx, p0, lag=None, own_hx=False):
     """Pressure (and Thx) from the logged valve, 1 s steps. lag: a fixed lag
     in s instead of LAG(Thx); own_hx: Thx from the model, not the log."""
     y, p, a = x[0], p0, hx[0]
+    af = min(a, HXCAP)
+    as_ = a - af
     buf = [None] * (DEAD + 1)
     out, out_hx = np.empty(len(x)), np.empty(len(x))
     for i in range(len(x)):
@@ -62,10 +73,13 @@ def model(x, hx, p0, lag=None, own_hx=False):
         buf.pop()
         buf.insert(0, target)
         delayed = buf[DEAD] if buf[DEAD] is not None else target
-        tau = lag or float(np.interp(a, LAG_T, LAG_S))
+        tau = lag or min(float(np.interp(a, LAG_T, LAG_S)), float(np.interp(p, DRY_P, DRY_S)))
         p += (delayed - p) * (1 - math.exp(-1 / tau))
         if own_hx:
-            a += (np.interp(p, HX_P, HX_T) - a) * (1 - math.exp(-1 / HXTAU))
+            T = float(np.interp(p, HX_P, HX_T))
+            af += (min(T, HXCAP) - af) * (1 - math.exp(-1 / HXFAST))
+            as_ += (T - min(T, HXCAP) - as_) * (1 - math.exp(-1 / HXTAU))
+            a = af + as_
         out[i], out_hx[i] = p, a
     return out, out_hx
 

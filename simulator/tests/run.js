@@ -687,10 +687,14 @@ let parkedFlash;
   const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
   const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
   s.cmd('PID SET 0.40,0.75,0'); s.cmd('PRES SP 16'); s.cmd('MODE AUTO');
-  s.run(600000);
-  const p16 = num(s.cmd('PRES?')), x0 = num(s.cmd('VALV?'));
-  check('bench cryostat: AUTO holds 16 mbar (KP 0.40, TI 0.75)', s.reg() >= 2 && Math.abs(p16 - 16) < 0.5,
-    'regulation ' + s.reg() + ', ' + p16 + ' mbar at ' + x0 + ' %');
+  s.run(540000);
+  // Held: no swing over the last minute of 10 min. It may still creep a
+  // little as the heat exchanger settles (the knee), as on the bench.
+  const ps = [];
+  for (let i = 0; i < 12; i++) { s.run(5000); ps.push(num(s.cmd('PRES?'))); }
+  const p16 = ps[ps.length - 1], x0 = num(s.cmd('VALV?'));
+  check('bench cryostat: AUTO holds 16 mbar (KP 0.40, TI 0.75)', s.reg() >= 1 && ps.every(p => Math.abs(p - 16) < 0.3),
+    'regulation ' + s.reg() + ', ' + Math.min(...ps) + ' to ' + Math.max(...ps) + ' mbar, valve ' + x0 + ' %');
   s.cmd('MODE MANUAL');
   let hi = null, last = 0; const ups = [];
   for (let t = 0; t < 300; t++) {
@@ -706,6 +710,26 @@ let parkedFlash;
   const pBack = num(s.cmd('PRES?'));
   check('bench cryostat: 0.2 % opening sticks, closing follows', Math.abs(pOpen - p0) < 0.1 * p0 + 0.05,
     [p0, pOpen, pBack].join(' -> '));
+}
+{ // The bench cryostat, 10 Nov: at 10 mbar for half an hour (heat exchanger cold), then SP 1. With
+  // KP 1.20 (1 mbar's gain, found with the heat exchanger warm) AUTO swings over the knee as on the
+  // bench (there 1 to 10 mbar, about 18 s a cycle); with KP 0.10 it comes down without swinging.
+  const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
+  const reach = kp => {
+    const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
+    s.cmd('PID SET 0.40,0.75,0'); s.cmd('PRES SP 10'); s.cmd('MODE AUTO'); s.run(1800000);
+    s.cmd('PID SET ' + kp.toFixed(2) + ',0.42,0'); s.cmd('PRES SP 1');
+    let low = false, swings = 0;   // times it came back up from under 1.5 to over 3.5 mbar
+    for (let t = 0; t < 120; t++) {
+      s.run(1000); const p = num(s.cmd('PRES?', 20));
+      if (p < 1.5) low = true;
+      else if (p > 3.5 && low) { swings++; low = false; }
+    }
+    return swings;
+  };
+  const hi = reach(1.2), lo = reach(0.1);
+  check('bench cryostat: 10 -> 1 mbar at KP 1.20 swings back over 3.5 mbar at least twice, at KP 0.10 never',
+    hi >= 2 && lo === 0, 'KP 1.20 ' + hi + ' swings, KP 0.10 ' + lo);
 }
 console.log(failed ? failed + ' failed' : 'all passed');
 process.exit(failed ? 1 : 0);

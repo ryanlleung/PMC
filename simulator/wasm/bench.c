@@ -153,9 +153,13 @@ static void fl_tick(double dt)
 // with liquid in it (Thx under about 3.5 K) the pressure follows the valve
 // over 25 to 70 s, dry (5.5 K and over) in about 5 s. That is why the
 // relay period and swing change so much from one setpoint to the next.
-// Thx heads over minutes for a steady value that falls from 1 to 12 mbar
-// (more flow, colder, so the pressure creeps on up: the valve's knee) and
-// rises again above 12 mbar (the creep runs back). The needle sticks when
+// Below about 6 mbar the heat exchanger holds no liquid whatever Thx reads,
+// so the lag is shorter still there (2 s at 2 mbar): a reach from 10 down
+// to 1 mbar with a high KP swings 1 to 10 mbar as on the bench (10 Nov).
+// Thx heads for a steady value that falls from 1 to 12 mbar (more flow,
+// colder, so the pressure creeps on up: the valve's knee) and rises again
+// above 12 mbar (the creep runs back): up to 4.5 K within seconds (the
+// liquid boils off), the rest over minutes. The needle sticks when
 // opening at low openings (it slips all at once after a 0.37 % move) and
 // follows at once when closing.
 #define BX_N 16
@@ -164,6 +168,9 @@ static const double BX_F[BX_N] = { 0, 0, 0.9, 2.5, 5.5, 7.0, 8.6, 12.3, 18.0, 20
 #define BT_N 9
 static const double BT_T[BT_N] = { 1.8, 2.0, 2.75, 3.5, 4.5, 5.7, 7, 12, 30 };    // heat exchanger K
 static const double BT_LAG[BT_N] = { 70, 64, 26, 24, 12, 5, 5, 5, 5 };           // s, pressure lag
+#define BL_N 6
+static const double BL_P[BL_N] = { 1, 2, 4, 6, 8, 12 };                       // mbar
+static const double BL_LAG[BL_N] = { 1.5, 2, 4, 8, 30, 1000 };                // s, the most the lag is (dry)
 #define BH_N 10
 static const double BH_P[BH_N] = { 0.67, 1, 2, 4, 8, 12, 16, 20, 28, 50 };        // mbar
 static const double BH_T[BH_N] = { 20, 16, 14, 7, 3.2, 1.9, 4.5, 5.6, 6.5, 8.8 };  // K, steady
@@ -172,7 +179,9 @@ static const double BH_T[BH_N] = { 20, 16, 14, 7, 3.2, 1.9, 4.5, 5.6, 6.5, 8.8 }
 #define BX_DEAD   2.0      // s, dead time
 #define BX_STICK0 0.37     // % of travel an opening move sticks for, up to 5 % open
 #define BX_STICK1 0.05     // the same from 10 % open
-#define BX_HXTAU  340.0    // s, heat exchanger
+#define BX_HXTAU  340.0    // s, heat exchanger: the slow part
+#define BX_HXFAST 15.0     // s, its fast part
+#define BX_HXCAP  4.5      // K the fast part goes up to
 #define BX_HX0    3.0      // K at power-on: the cryostat has been running
 #define BX_NOISE  0.004    // flow noise, fraction (2 s correlation)
 #define BX_WANDER 0.004    // slow wander, fraction (200 s correlation)
@@ -180,7 +189,7 @@ static const double BH_T[BH_N] = { 20, 16, 14, 7, 3.2, 1.9, 4.5, 5.6, 6.5, 8.8 }
 #define BX_RING   1000     // 10 s of 10 ms ticks
 static double bx_ring[BX_RING];
 static int bx_ri;
-static double bx_y, bx_fn, bx_wn;
+static double bx_y, bx_fn, bx_wn, bx_hf, bx_hs;   // needle %, noise, Thx fast and slow parts
 
 static double table(const double *xs, const double *ys, int n, double x)
 {
@@ -208,11 +217,17 @@ static void bx_fill(double mbar)
     for (int i = 0; i < BX_RING; i++) bx_ring[i] = mbar;
     B.P = mbar;
 }
+static void bx_set_hx(double hx)
+{
+    B.hx = hx;
+    bx_hf = hx < BX_HXCAP ? hx : BX_HXCAP;
+    bx_hs = hx - bx_hf;
+}
 static void bx_reset(double hx)
 {
     bx_y = bx_valve_pct();
     bx_fn = bx_wn = 0;
-    B.hx = hx;
+    bx_set_hx(hx);
     bx_ri = 0;
     bx_fill(bx_target());
 }
@@ -226,10 +241,15 @@ static void bx_tick(double dt)
     bx_ring[bx_ri] = bx_target();
     double in = bx_ring[(bx_ri - (int)lround(BX_DEAD / dt) + BX_RING) % BX_RING];
     bx_ri = (bx_ri + 1) % BX_RING;
-    double lag = B.pump ? table(BT_T, BT_LAG, BT_N, B.hx) : 60.0;   // the pump off: the line fills
+    double lag = table(BT_T, BT_LAG, BT_N, B.hx), dry = table(BL_P, BL_LAG, BL_N, B.P);
+    if (dry < lag) lag = dry;
+    if (!B.pump) lag = 60.0;   // the pump off: the line fills
     B.P += (in - B.P) * (1 - exp(-dt / lag));
     if (B.P < 0) B.P = 0;
-    B.hx += (table(BH_P, BH_T, BH_N, B.P) - B.hx) * (1 - exp(-dt / BX_HXTAU));
+    double T = table(BH_P, BH_T, BH_N, B.P), Tf = T < BX_HXCAP ? T : BX_HXCAP;
+    bx_hf += (Tf - bx_hf) * (1 - exp(-dt / BX_HXFAST));
+    bx_hs += (T - Tf - bx_hs) * (1 - exp(-dt / BX_HXTAU));
+    B.hx = bx_hf + bx_hs;
 }
 
 /* ---- motor and needle ----------------------------------------------------- */
@@ -287,6 +307,9 @@ bool bench_limit_pin_high(void)
 // INA228 input loading (about 5 % low), as model.c.
 static double druck_mv(double p)
 {
+    // The bench model's pressures are what the calibrated bench board read
+    // (its logs): its Druck reads true on the nominal table, with no CAL.
+    if (B.plant == PLANT_BENCH) return p / 1034.214 * 100.0;
     const double zero = 0.05, span = 100.02, fs = 1034, load = 1 / 1.0512;
     return (zero + p / fs * (span - zero)) * load;
 }
@@ -336,6 +359,12 @@ void bench_set_pressure(double mbar)
 {
     if (B.plant == PLANT_BENCH) bx_fill(mbar);
     else B.P = mbar;
+}
+
+void bench_set_hx(double k)
+{
+    if (B.plant == PLANT_BENCH) bx_set_hx(k);
+    else B.hx = k;
 }
 
 void bench_plant(int plant)

@@ -358,7 +358,7 @@ EXPORT(sim_set) void sim_set(int id, double v)
     case 20: B.baro = v != 0; break;
     case 21: B.baro_err = v; break;
     case 22: bench_plant((int)v); break;
-    case 23: B.hx = v; break;
+    case 23: bench_set_hx(v); break;
     case 40: bench_set_pressure(v); break;
     case 41: B.T = v; break;
     case 42: B.mL = v; break;

@@ -40,8 +40,9 @@ extern bench_t B;
 
 void bench_init(void);
 void bench_tick_10ms(void);
-void bench_plant(int plant);
-void bench_set_pressure(double mbar);   // the line pressure now (the bench model's delay too)  // plant_t; the bench model starts at its steady state for the pressure now
+void bench_plant(int plant);            // plant_t; the bench model starts at its steady state for the pressure now
+void bench_set_pressure(double mbar);   // the line pressure now (the bench model's delay too)
+void bench_set_hx(double k);            // the heat exchanger now (the bench model: both its parts)
 void bench_coils(uint8_t coils);
 bool bench_limit_pin_high(void);
 void bench_read(int32_t *raw_shunt, int32_t *raw_bus, int16_t *raw_temp);
