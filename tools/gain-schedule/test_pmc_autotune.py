@@ -429,6 +429,23 @@ class SteepValve(unittest.TestCase):
         self.assertLess(x0, 3.3)
         self.assertAlmostEqual(b.P.p(), 2.0, delta=0.3)
 
+    def test_a_cut_starts_the_stage_again(self):
+        # Ryan 10 Nov: "12 min of at most 10 min". Each cut starts the wait
+        # again; the stage line (its clock, and the KP it shows) does too.
+        b = FakeBoard(self.plant())
+        b.advance(30)
+        t = self.tuner(b)
+        stages = []
+        t.stage = lambda text, phase=None, most=None: stages.append((text, phase, most))
+        t.reach(2.0, 3.0, 0.40)
+        self.assertEqual(len(stages), len(t.cuts) + 1)
+        self.assertEqual(stages[0], ('AUTO at 2 mbar with KP 3.00 TI 0.40, waiting for it to hold', '2 mbar reach',
+                                     at.REACH_MAX_S))
+        for text, phase, most in stages[1:]:
+            self.assertIn('(cut from 3.00)', text)
+            self.assertEqual((phase, most), (None, at.REACH_MAX_S))
+        self.assertIn('KP %.2f ' % b.sets[0][0], stages[-1][0])
+
     def test_point_ends_with_gains_that_do_not_oscillate(self):
         # Less steep above the knee (6 mbar per %), so the relay at 2 mbar
         # works with a 0.1 % step; the reach with KP 3 still swings wildly.

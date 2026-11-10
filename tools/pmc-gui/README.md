@@ -4,7 +4,7 @@
 
 ## The page
 
-- **Top bar**, on every tab: the tabs, then three status lights and the board's mode.
+- **Top bar**, on every tab: the GUI's build (commits on its branch, the commit, the commit time; "edited" when its files differ from that commit) and the board's firmware version, the tabs, then three status lights and the board's mode. The build line is printed in the console window at start too.
   - Board: connected, or why there is no link.
   - Lake Shore: the temperatures, off, or why there is no link.
   - Logger: the rows written so far (red dot while it records), or Not logging.
@@ -33,7 +33,7 @@ The tabs:
 
     Learned gains: every setpoint's result (KP, TI, Ku, Pu, the trims) is kept in `autotune-learned.csv` in the log folder, newest per setpoint. With Start from Learned gains (the default) a setpoint learned before reaches with its own learned gains, sizes its relay step from its own Ku and starts the check from its learned KP and TI instead of Ku / 4 and 2 Pu, so the trims carry on from run to run rather than starting fresh. If the new relay test's Ku is more than 2 times off the learned one the plant has changed and that setpoint starts fresh. Start from Fresh ignores the file (its results still go in it). The first time, with no learned file yet, it is built from the `results.csv` of the earlier autotune runs in the same log folder. The card lists what is learned.
 
-    Whenever AUTO runs (reaching and holding a setpoint, the check steps) a watchdog watches for AUTO oscillating hard: four swings in a row within 400 s, each more than 30 % of the setpoint (0.2 mbar at least). It then cuts KP at once with `PID SET`, by half, or to a quarter when the swing is bigger than the setpoint itself, and goes on with the lower gain; a check step that oscillated is tried again.
+    Whenever AUTO runs (reaching and holding a setpoint, the check steps) a watchdog watches for AUTO oscillating hard: four swings in a row within 400 s, each more than 30 % of the setpoint (0.2 mbar at least). It then cuts KP at once with `PID SET`, by half, or to a quarter when the swing is bigger than the setpoint itself, and goes on with the lower gain, and the wait for AUTO to hold starts again (the stage line shows the new KP and its own time limit); a check step that oscillated is tried again.
 
     A setpoint that cannot be reached, gives no usable oscillation, or where the board leaves AUTO (a warning) is skipped; a fault ends the run. 15 to 30 minutes a setpoint (the longer with trims), so 2 to 4 hours for eight. While it runs the PID table is Off and set 1 holds the gains under test (`PID SET`); at the end set 1, the PID table, the setpoint and the mode are put back as found.
 

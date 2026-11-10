@@ -11,6 +11,7 @@
   body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, "Segoe UI", sans-serif; }
   header { background: #1d2226; color: #fff; padding: 0 16px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; min-height: 48px; }
   header b { font-size: 17px; }
+  #build { font-size: 12px; color: #9aa6b0; white-space: nowrap; }
   nav { display: flex; gap: 2px; }
   nav button { background: transparent; color: #c9d0d6; border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 13px 14px 10px; }
   nav button:hover { background: #2a3238; }
@@ -113,6 +114,7 @@
 <body>
 <header>
   <b>iPC control test</b>
+  <span id="build" title="This GUI's build: commits on its branch (commit), commit time; edited = its files differ from that commit. Firmware: the board's *IDN? answer"></span>
   <nav><button data-tab="live" class="on">Live</button><button data-tab="tests">Tests</button><button data-tab="gains">Gains</button><button data-tab="board">Board</button></nav>
   <div class="pills">
     <button class="pill" id="pBoard" onclick="go('board')"><i></i><span id="link">Board: connecting</span></button>
@@ -516,6 +518,8 @@ async function refresh() {
   const on = s.link === 'connected';
   setPill('pBoard', on ? 'ok' : 'bad', on ? 'Board connected' : 'Board: ' + s.link, s.idn);
   $('idn').textContent = (on ? 'Connected: ' : 'No link. Last seen: ') + (s.idn || '--') + (on ? '' : ' (' + s.link + ')');
+  const fw = (s.idn || '').split(',')[3];
+  $('build').textContent = 'GUI ' + (s.build || '--') + (fw ? ' \u00b7 firmware ' + fw.trim() : '');
   const r = rows[rows.length - 1];
   if (r) {
     $('sp').textContent = fmt(r[1], 1); $('p').textContent = fmt(r[2], 3); $('v').textContent = fmt(r[3], 2);

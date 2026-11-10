@@ -83,6 +83,7 @@ COLS = ['t_s', 'sp_mbar', 'p_mbar', 'valve_pct', 'mode', 'alarm', 'stage']
 # The 336 inputs on this rig, used when an input is given without a name.
 LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
 LS_INPUT = re.compile(r'^[A-D][1-5]?$')
+GUI_BUILD = ''              # set by main(): gui_build()
 
 
 def num(part):
@@ -104,6 +105,31 @@ def kelvin(text):
 
 def stamp():
     return time.strftime('%Y%m%d_%H%M%S')
+
+
+def gui_build(here=HERE):
+    """This GUI's build, from the git checkout it runs in: 'build <commits> (<hash>), <commit time>',
+    and ', edited' when its files differ from that commit. Without git: the newest file time."""
+    import subprocess
+
+    def git(*a):
+        r = subprocess.run(['git', '-C', here] + list(a), capture_output=True, text=True, timeout=5)
+        if r.returncode:
+            raise OSError(r.stderr.strip())
+        return r.stdout.strip()
+    try:
+        n = int(git('rev-list', '--count', 'HEAD'))
+        h, ct = git('log', '-1', '--format=%h %ct').split()
+        try:
+            edited = git('status', '--porcelain', '--untracked-files=no', '--', '.', os.path.join('..', 'gain-schedule'))
+        except (OSError, subprocess.SubprocessError):
+            edited = ''
+        return 'build %d (%s), %s%s' % (n, h, time.strftime('%d/%m/%y %H:%M', time.localtime(int(ct))),
+                                        ', edited' if edited else '')
+    except (OSError, ValueError, subprocess.SubprocessError):
+        files = [os.path.join(here, f) for f in os.listdir(here) if f.endswith(('.py', '.html'))]
+        t = max((os.path.getmtime(f) for f in files), default=0)
+        return 'files of %s (no git)' % time.strftime('%d/%m/%y %H:%M', time.localtime(t))
 
 
 def ls_inputs(specs):
@@ -1338,7 +1364,7 @@ class Board:
         with self.lock:
             rows = [r for r in self.hist if r[0] > since]
             blended = [[sp] + list(gains_for(self.table, sp)) for sp in SHOW_SP] if self.table else []
-            return {'link': self.state['link'], 'idn': self.state['idn'], 'pid': self.state['pid'],
+            return {'link': self.state['link'], 'idn': self.state['idn'], 'pid': self.state['pid'], 'build': GUI_BUILD,
                     'board_sched': self.state.get('board_sched'), 'pid_set': self.state.get('pid_set'),
                     'log': self.state['log'], 'rows': rows, 'results': self.results, 'vresults': self.vresults,
                     'prog': self.prog_view(), 'last_prog': self.last_prog,
@@ -1520,6 +1546,9 @@ def main():
         sys.exit('no port for the page; try --port with another number')
     port = srv.server_address[1]
     threading.Thread(target=board.run, daemon=True).start()
+    global GUI_BUILD
+    GUI_BUILD = gui_build()
+    print('iPC control test GUI %s' % GUI_BUILD)
     print('board %s:%d, open http://localhost:%d  (Ctrl+C to stop)' % (board.addr + (port,)))
     print('logging to %s' % board.logger.folder)
     if not a.allow_sleep and keep_awake():

@@ -534,12 +534,14 @@ class AutoTuner(pmc_gains.Tuner):
         self.cuts.append('x%.2f osc' % w.cut())
         return new
 
-    def hold(self, sp, most, kp, ti):
+    def hold(self, sp, most, kp, ti, pre='', phase=None):
         """AUTO at sp until the minute's mean is on the point and level,
-        cutting KP while it oscillates (each cut starts the wait again).
+        cutting KP while it oscillates (each cut starts the wait again,
+        and the stage line with it: the new KP and its own `most`).
         Returns (valve % it holds at, held, the last 30 s mean pressure,
         the KP in use)."""
         tol = max(0.05 * sp, 0.1)
+        kp0 = kp
 
         def level(rows):
             t = rows[-1][0]
@@ -551,7 +553,9 @@ class AutoTuner(pmc_gains.Tuner):
                 return False
             ma, mb = sum(a) / len(a), sum(b) / len(b)
             return abs((ma + mb) / 2 - sp) < tol and abs(ma - mb) < tol / 2
-        for _ in range(MAX_CUTS + 1):
+        for n in range(MAX_CUTS + 1):
+            self.stage('%sAUTO at %g mbar with KP %.2f TI %.2f%s, waiting for it to hold' % (
+                pre, sp, kp, ti, ' (cut from %.2f)' % kp0 if kp < kp0 else ''), phase if n == 0 else None, most)
             w = Wild(sp)
 
             def held(rows):
@@ -586,9 +590,7 @@ class AutoTuner(pmc_gains.Tuner):
         self.link.do('PRES SP %.1f' % sp)
         if self.sample()[2] != 'AUTO':
             self.auto()
-        self.stage('AUTO at %g mbar with KP %.2f TI %.2f, waiting for it to hold' % (sp, kp, ti),
-                   '%g mbar reach' % sp, REACH_MAX_S)
-        x0, ok, p, _ = self.hold(sp, REACH_MAX_S, kp, ti)
+        x0, ok, p, _ = self.hold(sp, REACH_MAX_S, kp, ti, '', '%g mbar reach' % sp)
         if x0 is None:
             raise RuntimeError('no valve reading')
         if not ok and abs(p - sp) > 0.3 * sp:
@@ -696,9 +698,7 @@ class AutoTuner(pmc_gains.Tuner):
         ends the check there."""
         self.pid(kp, ti)
         self.auto()
-        self.stage('check %d: AUTO at %g mbar with KP %.2f TI %.2f, waiting for it to hold' % (k, sp, kp, ti),
-                   '%g mbar check %d hold' % (sp, k), CHECK_HOLD_MAX_S)
-        kp = self.hold(sp, CHECK_HOLD_MAX_S, kp, ti)[3]
+        kp = self.hold(sp, CHECK_HOLD_MAX_S, kp, ti, 'check %d: ' % k, '%g mbar check %d hold' % (sp, k))[3]
         hi = round(max(sp * (1 + CHECK_UP), sp + 0.2), 1)
         # The pressure's own wander is not the gains': overshoot counts only
         # beyond it, and it widens the band (9 Nov, 4 mbar: +/- 0.17 mbar
