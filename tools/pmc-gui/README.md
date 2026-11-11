@@ -4,6 +4,8 @@
 
 ## The page
 
+Screenshots on the simulator (GUI build 425, firmware 0.16.9): [Live, during an autotune](screens/live-autotune-running.png) and [Gains, after it](screens/gains-autotune-done.png).
+
 - **Top bar**, on every tab: the GUI's build (commits on its branch, the commit, the commit time; "edited" when its files differ from that commit) and the board's firmware version, the tabs, then three status lights and the board's mode. The build line is printed in the console window at start too.
   - Board: connected, or why there is no link.
   - Lake Shore: the temperatures, off, or why there is no link.
