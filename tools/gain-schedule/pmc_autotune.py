@@ -1710,6 +1710,19 @@ STEP_MOST_S = 1200             # the most one step is recorded, s
 STEP_BAND_PCT = 5.0            # settled: within this % of the new setpoint...
 STEP_BAND_MIN = 0.1            # ...or this, mbar, if wider, for SETTLED_S
 STEP_FIRST_MAX_S = 600         # the most it waits for the first setpoint to hold
+# The PID table the step test writes first unless told not to (Ryan, 11 Nov:
+# "initialise to the kp ti kd values that you came up with for 6 and 14 mbar
+# boundaries"): sets 1 and 2 from the 10 Nov proposal, set 3 from the 11 Nov
+# bench run; (KP %/mbar, TI min, KD) per set, then B1, B2 mbar and H %.
+STEP_SETS = [(0.06, 0.70, 0.0), (0.14, 1.50, 0.0), (0.30, 0.25, 0.0)]
+STEP_B1, STEP_B2, STEP_H = 6.0, 14.0, 10
+
+
+def table_lines(sets, b1, b2, h):
+    """The text-port lines for three PID sets [(kp, ti, kd)] and the PID
+    table on the pressure."""
+    return ['PIDS SET %d,%.2f,%.2f,%.2f' % (n, kp, ti, kd) for n, (kp, ti, kd) in enumerate(sets, 1)] + \
+        ['SCHED SET PV,%g,%g,%d' % (b1, b2, h)]
 
 
 def step_band(sp):

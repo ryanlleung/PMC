@@ -812,9 +812,11 @@ class Board:
         return ''
 
     # Setpoint step test (pmc_autotune.StepTest) ------------------------------
-    def start_steptest(self, sps, most_min):
+    def start_steptest(self, sps, most_min, table=None):
         """AUTO through the setpoints in the order typed, each step until it
-        holds, with the board's own gains and PID table (Ryan, 11 Nov)."""
+        holds, with the board's gains and PID table (Ryan, 11 Nov). table:
+        {'sets': [[kp, ti, kd]] x 3, 'b1', 'b2', 'h'} is written to the board
+        first; None leaves the board's as they are."""
         if self.busy():
             return 'a test is already running'
         sps = [round(x, 1) for x in sps]
@@ -822,6 +824,22 @@ class Board:
             return 'give two or more setpoints above 0, each different from the one before'
         if not 1 <= most_min <= 120:
             return 'the most per step must be 1 to 120 min'
+        lines = []
+        if table:
+            sets = [[float(v) for v in x] for x in table['sets']]
+            b1, b2, h = float(table['b1']), float(table['b2']), int(float(table['h']))
+            if len(sets) != 3 or any(len(x) != 3 for x in sets):
+                return 'give KP, TI and KD for each of the three sets'
+            for n, (kp, ti, kd) in enumerate(sets, 1):
+                if not (pmc_autotune.KP_MIN <= kp <= pmc_autotune.KP_MAX and pmc_autotune.TI_MIN <= ti <= pmc_autotune.TI_MAX
+                        and 0 <= kd <= 10000):
+                    return 'set %d: KP %g to %g, TI %g to %g min, KD 0 or more' % (
+                        n, pmc_autotune.KP_MIN, pmc_autotune.KP_MAX, pmc_autotune.TI_MIN, pmc_autotune.TI_MAX)
+            if not 0 < b1 < b2:
+                return 'B1 must be above 0 and below B2'
+            if not 0 <= h <= 50:
+                return 'H must be 0 to 50 %'
+            lines = pmc_autotune.table_lines(sets, b1, b2, h)
         r = self.raw('SETPOINT?;PRESSURE?;VALVE?;ALARM?')
         if r.startswith('LINK '):
             return r
@@ -835,16 +853,23 @@ class Board:
         r = self.send('SETPOINT %.1f' % sps[0])     # ERR 211 when Remote control is Off
         if r:
             return r
+        for line in lines:
+            r = self.send(line)
+            if r.startswith('ERR 100'):
+                return 'this firmware has no PID table (0.15.15 or later)'
+            if r:
+                return '%s: %s' % (line, r)
         most = int(most_min * 60)
         self.job, self.stop_job, self.abort = 'steptest', False, False
         labels = ['Hold %g mbar' % sps[0]] + ['%g -> %g mbar' % (a, b) for a, b in zip(sps, sps[1:])]
         self.begin('steptest', 'Setpoint step test', labels,
                    '%s mbar, each step until it holds within %g %% of the setpoint (%g mbar at least) for %d s, '
-                   'or %d min at most; the board\'s own gains and PID table' % (
+                   'or %d min at most; %s' % (
                        ' -> '.join('%g' % x for x in sps), pmc_autotune.STEP_BAND_PCT, pmc_autotune.STEP_BAND_MIN,
-                       pmc_autotune.SETTLED_S, most // 60))
+                       pmc_autotune.SETTLED_S, most // 60,
+                       'PID table written first: ' + '; '.join(lines) if lines else 'the board\'s own gains and PID table'))
         with self.lock:
-            self.st = {'sps': sps, 'rows': [], 'now': '', 'running': True, 'dir': self.run_dir}
+            self.st = {'sps': sps, 'rows': [], 'now': '', 'running': True, 'dir': self.run_dir, 'written': lines}
         threading.Thread(target=self.steptest_job, args=(sps, most), daemon=True).start()
         return ''
 
@@ -1170,7 +1195,8 @@ def make_handler(board):
                                              str(q.get('start', 'learned')))
                 elif p == '/api/steptest':
                     r = board.start_steptest([float(x) for x in str(q['sps']).replace(',', ' ').split()],
-                                             float(q.get('most_min', pmc_autotune.STEP_MOST_S / 60)))
+                                             float(q.get('most_min', pmc_autotune.STEP_MOST_S / 60)),
+                                             q.get('table'))
                 elif p == '/api/autotune/write':
                     r = board.write_sets()
                 elif p == '/api/log':

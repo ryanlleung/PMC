@@ -262,9 +262,16 @@
         <h2>Setpoint step test<span class="badge">Running</span></h2>
         <div class="row"><label class="w">Setpoints</label><input id="sSps" type="text" class="wide" value="8 12 16 24 48 24 16 12 8 4 2 4 8"><label>mbar</label></div>
         <div class="row"><label class="w">Each step</label><input id="sMost" type="number" step="1" min="1" max="120" value="20" style="width:60px"><label>min at most</label></div>
+        <div class="row"><label class="w">PID table</label><select id="sTable"><option value="write" selected>Write these first</option><option value="leave">Leave the board's</option></select></div>
+        <div id="sTableBox">
+          <div class="row"><label class="w">Set 1</label><label>KP</label><input id="s1kp" type="number" step="0.01" value="0.06" style="width:56px"><label>TI</label><input id="s1ti" type="number" step="0.01" value="0.70" style="width:56px"><label>KD</label><input id="s1kd" type="number" step="0.01" value="0" style="width:48px"></div>
+          <div class="row"><label class="w">Set 2</label><label>KP</label><input id="s2kp" type="number" step="0.01" value="0.14" style="width:56px"><label>TI</label><input id="s2ti" type="number" step="0.01" value="1.50" style="width:56px"><label>KD</label><input id="s2kd" type="number" step="0.01" value="0" style="width:48px"></div>
+          <div class="row"><label class="w">Set 3</label><label>KP</label><input id="s3kp" type="number" step="0.01" value="0.30" style="width:56px"><label>TI</label><input id="s3ti" type="number" step="0.01" value="0.25" style="width:56px"><label>KD</label><input id="s3kd" type="number" step="0.01" value="0" style="width:48px"></div>
+          <div class="row"><label class="w">Boundaries</label><label>B1</label><input id="sB1" type="number" step="0.5" value="6" style="width:48px"><label>B2</label><input id="sB2" type="number" step="0.5" value="14" style="width:48px"><label>H %</label><input id="sH" type="number" step="1" value="10" style="width:44px"></div>
+        </div>
         <div class="est" id="sEst"></div>
         <div class="row"><button class="primary run" onclick="startSteps(this)">Run step test</button><button class="stopbtn" onclick="stopTest(this)">Stop step test</button></div>
-        <div class="hint">AUTO through the setpoints in the order typed, with the board's own gains and PID table: nothing is changed on the board but the setpoint. First AUTO at the first setpoint until it holds (10 min at most), then each step until the pressure holds within 5 % of the new setpoint (0.1 mbar at least) for 1 min, or the time above. Each step's figures show on the left as it ends: the PID set in use and its gains, the time to 63 % and 90 % of the step, overshoot, settling time, reversals and valve back-off. Its folder has every sample, each step's samples and results.csv. Stop step test puts the setpoint back to the first one; STOP leaves everything where it is.</div>
+        <div class="hint">Write these first sends the three sets and the PID table on the pressure (<code>PIDS SET</code>, <code>SCHED SET PV</code>) before the run, and they stay on the board after it. KP in % per mbar, TI in min. The values are the ones proposed for 6 and 14 mbar boundaries: sets 1 and 2 from the 10 Nov model, set 3 from the 11 Nov bench run; none benched as a table. Leave the board's runs with whatever the board has. Then AUTO through the setpoints in the order typed: nothing else is changed on the board but the setpoint. First AUTO at the first setpoint until it holds (10 min at most), then each step until the pressure holds within 5 % of the new setpoint (0.1 mbar at least) for 1 min, or the time above. Each step's figures show on the left as it ends: the PID set in use and its gains, the time to 63 % and 90 % of the step, overshoot, settling time, reversals and valve back-off. Its folder has every sample, each step's samples and results.csv. Stop step test puts the setpoint back to the first one; STOP leaves everything where it is.</div>
       </div>
     </div>
 
@@ -365,7 +372,10 @@ async function post(url, body, btn, what, okText) {
 const cmd = (line, btn) => post('/api/cmd', { line }, btn, line).then(j => j.reply);
 const stopAll = btn => post('/api/stop', {}, btn, 'STOP', 'valve stopped');
 const stopTest = btn => post('/api/test/stop', {}, btn, 'Stop test', 'stopping');
-const startSteps = btn => post('/api/steptest', { sps: val('sSps'), most_min: +val('sMost') }, btn, 'Step test', 'started');
+const startSteps = btn => post('/api/steptest', { sps: val('sSps'), most_min: +val('sMost'),
+  table: val('sTable') === 'write' ? { sets: [1, 2, 3].map(n => ['kp', 'ti', 'kd'].map(k => +val('s' + n + k))), b1: +val('sB1'), b2: +val('sB2'), h: +val('sH') } : null },
+  btn, 'Step test', 'started');
+document.addEventListener('change', e => { if (e.target.id === 'sTable') $('sTableBox').style.display = val('sTable') === 'write' ? '' : 'none'; });
 function setPid(btn) {
   const kd = val('kd');
   cmd('PID SET ' + val('kp') + ',' + val('ti') + (kd !== '' ? ',' + kd : ''), btn).then(r => { if (!r) pidLoaded = false; });

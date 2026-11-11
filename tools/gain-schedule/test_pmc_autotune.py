@@ -1012,6 +1012,11 @@ class SetpointSteps(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(d, 'step_2_48_to_2mbar.csv')))
         self.assertFalse(any(x.startswith(('PID SET', 'PIDS SET', 'SCHED SET')) for x in b.log))   # the board's gains
 
+    def test_the_table_it_writes_first(self):
+        self.assertEqual(at.table_lines(at.STEP_SETS, at.STEP_B1, at.STEP_B2, at.STEP_H),
+                         ['PIDS SET 1,0.06,0.70,0.00', 'PIDS SET 2,0.14,1.50,0.00', 'PIDS SET 3,0.30,0.25,0.00',
+                          'SCHED SET PV,6,14,10'])
+
     def test_ends_when_the_board_leaves_auto(self):
         plant = Plant(K=2.0, L=2.0, tau=8.0, noise=0.01)
         b = FakeBoard(plant)
