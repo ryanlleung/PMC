@@ -144,44 +144,73 @@ static void fl_tick(double dt)
 }
 
 /* ---- bench cryostat, fitted to the bench logs ----------------------------- */
-// The flow line as the bench logs of 6 and 9 Nov 2026 show it (valve,
-// pressure and the Lake Shore's heat exchanger temperature, 1 s samples;
-// simulator/wasm/fit_bench.py checks a set of these numbers against logs).
+// The flow line as the bench logs of 9 to 11 Nov 2026 show it (valve,
+// pressure and the Lake Shore's heat exchanger and cold head temperatures,
+// 1 s samples; simulator/wasm/fit_bench.py checks the same numbers against
+// logs). The numbers are those of the 11 Nov 17:26 step test session.
+//
 // The pressure heads for
-//   floor + F(needle) x exp(-(Thx - 4 K) / KA)
-// after a dead time, through a lag that depends on the heat exchanger:
-// with liquid in it (Thx under about 3.5 K) the pressure follows the valve
-// over 25 to 70 s, dry (5.5 K and over) in about 5 s. That is why the
-// relay period and swing change so much from one setpoint to the next.
-// Below about 6 mbar the heat exchanger holds no liquid whatever Thx reads,
-// so the lag is shorter still there (2 s at 2 mbar): a reach from 10 down
-// to 1 mbar with a high KP swings 1 to 10 mbar as on the bench (10 Nov).
-// Thx heads for a steady value that falls from 1 to 12 mbar (more flow,
-// colder, so the pressure creeps on up: the valve's knee) and rises again
-// above 12 mbar (the creep runs back): up to 4.5 K within seconds (the
-// liquid boils off), the rest over minutes. The needle sticks when
-// opening at low openings (it slips all at once after a 0.37 % move) and
-// follows at once when closing.
-#define BX_N 16
-static const double BX_Y[BX_N] = { 0, 2.4, 2.6, 3.0, 3.2, 3.45, 3.7, 4.6, 7.0, 8.0, 9.4, 10.7, 13.5, 20, 32, 50 };       // valve %
-static const double BX_F[BX_N] = { 0, 0, 0.9, 2.5, 5.5, 7.0, 8.6, 12.3, 18.0, 20.5, 25.3, 27.7, 33.6, 48.5, 76, 98 };  // mbar at 4 K
+//   floor + F(needle) x G(Thx)
+// after a dead time, through a lag. The needle follows a closing valve at
+// once and an opening valve 0.30 % of travel behind (play): a small opening
+// move after a closing one does nothing. G is 1.33 with the heat exchanger
+// at 1.8 K (liquid in it) and 0.63 from 8 K (gas only), so the same opening
+// gives twice the pressure wet as dry. The lag is 25 to 70 s with the heat
+// exchanger under 3.5 K and 5 s from 5.7 K; it is never more than 2 s at
+// 2 mbar and 8 s at 6 mbar.
+//
+// What sets Thx is the cold head. It warms with the flow (3.5 K at 8 mbar,
+// 4.1 K at 14.5, 5.9 K at 29) over minutes. Under 3.72 K all the helium
+// reaches the heat exchanger as liquid, over 4.03 K none does, and Thx
+// heads for a mix of its two steady values: with liquid, colder the more
+// flow (3.5 K at 8 mbar, 1.8 K from 12.5 mbar); with gas, 6 to 14 K.
+// So a step up from 12 mbar first sees a wet heat exchanger (the pressure
+// climbs past 15 mbar), then the cold head passes 3.72 K, the heat
+// exchanger dries and the pressure falls back at the same opening. Coming
+// down from 16 mbar the heat exchanger stays dry until the cold head is
+// back under 4.03 K; then it refills and the pressure holds up while the
+// valve closes. The heat exchanger itself moves in seconds when cold and
+// in minutes when warm (its heat capacity grows with temperature).
+//
+// Two things move from one bench session to the next and are fixed here at
+// their 11 Nov afternoon values: the valve's zero (9 Nov was 0.6 % lower,
+// 10 Nov 0.2 % lower) and how cold the cold head runs (9 and 10 Nov were
+// 0.2 K colder, so the heat exchanger dried later on a step up).
+#define BX_N 18
+static const double BX_Y[BX_N] = { 0, 1.68, 1.88, 2.28, 2.48, 2.73, 2.98, 3.88, 6.28, 7.28, 8.68, 9.98, 12.78, 19.28, 24.3, 31.28, 49.28, 100 };   // valve %
+static const double BX_F[BX_N] = { 0, 0, 0.4, 0.88, 4.76, 7.4, 9, 12.1, 18.8, 21.8, 26.8, 31.1, 40.1, 52.7, 69.2, 75, 79.9, 87.2 };          // mbar with Thx 3.5 K
+#define BG_N 7
+static const double BG_T[BG_N] = { 1.8, 2.5, 3.5, 5, 6.5, 8, 12 };                 // heat exchanger K
+static const double BG_F[BG_N] = { 1.33, 1.09, 1, 0.92, 0.76, 0.63, 0.63 };     // x the pressure
 #define BT_N 9
-static const double BT_T[BT_N] = { 1.8, 2.0, 2.75, 3.5, 4.5, 5.7, 7, 12, 30 };    // heat exchanger K
-static const double BT_LAG[BT_N] = { 70, 64, 26, 24, 12, 5, 5, 5, 5 };           // s, pressure lag
+static const double BT_T[BT_N] = { 1.8, 2, 2.75, 3.5, 4.5, 5.7, 7, 12, 30 };     // heat exchanger K
+static const double BT_LAG[BT_N] = { 70, 64, 26, 24, 12, 5, 5, 5, 5 };          // s, pressure lag
 #define BL_N 6
-static const double BL_P[BL_N] = { 1, 2, 4, 6, 8, 12 };                       // mbar
-static const double BL_LAG[BL_N] = { 1.5, 2, 4, 8, 30, 1000 };                // s, the most the lag is (dry)
-#define BH_N 10
-static const double BH_P[BH_N] = { 0.67, 1, 2, 4, 8, 12, 16, 20, 28, 50 };        // mbar
-static const double BH_T[BH_N] = { 20, 16, 14, 7, 3.2, 1.9, 4.5, 5.6, 6.5, 8.8 };  // K, steady
+static const double BL_P[BL_N] = { 1, 2, 4, 6, 8, 12 };                            // mbar
+static const double BL_LAG[BL_N] = { 1.5, 2, 4, 8, 30, 1000 };                 // s, the most the lag is
+#define BC_N 11
+static const double BC_P[BC_N] = { 1, 2, 4, 8, 10, 12, 14.5, 18, 24, 29, 48 };     // mbar
+static const double BC_T[BC_N] = { 2.91, 3.02, 3.09, 3.46, 3.56, 3.88, 4.09, 4.21, 4.93, 5.92, 10.88 };   // K, cold head, steady
+#define BK_N 5
+static const double BK_T[BK_N] = { 3.5, 4, 5, 6, 30 };                             // cold head K
+static const double BK_S[BK_N] = { 255, 100, 100, 150, 150 };                      // s, its time constant when cooling
+#define BW_N 6
+static const double BW_C[BW_N] = { 3.72, 3.78, 3.88, 3.98, 4.03, 30 };             // cold head K
+static const double BW_X[BW_N] = { 1, 0.85, 0.66, 0.13, 0, 0 };                    // share of the helium arriving as liquid
+#define BH_N 11
+static const double BH_P[BH_N] = { 1, 2, 4, 6, 8, 9, 10, 11, 12, 12.5, 60 };       // mbar
+static const double BH_T[BH_N] = { 19, 8, 7.13, 4.77, 3.47, 2.92, 2.61, 2.06, 2.05, 1.81, 1.81 };   // K, Thx steady with liquid arriving
+#define BD_N 9
+static const double BD_P[BD_N] = { 4, 8, 12, 16, 20, 24, 29, 46, 55 };             // mbar
+static const double BD_T[BD_N] = { 9, 8, 6.8, 6.2, 5.7, 5.9, 7, 9.8, 13.9 }; // K, Thx steady with gas only
 #define BX_FLOOR  0.67     // mbar, valve shut (the pump's floor with the line)
-#define BX_KA     10.0     // K: the heat exchanger's effect on the pressure
 #define BX_DEAD   2.0      // s, dead time
-#define BX_STICK0 0.37     // % of travel an opening move sticks for, up to 5 % open
-#define BX_STICK1 0.05     // the same from 10 % open
-#define BX_HXTAU  340.0    // s, heat exchanger: the slow part
-#define BX_HXFAST 15.0     // s, its fast part
-#define BX_HXCAP  4.5      // K the fast part goes up to
+#define BX_PLAY   0.3     // % of travel the needle lags an opening valve by
+#define BX_CUP    1.5      // the cold head warms this many times more slowly than it cools
+#define BX_HXTAU  12.5     // s, heat exchanger time constant at 2.8 K
+#define BX_HXPOW  2.64     // it grows with this power of Thx
+#define BX_HXMIN  4      // s, and is never under this
+#define BX_HXSTEP 3      // K: the most Thx is pulled by, however far it is from its steady value
 #define BX_HX0    3.0      // K at power-on: the cryostat has been running
 #define BX_NOISE  0.004    // flow noise, fraction (2 s correlation)
 #define BX_WANDER 0.004    // slow wander, fraction (200 s correlation)
@@ -189,7 +218,7 @@ static const double BH_T[BH_N] = { 20, 16, 14, 7, 3.2, 1.9, 4.5, 5.6, 6.5, 8.8 }
 #define BX_RING   1000     // 10 s of 10 ms ticks
 static double bx_ring[BX_RING];
 static int bx_ri;
-static double bx_y, bx_fn, bx_wn, bx_hf, bx_hs;   // needle %, noise, Thx fast and slow parts
+static double bx_y, bx_fn, bx_wn, bx_c;   // needle %, noise, cold head K
 
 static double table(const double *xs, const double *ys, int n, double x)
 {
@@ -201,27 +230,21 @@ static double table(const double *xs, const double *ys, int n, double x)
 // The needle's opening as the firmware counts valve % (POSMAX 66048 steps,
 // 0 % at RETURN 400 steps above the switch): the logs are in these units.
 static double bx_valve_pct(void) { return (B.needle_half / 2.0 - 400.0) / 660.48; }
-static double bx_stick(double y)
-{
-    double f = clamp((y - 5.0) / 5.0, 0, 1);
-    return BX_STICK0 * (1 - f) + BX_STICK1 * f;
-}
 static double bx_target(void)
 {
     if (!B.pump) return BX_PUMPOFF;
     double f = B.he && bx_y > 0 ? table(BX_Y, BX_F, BX_N, bx_y) : 0;
-    return BX_FLOOR + f * exp(-(B.hx - 4.0) / BX_KA) * (1 + bx_fn + bx_wn);
+    return BX_FLOOR + f * table(BG_T, BG_F, BG_N, B.hx) * (1 + bx_fn + bx_wn);
 }
 static void bx_fill(double mbar)
 {
     for (int i = 0; i < BX_RING; i++) bx_ring[i] = mbar;
     B.P = mbar;
+    bx_c = table(BC_P, BC_T, BC_N, mbar);   // the cold head as after a long time at this pressure
 }
 static void bx_set_hx(double hx)
 {
     B.hx = hx;
-    bx_hf = hx < BX_HXCAP ? hx : BX_HXCAP;
-    bx_hs = hx - bx_hf;
 }
 static void bx_reset(double hx)
 {
@@ -234,22 +257,29 @@ static void bx_reset(double hx)
 static void bx_tick(double dt)
 {
     double x = bx_valve_pct();
-    if (x < bx_y) bx_y = x;                          // closing: follows at once
-    else if (x - bx_y > bx_stick(bx_y)) bx_y = x;    // opening: sticks, then slips
+    if (x < bx_y) bx_y = x;                              // closing: follows at once
+    else if (x - BX_PLAY > bx_y) bx_y = x - BX_PLAY;     // opening: follows behind the play
     bx_fn += -bx_fn * dt / 2 + BX_NOISE * sqrt(dt) * gauss();
     bx_wn += -bx_wn * dt / 200 + BX_WANDER * sqrt(2 * dt / 200) * gauss();
     bx_ring[bx_ri] = bx_target();
     double in = bx_ring[(bx_ri - (int)lround(BX_DEAD / dt) + BX_RING) % BX_RING];
     bx_ri = (bx_ri + 1) % BX_RING;
-    double lag = table(BT_T, BT_LAG, BT_N, B.hx), dry = table(BL_P, BL_LAG, BL_N, B.P);
-    if (dry < lag) lag = dry;
+    double lag = table(BT_T, BT_LAG, BT_N, B.hx), most = table(BL_P, BL_LAG, BL_N, B.P);
+    if (most < lag) lag = most;
     if (!B.pump) lag = 60.0;   // the pump off: the line fills
     B.P += (in - B.P) * (1 - exp(-dt / lag));
     if (B.P < 0) B.P = 0;
-    double T = table(BH_P, BH_T, BH_N, B.P), Tf = T < BX_HXCAP ? T : BX_HXCAP;
-    bx_hf += (Tf - bx_hf) * (1 - exp(-dt / BX_HXFAST));
-    bx_hs += (T - Tf - bx_hs) * (1 - exp(-dt / BX_HXTAU));
-    B.hx = bx_hf + bx_hs;
+    // The cold head follows the flow.
+    double ce = table(BC_P, BC_T, BC_N, B.P), tc = table(BK_T, BK_S, BK_N, bx_c);
+    if (ce > bx_c) tc *= BX_CUP;
+    bx_c += (ce - bx_c) * (1 - exp(-dt / tc));
+    // The heat exchanger heads for its steady value with the share of
+    // liquid the cold head delivers, quickly when cold, slowly when warm.
+    double wet = table(BW_C, BW_X, BW_N, bx_c);
+    double T = wet * table(BH_P, BH_T, BH_N, B.P) + (1 - wet) * table(BD_P, BD_T, BD_N, B.P);
+    double th = BX_HXTAU * pow(B.hx / 2.8, BX_HXPOW);
+    if (th < BX_HXMIN) th = BX_HXMIN;
+    B.hx += clamp(T - B.hx, -BX_HXSTEP, BX_HXSTEP) * (1 - exp(-dt / th));
 }
 
 /* ---- motor and needle ----------------------------------------------------- */

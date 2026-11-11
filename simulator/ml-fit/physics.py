@@ -1,4 +1,4 @@
-"""The physics model (bench.c, as fit_bench.py runs it) on a logged valve, the
+"""The physics model (bench.c as of 10 Nov 2026, kept in bench_10nov.py) on a logged valve, the
 valve offset of a run, and the valve-history features the learned correction
 reads."""
 import os
@@ -6,8 +6,8 @@ import sys
 
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'wasm'))
-import fit_bench as fb  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bench_10nov as fb  # noqa: E402
 
 W = 120     # s at the start of a run where the model is given the logged heat exchanger temperature
 CAL = 600   # s at the start of a run that are never scored

@@ -23,8 +23,8 @@ W, CAL = 120, 600
 def errs(p, m):
     return dict(rmse=float(np.sqrt(np.mean((m - p) ** 2))), rel=float(np.median(np.abs(m - p) / p) * 100))
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'wasm'))
-import fit_bench as fb  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+import bench_10nov as fb  # noqa: E402
 
 T = lambda a: torch.tensor(np.asarray(a, dtype=np.float32))
 

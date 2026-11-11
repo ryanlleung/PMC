@@ -710,9 +710,12 @@ let parkedFlash;
   const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
   const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
   s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT 16'); s.cmd('MODE AUTO');
-  s.run(540000);
-  // Held: no swing over the last minute of 10 min. It may still creep a
-  // little as the heat exchanger settles (the knee), as on the bench.
+  s.run(900000);
+  // Held: no swing over the last minute of 16 min. From a cold start the
+  // heat exchanger is wet at first and dries over the next minutes (the
+  // cold head warms with the flow), so the valve has to open on from 4 to
+  // 7 % and the pressure runs under the setpoint meanwhile, as on the
+  // bench step test of 11 Nov.
   const ps = [];
   for (let i = 0; i < 12; i++) { s.run(5000); ps.push(num(s.cmd('PRESSURE?'))); }
   const p16 = ps[ps.length - 1], x0 = num(s.cmd('VALVE?'));
