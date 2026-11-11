@@ -854,6 +854,135 @@ class Refine(unittest.TestCase):
         t.point(8.0, (0.1, 0.4), 0.4)
         self.assertFalse(any(c.startswith(('Learned', 'Fresh')) for c in t.calcs))
 
+    def test_the_model_never_takes_kp_back_over_a_cut(self):
+        # Check 1 overshoots: KP x 0.8 = 0.4. Check 2 is slow, and its fit (a
+        # low K) wants far more KP than that; the model stays at 0.4 or under.
+        t = self.tuner([fig(8.0, 1), fig(0, 0, 30, 80, settle_s=None), fig(0, 0)])
+        cl = {'K': 0.5, 'L': 4, 'tau': 9, 'rms': 0.01, 'share': 0.02, 'n': 300}
+        check = t.check
+
+        def run(sp, kp, ti, r, k):
+            t.leg_runs = [{'p': 8.0, 'x': 3.0, 'p0': 8.0, 'p1': 9.6, 'kp': kp, 'ti': ti, 'rows': []}]
+            t.check_band, t.check_n = 0.08, 420
+            return check(sp, kp, ti, r, k)
+        t.check = run
+        t.fit_line = lambda sp, k, new: setattr(t, 'cl_fit', cl)
+        r = t.point(8.0, (0.1, 0.4), 0.4)
+        self.assertEqual(self.used[1][0], 0.4)
+        self.assertEqual(len(self.used), 3)
+        self.assertLessEqual(self.used[2][0], 0.4)
+        self.assertNotEqual(self.used[2][1], self.used[1][1])
+        self.assertTrue(r['trims'].startswith('KP x0.80, fit KP '), r['trims'])
+
+
+class ModelGains(unittest.TestCase):
+    """Gains from the check as it ran (Ryan, 11 Nov: "Build the fix")."""
+
+    def setUp(self):
+        self.n = int(min(max(12 * 25 + 90, 150), 360) + at.SETTLED_S)
+
+    def test_bench_24_mbar(self):
+        # The fit of the 11 Nov bench checks at 24 mbar (K 1.49 mbar/%, L 4 s,
+        # tau 9 s; Ku 0.96, Pu 25 s): KP up from the 0.24 the run left, under
+        # Ku / 2, TI at its floor 2.5 L_eff, and no model over 5 % overshoot.
+        fit = {'K': 1.49, 'L': 4, 'tau': 9}
+        kp, ti, s = at.model_gains(fit, 0.96, 25.0, 24.0, 28.8, 36.0, 0.24, self.n)
+        self.assertGreater(kp, 0.24)
+        self.assertLessEqual(kp, 0.96 / at.MODEL_KU)
+        self.assertGreaterEqual(ti, at.clip_ti(at.TI_MIN_LEFF * 25 / 4 / 60))
+        self.assertLess(ti, 0.59)
+        self.assertLess(s, at.model_settle(at.model_set(fit, 25.0), 0.24, 0.59, 24.0, 28.8, 36.0, 0.24, self.n) or 1e9)
+        # The 10 Nov plant at 16 mbar (K 2.44, L 9 s) with the gains from the 16 mbar fit: still under 5 %.
+        kp, ti, _ = at.model_gains({'K': 1.86, 'L': 4, 'tau': 6}, 1.0, 24.0, 16.0, 19.2, 30.0, 0.16, self.n)
+        f = at.step_figures(at.predict_leg({'K': 2.44, 'L': 9, 'tau': 6}, kp, ti, 16.0, 30.0, 16.0, 19.2, self.n),
+                            16.0, 19.2, 0.16)
+        self.assertLessEqual(f['overshoot_pct'], at.OVERSHOOT_MAX)
+
+    def test_kp_cap(self):
+        # A fit that wants a lot of KP gets Ku / 2, or the KP cut here.
+        fit = {'K': 0.5, 'L': 2, 'tau': 6}
+        self.assertEqual(at.model_gains(fit, 2.0, 20.0, 8.0, 9.6, 3.0, 0.08, self.n)[0], 1.0)
+        self.assertEqual(at.model_gains(fit, 2.0, 20.0, 8.0, 9.6, 3.0, 0.08, self.n, kp_top=0.4)[0], 0.4)
+
+    def test_point_takes_the_gains_from_the_check_as_it_ran(self):
+        # Ku / 4 and 2 Pu leave the check slow (the valve backing off, so no
+        # TI rule); the model's gains settle it in under half the time.
+        plant = Plant(K=1.5, L=4.0, tau=9.0, noise=0.01, stick=0.3, curve=lambda v: 0.67 + 1.5 * max(v, 0))
+        b = FakeBoard(plant)
+        b.advance(200)
+        t = at.AutoTuner(b, Clock(b), SimpleNamespace(d=0.4), tempfile.mkdtemp())
+        t.say = lambda m: None
+        figs = []
+        check = t.check
+
+        def run(*a):
+            out = check(*a)
+            figs.append(out[0])
+            return out
+        t.check = run
+        r = t.point(24, (0.2, 0.5), 0.4)
+        self.assertTrue(r['trims'].startswith('fit KP '), r['trims'])
+        self.assertIsNone(figs[0]['settle_s'])
+        self.assertLess(r['settle_s'], 150)
+        self.assertLessEqual(r['overshoot_pct'], at.OVERSHOOT_MAX)
+        self.assertTrue(any(c.startswith('Gains from check 1 as it ran') for c in t.calcs))
+        self.assertTrue(any(c.startswith('Not used') for c in t.calcs))   # check 2's are near enough the same
+
+
+class Hold(unittest.TestCase):
+    def hold(self, ps):
+        t = at.AutoTuner(None, None, SimpleNamespace(d=0.4), None)
+        t.say = lambda m: None
+
+        def samples(most, stop):
+            rows = []
+            for i, p in enumerate(ps):
+                rows.append((float(i), p, 9.0, 'AUTO'))
+                if stop(rows):
+                    break
+            return rows
+        t.samples = samples
+        return t.hold(24.0, len(ps), 0.24, 0.30)
+
+    def test_not_held_4_percent_under_while_still_rising(self):
+        # 11 Nov bench: 24 mbar called held at 23.07 mbar.
+        x0, ok, p, _ = self.hold([22.9 + 0.004 * i for i in range(120)])
+        self.assertFalse(ok)
+        x0, ok, p, _ = self.hold([24.0 + 0.05 * math.sin(i) for i in range(120)])
+        self.assertTrue(ok)
+
+
+class OutOfReach(unittest.TestCase):
+    """A check step the cryostat cannot reach ends the check, and the
+    setpoint is skipped (Ryan, 11 Nov, 48 mbar: the pressure stopped at
+    54.5 mbar with the valve at 98 %, short of 57.6)."""
+
+    def run_point(self, curve, gains=(0.2, 0.5)):
+        plant = Plant(curve=curve, L=4.0, tau=9.0, noise=0.01)
+        b = FakeBoard(plant)
+        b.advance(200)
+        d = tempfile.mkdtemp()
+        t = at.AutoTuner(b, Clock(b), SimpleNamespace(d=0.4), d)
+        t.say = lambda m: None
+        with self.assertRaises(RuntimeError) as e:
+            t.point(48, gains, 3.0)
+        self.assertIn('the check step to 57.6 mbar is out of reach', str(e.exception))
+        self.assertIn('so 48 mbar is left out of the sets', str(e.exception))
+        self.assertEqual(b.sp, 48.0)                                   # put back to the point
+        self.assertTrue(os.path.exists(os.path.join(d, 'check_48mbar_1_up.csv')))
+        return str(e.exception), t
+
+    def test_the_valve_past_90(self):
+        # 48 mbar at 86 % of the valve, 55.7 mbar at 100 %.
+        msg, t = self.run_point(lambda v: 0.67 + 0.55 * max(v, 0), (1.0, 0.3))
+        self.assertIn('the valve over 90 % for 30 s', msg)
+        self.assertLess(t.clock.now(), 2000)
+
+    def test_the_pressure_stopping(self):
+        # Flat over 60 %: 48.7 mbar at most; the valve never has to pass 90 %.
+        msg, _ = self.run_point(lambda v: 0.67 + 0.8 * min(max(v, 0), 60))
+        self.assertIn('up less than', msg)
+
 
 class Files(unittest.TestCase):
     def test_only_the_check_a_result_came_from_is_kept(self):

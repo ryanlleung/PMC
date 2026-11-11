@@ -29,9 +29,15 @@ For each test point, in the order given (the GUI: as typed, 2 4 8 12 16 24 48 mb
      before 90 %, and how long the pressure sags under the setpoint with the
      valve still. The first rule that applies is applied (refine_rule):
      too many reversals or a watchdog cut, KP x 0.7; overshoot, KP x 0.8; a
-     long tail with the valve backing off, TI x 0.7; slow, TI x 0.8. KP is
-     never raised. A refinement that makes the check worse is undone and
-     ends the refinements.
+     long tail with the valve backing off, TI x 0.7; slow, TI x 0.8. Those
+     rules never raise KP. When no KP cut is due, the check is also fitted
+     as it ran (the board's PI on the fit) and KP and TI are searched on
+     three models of that fit (model_gains): when they settle at least
+     25 % faster, they are used instead, so KP can go up as well as down
+     (to Ku / 2). A refinement that makes the check worse is undone and
+     ends the refinements. A check step up the cryostat cannot reach (the
+     valve over 90 %, or the pressure no longer rising) ends the check and
+     the point is skipped, so it is left out of the sets.
 Whenever AUTO runs (reaching a point, holding it, the check steps), a
 watchdog looks for a sustained oscillation: two full cycles in a row (four
 swings), each swing more than 30 % of the setpoint. It then cuts KP at once (x 0.5, or
@@ -128,6 +134,25 @@ KI_LEFF = 4.0                  # integral gain KP / TI never over 1 / (this x K 
 VALVE_STILL = 0.01             # the valve moved less than this, %, in 30 s = not moving
 WORSE_T90 = 1.5                # a check this many times slower to 90 % is worse
 WORSE_BAD = 1.15               # ...or this many times as far over the overshoot and reversal limits
+
+# Gains from the check as it ran (model_gains, AutoTuner.model_step; Ryan,
+# 11 Nov: the relay start and the x 0.8 rules left KP low and TI long).
+MODEL_KU = 2.0                 # KP from the model never over Ku / this
+MODEL_SHARE_MAX = 0.15         # used when the fit of the check as it ran is within this share of the step
+MODEL_FASTER = 0.75            # ...its gains settle in this times the check's settle or less
+MODEL_CHANGE = 0.15            # ...and KP or TI differs from the gains in use by more than this share
+MODEL_K = 1.3                  # the models: the fit at L_eff, its K over this, and its K times this...
+MODEL_L_MORE = 4               # ...with the dead time this much longer, s
+MODEL_KP_RATIO = 1.12          # the KP grid, down from the cap in this ratio...
+MODEL_KP_N = 30                # ...this many values
+MODEL_TI_RATIO = 1.15          # the TI grid, up from its floor in this ratio...
+MODEL_TI_MAX = 3.0             # ...to this, min
+
+# A check step out of reach (leg): the step ends, the setpoint is skipped.
+VALVE_FAR = 90.0               # the valve past this, %, with the pressure short of the band...
+FAR_S = 30                     # ...for this long
+STALL_S = 60                   # or at the step's end, short of the band, the pressure gained under the band in this long...
+STALL_MOVE = 15.0              # ...with the valve opened this much more than at the step, %
 
 # Reaching a point in AUTO.
 REACH_MAX_S = 600
@@ -451,6 +476,67 @@ def rule_gains(fit, ku, pu_s):
     ti_s = min(max(fit['tau'], TI_MIN_LEFF * le), 20.0 * le)
     kp = min(ti_s / (5.0 * fit['K'] * le), ku / KU_CAP)
     return clip_kp(kp), clip_ti(ti_s / 60.0)
+
+
+def model_set(fit, pu_s):
+    """The models model_gains has to suit: the fit with its dead time made
+    L_eff (the checks barely tell L from tau, and the relay's period says
+    more lag); the same with K MODEL_K times lower (slower); and with K
+    MODEL_K times higher and the dead time MODEL_L_MORE s longer together
+    (the overshoot side: on 11 Nov the bench's 16 mbar fit was K 1.86 L 4,
+    on 10 Nov K 2.44 L 9)."""
+    le = int(round(l_eff(fit, pu_s)))
+    K, tau = fit['K'], fit['tau']
+    return [{'K': K, 'L': le, 'tau': tau}, {'K': K / MODEL_K, 'L': le, 'tau': tau},
+            {'K': K * MODEL_K, 'L': le + MODEL_L_MORE, 'tau': tau}]
+
+
+def model_settle(models, kp, ti, sp, hi, x0, band, n, beat=None):
+    """The check on the models with kp, ti: the setpoint sp -> hi and back,
+    each from steady (the valve at x0 at sp). The worst settle, s, over the
+    models and both steps; None when any of them goes over OVERSHOOT_MAX or
+    REVERSALS_MAX, does not settle in n s, or takes beat s or longer."""
+    worst = 0.0
+    for m in models:
+        for p0, p1, x in ((sp, hi, x0), (hi, sp, x0 + (hi - sp) / m['K'])):
+            if not 0.0 <= x <= 100.0:
+                return None
+            f = step_figures(predict_leg(m, kp, ti, p0, x, p0, p1, n), p0, p1, band)
+            if f is None or f['settle_s'] is None or f['overshoot_pct'] > OVERSHOOT_MAX or \
+                    f['reversals'] > REVERSALS_MAX:
+                return None
+            worst = max(worst, f['settle_s'])
+            if beat is not None and worst >= beat:
+                return None
+    return worst
+
+
+def model_gains(fit, ku, pu_s, sp, hi, x0, band, n, kp_top=None):
+    """KP and TI for the fastest check on the models (model_set) of a fit
+    of the check as it ran: the least worst settle (model_settle) with no
+    model over the overshoot or reversal limits. KP from Ku / MODEL_KU (or
+    kp_top, the KP a check here overshot or oscillated with, if lower) down
+    in MODEL_KP_RATIO steps; TI from its floor (2.5 L_eff, and the integral
+    gain KP / TI at most 1 / (4 K L_eff)) up in MODEL_TI_RATIO steps to
+    MODEL_TI_MAX min. KP can come out higher than the gains in use: this is
+    the only place the autotune raises it. Returns (kp, ti, settle_s) or
+    None when no gains suit every model."""
+    models = model_set(fit, pu_s)
+    le = l_eff(fit, pu_s)
+    top = ku / MODEL_KU if kp_top is None else min(ku / MODEL_KU, kp_top)
+    best, seen = None, set()
+    for i in range(MODEL_KP_N):
+        kp = clip_kp(top / MODEL_KP_RATIO ** i)
+        if kp in seen or kp > top + 1e-9:
+            continue
+        seen.add(kp)
+        ti = clip_ti(max(TI_MIN_LEFF * le, KI_LEFF * fit['K'] * le * kp) / 60.0)
+        while ti <= MODEL_TI_MAX:
+            s = model_settle(models, kp, ti, sp, hi, x0, band, n, best[2] if best else None)
+            if s is not None:
+                best = (kp, ti, s)
+            ti = clip_ti(ti * MODEL_TI_RATIO + 0.005)
+    return best
 
 
 def badness(fig):
@@ -797,7 +883,9 @@ def refine_rule(fig, kp, ti, ku, pu_s, fit):
 
     Rules 3 and 4 never take TI under 2.5 L_eff (in min) or the integral gain
     KP / TI over 1 / (4 K L_eff); at the limit the check passes ('limit').
-    KP is never raised, and never over Ku / 3.
+    KP is never raised here, and never over Ku / 3; the gains from the check
+    as it ran (AutoTuner.model_step) can raise it, to Ku / 2, when no rule
+    1 or 2 applies.
 
     Returns {'kind': 'kp' | 'ti' | 'pass' | 'limit', 'kp', 'ti', 'why', 'f' (the factor), 'note'}."""
     keep = {'kind': 'pass', 'kp': kp, 'ti': ti, 'why': '', 'note': ''}
@@ -969,6 +1057,9 @@ class AutoTuner(Tuner):
     # tuning live graph"): the fit it is worked out on, and the last reach
     # and relay samples it can come from before the first check.
     pred_fit, relay_rows, leg_runs = None, [], []
+    # The fit of the last check as it ran (fit_closed_loop), and that
+    # check's band and length, for the gains from it (model_step).
+    cl_fit, check_band, check_n = None, 0.0, 0
 
     def predicted(self, rows, label):
         """A check step's predicted answer, [(t from the change, p, x)]: the
@@ -1051,11 +1142,14 @@ class AutoTuner(Tuner):
         return new
 
     def hold(self, sp, most, kp, ti, pre='', phase=None):
-        """AUTO at sp until the minute's mean is on the point and level,
-        cutting KP while it oscillates (each cut starts the wait again,
-        and the stage line with it: the new KP and its own `most`).
-        Returns (valve % it holds at, held, the last 30 s mean pressure,
-        the KP in use)."""
+        """AUTO at sp until the minute's mean is on the point (within tol,
+        5 %) and level: its last 30 s within tol / 2 of the point and
+        within tol / 4 of the 30 s before (11 Nov bench: held within 5 %
+        alone, 24 mbar was called held at 23.07 and 48 at 45.85 while still
+        rising, and the relay ran about a valve too far closed). Cuts KP
+        while it oscillates (each cut starts the wait again, and the stage
+        line with it: the new KP and its own `most`). Returns (valve % it
+        holds at, held, the last 30 s mean pressure, the KP in use)."""
         tol = max(0.05 * sp, 0.1)
         kp0 = kp
 
@@ -1068,7 +1162,7 @@ class AutoTuner(Tuner):
             if not a or not b:
                 return False
             ma, mb = sum(a) / len(a), sum(b) / len(b)
-            return abs((ma + mb) / 2 - sp) < tol and abs(ma - mb) < tol / 2
+            return abs((ma + mb) / 2 - sp) < tol and abs(ma - sp) < tol / 2 and abs(ma - mb) < tol / 4
         for n in range(MAX_CUTS + 1):
             self.stage('%sAUTO at %g mbar with KP %.2f TI %.2f%s, waiting for it to hold' % (
                 pre, sp, kp, ti, ' (cut from %.2f)' % kp0 if kp < kp0 else ''), phase if n == 0 else None, most)
@@ -1236,7 +1330,7 @@ class AutoTuner(Tuner):
         steps as they ran (fit_closed_loop) when they come within
         PRED_SHARE_MAX of the step, else `new` (check k's fit, when good),
         else the one before."""
-        cl = fit_closed_loop(self.leg_runs)
+        cl = self.cl_fit = fit_closed_loop(self.leg_runs)
         if cl:
             ok = cl['share'] <= PRED_SHARE_MAX
             self.calc('Fit of check %d at %g mbar as it ran, for the predicted line only (the board\'s PI on the fit, '
@@ -1258,6 +1352,7 @@ class AutoTuner(Tuner):
         self.send('PRES SP %.1f' % p1, 'check step %g -> %g mbar' % (p0, p1))
         t0, n, rows, since = self.clock.now(), 0, [], None
         wd = Wild(p1)
+        far, gone = None, ''
         try:
             while True:
                 n += 1
@@ -1274,7 +1369,25 @@ class AutoTuner(Tuner):
                                             wd.status(), 2 * WILD_CYCLES, wd.big))
                 if p is not None:
                     since = (since if since is not None else t) if abs(p - p1) <= band else None
-                if (since is not None and t - since >= SETTLED_S) or t >= most or wd.feed(p):
+                # Out of reach (Ryan, 11 Nov: at 48 mbar the pressure stopped
+                # at 54.5 with the valve at 98 %, short of 57.6, and five
+                # checks ran out of time): the valve past VALVE_FAR % with
+                # the pressure short of the band for FAR_S, or at the end
+                # the pressure no longer rising with the valve opened
+                # STALL_MOVE % more. Up steps only.
+                short = p1 > p0 and p is not None and p < p1 - band
+                far = (far if far is not None else t) if short and x is not None and x >= VALVE_FAR else None
+                if far is not None and t - far >= FAR_S:
+                    gone = 'the valve over %.0f %% for %d s (%.1f %%) with the pressure %.2f mbar' % (
+                        VALVE_FAR, FAR_S, x, p)
+                if not gone and short and t >= most and x is not None and x_s is not None and \
+                        x - x_s >= STALL_MOVE:
+                    now = [r[1] for r in rows if r[0] > t - 10 and r[1] is not None]
+                    then = [r[1] for r in rows if t - STALL_S - 10 < r[0] <= t - STALL_S and r[1] is not None]
+                    if now and then and sum(now) / len(now) - sum(then) / len(then) < band:
+                        gone = 'the pressure %.2f mbar and up less than %.2f mbar in the last %d s, with the valve ' \
+                               'opened %.1f %% to %.1f %%' % (p, band, STALL_S, x - x_s, x)
+                if gone or (since is not None and t - since >= SETTLED_S) or t >= most or wd.feed(p):
                     break
         finally:
             if pred:
@@ -1291,6 +1404,11 @@ class AutoTuner(Tuner):
                                 '' if r[2] is None else '%.2f' % r[2], p0, p1,
                                 '' if q is None else '%.3f' % q[0], '' if q is None else '%.2f' % q[1]])
         self.leg_rows = rows
+        if gone:
+            self.calc('Check step %g -> %g mbar out of reach: %s' % (p0, p1, gone))
+            self.send('PRES SP %.1f' % sp, 'check step out of reach, back to %g mbar' % sp)
+            raise RuntimeError('the check step to %g mbar is out of reach (%s), so %g mbar is left out of the sets' % (
+                p1, gone, sp))
         if p_s is not None and x_s is not None and g and g[0] is not None:
             self.leg_runs.append({'p': p_s, 'x': x_s, 'p0': p0, 'p1': p1, 'kp': g[0], 'ti': g[1], 'rows': rows})
         fig = step_figures(rows, p0, p1, band, slack)
@@ -1318,6 +1436,7 @@ class AutoTuner(Tuner):
                       'overshoot counted beyond the wander, %.3f mbar (at most %d %% of the step)' % (
                           band, hi - sp, slack, WANDER_MAX * 100))
         most = min(max(12 * r['Pu_s'] + 90, 150), 360)
+        self.check_band, self.check_n = band, int(most + SETTLED_S)
         rows = list(self.held_rows)     # the hold, then the two legs: one series for the fit
         legs, self.leg_runs = [], []
         for k2, (a, b) in enumerate([(sp, hi), (hi, sp)]):
@@ -1386,6 +1505,51 @@ class AutoTuner(Tuner):
         if gone:
             self.calc('Check %d passed over: %s deleted' % (k, ', '.join(gone)))
 
+    def model_step(self, sp, k, fig, kp, ti, ku, pu, kp_top=None):
+        """The gains from check k as it ran (model_gains on cl_fit, the fit
+        of its steps), as a refinement (Ryan, 11 Nov: "Build the fix"):
+        {'kind': 'model', 'kp', 'ti', 'why'} when the check had no
+        oscillation, overshoot or reversals over the limits, the fit is
+        within MODEL_SHARE_MAX of the step, the model's gains settle in
+        MODEL_FASTER times the check's settle or less (any time, when the
+        check did not settle) and KP or TI differs by more than
+        MODEL_CHANGE. Else None. KP can go up; never over Ku / MODEL_KU,
+        nor over a KP cut at this setpoint (kp_top)."""
+        cl, runs = self.cl_fit, self.leg_runs
+        if not fig or not runs or fig.get('wild_pp') or fig.get('cut') or \
+                fig['overshoot_pct'] > OVERSHOOT_MAX or fig['reversals'] > REVERSALS_MAX:
+            return None
+        if not cl or cl['share'] > MODEL_SHARE_MAX:
+            self.calc('Gains from check %d as it ran: not tried, %s' % (
+                k, 'no fit of its steps' if not cl else 'the fit of its steps is %.0f %% of the step off (needs %.0f %% '
+                'or less)' % (100 * cl['share'], 100 * MODEL_SHARE_MAX)))
+            return None
+        up = runs[0]
+        le = int(round(l_eff(cl, pu)))
+        top = ku / MODEL_KU if kp_top is None else min(ku / MODEL_KU, kp_top)
+        got = model_gains(cl, ku, pu, sp, up['p1'], up['x'], self.check_band, self.check_n, kp_top)
+        head = ('Gains from check %d as it ran: the fit K %.2f mbar/%%, L %d s, tau %d s (%.0f %% of the step off), '
+                'as three models (L_eff %d s; K / %g; K x %g with L_eff + %d s); KP up to %.2f (%s), TI from %.2f min' % (
+                    k, cl['K'], cl['L'], cl['tau'], 100 * cl['share'], le, MODEL_K, MODEL_K, MODEL_L_MORE, top,
+                    'Ku / %g' % MODEL_KU if kp_top is None or kp_top >= ku / MODEL_KU else 'the KP cut here',
+                    clip_ti(TI_MIN_LEFF * l_eff(cl, pu) / 60.0)))
+        if got is None:
+            self.calc(head + ': no gains settle on every model within %d %% overshoot' % OVERSHOOT_MAX)
+            return None
+        mkp, mti, ms = got
+        meas = fig.get('settle_s')
+        self.calc(head + ': KP %.2f TI %.2f settle in %.0f s at worst, no overshoot over %g %%; the check (KP %.2f TI %.2f) '
+                  '%s' % (mkp, mti, ms, OVERSHOOT_MAX, kp, ti,
+                          'did not settle' if meas is None else 'settled in %.0f s' % meas))
+        if meas is not None and ms > MODEL_FASTER * meas:
+            self.calc('Not used: not %d %% faster than the check' % round(100 * (1 - MODEL_FASTER)))
+            return None
+        if max(abs(mkp / kp - 1), abs(mti / ti - 1)) <= MODEL_CHANGE:
+            self.calc('Not used: within %d %% of the gains in use' % round(100 * MODEL_CHANGE))
+            return None
+        return {'kind': 'model', 'kp': mkp, 'ti': mti, 'why': 'check %d as it ran settles in %.0f s with KP %.2f TI %.2f '
+                'on the models, against %s' % (k, ms, mkp, mti, 'not settling' if meas is None else '%.0f s' % meas)}
+
     def point(self, sp, reach_gains, d, prior=None):
         """One test point: a result row for the table. prior: the point's
         learned row (load_learned), whose fit gives the first gains."""
@@ -1439,10 +1603,11 @@ class AutoTuner(Tuner):
         self.pred_fit = self.fit_for_prediction(sp, fit)
 
         # Check and refine: after every check the fit is redone, then the first
-        # rule that applies changes KP or TI, until the check passes, a
-        # refinement makes it worse (undone), or MAX_REFINES.
+        # rule that applies changes KP or TI (with no KP cut due, the gains
+        # from the check as it ran first, model_step), until the check
+        # passes, a refinement makes it worse (undone), or MAX_REFINES.
         steps, k, refines, prev, end_note = [], 0, 0, None, ''
-        fig = None
+        fig, kp_top = None, None
         while True:
             k += 1
             self.series = None
@@ -1475,6 +1640,10 @@ class AutoTuner(Tuner):
                     break
                 self.drop_check(sp, prev['k'])
             act = refine_rule(fig, kp, ti, ku, pu, fit)
+            if act['kind'] == 'kp':          # the model never takes KP back over a cut
+                kp_top = act['kp'] if kp_top is None else min(kp_top, act['kp'])
+            elif act['kind'] in ('pass', 'limit', 'ti'):
+                act = self.model_step(sp, k, fig, kp, ti, ku, pu, kp_top) or act
             if act['kind'] == 'pass':
                 if fig:
                     self.decide('Rule: the check passes with KP %.2f TI %.2f (overshoot %.1f %%, limit %g; %d reversals, '
@@ -1489,14 +1658,23 @@ class AutoTuner(Tuner):
                 self.decide('Not applied: %s, but at most %d refinements at one setpoint' % (act['why'], MAX_REFINES))
                 end_note = 'still %s after %d refinements' % (act['why'], MAX_REFINES)
                 break
-            self.decide('Rule: %s, so %s x %.2f: KP %.2f -> %.2f, TI %.2f -> %.2f' % (
-                act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f'], kp, act['kp'], ti, act['ti']))
-            self.check_why = 'rule: %s, %s x %.2f' % (act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f'])
-            self.say('%g mbar: %s, %s x %.2f' % (sp, act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f']))
+            if act['kind'] == 'model':
+                self.decide('Rule: %s, so the gains from the check as it ran: KP %.2f -> %.2f, TI %.2f -> %.2f' % (
+                    act['why'], kp, act['kp'], ti, act['ti']))
+                self.check_why = 'the gains from check %d as it ran' % k
+                self.say('%g mbar: gains from check %d as it ran, KP %.2f TI %.2f' % (sp, k, act['kp'], act['ti']))
+                step = 'fit KP %.2f TI %.2f' % (act['kp'], act['ti'])
+            else:
+                name = 'KP' if act['kind'] == 'kp' else 'TI'
+                self.decide('Rule: %s, so %s x %.2f: KP %.2f -> %.2f, TI %.2f -> %.2f' % (
+                    act['why'], name, act['f'], kp, act['kp'], ti, act['ti']))
+                self.check_why = 'rule: %s, %s x %.2f' % (act['why'], name, act['f'])
+                self.say('%g mbar: %s, %s x %.2f' % (sp, act['why'], name, act['f']))
+                step = '%s x%.2f' % (name, act['f'])
             prev = {'kp': kp, 'ti': ti, 'fig': fig, 'k': k}
             kp, ti = act['kp'], act['ti']
             refines += 1
-            steps.append('%s x%.2f' % ('KP' if act['kind'] == 'kp' else 'TI', act['f']))
+            steps.append(step)
         trims = self.cuts + steps
         self.calc('Result at %g mbar: KP %.2f, TI %.2f min%s' % (sp, kp, ti, ' (changed ' + ', '.join(trims) + ')'
                                                                  if trims else ''), 'result')
