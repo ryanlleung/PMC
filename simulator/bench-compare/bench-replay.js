@@ -34,8 +34,8 @@ const rows = lines.slice(1).map(fields)
 if (!rows.length) { console.error('no samples in that range'); process.exit(1); }
 const num = q => parseFloat((q.match(/-?[\d.]+/) || ['NaN'])[0]);
 const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
-s.cmd('PID SET 0.40,0.75,0'); s.cmd('PRES SP ' + rows[0].p.toFixed(1)); s.cmd('MODE AUTO'); s.run(1800000);
-const off = +(num(s.cmd('VALV?')) - rows[0].x).toFixed(2);
+s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT ' + rows[0].p.toFixed(1)); s.cmd('MODE AUTO'); s.run(1800000);
+const off = +(num(s.cmd('VALVE?')) - rows[0].x).toFixed(2);
 s.cmd('MODE MANUAL');
 console.error('valve offset %s %% (sim %s mbar, heat exchanger %s K at the start)', off, s.get(0).toFixed(2), s.get(23).toFixed(2));
 console.log('t_s,bench_p,sim_p,bench_valve,sim_valve,bench_hx,sim_hx,stage,offset');
@@ -44,6 +44,6 @@ for (const r of rows) {
   const dt = Math.round((r.t - tp) * 1000); tp = r.t;
   if (dt > 0) s.run(dt);
   const want = Math.max(0, +(r.x + off).toFixed(2));
-  if (sent === null || Math.abs(want - sent) >= 0.01) { sent = want; s.send('VALV SET ' + sent.toFixed(2)); }
+  if (sent === null || Math.abs(want - sent) >= 0.01) { sent = want; s.send('VALVE SET ' + sent.toFixed(2)); }
   console.log([r.t.toFixed(1), r.p, s.get(0).toFixed(3), r.x, sent, r.hx, s.get(23).toFixed(2), quote(r.st), off].join(','));
 }

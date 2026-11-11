@@ -15,10 +15,10 @@ either target takes control, as SECoP expects.
 
 It uses the remote command set, which the firmware gets in the same release
 as this driver. Every command gets one reply line: a query its words and
-value (PRES? -> PRES 4.625 mbar), a set command nothing unless refused
+value (PRESSURE? -> PRESSURE 4.625 mbar), a set command nothing unless refused
 (ERR <code> <text>), so each set line here ends with a query.
 Each reading is its own query
-(PRES?, PRES SP?, MODE?, VALV?, VALV MOVING?, BARO?, ALRM?), and each poll
+(PRESSURE?, SETPOINT?, MODE?, VALVE?, VALVE MOVING?, BAROMETER?, ALARM?), and each poll
 chains its queries on one line with ';'. Nothing here
 homes the valve, calibrates, changes a setting or drives the motor. Those
 stay on the touch screen.
@@ -47,7 +47,7 @@ class Mm4IO(StringIO):
 
     def get(self, *queries):
         """Values of one-value queries, sent as one chained line, without
-        their leading words or unit: get('PRES?', 'MODE?') -> ['4.625',
+        their leading words or unit: get('PRESSURE?', 'MODE?') -> ['4.625',
         'AUTO']. None where the board answers NONE."""
         parts = self.do(';'.join(queries)).split(';')
         for part in parts:
@@ -75,7 +75,7 @@ def number(text):
 
 
 def alarm_tags(text):
-    """Tags of the active alarms from ALRM?, faults first ('' if none)."""
+    """Tags of the active alarms from ALARM?, faults first ('' if none)."""
     return '' if text is None else ','.join(a.split(',')[0] for a in text.split('|'))
 
 
@@ -99,7 +99,7 @@ class Pressure(HasOutputModule, HasIO, Drivable):
                           FloatRange(0, unit='mbar'), readonly=False, default=0.5)
 
     def read_value(self):
-        p, sp, mode, alarm = self.io.get('PRES?', 'PRES SP?', 'MODE?', 'ALRM?')
+        p, sp, mode, alarm = self.io.get('PRESSURE?', 'SETPOINT?', 'MODE?', 'ALARM?')
         p, sp = number(p), number(sp)
         if sp is not None:
             self.target = sp
@@ -136,7 +136,7 @@ class Pressure(HasOutputModule, HasIO, Drivable):
         return IDLE, 'MANUAL'
 
     def write_target(self, value):
-        self.io.do(f'PRES SP {value:.1f};MODE AUTO;MODE?')
+        self.io.do(f'SETPOINT {value:.1f};MODE AUTO;MODE?')
         self.activate_control()
         return value
 
@@ -164,12 +164,12 @@ class Pressure(HasOutputModule, HasIO, Drivable):
     @Command()
     def reset(self):
         """Clear latched faults whose cause has gone."""
-        self.io.do('ALRM RESET;ALRM?')
+        self.io.do('ALARM RESET;ALARM?')
 
     @Command()
     def ok_warning(self):
         """Acknowledge the warning, as OK on the screen."""
-        self.io.do('ALRM OK;ALRM?')
+        self.io.do('ALARM OK;ALARM?')
 
 
 class Valve(HasControlledBy, HasIO, Drivable):
@@ -182,7 +182,7 @@ class Valve(HasControlledBy, HasIO, Drivable):
                        FloatRange(0, 100, unit='%', fmtstr='%.1f'), readonly=False)
 
     def read_value(self):
-        v, mode, moving = self.io.get('VALV?', 'MODE?', 'VALV MOVING?')
+        v, mode, moving = self.io.get('VALVE?', 'MODE?', 'VALVE MOVING?')
         v = number(v)
         if v is None:
             self.status = WARN, 'valve not homed: home it at the screen'
@@ -197,7 +197,7 @@ class Valve(HasControlledBy, HasIO, Drivable):
 
     def write_target(self, value):
         self.self_controlled()   # ends AUTO through the pressure module
-        self.io.do(f'VALV SET {value:.1f};VALV MOVING?')
+        self.io.do(f'VALVE SET {value:.1f};VALVE MOVING?')
         self.status = BUSY, 'moving'
         return value
 
@@ -215,7 +215,7 @@ class RoomPressure(HasIO, Readable):
     value = Parameter('room pressure', FloatRange(unit='mbar', fmtstr='%.2f'))
 
     def read_value(self):
-        baro = number(*self.io.get('BARO?'))
+        baro = number(*self.io.get('BAROMETER?'))
         if baro is None:
             self.status = ERROR, 'no reading (barometer not fitted?)'
             return self.value

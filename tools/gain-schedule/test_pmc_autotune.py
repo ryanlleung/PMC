@@ -358,10 +358,10 @@ class Rules(unittest.TestCase):
         f = {'sp': 8.0, 'mode': 'AUTO', 'valve': 4.2, 'pid': [0.1, 0.4, 0.0], 'sched': 'PV,6.0,20.0,15',
              'set1': [0.1, 0.4, 0.0]}
         self.assertEqual(at.put_back_lines(f), ['PIDS SET 1,0.10,0.40,0.00', 'SCHED SET PV,6.0,20.0,15',
-                                                'PRES SP 8.0', 'MODE AUTO'])
+                                                'SETPOINT 8.0', 'MODE AUTO'])
         f.update(mode='MANUAL', sched=None)
-        self.assertEqual(at.put_back_lines(f), ['PID SET 0.10,0.40,0.00', 'PRES SP 8.0', 'MODE MANUAL',
-                                                'VALV SET 4.2'])
+        self.assertEqual(at.put_back_lines(f), ['PID SET 0.10,0.40,0.00', 'SETPOINT 8.0', 'MODE MANUAL',
+                                                'VALVE SET 4.2'])
 
 
 class Watchdog(unittest.TestCase):
@@ -451,14 +451,14 @@ class FakeBoard:
 
     def one(self, c):
         P = self.P
-        if c == 'PRES?':
-            return 'PRES %.3f mbar' % P.p()
-        if c == 'PRES SP?':
-            return 'PRES SP %.1f mbar' % self.sp
-        if c == 'VALV?':
-            return 'VALV %.2f %%' % P.v
-        if c == 'VALV MOVING?':
-            return 'VALV MOVING %d' % (abs(P.cmd - P.v) > 1e-6)
+        if c == 'PRESSURE?':
+            return 'PRESSURE %.3f mbar' % P.p()
+        if c == 'SETPOINT?':
+            return 'SETPOINT %.1f mbar' % self.sp
+        if c == 'VALVE?':
+            return 'VALVE %.2f %%' % P.v
+        if c == 'VALVE MOVING?':
+            return 'VALVE MOVING %d' % (abs(P.cmd - P.v) > 1e-6)
         if c == 'MODE?':
             return 'MODE ' + self.mode
         if c == 'PID?':
@@ -467,7 +467,7 @@ class FakeBoard:
             return 'SCHED ' + self.table if self.sched else 'ERR 100 Unknown command'
         if c == 'PIDS?':
             return ('PIDS 1,' + ','.join('%.2f' % v for s in self.sets for v in s)) if self.sched else 'ERR 100'
-        if c.startswith('PRES SP '):
+        if c.startswith('SETPOINT '):
             self.sp = float(c[8:])
             return None
         if c == 'MODE AUTO':
@@ -481,7 +481,7 @@ class FakeBoard:
             self.mode = 'MANUAL'
             P.cmd = P.v
             return None
-        if c.startswith('VALV SET '):
+        if c.startswith('VALVE SET '):
             if self.mode != 'MANUAL':
                 return 'ERR 211 not in MANUAL'
             P.cmd = float(c[9:])

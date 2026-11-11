@@ -13,7 +13,7 @@ to a Lake Shore 336 (TCP 7777) when one is given, and serves one page:
             test per setpoint for Ku and Pu, first gains from a fit of the
             cryostat's response, a checking step that refines KP and TI, the
             three sets, Write to board).
-  Board     the event log (EVNT?), reset and OK for alarms, the board clock
+  Board     the event log (EVENT?), reset and OK for alarms, the board clock
             from this PC, and a command line for any text port command.
 A bar under the tabs shows the autotune while it runs: its steps, the stage it
 is in, how long it has taken and about how long is left.
@@ -72,6 +72,7 @@ PREDS_KEPT = 8              # the check steps' predicted lines kept for the char
 LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
 LS_INPUT = re.compile(r'^[A-D][1-5]?$')
 OLD_FIRMWARE = (0, 16, 9)   # the reversal hold scales with KP from this version
+NAMES_FIRMWARE = (0, 16, 12)   # the text port names are whole words from this version (PRESSURE?, not PRES?)
 GUI_BUILD = ''              # set by main(): gui_build()
 
 
@@ -451,6 +452,11 @@ class Board:
         else:
             raise ConnectionError('no *IDN? answer after connecting')
         self.state['idn'] = r
+        fw = r.split(',')[3:4]
+        ver = tuple(int(x) for x in re.findall(r'\d+', fw[0])[:3]) if fw else None
+        if ver and ver < NAMES_FIRMWARE:
+            raise ConnectionError('board firmware %s has the old command names: flash %s or later' % (
+                fw[0].strip(), '.'.join(map(str, NAMES_FIRMWARE))))
         self.state['link'] = 'connected'
 
     def line(self):
@@ -535,7 +541,7 @@ class Board:
     def job_line(self, kind, line):
         if kind == 'events':
             first = self.ask(line)
-            if not first.startswith('EVNT '):
+            if not first.startswith('EVENT '):
                 return [first]
             return [first] + [self.line() for _ in range(int(first.split()[1]))]
         if kind == 'raw':
@@ -576,9 +582,9 @@ class Board:
     def poll(self):
         # SCHED? and PIDS? last: firmware before 0.15.15 refuses them (ERR 100),
         # which ends the line there.
-        r = self.ask('PRES SP?;PRES?;VALV?;MODE?;ALRM?;PID?;SCHED?;PIDS?')
+        r = self.ask('SETPOINT?;PRESSURE?;VALVE?;MODE?;ALARM?;PID?;SCHED?;PIDS?')
         sp, p, v, m, a, pid, sch, pids = (r.split(';') + [''] * 8)[:8]
-        row = [self.now(), num(sp), num(p), num(v), m[5:], a[5:], self.phase] + (self.ls.now() if self.ls else [])
+        row = [self.now(), num(sp), num(p), num(v), m[5:], a[6:], self.phase] + (self.ls.now() if self.ls else [])
         self.add_row(row)
         if pid.startswith('PID '):
             with self.lock:
@@ -745,16 +751,16 @@ class Board:
         if not (pmc_autotune.KP_MIN <= kp0 <= pmc_autotune.KP_MAX and pmc_autotune.TI_MIN <= ti0 <= pmc_autotune.TI_MAX):
             return 'the first gains must be KP %g to %g and TI %g to %g min' % (
                 pmc_autotune.KP_MIN, pmc_autotune.KP_MAX, pmc_autotune.TI_MIN, pmc_autotune.TI_MAX)
-        r = self.raw('PRES SP?;PRES?;VALV?;ALRM?;PID?')
+        r = self.raw('SETPOINT?;PRESSURE?;VALVE?;ALARM?;PID?')
         if r.startswith('LINK '):
             return r
         parts = (r.split(';') + [''] * 5)[:5]
-        if parts[1] == 'PRES NONE':
+        if parts[1] == 'PRESSURE NONE':
             return 'no pressure reading'
-        if parts[2] == 'VALV NONE':
+        if parts[2] == 'VALVE NONE':
             return 'the valve is not homed: home it on the screen first'
         if 'F-' in parts[3]:
-            return 'reset the fault first (Board tab): ' + parts[3][5:]
+            return 'reset the fault first (Board tab): ' + parts[3][6:]
         if not parts[4].startswith('PID '):
             return 'this firmware has no PID SET (0.15.8 or later): ' + parts[4]
         r = self.send('PID SET ' + parts[4][4:])   # the same gains, so nothing is written: ERR 211 when Remote control is Off
@@ -1051,12 +1057,12 @@ def make_handler(board):
                     r = board.stop_all()
                 elif p == '/api/raw':
                     line = str(q['line']).strip()[:96]
-                    kind = 'events' if line.upper().startswith('EVNT?') else 'raw'
+                    kind = 'events' if line.upper().startswith('EVENT?') else 'raw'
                     got = board.queued(kind, line)
                     out['lines'] = got if isinstance(got, list) else [got]
                     r = ''
                 elif p == '/api/events':
-                    got = board.queued('events', 'EVNT? %d' % int(q.get('n', 30)))
+                    got = board.queued('events', 'EVENT? %d' % int(q.get('n', 30)))
                     out['lines'] = got if isinstance(got, list) else [got]
                     r = ''
                 elif p == '/api/time':

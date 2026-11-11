@@ -18,7 +18,7 @@ async function fixture(remoteOff) {
       child.once('exit', code => reject(new Error('Fixture exited: ' + code + '\n' + errors)));
       child.stdout.on('data', data => {
         output += data;
-        const ready = output.match(/simulated mm4 on port (\d+), MODE MANUAL;VALV 5\.00 %/);
+        const ready = output.match(/simulated mm4 on port (\d+), MODE MANUAL;VALVE 5\.00 %/);
         if (ready) resolve(Number(ready[1]));
       });
     });
@@ -40,10 +40,10 @@ async function fixture(remoteOff) {
       waiting = { resolve, reject };
       socket.write(line + '\r\n');
     });
-    assert.equal(await query('MODE?;VALV?;VALV MOVING?;ALRM?'),
-      'MODE MANUAL;VALV 5.00 %;VALV MOVING 0;ALRM NONE');
-    assert.equal(await query('PRES SP 5;PRES SP?'), remoteOff
-      ? 'ERR 211 Read only over the network' : 'PRES SP 5.0 mbar');
+    assert.equal(await query('MODE?;VALVE?;VALVE MOVING?;ALARM?'),
+      'MODE MANUAL;VALVE 5.00 %;VALVE MOVING 0;ALARM NONE');
+    assert.equal(await query('SETPOINT 5;SETPOINT?'), remoteOff
+      ? 'ERR 211 Read only over the network' : 'SETPOINT 5.0 mbar');
     assert.equal(await query('STOP;MODE?'), remoteOff
       ? 'ERR 211 Read only over the network' : 'MODE MANUAL');
     assert.equal(errors, '');

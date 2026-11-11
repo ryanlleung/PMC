@@ -233,7 +233,7 @@ class Link:
 
 
 def value(part, head):
-    """'PRES 2.913 mbar' -> 2.913; 'PRES NONE' -> None."""
+    """'PRESSURE 2.913 mbar' -> 2.913; 'PRESSURE NONE' -> None."""
     if not part.startswith(head):
         raise ValueError(f'expected {head}, got {part!r}')
     v = part[len(head):].split()
@@ -265,8 +265,8 @@ class Tuner:
         print(f'[{self.clock.now():7.0f} s] {msg}', flush=True)
 
     def sample(self):
-        p, x, m = self.link.ask('PRES?;VALV?;MODE?')
-        return value(p, 'PRES'), value(x, 'VALV'), m.partition(' ')[2]
+        p, x, m = self.link.ask('PRESSURE?;VALVE?;MODE?')
+        return value(p, 'PRESSURE'), value(x, 'VALVE'), m.partition(' ')[2]
 
     def samples(self, seconds, stop=None):
         """Read once a board second for up to `seconds`; stop(rows) ends early."""
@@ -1109,7 +1109,7 @@ class AutoTuner(Tuner):
         """Until the valve has stopped: in MANUAL the board refuses a
         settings save while a move runs (ERR 212)."""
         t0 = self.clock.now()
-        while self.link.ask('VALV MOVING?')[0].endswith(' 1') and self.clock.now() - t0 < 60:
+        while self.link.ask('VALVE MOVING?')[0].endswith(' 1') and self.clock.now() - t0 < 60:
             self.clock.wait_until(self.clock.now() + 0.5)
 
     def auto(self, why=''):
@@ -1198,7 +1198,7 @@ class AutoTuner(Tuner):
         self.decide('Reach %g mbar: AUTO with KP %.2f TI %.2f (%s)' % (
             sp, kp, ti, why or 'the setpoint before\'s gains, or the first gains'))
         self.pid(kp, ti, 'reach %g mbar with %s' % (sp, why or 'the setpoint before\'s gains, or the first gains'))
-        self.send('PRES SP %.1f' % sp, 'reach %g mbar' % sp)
+        self.send('SETPOINT %.1f' % sp, 'reach %g mbar' % sp)
         if self.sample()[2] != 'AUTO':
             self.auto('reach %g mbar' % sp)
         x0, ok, p, _ = self.hold(sp, REACH_MAX_S, kp, ti, '', '%g mbar reach' % sp)
@@ -1214,7 +1214,7 @@ class AutoTuner(Tuner):
     def relay(self, sp, x0, d):
         self.phase_now = '%g mbar noise' % sp
         self.send('MODE MANUAL', 'relay test at %g mbar' % sp)
-        self.send('VALV SET %.1f' % x0, 'x0, the valve AUTO held %g mbar at' % sp)
+        self.send('VALVE SET %.1f' % x0, 'x0, the valve AUTO held %g mbar at' % sp)
         self.stage('MANUAL at %.1f %%, %d s for the noise' % (x0, NOISE_S), '%g mbar noise' % sp, NOISE_S)
         rows = self.samples(NOISE_S)
         held = [(r[1], r[2]) for r in rows]
@@ -1237,7 +1237,7 @@ class AutoTuner(Tuner):
                     raise RuntimeError(self.left('MANUAL', m))
                 cmd = R.feed(self.clock.now() - t0, p, x)
                 if cmd is not None and cmd != sent:
-                    self.link.do('VALV SET %.1f' % cmd)
+                    self.link.do('VALVE SET %.1f' % cmd)
                     sent = cmd
                 if R.note:
                     self.say('%g mbar relay: %s' % (sp, R.note))
@@ -1253,7 +1253,7 @@ class AutoTuner(Tuner):
                         w.writerow(['%.1f' % r[0], '' if r[1] is None else '%.3f' % r[1],
                                     '' if r[2] is None else '%.2f' % r[2], '' if r[3] is None else '%.1f' % r[3]])
         if R.why:
-            self.send('VALV SET %.1f' % x0, 'relay test ended: ' + R.why)
+            self.send('VALVE SET %.1f' % x0, 'relay test ended: ' + R.why)
             raise RuntimeError('relay test: ' + R.why)
         self.relay_rows = held + [(row[1], row[2]) for row in R.rows]
         r = R.result()
@@ -1349,7 +1349,7 @@ class AutoTuner(Tuner):
         p_s, x_s, _ = self.sample()
         pred = self.predict(p0, p1, band, most, slack, name, p_s, x_s)
         g = self.gains
-        self.send('PRES SP %.1f' % p1, 'check step %g -> %g mbar' % (p0, p1))
+        self.send('SETPOINT %.1f' % p1, 'check step %g -> %g mbar' % (p0, p1))
         t0, n, rows, since = self.clock.now(), 0, [], None
         wd = Wild(p1)
         far, gone = None, ''
@@ -1406,7 +1406,7 @@ class AutoTuner(Tuner):
         self.leg_rows = rows
         if gone:
             self.calc('Check step %g -> %g mbar out of reach: %s' % (p0, p1, gone))
-            self.send('PRES SP %.1f' % sp, 'check step out of reach, back to %g mbar' % sp)
+            self.send('SETPOINT %.1f' % sp, 'check step out of reach, back to %g mbar' % sp)
             raise RuntimeError('the check step to %g mbar is out of reach (%s), so %g mbar is left out of the sets' % (
                 p1, gone, sp))
         if p_s is not None and x_s is not None and g and g[0] is not None:
@@ -1459,7 +1459,7 @@ class AutoTuner(Tuner):
                         'not reached' if fg['t90_s'] is None else '%d s' % fg['t90_s'],
                         fg['backoff_pct'], fg['sag_s'])))
             if legs[-1] and legs[-1].get('wild_pp'):
-                self.send('PRES SP %.1f' % sp, 'check %d ended: oscillating' % k)
+                self.send('SETPOINT %.1f' % sp, 'check %d ended: oscillating' % k)
                 break
         # One sample a second, the valve held over a missing reading.
         xs, ps, last = [], [], None
@@ -1784,9 +1784,9 @@ def next_d(sp, ku, first):
 
 def found(link):
     """What to put back: setpoint, mode, valve, the PID table and set 1."""
-    sp = value(link.ask('PRES SP?')[0], 'PRES SP')
-    p, x, mode = link.ask('PRES?;VALV?;MODE?')
-    out = {'sp': sp, 'mode': mode.partition(' ')[2], 'valve': value(x, 'VALV'), 'sched': None, 'set1': None}
+    sp = value(link.ask('SETPOINT?')[0], 'SETPOINT')
+    p, x, mode = link.ask('PRESSURE?;VALVE?;MODE?')
+    out = {'sp': sp, 'mode': mode.partition(' ')[2], 'valve': value(x, 'VALVE'), 'sched': None, 'set1': None}
     pid = link.ask('PID?')[0]
     out['pid'] = [float(v) for v in pid[4:].split(',')]
     try:
@@ -1809,13 +1809,13 @@ def put_back_lines(f, x_last=None):
     elif f.get('pid'):
         out.append('PID SET %.2f,%.2f,%.2f' % tuple(f['pid']))
     if f.get('sp') is not None:
-        out.append('PRES SP %.1f' % f['sp'])
+        out.append('SETPOINT %.1f' % f['sp'])
     if f.get('mode') == 'AUTO':
         out.append('MODE AUTO')
     else:
         out.append('MODE MANUAL')
         if f.get('valve') is not None:
-            out.append('VALV SET %.1f' % f['valve'])
+            out.append('VALVE SET %.1f' % f['valve'])
     return out
 
 

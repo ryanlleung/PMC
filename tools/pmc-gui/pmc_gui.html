@@ -212,8 +212,8 @@
       <div class="card">
         <h2>Control</h2>
         <div class="row"><label class="w">Mode</label><div class="seg"><button id="mAuto" onclick="cmd('MODE AUTO', this)">AUTO</button><button id="mMan" onclick="cmd('MODE MANUAL', this)">MANUAL</button></div></div>
-        <div class="row"><label class="w">Setpoint</label><input id="spIn" type="number" step="0.1" min="0" value="5" onkeydown="if(event.key==='Enter')$('spBtn').click()"><label>mbar</label><button id="spBtn" onclick="cmd('PRES SP ' + val('spIn'), this)">Set</button></div>
-        <div class="row"><label class="w">Valve</label><input id="vIn" type="number" step="0.1" min="0" max="100" value="10" onkeydown="if(event.key==='Enter')$('vBtn').click()"><label>%</label><button id="vBtn" onclick="cmd('VALV SET ' + val('vIn'), this)">Go to</button></div>
+        <div class="row"><label class="w">Setpoint</label><input id="spIn" type="number" step="0.1" min="0" value="5" onkeydown="if(event.key==='Enter')$('spBtn').click()"><label>mbar</label><button id="spBtn" onclick="cmd('SETPOINT ' + val('spIn'), this)">Set</button></div>
+        <div class="row"><label class="w">Valve</label><input id="vIn" type="number" step="0.1" min="0" max="100" value="10" onkeydown="if(event.key==='Enter')$('vBtn').click()"><label>%</label><button id="vBtn" onclick="cmd('VALVE SET ' + val('vIn'), this)">Go to</button></div>
         <div class="hint">The filled mode button is the mode the board is in now.</div>
       </div>
       <div class="card">
@@ -258,7 +258,7 @@
     <div class="tab col" data-tab="board">
       <div class="card">
         <h2>Alarms</h2>
-        <div class="row"><button onclick="cmd('ALRM RESET', this)">Reset faults</button><button onclick="cmd('ALRM OK', this)">OK warning</button></div>
+        <div class="row"><button onclick="cmd('ALARM RESET', this)">Reset faults</button><button onclick="cmd('ALARM OK', this)">OK warning</button></div>
       </div>
       <div class="card">
         <h2>Event log</h2>
@@ -270,8 +270,8 @@
       </div>
       <div class="card">
         <h2>Command</h2>
-        <div class="row"><input id="raw" type="text" class="wide" placeholder="e.g. PRES?;MODE?" onkeydown="if(event.key==='Enter')$('rawBtn').click()"><button id="rawBtn" onclick="sendRaw(this)">Send</button></div>
-        <div class="hint">Any text port command. Commands share a line with ;. NETW? and *IDN? identify the board.</div>
+        <div class="row"><input id="raw" type="text" class="wide" placeholder="e.g. PRESSURE?;MODE?" onkeydown="if(event.key==='Enter')$('rawBtn').click()"><button id="rawBtn" onclick="sendRaw(this)">Send</button></div>
+        <div class="hint">Any text port command. Commands share a line with ;. NETWORK? and *IDN? identify the board.</div>
       </div>
     </div>
   </div>

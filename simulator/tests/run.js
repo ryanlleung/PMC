@@ -1,7 +1,7 @@
 // Bench scenarios against the firmware build (pmc-wasm.js), in node:
 //   node simulator/tests/run.js [--png <dir>]
 // Each case boots a new board and checks the firmware's replies. The board
-// sends nothing unasked, so a case reads the event log (EVNT?). The text
+// sends nothing unasked, so a case reads the event log (EVENT?). The text
 // port takes the remote command set only; homing, calibration and settings
 // go through the simulator's test hooks (sim-node.js), as the screens do.
 const { load, CFG } = require('./sim-node.js');
@@ -15,7 +15,7 @@ function check(name, ok, detail) {
   if (!ok) failed++;
 }
 // The last n events, newest last.
-const events = (s, n = 100) => s.cmd('EVNT? ' + n, 2000);
+const events = (s, n = 100) => s.cmd('EVENT? ' + n, 2000);
 function homed(s) {
   s.boot(); s.set(5, 40000); s.run(2000);
   s.home();
@@ -33,8 +33,8 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 { // Boot: NOT HOMED, nothing moves.
   const s = load(); s.boot(); s.set(5, 40000); s.run(3000);
   check('boot sends nothing unasked', s.out === '', s.out);
-  const st = s.cmd('MODE?;VALV?;VALV MOVING?;ALRM?'), ev = events(s);
-  check('boot NOT HOMED', st === 'MODE NOT HOMED;VALV NONE;VALV MOVING 0;ALRM NONE\r\n', st);
+  const st = s.cmd('MODE?;VALVE?;VALVE MOVING?;ALARM?'), ev = events(s);
+  check('boot NOT HOMED', st === 'MODE NOT HOMED;VALVE NONE;VALVE MOVING 0;ALARM NONE\r\n', st);
   check('boot no motion', s.get(5) === 40000);
   shot(s, 'boot');
   // Home: Start AUTO is greyed, and Home valve (in the Valve tile) only asks, before a reference is set.
@@ -53,8 +53,8 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 }
 { // Start AUTO in MANUAL (Maintain to 0.15.2): AUTO at the pressure as shown, from where the valve is, no question.
   const s = homed(load());
-  s.cmd('VALV SET 30', 60000); s.run(400000);
-  const p = s.cmd('PRES?').match(/PRES ([\d.]+) mbar/)[1], before = s.get(30);
+  s.cmd('VALVE SET 30', 60000); s.run(400000);
+  const p = s.cmd('PRESSURE?').match(/PRESSURE ([\d.]+) mbar/)[1], before = s.get(30);
   // The tiles and header follow within 0.15 s of the release (0.15.4; the 0.5 s refresh was too slow).
   const hdrPx = () => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[3 * 480 + 415];
   const press = (x, y) => { s.x.sim_touch(x, y, 1); s.run(120); s.x.sim_touch(x, y, 0); s.run(150); };
@@ -62,9 +62,9 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   press(93, 184);
   check('Start AUTO shows within 0.15 s', hdrPx() !== manualPx);
   s.run(850);
-  const sp = s.cmd('PRES SP?'), shown = (Math.round(parseFloat(p) * 10) / 10).toFixed(1);
+  const sp = s.cmd('SETPOINT?'), shown = (Math.round(parseFloat(p) * 10) / 10).toFixed(1);
   check('Start AUTO starts AUTO at the shown pressure', s.cmd('MODE?') === 'MODE AUTO\r\n' &&
-    sp === 'PRES SP ' + shown + ' mbar\r\n', p + ' ' + sp);
+    sp === 'SETPOINT ' + shown + ' mbar\r\n', p + ' ' + sp);
   // Bumpless: only the loop's own small correction, under 0.5 % of travel.
   check('Start AUTO does not jump the valve', Math.abs(s.get(30) - before) < 330, before + ' -> ' + s.get(30));
   shot(s, 'start-auto');
@@ -115,7 +115,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   // Choose sensor is gone (one sensor per board): no CFG_SENSOR key (27), the sensor range is the 15 psia Druck's,
   // and the old Settings slot now opens Review and save.
   check('no sensor-in-use setting', s.setting(27) === -2147483648 && s.setting(CFG.DBC) === 8, s.setting(27) + ' ' + s.setting(CFG.DBC));
-  check('setpoint limit is the 15 psia range', s.cmd('PRES SP 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('PRES SP 1035'));
+  check('setpoint limit is the 15 psia range', s.cmd('SETPOINT 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('SETPOINT 1035'));
   menu(); s.tap(386, 184); check('old Settings slot opens Review and save', screen() === 'Review and save', screen());
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
@@ -140,13 +140,13 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   // The header's title, left of the remote light: Home's, a keypad's or another page's.
   const title = () => { const fb = new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272); let h = 0;
     for (let y = 4; y < 36; y++) for (let x = 96; x < 290; x++) h = (h * 31 + fb[y * 480 + x]) >>> 0; return h; };
-  const home = title(), at = s.cmd('VALV?');
+  const home = title(), at = s.cmd('VALVE?');
   s.tap(290, 184); const kp = s.popup();                           // Go to: the keypad
   s.tap(110, 183); s.tap(100, 70); const kpStays = s.popup();       // 5, then a tap on its title
   shot(s, 'popup-keypad');
   s.tap(415, 72); s.run(2000);                                      // the dimmed page right of it (the PID tile under it)
   check('keypad: stays on a tap on its box, closes on the dimmed page; nothing set, still Home', kp && kpStays && !s.popup() &&
-    s.cmd('VALV?') === at && !s.busy() && title() === home, [kp, kpStays, s.popup(), s.cmd('VALV?'), title() === home].join());
+    s.cmd('VALVE?') === at && !s.busy() && title() === home, [kp, kpStays, s.popup(), s.cmd('VALVE?'), title() === home].join());
   s.tap(24, 20); const sa = s.popup();                              // the power icon: Shut down?
   s.tap(240, 62); const sb = s.popup();                             // a tap on its question
   shot(s, 'popup-shutdown');
@@ -172,7 +172,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const arrows = () => [px(324, 16), px(336, 24)];   // the arrow down's and the arrow up's stems
   let dark = 0, n = 0;
   for (let i = 0; i < 8; i++) {
-    s.send('PRES?');
+    s.send('PRESSURE?');
     for (let t = 0; t < 10; t++) { s.run(100); if (i || t > 2) { n++; if (arrows().some(c => c !== 0xFFFF)) dark++; } }
   }
   shot(s, 'remote-light');
@@ -183,21 +183,21 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 }
 { // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
   const s = load(); s.boot(); s.run(2000);
-  const ok = s.setClosed(), st = s.cmd('MODE?;VALV?');
-  check('set position by hand reads 0.00 %', ok && st === 'MODE MANUAL;VALV 0.00 %\r\n', s.why() + ' ' + st);
+  const ok = s.setClosed(), st = s.cmd('MODE?;VALVE?');
+  check('set position by hand reads 0.00 %', ok && st === 'MODE MANUAL;VALVE 0.00 %\r\n', s.why() + ' ' + st);
 }
 { // Set as 0 % after homing reads 0.00 %, not the seat (Ryan, 4 Nov).
   const s = homed(load());
-  s.cmd('VALV SET 10', 30000); s.cmd('STOP');
-  const ok = s.setClosed(), st = s.cmd('VALV?');
-  check('Set as 0 % after homing reads 0.00 %', ok && st === 'VALV 0.00 %\r\n', s.why() + ' ' + st);
+  s.cmd('VALVE SET 10', 30000); s.cmd('STOP');
+  const ok = s.setClosed(), st = s.cmd('VALVE?');
+  check('Set as 0 % after homing reads 0.00 %', ok && st === 'VALVE 0.00 %\r\n', s.why() + ' ' + st);
 }
 { // MANUAL go-to and the needle follows the coils.
   const s = homed(load());
-  s.cmd('VALV SET 25', 60000);
+  s.cmd('VALVE SET 25', 60000);
   const full = s.get(5) / 2;
   // The needle is the count plus Return, since 0 % is above the switch.
-  check('VALV SET 25 % moves the needle 25 % of 66048', Math.abs(s.get(30) - 16512) <= 1 && full - s.get(30) === s.setting(CFG.RETURN), 'needle ' + full + ', count ' + s.get(30));
+  check('VALVE SET 25 % moves the needle 25 % of 66048', Math.abs(s.get(30) - 16512) <= 1 && full - s.get(30) === s.setting(CFG.RETURN), 'needle ' + full + ', count ' + s.get(30));
 }
 { // F-1: Druck unplugged.
   const s = homed(load()); s.set(8, 0); s.run(5000);
@@ -224,37 +224,37 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 }
 { // AUTO at 5 mbar settles.
   const s = homed(load());
-  s.cmd('PRES SP 5'); s.cmd('MODE AUTO');
+  s.cmd('SETPOINT 5'); s.cmd('MODE AUTO');
   s.run(400000);
-  const d = s.cmd('PRES?;PRES SP?;MODE?;VALV?;ALRM?');
+  const d = s.cmd('PRESSURE?;SETPOINT?;MODE?;VALVE?;ALARM?');
   check('AUTO 5 mbar stable', s.reg() === 3, 'regulation ' + s.reg());
-  check('poll in AUTO', /^PRES [45]\.\d{3} mbar;PRES SP 5\.0 mbar;MODE AUTO;VALV \d+\.\d\d %;ALRM NONE\r\n$/.test(d), d);
+  check('poll in AUTO', /^PRESSURE [45]\.\d{3} mbar;SETPOINT 5\.0 mbar;MODE AUTO;VALVE \d+\.\d\d %;ALARM NONE\r\n$/.test(d), d);
   shot(s, 'auto');
   check('control tuning saves in AUTO', s.save(CFG.KP, 300) && s.setting(CFG.KP) === 300 &&
     s.cmd('MODE?') === 'MODE AUTO\r\n', s.why());
 }
 { // A large setpoint change in AUTO applies at once from the SP keypad: no question (0.14.22).
   const s = homed(load());
-  s.cmd('PRES SP 5;MODE AUTO'); s.run(5000);
+  s.cmd('SETPOINT 5;MODE AUTO'); s.run(5000);
   s.tap(121, 184); s.tap(40, 239); s.tap(110, 183); s.tap(320, 212);   // SP box, 1, 5, Set
   s.run(500);
   shot(s, 'sp-change');
-  const st = s.cmd('PRES SP?;MODE?');
-  check('SP 5 to 15 mbar in AUTO applies without a question', st === 'PRES SP 15.0 mbar;MODE AUTO\r\n', st);
+  const st = s.cmd('SETPOINT?;MODE?');
+  check('SP 5 to 15 mbar in AUTO applies without a question', st === 'SETPOINT 15.0 mbar;MODE AUTO\r\n', st);
 }
 { // The motor supply is no longer sensed: counted moves can continue without physical motion.
   const s = homed(load());
-  s.cmd('PRES SP 5;MODE AUTO'); s.run(400000);
+  s.cmd('SETPOINT 5;MODE AUTO'); s.run(400000);
   s.set(12, 0);
   const needle = s.get(5), count = s.get(30);
-  s.cmd('PRES SP 8'); s.run(5000);
-  check('motor power loss does not directly end AUTO', s.cmd('MODE?;ALRM?') === 'MODE AUTO;ALRM NONE\r\n');
+  s.cmd('SETPOINT 8'); s.run(5000);
+  check('motor power loss does not directly end AUTO', s.cmd('MODE?;ALARM?') === 'MODE AUTO;ALARM NONE\r\n');
   check('unpowered motor stays still while the step count advances', s.get(5) === needle && s.get(30) !== count);
 }
 { // F-6: the needle slips in AUTO, so the pressure does not follow.
   const s = homed(load());
-  s.cmd('PRES SP 5'); s.cmd('MODE AUTO'); s.run(300000);
-  s.set(6, 0); s.cmd('PRES SP 8');
+  s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
+  s.set(6, 0); s.cmd('SETPOINT 8');
   s.run(600000);
   const ev = events(s, 10);
   check('F-6 no response', /F-6/.test(ev), ev);
@@ -263,26 +263,26 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(415, 184); s.tap(240, 72); s.tap(180, 72);   // Menu > Events (0.16.2), the fault
   shot(s, 'f06-detail');
   s.tap(181, 240);   // Reset fault
-  check('fault detail Reset fault works', s.cmd('ALRM?') === 'ALRM NONE\r\n', s.cmd('ALRM?'));
+  check('fault detail Reset fault works', s.cmd('ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
 }
 { // W-2: the rotary pump stops in AUTO; the pressure never comes back into band.
   const s = homed(load());
-  s.cmd('PRES SP 5'); s.cmd('MODE AUTO'); s.run(300000);
+  s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
   s.set(4, 0);
   s.run(1900000);
-  const ev = events(s, 10), st = s.cmd('MODE?;ALRM?');
-  check('W-2 to MANUAL', /W-2/.test(ev) && /^MODE MANUAL;ALRM W-2,1,/.test(st), ev + st);
+  const ev = events(s, 10), st = s.cmd('MODE?;ALARM?');
+  check('W-2 to MANUAL', /W-2/.test(ev) && /^MODE MANUAL;ALARM W-2,1,/.test(st), ev + st);
   shot(s, 'w02');
 }
 { // W-3: controller hot.
   const s = homed(load()); s.set(13, 57); s.run(3000);
   const ev = events(s, 3);
-  check('W-3 controller hot', /W-3,Controller hot/.test(ev) && /^ALRM W-3,0,Controller hot\r\n$/.test(s.cmd('ALRM?')), ev);
+  check('W-3 controller hot', /W-3,Controller hot/.test(ev) && /^ALARM W-3,0,Controller hot\r\n$/.test(s.cmd('ALARM?')), ev);
   shot(s, 'w03');
 }
 { // Settings and the saved position survive a power cycle (serial flash).
   const s = homed(load());
-  s.cmd('VALV SET 10', 20000); const saved = s.save(CFG.KP, 300); s.run(5000);
+  s.cmd('VALVE SET 10', 20000); const saved = s.save(CFG.KP, 300); s.run(5000);
   const flash = s.flash(), needle = s.get(5);
   const t = load(); t.x.sim_bench_init(); t.boot(flash); t.set(5, needle); t.run(3000);
   check('settings kept over a power cycle', saved && t.setting(CFG.KP) === 300, s.why() + ' KP ' + t.setting(CFG.KP));
@@ -326,9 +326,9 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.set(11, 1); s.set(19, 1008.4); s.run(3000);
   const a = s.cal(2, -1), ev = events(s, 4);
   check('air point from the room sensor', a && /Air point [\d.]+ mV\/V at 1008\.40 mbar from the room sensor/.test(ev), s.why() + ev.slice(-400));
-  // No room sensor: the air point needs a typed reading, BARO? says NONE.
+  // No room sensor: the air point needs a typed reading, BAROMETER? says NONE.
   const u = load(); u.boot(); u.set(20, 0); u.run(3000); u.set(11, 1); u.run(3000);
-  check('BARO NONE without the sensor', u.cmd('BARO?', 1000) === 'BARO NONE\r\n', u.cmd('BARO?', 1000));
+  check('BAROMETER NONE without the sensor', u.cmd('BAROMETER?', 1000) === 'BAROMETER NONE\r\n', u.cmd('BAROMETER?', 1000));
   const r = u.cal(2, -1, 2000);
   check('room air point refused without the sensor', !r && /no room pressure sensor/i.test(u.why()), u.why());
   check('typed air point still works', u.cal(2, 1013), u.why());
@@ -337,71 +337,74 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
   // R1, R2, R5: no echo; a query gives one line starting with its own words.
-  const qs = ['PRES?', 'PRES SP?', 'MODE?', 'VALV?', 'VALV MOVING?', 'BARO?', 'ALRM?', 'NETW?', 'TIME?'];
+  const qs = ['PRESSURE?', 'SETPOINT?', 'MODE?', 'VALVE?', 'VALVE MOVING?', 'BAROMETER?', 'ALARM?', 'NETWORK?', 'TIME?'];
   const bad = qs.map(q => [q, one(q)]).filter(([q, r]) => !(r.startsWith(q.slice(0, -1) + ' ') && /^[^\r\n]*\r\n$/.test(r)))
     .map(([q, r]) => q + ' -> ' + JSON.stringify(r));
   check('queries: one line, own words first', bad.length === 0, bad.join('\n     '));
   // R2: set commands silent when accepted.
-  const sets = ['PRES SP 5', 'MODE MANUAL', 'VALV SET 30', 'STOP', 'ALRM OK', 'ALRM RESET', 'TIME SET 2026-10-27 12:00:00'];
-  const loud = sets.map(c => [c, s.cmd(c, c.startsWith('VALV') ? 60000 : 1000)]).filter(([, r]) => r !== '').map(([c, r]) => c + ' -> ' + JSON.stringify(r));
+  const sets = ['SETPOINT 5', 'MODE MANUAL', 'VALVE SET 30', 'STOP', 'ALARM OK', 'ALARM RESET', 'TIME SET 2026-10-27 12:00:00'];
+  const loud = sets.map(c => [c, s.cmd(c, c.startsWith('VALVE') ? 60000 : 1000)]).filter(([, r]) => r !== '').map(([c, r]) => c + ' -> ' + JSON.stringify(r));
   check('set commands silent', loud.length === 0, loud.join('\n     '));
   check('TIME SET then TIME?', /^TIME 2026-10-27 12:00:\d\d\r\n$/.test(one('TIME?')), one('TIME?'));
   // R4, R6, R7: a query confirms the value taken; fixed decimals; chaining.
-  check('PRES SP 5.04;PRES SP? gives 5.0', one('PRES SP 5.04;PRES SP?') === 'PRES SP 5.0 mbar\r\n', one('PRES SP?'));
-  const poll = one('PRES?;PRES SP?;MODE?;VALV?;ALRM?');
-  check('chained poll', /^PRES \d+\.\d{3} mbar;PRES SP 5\.0 mbar;MODE MANUAL;VALV 30\.00 %;ALRM NONE\r\n$/.test(poll), poll);
-  check('BARO? and NETW? in the simulator', one('BARO?;NETW?') === 'BARO 1013.20 mbar;NETW NONE\r\n', one('BARO?;NETW?'));
+  check('SETPOINT 5.04;SETPOINT? gives 5.0', one('SETPOINT 5.04;SETPOINT?') === 'SETPOINT 5.0 mbar\r\n', one('SETPOINT?'));
+  const poll = one('PRESSURE?;SETPOINT?;MODE?;VALVE?;ALARM?');
+  check('chained poll', /^PRESSURE \d+\.\d{3} mbar;SETPOINT 5\.0 mbar;MODE MANUAL;VALVE 30\.00 %;ALARM NONE\r\n$/.test(poll), poll);
+  check('BAROMETER? and NETWORK? in the simulator', one('BAROMETER?;NETWORK?') === 'BAROMETER 1013.20 mbar;NETWORK NONE\r\n', one('BAROMETER?;NETWORK?'));
   check('*IDN?', /^MercShore,iPC,[0-9A-F]{24},\d+\.\d+\.\d+\r\n$/.test(one('*IDN?')), one('*IDN?'));
-  // EVNT?: the count line, then that many lines, newest first.
-  const ev = s.cmd('EVNT? 3', 2000).split('\r\n');
-  check('EVNT? 3', ev[0] === 'EVNT 3' && ev.slice(1, 4).every(l => /^\d+\.\d,[A-Z0-9-]+,/.test(l)) && ev.length === 5 && ev[4] === '',
+  // EVENT?: the count line, then that many lines, newest first.
+  const ev = s.cmd('EVENT? 3', 2000).split('\r\n');
+  check('EVENT? 3', ev[0] === 'EVENT 3' && ev.slice(1, 4).every(l => /^\d+\.\d,[A-Z0-9-]+,/.test(l)) && ev.length === 5 && ev[4] === '',
     ev.join(' | '));
-  check('EVNT? defaults to 1', s.cmd('EVNT?', 2000).split('\r\n').length === 3);
+  check('EVENT? defaults to 1', s.cmd('EVENT?', 2000).split('\r\n').length === 3);
   // R8: ERR <code> <text>, the first refusal ends the line.
-  const errs = [['NO SUCH', 100], ['PRES SP x', 101], ['PRES SP 2000', 102], ['X'.repeat(97), 103], ['MODE?;EVNT? 2', 104],
-    ['EVNT? 0', 102], ['VALV SET 101', 102], ['VALV SET', 101], ['MODE', 101], ['TIME SET 2026-13-01 00:00:00', 101],
-    ['PRES? 5', 100], ['pres?', 100]];
+  const errs = [['NO SUCH', 100], ['SETPOINT x', 101], ['SETPOINT 2000', 102], ['X'.repeat(97), 103], ['MODE?;EVENT? 2', 104],
+    ['EVENT? 0', 102], ['VALVE SET 101', 102], ['VALVE SET', 101], ['MODE', 101], ['TIME SET 2026-13-01 00:00:00', 101],
+    ['PRESSURE? 5', 100], ['pressure?', 100], ['SETPOINT', 101], ['SETPOINTS 5', 100], ['EVENT?5', 100],
+    // 0.16.12: the four-letter names to 0.16.11 are not taken any more.
+    ['PRES?', 100], ['PRES SP 5', 100], ['PRES SP?', 100], ['VALV?', 100], ['VALV SET 5', 100], ['ALRM?', 100], ['ALRM OK', 100],
+    ['EVNT?', 100], ['BARO?', 100], ['NETW?', 100]];
   const wrong = errs.map(([c, n]) => [c, n, one(c)]).filter(([c, n, r]) => !new RegExp('(^|;)ERR ' + n + ' [A-Z][^;\\r\\n]*\\r\\n$').test(r))
     .map(([c, n, r]) => c.slice(0, 20) + ' -> ' + JSON.stringify(r) + ' (want ' + n + ')');
   check('error codes 100-104', wrong.length === 0, wrong.join('\n     '));
-  check('first refusal ends the line', one('PRES SP 2000;PRES SP?') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', one('PRES SP 2000;PRES SP?'));
-  // The page's example: AUTO, then VALV SET refused until MANUAL.
+  check('first refusal ends the line', one('SETPOINT 2000;SETPOINT?') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', one('SETPOINT 2000;SETPOINT?'));
+  // The page's example: AUTO, then VALVE SET refused until MANUAL.
   check('MODE AUTO;MODE?', one('MODE AUTO;MODE?') === 'MODE AUTO\r\n', one('MODE?'));
-  check('ERR 202 in AUTO', one('VALV SET 40;VALV MOVING?') === 'ERR 202 Switch to MANUAL first\r\n');
-  check('MODE MANUAL;VALV SET 40;VALV MOVING?', one('MODE MANUAL;VALV SET 40;VALV MOVING?') === 'VALV MOVING 1\r\n');
+  check('ERR 202 in AUTO', one('VALVE SET 40;VALVE MOVING?') === 'ERR 202 Switch to MANUAL first\r\n');
+  check('MODE MANUAL;VALVE SET 40;VALVE MOVING?', one('MODE MANUAL;VALVE SET 40;VALVE MOVING?') === 'VALVE MOVING 1\r\n');
   s.run(30000);
   check('STOP in AUTO ends AUTO', (one('MODE AUTO'), one('STOP;MODE?')) === 'MODE MANUAL\r\n');
   // 201 while homing, 204 not homed, 206 no target, 210 cause present.
   s.home(200);
-  check('MODE HOMING, moving', one('MODE?;VALV MOVING?') === 'MODE HOMING;VALV MOVING 1\r\n', one('MODE?'));
-  check('ERR 201 while homing', one('VALV SET 10') === 'ERR 201 Homing, STOP to cancel\r\n', one('VALV SET 10'));
+  check('MODE HOMING, moving', one('MODE?;VALVE MOVING?') === 'MODE HOMING;VALVE MOVING 1\r\n', one('MODE?'));
+  check('ERR 201 while homing', one('VALVE SET 10') === 'ERR 201 Homing, STOP to cancel\r\n', one('VALVE SET 10'));
   one('STOP');
   const u = load(); u.boot(); u.run(2000);
-  check('ERR 204 not homed', u.cmd('PRES SP 5;MODE AUTO;MODE?') === 'ERR 204 Home the valve first\r\n', u.cmd('MODE?'));
-  check('VALV SET not homed', u.cmd('VALV SET 40') === 'ERR 204 Home the valve first\r\n', u.cmd('VALV SET 40'));
+  check('ERR 204 not homed', u.cmd('SETPOINT 5;MODE AUTO;MODE?') === 'ERR 204 Home the valve first\r\n', u.cmd('MODE?'));
+  check('VALVE SET not homed', u.cmd('VALVE SET 40') === 'ERR 204 Home the valve first\r\n', u.cmd('VALVE SET 40'));
   const t = homed(load());
-  check('ERR 206 no target', t.cmd('MODE AUTO') === 'ERR 206 Set a target first\r\n');
+  check('ERR 206 no setpoint', t.cmd('MODE AUTO') === 'ERR 206 Set a setpoint first\r\n');
   t.set(8, 0); t.run(5000);
-  check('ERR 210 cause present', /^ERR 210 Not reset, cause still present: F-1\r\n$/.test(t.cmd('ALRM RESET')), t.cmd('ALRM RESET'));
-  check('ALRM? fault flag 0 while its cause is present', /^ALRM F-1,0,/.test(t.cmd('ALRM?')), t.cmd('ALRM?'));
+  check('ERR 210 cause present', /^ERR 210 Not reset, cause still present: F-1\r\n$/.test(t.cmd('ALARM RESET')), t.cmd('ALARM RESET'));
+  check('ALARM? fault flag 0 while its cause is present', /^ALARM F-1,0,/.test(t.cmd('ALARM?')), t.cmd('ALARM?'));
   t.set(8, 1); t.run(5000);
-  check('ALRM? fault flag 1 once it can reset', /^ALRM F-1,1,/.test(t.cmd('ALRM?')), t.cmd('ALRM?'));
-  check('ALRM RESET clears it', t.cmd('ALRM RESET;ALRM?') === 'ALRM NONE\r\n', t.cmd('ALRM?'));
-  check('nothing sent unasked over a run', (t.cmd('PRES SP 5;MODE AUTO', 60000), t.out === ''), t.out);
+  check('ALARM? fault flag 1 once it can reset', /^ALARM F-1,1,/.test(t.cmd('ALARM?')), t.cmd('ALARM?'));
+  check('ALARM RESET clears it', t.cmd('ALARM RESET;ALARM?') === 'ALARM NONE\r\n', t.cmd('ALARM?'));
+  check('nothing sent unasked over a run', (t.cmd('SETPOINT 5;MODE AUTO', 60000), t.out === ''), t.out);
 }
 { // Remote control switch: On by default; Off, the link takes queries only; On from the screen, it takes sets.
   const d = load(); d.boot(); d.run(1000);   // boot() leaves the switch as the firmware starts it
-  check('switch On by default', d.cmd('PRES SP 5;PRES SP?') === 'PRES SP 5.0 mbar\r\n', d.cmd('PRES SP?'));
+  check('switch On by default', d.cmd('SETPOINT 5;SETPOINT?') === 'SETPOINT 5.0 mbar\r\n', d.cmd('SETPOINT?'));
   const s = load(); s.boot(undefined, { remote: false }); s.set(5, 40000); s.run(2000);
-  check('switch Off: PRES SP refused', s.cmd('PRES SP 5') === 'ERR 211 Read only over the network\r\n', s.cmd('PRES SP 5'));
+  check('switch Off: SETPOINT refused', s.cmd('SETPOINT 5') === 'ERR 211 Read only over the network\r\n', s.cmd('SETPOINT 5'));
   check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
-  check('switch Off: queries answer', s.cmd('MODE?;PRES SP?') === 'MODE NOT HOMED;PRES SP NONE\r\n', s.cmd('MODE?;PRES SP?'));
+  check('switch Off: queries answer', s.cmd('MODE?;SETPOINT?') === 'MODE NOT HOMED;SETPOINT NONE\r\n', s.cmd('MODE?;SETPOINT?'));
   s.tap(415, 184); s.tap(84, 184); s.tap(357, 128);   // Menu, System (0.16.2: bottom left), Remote control
-  check('switch On from the screen: PRES SP taken', s.cmd('PRES SP 5;PRES SP?') === 'PRES SP 5.0 mbar\r\n', s.cmd('PRES SP?'));
+  check('switch On from the screen: SETPOINT taken', s.cmd('SETPOINT 5;SETPOINT?') === 'SETPOINT 5.0 mbar\r\n', s.cmd('SETPOINT?'));
   check('switch On is a NET event', /NET,Remote control on \(screen\)/.test(events(s, 5)), events(s, 5));
   shot(s, 'system');
   s.tap(357, 128);
-  check('switch Off again: refused', s.cmd('PRES SP 6') === 'ERR 211 Read only over the network\r\n');
+  check('switch Off again: refused', s.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('PID?') === 'PID 4.00,0.25,0.00\r\n', s.cmd('PID?'));
   check('switch Off: PIDS SET and SCHED SET refused, PIDS? and SCHED? answer',
@@ -425,9 +428,9 @@ const NEEDLE0 = 800;   // the needle at 0 % after homing: 400 full steps above t
 let parkedFlash;
 { // Every start is OFF: the black screen, nothing moves, a double tap turns it on.
   const s = load(); s.boot(undefined, { off: true }); s.set(5, 40000); s.run(2000);
-  check('start: OFF', s.cmd('MODE?;VALV?') === 'MODE OFF;VALV NONE\r\n', s.cmd('MODE?;VALV?'));
+  check('start: OFF', s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE NONE\r\n', s.cmd('MODE?;VALVE?'));
   check('start: black screen', px(s, 10, 10) === 0 && px(s, 240, 136) === 0, px(s, 10, 10));
-  check('start: moves refused', s.cmd('VALV SET 10') === 'ERR 213 Controller is off\r\n', s.cmd('VALV SET 10'));
+  check('start: moves refused', s.cmd('VALVE SET 10') === 'ERR 213 Controller is off\r\n', s.cmd('VALVE SET 10'));
   check('start: BOOT event says OFF', /BOOT,Power-up \(event only\), OFF, valve not homed/.test(events(s, 5)), events(s, 5));
   shot(s, 'boot-off');
   s.tap(240, 136, 100); s.tap(240, 136, 150);
@@ -439,22 +442,22 @@ let parkedFlash;
 }
 { // From the screen: the power icon (top left), Shut down, the black screen, OFF, a double tap.
   const s = homed(load());
-  s.cmd('VALV SET 30', 60000); s.run(2000);
+  s.cmd('VALVE SET 30', 60000); s.run(2000);
   s.tap(24, 20); shot(s, 'shutdown-ask');
   s.tap(318, 165, 3000);
-  const during = s.cmd('MODE?;VALV MOVING?');
-  check('shut down: to 0 %', during === 'MODE SHUTDOWN;VALV MOVING 1\r\n', during);
-  check('shut down: ERR 213 while moving', s.cmd('VALV SET 10') === 'ERR 213 Shutting down, STOP to cancel\r\n' &&
-    s.cmd('MODE MANUAL') === 'ERR 213 Shutting down, STOP to cancel\r\n', s.cmd('VALV SET 10'));
+  const during = s.cmd('MODE?;VALVE MOVING?');
+  check('shut down: to 0 %', during === 'MODE SHUTDOWN;VALVE MOVING 1\r\n', during);
+  check('shut down: ERR 213 while moving', s.cmd('VALVE SET 10') === 'ERR 213 Shutting down, STOP to cancel\r\n' &&
+    s.cmd('MODE MANUAL') === 'ERR 213 Shutting down, STOP to cancel\r\n', s.cmd('VALVE SET 10'));
   shot(s, 'shutting-down');
   s.run(60000);
-  const st = s.cmd('MODE?;VALV?;VALV MOVING?');
-  check('shut down: OFF at 0 %', st === 'MODE OFF;VALV 0.00 %;VALV MOVING 0\r\n', st);
+  const st = s.cmd('MODE?;VALVE?;VALVE MOVING?');
+  check('shut down: OFF at 0 %', st === 'MODE OFF;VALVE 0.00 %;VALVE MOVING 0\r\n', st);
   check('shut down: needle at 0 %, switch not reached, coils off', s.get(5) === NEEDLE0 && s.get(15) === 0,
     'needle ' + s.get(5) + ' coils ' + s.get(15));
-  check('OFF: ERR 213', s.cmd('VALV SET 10') === 'ERR 213 Controller is off\r\n' && s.cmd('MODE AUTO') === 'ERR 213 Controller is off\r\n' &&
+  check('OFF: ERR 213', s.cmd('VALVE SET 10') === 'ERR 213 Controller is off\r\n' && s.cmd('MODE AUTO') === 'ERR 213 Controller is off\r\n' &&
     s.cmd('MODE MANUAL') === 'ERR 213 Controller is off\r\n', s.cmd('MODE AUTO'));
-  check('OFF: pressure still read', /^PRES [\d.]+ mbar/.test(s.cmd('PRES?')), s.cmd('PRES?'));
+  check('OFF: pressure still read', /^PRESSURE [\d.]+ mbar/.test(s.cmd('PRESSURE?')), s.cmd('PRESSURE?'));
   check('shut down event', /OFF,Valve at 0 %, count 0; coils off, OFF/.test(events(s, 5)), events(s, 5));
   shot(s, 'off');
   parkedFlash = s.flash();
@@ -462,22 +465,22 @@ let parkedFlash;
   check('OFF: one tap does nothing', s.cmd('MODE?') === 'MODE OFF\r\n', s.cmd('MODE?'));
   s.tap(240, 136, 100); s.tap(240, 136, 300);
   s.run(3000);
-  check('OFF: a double tap turns it on, MANUAL', s.cmd('MODE?;VALV?') === 'MODE MANUAL;VALV 0.00 %\r\n', s.cmd('MODE?;VALV?'));
+  check('OFF: a double tap turns it on, MANUAL', s.cmd('MODE?;VALVE?') === 'MODE MANUAL;VALVE 0.00 %\r\n', s.cmd('MODE?;VALVE?'));
   shot(s, 'on-again');
-  s.cmd('VALV SET 5', 15000);
-  check('on again: moves', s.cmd('VALV?') === 'VALV 5.00 %\r\n', s.cmd('VALV?'));
+  s.cmd('VALVE SET 5', 15000);
+  check('on again: moves', s.cmd('VALVE?') === 'VALVE 5.00 %\r\n', s.cmd('VALVE?'));
 }
 { // Close the valve unticked (0.15.7): OFF at once, the valve left open, its count kept.
   const s = homed(load());
-  s.cmd('VALV SET 30', 60000); s.run(2000);
+  s.cmd('VALVE SET 30', 60000); s.run(2000);
   const needle = s.get(5);
   s.tap(24, 20); s.tap(240, 111); shot(s, 'shutdown-leave');
   s.tap(318, 165, 1000);
-  check('shut down, valve left: OFF at 30 %', s.cmd('MODE?;VALV?;VALV MOVING?') === 'MODE OFF;VALV 30.00 %;VALV MOVING 0\r\n' &&
-    s.get(5) === needle && s.get(15) === 0, s.cmd('MODE?;VALV?') + ' needle ' + s.get(5) + ' coils ' + s.get(15));
+  check('shut down, valve left: OFF at 30 %', s.cmd('MODE?;VALVE?;VALVE MOVING?') === 'MODE OFF;VALVE 30.00 %;VALVE MOVING 0\r\n' &&
+    s.get(5) === needle && s.get(15) === 0, s.cmd('MODE?;VALVE?') + ' needle ' + s.get(5) + ' coils ' + s.get(15));
   check('shut down, valve left: event', /OFF,Shut down, valve left at 30\.0 %: coils off, OFF/.test(events(s, 5)), events(s, 5));
   const t = load(); t.boot(s.flash(), { off: true }); t.set(5, needle); t.run(2000);
-  check('shut down, valve left: kept at the next start', t.cmd('MODE?;VALV?') === 'MODE OFF;VALV 30.00 %\r\n', t.cmd('MODE?;VALV?'));
+  check('shut down, valve left: kept at the next start', t.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE 30.00 %\r\n', t.cmd('MODE?;VALVE?'));
   const u = homed(load());
   u.tap(24, 20); u.tap(240, 111); u.tap(240, 111); u.tap(318, 165, 1000);
   check('ticked again: closes', u.cmd('MODE?') === 'MODE OFF\r\n' && /at 0 %: coils off, OFF/.test(events(u, 5)), events(u, 5));
@@ -486,38 +489,38 @@ let parkedFlash;
   for (const r of [0, 1, 2]) {
     const s = load(); s.boot(parkedFlash, { off: true, reset: r }); s.set(5, NEEDLE0); s.run(2000);
     const what = ['power-up', 'watchdog', 'Restart'][r];
-    check('start after Shut down (' + what + '): OFF at 0 %', s.cmd('MODE?;VALV?') === 'MODE OFF;VALV 0.00 %\r\n' &&
-      s.offer() === -2147483648, s.cmd('MODE?;VALV?') + ' offer ' + s.offer());
+    check('start after Shut down (' + what + '): OFF at 0 %', s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE 0.00 %\r\n' &&
+      s.offer() === -2147483648, s.cmd('MODE?;VALVE?') + ' offer ' + s.offer());
     if (r) continue;
     check('start after Shut down: event', /REF,Kept from the last shut down: count 0 \(0\.0 %\)\r?\n/.test(events(s, 5)), events(s, 5));
     s.turnOn();
-    s.cmd('VALV SET 20', 60000);
-    check('start after Shut down: on, moves at once', s.cmd('MODE?;VALV?') === 'MODE MANUAL;VALV 20.00 %\r\n' &&
-      s.get(5) / 2 === 400 + Math.round(66048 * 0.2), s.cmd('MODE?;VALV?') + ' needle ' + s.get(5));
+    s.cmd('VALVE SET 20', 60000);
+    check('start after Shut down: on, moves at once', s.cmd('MODE?;VALVE?') === 'MODE MANUAL;VALVE 20.00 %\r\n' &&
+      s.get(5) / 2 === 400 + Math.round(66048 * 0.2), s.cmd('MODE?;VALVE?') + ' needle ' + s.get(5));
   }
 }
 { // The valve closed onto the switch while the power was off: not homed, nothing offered.
   const s = load(); s.boot(parkedFlash, { off: true }); s.set(5, 0); s.run(2000);
-  check('kept but switch pressed: not homed', s.cmd('MODE?;VALV?') === 'MODE OFF;VALV NONE\r\n' && s.offer() === -2147483648,
-    s.cmd('MODE?;VALV?') + ' offer ' + s.offer());
+  check('kept but switch pressed: not homed', s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE NONE\r\n' && s.offer() === -2147483648,
+    s.cmd('MODE?;VALVE?') + ' offer ' + s.offer());
   check('kept but switch pressed: event', /limit switch is pressed: home the valve/.test(events(s, 5)), events(s, 5));
   s.turnOn();
   check('kept but switch pressed: on, NOT HOMED', s.cmd('MODE?') === 'MODE NOT HOMED\r\n', s.cmd('MODE?'));
   const t = load(); t.boot(s.flash(), { off: true }); t.set(5, NEEDLE0); t.run(2000);
-  check('kept entry withdrawn', t.cmd('MODE?;VALV?') === 'MODE OFF;VALV NONE\r\n' && t.offer() === -2147483648,
-    t.cmd('MODE?;VALV?') + ' offer ' + t.offer());
+  check('kept entry withdrawn', t.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE NONE\r\n' && t.offer() === -2147483648,
+    t.cmd('MODE?;VALVE?') + ' offer ' + t.offer());
 }
 { // Set by hand, not homed: kept through Shut down, but still not homed (SAVED).
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
   s.setClosed();
-  check('set by hand at 0 %: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALV?') === 'MODE OFF;VALV 0.00 %\r\n', s.why() + s.cmd('MODE?;VALV?'));
+  check('set by hand at 0 %: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE 0.00 %\r\n', s.why() + s.cmd('MODE?;VALVE?'));
   const t = load(); t.boot(s.flash(), { off: true }); t.set(5, 40000); t.run(2000);
-  check('set by hand: kept, not homed', t.cmd('VALV?') === 'VALV 0.00 %\r\n' &&
-    /Kept from the last shut down: count 0 \(0\.0 %\), not homed/.test(events(t, 5)), t.cmd('VALV?') + events(t, 5));
+  check('set by hand: kept, not homed', t.cmd('VALVE?') === 'VALVE 0.00 %\r\n' &&
+    /Kept from the last shut down: count 0 \(0\.0 %\), not homed/.test(events(t, 5)), t.cmd('VALVE?') + events(t, 5));
 }
 { // Switched off without Shut down: the saved position offered, and the log says so.
   const s = homed(load());
-  s.cmd('VALV SET 30', 60000); s.run(3000);
+  s.cmd('VALVE SET 30', 60000); s.run(3000);
   const t = load(); t.boot(s.flash()); t.set(5, 40000); t.run(2000);
   check('switched off without Shut down', t.offer() === Math.round(66048 * 0.3) && /Last power-off without Shut down/.test(events(t, 5)),
     t.offer() + '\n' + events(t, 5));
@@ -525,46 +528,46 @@ let parkedFlash;
 }
 { // STOP cancels: MANUAL, the valve where it stopped.
   const s = homed(load());
-  s.cmd('VALV SET 50', 90000); s.run(2000);
+  s.cmd('VALVE SET 50', 90000); s.run(2000);
   s.shutdown(5000);
   s.cmd('STOP', 1000);
-  const v = parseFloat(s.cmd('VALV?').match(/VALV ([-\d.]+)/)[1]);
-  check('STOP cancels shut down: MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n' && v > 40 && v < 48 && !s.busy(), s.cmd('MODE?;VALV?'));
+  const v = parseFloat(s.cmd('VALVE?').match(/VALVE ([-\d.]+)/)[1]);
+  check('STOP cancels shut down: MANUAL', s.cmd('MODE?') === 'MODE MANUAL\r\n' && v > 40 && v < 48 && !s.busy(), s.cmd('MODE?;VALVE?'));
   check('STOP cancels shut down: event', /shut down cancelled/.test(events(s, 5)), events(s, 5));
 }
 { // From AUTO: AUTO ends, then the same move to 0 %.
   const s = homed(load());
-  s.cmd('VALV SET 30', 60000);
-  s.cmd('PRES SP 3;MODE AUTO', 20000);
+  s.cmd('VALVE SET 30', 60000);
+  s.cmd('SETPOINT 3;MODE AUTO', 20000);
   check('in AUTO before shut down', s.cmd('MODE?') === 'MODE AUTO\r\n', s.cmd('MODE?'));
   check('shut down from AUTO', s.shutdown(1000) && s.cmd('MODE?') === 'MODE SHUTDOWN\r\n', s.why() + s.cmd('MODE?'));
   s.run(90000);
-  check('shut down from AUTO: OFF at 0 %', s.cmd('MODE?;VALV?') === 'MODE OFF;VALV 0.00 %\r\n', s.cmd('MODE?;VALV?'));
+  check('shut down from AUTO: OFF at 0 %', s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE 0.00 %\r\n', s.cmd('MODE?;VALVE?'));
 }
 { // Not homed: OFF at once, the valve not moved.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  check('shut down not homed: OFF, not moved', s.shutdown(2000) && s.cmd('MODE?;VALV?') === 'MODE OFF;VALV NONE\r\n' &&
-    s.get(5) === 40000, s.why() + s.cmd('MODE?;VALV?') + ' needle ' + s.get(5));
+  check('shut down not homed: OFF, not moved', s.shutdown(2000) && s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE NONE\r\n' &&
+    s.get(5) === 40000, s.why() + s.cmd('MODE?;VALVE?') + ' needle ' + s.get(5));
   check('shut down not homed: event', /OFF,Shut down, not homed: valve not moved/.test(events(s, 5)), events(s, 5));
 }
 { // The switch before 0 % (ice, an early switch): MANUAL there and the switch question.
   const s = homed(load());
-  s.cmd('VALV SET 30', 60000);
+  s.cmd('VALVE SET 30', 60000);
   s.set(18, 4000); s.set(7, 3);   // trips 2000 full steps above the seat
   s.shutdown(60000);
-  const st = s.cmd('MODE?;VALV?');
-  check('early switch: MANUAL, count kept', /^MODE MANUAL;VALV 2\.\d\d %/.test(st), st);
+  const st = s.cmd('MODE?;VALVE?');
+  check('early switch: MANUAL, count kept', /^MODE MANUAL;VALVE 2\.\d\d %/.test(st), st);
   check('early switch: event and question', /Shut down stopped \(limit switch pressed\)/.test(events(s, 5)) &&
     /W-1,Limit switch pressed/.test(events(s, 5)), events(s, 5));
   shot(s, 'early-switch');
   // The switch question needs an answer: a tap round it or on the strip leaves it (0.15.16).
   const asked = s.popup();
   s.tap(455, 100); s.tap(100, 240);
-  check('switch question stays on a tap round it', asked && s.popup() && /W-1/.test(s.cmd('ALRM?')), [asked, s.popup(), s.cmd('ALRM?')].join());
+  check('switch question stays on a tap round it', asked && s.popup() && /W-1/.test(s.cmd('ALARM?')), [asked, s.popup(), s.cmd('ALARM?')].join());
 }
 { // Already at 0 %: OFF at once.
   const s = homed(load());
-  check('at 0 %: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALV?') === 'MODE OFF;VALV 0.00 %\r\n', s.why() + s.cmd('MODE?;VALV?'));
+  check('at 0 %: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE 0.00 %\r\n', s.why() + s.cmd('MODE?;VALVE?'));
 }
 { // PID? and PID SET (0.15.8): the PID tab's Save over the text port, also in AUTO.
   const s = homed(load());
@@ -581,8 +584,8 @@ let parkedFlash;
   check('PID SET refusals', wrong.length === 0, wrong.join('\n     '));
   check('PID SET range text', one('PID SET 0,0.5') === 'ERR 102 Outside 0.01 to 100.00 for KP\r\n', one('PID SET 0,0.5'));
   check('refused PID SET changes nothing', one('PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
-  s.cmd('VALV SET 30', 60000);
-  s.cmd('PRES SP 3;MODE AUTO', 20000);
+  s.cmd('VALVE SET 30', 60000);
+  s.cmd('SETPOINT 3;MODE AUTO', 20000);
   check('PID SET in AUTO, AUTO kept', one('PID SET 2,0.4;PID?;MODE?') === 'PID 2.00,0.40,1.25;MODE AUTO\r\n', one('PID?;MODE?'));
   check('PID SET in AUTO saves', s.setting(CFG.KP) === 200 && s.setting(CFG.TI) === 40, s.setting(CFG.KP) + ' ' + s.setting(CFG.TI));
 }
@@ -614,32 +617,32 @@ let parkedFlash;
   // boundaries here are 3 and 8 mbar: up at 3.45 and 9.2, down at 6.8 and 2.55.
   // Sim-plant gains, a different set each so PID? shows which is in use.
   one('SCHED SET PV,3,8,15;PIDS SET 1,6,0.25;PIDS SET 2,5,0.25,0;PIDS SET 3,4,0.25,0');
-  // The set changes so far, oldest first (EVNT? lists the newest first).
+  // The set changes so far, oldest first (EVENT? lists the newest first).
   const sws = () => [...events(s, 100).matchAll(/AUTO PID set (\d) to (\d), pressure ([\d.]+) mbar/g)].map(m => [+m[1], +m[2], +m[3]]).reverse();
-  s.cmd('VALV SET 40', 60000);
+  s.cmd('VALVE SET 40', 60000);
   s.run(240000);
-  s.cmd('PRES SP 10;MODE AUTO', 1000);
+  s.cmd('SETPOINT 10;MODE AUTO', 1000);
   check('AUTO starts on the set for the lower of pressure and setpoint (3.8 mbar: set 2)', /Auto at setpoint 10\.0 mbar, valve [\d.]+ %, PID set 2/.test(events(s, 3)),
     events(s, 3));
   s.run(600000);
   check('PV schedule: set 3 at 10 mbar', /^PIDS 3,/.test(one('PIDS?')) && one('PID?') === 'PID 4.00,0.25,0.00\r\n',
-    one('PRES?;PIDS?;PID?'));
+    one('PRESSURE?;PIDS?;PID?'));
   const first = sws();
   check('then 2 to 3 over 9.2 mbar (B2 x 1.15), once', first.length === 1 && first[0][0] === 2 && first[0][1] === 3 && first[0][2] >= 9.2 &&
     first[0][2] < 10.5, JSON.stringify(first));
   // PID SET edits the set in use.
   check('PID SET edits the set in use', one('PID SET 4.5,0.25;PID?') === 'PID 4.50,0.25,0.00\r\n' && s.setting(CFG.KP3) === 450 &&
     s.setting(CFG.KP) === 600, s.setting(CFG.KP3) + ' ' + s.setting(CFG.KP));
-  s.cmd('PRES SP 2', 1000);
+  s.cmd('SETPOINT 2', 1000);
   s.run(900000);
   // Going down the set follows the setpoint at once (0.16.9: the lower of
   // pressure and setpoint), so a big step down does not start on set 3.
   const sw = sws().slice(1);
   check('10 -> 2: set 3 to 1 at once, still at 10 mbar (the setpoint\'s set), no other change', sw.length === 1 && sw[0][0] === 3 &&
     sw[0][1] === 1 && sw[0][2] > 9, JSON.stringify(sw));
-  check('10 -> 2: AUTO kept, near 2 mbar, set 1', one('MODE?') === 'MODE AUTO\r\n' && Math.abs(parseFloat(one('PRES?').slice(5)) - 2) < 0.3 &&
-    /^PIDS 1,/.test(one('PIDS?')) && one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('MODE?;PRES?;PIDS?;PID?'));
-  s.cmd('PRES SP 10', 1000);
+  check('10 -> 2: AUTO kept, near 2 mbar, set 1', one('MODE?') === 'MODE AUTO\r\n' && Math.abs(parseFloat(one('PRESSURE?').slice(9)) - 2) < 0.3 &&
+    /^PIDS 1,/.test(one('PIDS?')) && one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('MODE?;PRESSURE?;PIDS?;PID?'));
+  s.cmd('SETPOINT 10', 1000);
   s.run(900000);
   const up = sws().slice(2);
   check('2 -> 10: set 1 to 2 over 3.45, set 2 to 3 over 9.2 mbar', up.length === 2 && up[0][0] === 1 && up[0][1] === 2 &&
@@ -653,11 +656,11 @@ let parkedFlash;
 }
 { // The limit switch pressed away from the seat (0.16.4, Ryan PR #43): a yellow edge round Home's Valve tile at
   // once (the "Limit" tag of 0.16.1 gone) and W-4 within 0.3 s (two 1 s reads to 0.16.3); released, the edge goes.
-  const s = homed(load()); s.cmd('VALV SET 20', 60000);
+  const s = homed(load()); s.cmd('VALVE SET 20', 60000);
   const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
   const before = px(187, 100);
   s.set(7, 1); s.run(200);   // the wire open: the NC contact reads pressed
-  const edge = px(187, 100), al = s.cmd('ALRM?', 100);
+  const edge = px(187, 100), al = s.cmd('ALARM?', 100);
   shot(s, 'limit-edge');
   s.set(7, 0); s.run(300);
   const after = px(187, 100);
@@ -667,47 +670,47 @@ let parkedFlash;
 { // Switch pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): Motor override >
   // Switch turns it on; between 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11) the pressed switch
   // neither stops closing nor raises W-4; below 5 % it stops as always.
-  const s = homed(load()); s.cmd('VALV SET 40', 150000);
+  const s = homed(load()); s.cmd('VALVE SET 40', 150000);
   s.tap(415, 184); s.tap(240, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position > Motor override > Open
   s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 50 % on
   shot(s, 'motor-switch');
   const on = /Switch passed between 5 and 50 % open: on/.test(events(s, 5));
   s.set(7, 1); s.run(1000);                            // the switch reads pressed at 40 %
-  const a1 = s.cmd('ALRM?');
-  s.cmd('VALV SET 6', 90000);
-  const at6 = s.cmd('VALV?'), a6 = s.cmd('ALRM?');
-  s.cmd('VALV SET 2', 30000);
-  const at5 = s.cmd('VALV?'), ev = events(s, 5);
-  check('pass band: no W-4 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALRM NONE\r\n' &&
-    /VALV 6\.0/.test(at6) && a6 === 'ALRM NONE\r\n' && /VALV (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
+  const a1 = s.cmd('ALARM?');
+  s.cmd('VALVE SET 6', 90000);
+  const at6 = s.cmd('VALVE?'), a6 = s.cmd('ALARM?');
+  s.cmd('VALVE SET 2', 30000);
+  const at5 = s.cmd('VALVE?'), ev = events(s, 5);
+  check('pass band: no W-4 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
+    /VALVE 6\.0/.test(at6) && a6 === 'ALARM NONE\r\n' && /VALVE (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
     [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
 }
 { // The bench cryostat (the page's flow line, fitted to the bench logs): AUTO holds 16 mbar with
   // bench gains, a relay there cycles at about the bench's period, and opening sticks at low openings.
   const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
   const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
-  s.cmd('PID SET 0.40,0.75,0'); s.cmd('PRES SP 16'); s.cmd('MODE AUTO');
+  s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT 16'); s.cmd('MODE AUTO');
   s.run(540000);
   // Held: no swing over the last minute of 10 min. It may still creep a
   // little as the heat exchanger settles (the knee), as on the bench.
   const ps = [];
-  for (let i = 0; i < 12; i++) { s.run(5000); ps.push(num(s.cmd('PRES?'))); }
-  const p16 = ps[ps.length - 1], x0 = num(s.cmd('VALV?'));
+  for (let i = 0; i < 12; i++) { s.run(5000); ps.push(num(s.cmd('PRESSURE?'))); }
+  const p16 = ps[ps.length - 1], x0 = num(s.cmd('VALVE?'));
   check('bench cryostat: AUTO holds 16 mbar (KP 0.40, TI 0.75)', s.reg() >= 1 && ps.every(p => Math.abs(p - 16) < 0.3),
     'regulation ' + s.reg() + ', ' + Math.min(...ps) + ' to ' + Math.max(...ps) + ' mbar, valve ' + x0 + ' %');
   s.cmd('MODE MANUAL');
   let hi = null, last = 0; const ups = [];
   for (let t = 0; t < 300; t++) {
-    s.run(1000); const p = num(s.cmd('PRES?', 50));
+    s.run(1000); const p = num(s.cmd('PRESSURE?', 50));
     const want = p < 15.84 ? true : p > 16.16 ? false : hi === null ? p < 16 : hi;   // starts on the sign of the error
-    if (want !== hi) { hi = want; s.cmd('VALV SET ' + (x0 + (hi ? 0.8 : -0.8)).toFixed(1), 50); if (hi && t > 60) ups.push(t); }
+    if (want !== hi) { hi = want; s.cmd('VALVE SET ' + (x0 + (hi ? 0.8 : -0.8)).toFixed(1), 50); if (hi && t > 60) ups.push(t); }
   }
   const pu = ups.length > 2 ? (ups[ups.length - 1] - ups[0]) / (ups.length - 1) : 0;
   check('bench cryostat: relay at 16 mbar cycles in 12 to 30 s (bench 18 s)', pu >= 12 && pu <= 30, 'period ' + pu + ' s');
-  s.cmd('VALV SET 3.0', 30000); s.run(120000);
-  const p0 = num(s.cmd('PRES?')); s.cmd('VALV SET 3.2', 10000); s.run(20000);
-  const pOpen = num(s.cmd('PRES?')); s.cmd('VALV SET 3.0', 10000); s.run(20000);
-  const pBack = num(s.cmd('PRES?'));
+  s.cmd('VALVE SET 3.0', 30000); s.run(120000);
+  const p0 = num(s.cmd('PRESSURE?')); s.cmd('VALVE SET 3.2', 10000); s.run(20000);
+  const pOpen = num(s.cmd('PRESSURE?')); s.cmd('VALVE SET 3.0', 10000); s.run(20000);
+  const pBack = num(s.cmd('PRESSURE?'));
   check('bench cryostat: 0.2 % opening sticks, closing follows', Math.abs(pOpen - p0) < 0.1 * p0 + 0.05,
     [p0, pOpen, pBack].join(' -> '));
 }
@@ -717,11 +720,11 @@ let parkedFlash;
   const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
   const reach = kp => {
     const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
-    s.cmd('PID SET 0.40,0.75,0'); s.cmd('PRES SP 10'); s.cmd('MODE AUTO'); s.run(1800000);
-    s.cmd('PID SET ' + kp.toFixed(2) + ',0.42,0'); s.cmd('PRES SP 1');
+    s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT 10'); s.cmd('MODE AUTO'); s.run(1800000);
+    s.cmd('PID SET ' + kp.toFixed(2) + ',0.42,0'); s.cmd('SETPOINT 1');
     let low = false, swings = 0;   // times it came back up from under 1.5 to over 3.5 mbar
     for (let t = 0; t < 120; t++) {
-      s.run(1000); const p = num(s.cmd('PRES?', 20));
+      s.run(1000); const p = num(s.cmd('PRESSURE?', 20));
       if (p < 1.5) low = true;
       else if (p > 3.5 && low) { swings++; low = false; }
     }

@@ -171,7 +171,7 @@ int main(void)
     {
         link_task();
 #if PMC_LINK_ETHERNET
-        // A new client does not get the last one's EVNT? lines: stopped
+        // A new client does not get the last one's EVENT? lines: stopped
         // before valve_task writes its next lines this pass.
         if (ethlink_take_new_client())
             valve_events_stop();
@@ -189,7 +189,7 @@ int main(void)
             sense_second();
         }
         // The remote command set (remote.c): no echo, one reply line. While
-        // an EVNT? reply is going out a few lines a pass, the next line
+        // an EVENT? reply is going out a few lines a pass, the next line
         // waits, so its reply does not land among those lines; for 0.5 s at
         // most, so a STOP is not held longer than that.
         bool dumping = valve_events_sending();

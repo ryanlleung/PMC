@@ -8,17 +8,22 @@
  * screen. The full description is the "mm4 Remote Commands" page; README.md
  * has the list.
  *
- *   PRES SP <mbar>   MODE AUTO   MODE MANUAL   VALV SET <%>   STOP
- *   ALRM RESET   ALRM OK   TIME SET <YYYY-MM-DD> <HH:MM:SS>
- *   PRES?  PRES SP?  MODE?  VALV?  VALV MOVING?  BARO?  ALRM?  EVNT? [n]
- *   NETW?  TIME?  *IDN?
+ *   SETPOINT <mbar>   MODE AUTO   MODE MANUAL   VALVE SET <%>   STOP
+ *   ALARM RESET   ALARM OK   TIME SET <YYYY-MM-DD> <HH:MM:SS>
+ *   PRESSURE?  SETPOINT?  MODE?  VALVE?  VALVE MOVING?  BAROMETER?
+ *   ALARM?  EVENT? [n]  NETWORK?  TIME?  *IDN?
+ *   PID?  PID SET  PIDS?  PIDS SET  SCHED?  SCHED SET (the gains, 0.15.8)
+ *
+ * The names are whole words from 0.16.12. To 0.16.11 every first word had
+ * four letters (PRES, PRES SP, VALV, ALRM, EVNT, BARO, NETW); those are no
+ * longer taken.
  *
  * Reply rules: no echo; nothing sent unasked; a query replies one line
- * starting with its own words ("PRES 4.625 mbar", "VALV NONE"); a set
+ * starting with its own words ("PRESSURE 4.625 mbar", "VALVE NONE"); a set
  * command replies nothing unless refused; a refusal is "ERR <code> <text>".
  * Commands can share a line with ';': they run in order, the query replies
  * come back on one line joined by ';', and the first refusal ends the line.
- * EVNT? is the only multi-line reply ("EVNT <count>", then that many lines)
+ * EVENT? is the only multi-line reply ("EVENT <count>", then that many lines)
  * and must be on a line of its own.
  */
 

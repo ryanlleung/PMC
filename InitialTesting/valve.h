@@ -48,8 +48,8 @@
  *   latches nothing; in AUTO it drops to MANUAL.
  * Outside AUTO, STOP stops and holds the valve without a latch (STOP event).
  *
- * The remote commands are in remote.c (PRES SP, MODE, VALV SET, STOP, ALRM,
- * EVNT?); they call the functions below, as the screens do.
+ * The remote commands are in remote.c (SETPOINT, MODE, VALVE SET, STOP, ALARM,
+ * EVENT?); they call the functions below, as the screens do.
  * Events go to the log only; nothing is sent unasked.
  */
 
@@ -190,10 +190,10 @@ const char *valve_last_cal_iso(void);   // "YYYY-MM-DD HH:MM:SS" then, "" if the
 
 // Adds an event to the log (tag up to 5 characters).
 void valve_event(const char *tag, const char *fmt, ...);
-// EVNT? <n>: "EVNT <n>" now, then n lines "<age s>,<tag>,<text>", newest
+// EVENT? <n>: "EVENT <n>" now, then n lines "<age s>,<tag>,<text>", newest
 // first, sent from valve_task as the link has room.
 void valve_events_send(int n);
-// An EVNT? dump is still going out: main.c holds the next command line
+// An EVENT? dump is still going out: main.c holds the next command line
 // (up to 0.5 s), so no reply lands among its lines. _stop drops the rest
 // (a new client).
 bool valve_events_sending(void);

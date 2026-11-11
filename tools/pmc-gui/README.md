@@ -2,6 +2,8 @@
 
 `pmc_gui.py` is a small web server on a PC that talks to the board's text port (TCP 8888), and to a Lake Shore 336 (TCP 7777) when one is given, and serves one page to a browser. It holds the board's one connection, so every tool for the running board is on that page.
 
+It needs firmware 0.16.12 or later: the text port names are whole words from there (`PRESSURE?`, `SETPOINT`, `VALVE SET`). With an older board the Board light says so and nothing is sent; flash the board, or use the GUI from that firmware's commit.
+
 ## The page
 
 Screenshots on the simulator (GUI build 425, firmware 0.16.9): [Live, during an autotune](screens/live-autotune-running.png) and [Gains, after it](screens/gains-autotune-done.png) and [its log card](screens/gains-autotune-log.png); [the predicted line during a check](screens/live-autotune-predicted.png).
@@ -44,7 +46,7 @@ The tabs:
     The Log card under it lists, newest first, every decision (learned or fresh, the first gains, each rule and why, an undone refinement, a watchdog cut, a relay step change, a skipped setpoint, the result), every change the autotune makes to KP, TI and KD on the board (old -> new, and why), and the setpoint, mode and valve commands it sends, each with the KP, TI and KD in force after it. Download log saves the run's `autotune_log.csv`, which has the same rows plus every calculation in the Working card.
 
     The results fill in as each setpoint finishes: per setpoint Ku, Pu, the relay step, KP, TI, the fit, t63 and t90, the back-off, the sag and the check (with any changes), and the three PID table sets. Each set takes the lowest KP and the geometric mean of the TIs of the setpoints in its band (below B1, B1 to B2, above B2; 6 and 14 mbar with hysteresis 10 % unless changed). A band with no setpoint measured keeps the board's set. Write to board sends `PIDS SET 1` to `3` and `SCHED SET PV,<B1>,<B2>,<H>`, which turns the PID table on; nothing is written before that. The relay sees the valve as it is at that setpoint, needle stiction included.
-- **Board**: the board's identity, Reset faults and OK warning, the event log (`EVNT?`), the board clock set to the PC's time (`TIME SET`), and a command line for any text-port command.
+- **Board**: the board's identity, Reset faults and OK warning, the event log (`EVENT?`), the board clock set to the PC's time (`TIME SET`), and a command line for any text-port command.
 
 The autotune's relay test, fit, rules and sets, and the text-port link, are in `pmc_autotune.py`, imported from there.
 
