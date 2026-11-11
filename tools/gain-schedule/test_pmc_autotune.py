@@ -3,6 +3,7 @@
 
     python test_pmc_autotune.py
 """
+import csv
 import math
 import os
 import random
@@ -551,6 +552,66 @@ class Sequence(unittest.TestCase):
             b.do(line)
         self.assertEqual((b.mode, b.sets[0], b.table), ('MANUAL', [4.0, 0.25, 0.0], 'OFF,6.0,20.0,15'))
 
+        # The log (Ryan, 11 Nov): every calculation, decision, gain change and
+        # command, each with the gains on the board after it.
+        with open(os.path.join(d, at.LOG_FILE), newline='') as fh:
+            log = list(csv.reader(fh))
+        self.assertEqual(log[0], at.LOG_COLS)
+        rows = [dict(zip(at.LOG_COLS, r)) for r in log[1:]]
+        kinds = {r['kind'] for r in rows}
+        self.assertTrue({'calc', 'decision', 'gains', 'command', 'result'} <= kinds, kinds)
+        self.assertEqual(len([r for r in rows if r['kind'] == 'result']), 2)
+        first = next(r for r in rows if r['kind'] == 'gains')
+        self.assertEqual(first['change'], 'KP -- -> 0.30, TI -- -> 0.40, KD -- -> 0.00')
+        self.assertTrue(first['text'].startswith('PID SET 0.30,0.40,0: reach 4 mbar'), first['text'])
+        self.assertEqual(first['stage'], '4 mbar reach')
+        self.assertEqual(next(r for r in rows if r['text'].startswith('MODE MANUAL'))['stage'], '4 mbar noise')
+        self.assertTrue(all(r['stage'] for r in rows), [r for r in rows if not r['stage']][:2])
+        for r in rows:
+            if r['kind'] == 'gains':     # the KP and TI columns are the new gains, the change says from what
+                self.assertTrue(r['text'].startswith('PID SET %s,%s,0' % (r['kp'], r['ti_min'])), r)
+                self.assertIn('-> ' + r['kp'], r['change'] if 'KP' in r['change'] else '-> ' + r['kp'])
+        # The board's own record of what was set matches the log's.
+        sent = [x.split(';')[0] for x in b.log if x.startswith('PID SET ')]
+        self.assertEqual([r['text'].split(':')[0] for r in rows if r['kind'] == 'gains'],
+                         [x for i, x in enumerate(sent) if i == 0 or x != sent[i - 1]])
+        # The first gains for each point are a decision, and their check runs with them.
+        for sp in ('4', '12'):
+            dec = [r for r in rows if r['setpoint_mbar'] == sp and r['kind'] == 'decision']
+            self.assertTrue(any(r['text'].startswith('First gains') for r in dec), sp)
+        times = [float(r['t_s']) for r in rows]
+        self.assertEqual(times, sorted(times))
+
+
+class LogHelpers(unittest.TestCase):
+    def test_gains_change_names_what_changed(self):
+        self.assertEqual(at.gains_change([0.64, 0.88, 0.0], [0.45, 0.88, 0.0]), 'KP 0.64 -> 0.45')
+        self.assertEqual(at.gains_change([0.64, 0.88, 0.5], [0.64, 0.62, 0.0]), 'TI 0.88 -> 0.62, KD 0.50 -> 0.00')
+        self.assertEqual(at.gains_change([0.64, 0.88, 0.0], [0.64, 0.88, 0.0]), '')
+        self.assertEqual(at.gains_change(None, [0.1, 0.4, 0.0]), 'KP -- -> 0.10, TI -- -> 0.40, KD -- -> 0.00')
+
+    def test_log_row_writes_the_header_once_and_skips_no_folder(self):
+        d = tempfile.mkdtemp()
+        at.log_row(d, ['a'] * len(at.LOG_COLS))
+        at.log_row(d, ['b', None] + [''] * (len(at.LOG_COLS) - 2))
+        at.log_row(None, ['c'] * len(at.LOG_COLS))
+        with open(os.path.join(d, at.LOG_FILE), newline='') as fh:
+            got = list(csv.reader(fh))
+        self.assertEqual(got[0], at.LOG_COLS)
+        self.assertEqual([r[0] for r in got[1:]], ['a', 'b'])
+        self.assertEqual(got[2][1], '')
+
+    def test_unchanged_gains_are_not_logged_again(self):
+        d = tempfile.mkdtemp()
+        t = at.AutoTuner(None, None, SimpleNamespace(d=0.4), d)
+        t.set_gains([0.3, 0.4, 0], 'PID SET 0.30,0.40,0', 'one')
+        t.set_gains([0.3, 0.4, 0], 'PID SET 0.30,0.40,0', 'two')
+        t.set_gains([0.24, 0.4, 0], 'PID SET 0.24,0.40,0', 'three')
+        with open(os.path.join(d, at.LOG_FILE), newline='') as fh:
+            got = list(csv.reader(fh))[1:]
+        self.assertEqual([r[9] for r in got], ['PID SET 0.30,0.40,0: one', 'PID SET 0.24,0.40,0: three'])
+        self.assertEqual(got[1][5:9], ['0.24', '0.40', '0.00', 'KP 0.30 -> 0.24'])
+
 
 class SteepValve(unittest.TestCase):
     """Ryan's valve on 9 Nov: almost no flow change below about 3.1 %, then
@@ -754,7 +815,7 @@ class Files(unittest.TestCase):
         t.refit = lambda k, fit: fit
         r = t.point(2.0, (0.1, 0.4), 0.4)
         self.assertEqual(r['trims'], 'KP x0.80, KP x0.80')
-        self.assertEqual(sorted(os.listdir(d)), ['check_2mbar_3_back.csv', 'check_2mbar_3_up.csv'])
+        self.assertEqual(sorted(os.listdir(d)), ['autotune_log.csv', 'check_2mbar_3_back.csv', 'check_2mbar_3_up.csv'])
         self.assertIn('Check 1 passed over: check_2mbar_1_up.csv, check_2mbar_1_back.csv deleted', t.calcs)
 
     def test_an_undone_refinement_keeps_the_earlier_check(self):
@@ -774,7 +835,7 @@ class Files(unittest.TestCase):
         t.refit = lambda k, fit: fit
         r = t.point(2.0, (0.1, 0.4), 0.4)
         self.assertIn('undone', r['note'])
-        self.assertEqual(sorted(os.listdir(d)), ['check_2mbar_1_back.csv', 'check_2mbar_1_up.csv'])
+        self.assertEqual(sorted(os.listdir(d)), ['autotune_log.csv', 'check_2mbar_1_back.csv', 'check_2mbar_1_up.csv'])
 
 
 class Fit(unittest.TestCase):

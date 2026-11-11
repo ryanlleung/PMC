@@ -60,6 +60,10 @@ The PID table sets come from the setpoints in each band: below B1, B1 to B2, abo
 
 While it runs the PID table is Off and set 1 carries the gains under test; at the end set 1, the PID table, the setpoint and the mode are put back as found.
 
+## The log
+
+Each run writes `autotune_log.csv` in its folder as it goes (`log_row`, `LOG_COLS`): one row per calculation (the Working card's lines), decision (learned or fresh, first gains, each rule, an undone refinement, a watchdog cut, a relay step change, the result), change of gains on the board (`PID SET`, with old -> new and why) and command (setpoint, mode, valve). Every row carries the KP, TI and KD on the board after it. The GUI adds the start (settings and what it found), a skipped setpoint, the put back, the end with the gains read back from the board, and Write to board.
+
 ## Learned gains
 
 Each setpoint's result is kept in `autotune-learned.csv` in the GUI's log folder: `sp_mbar, kp, ti_min, Ku, Pu_s, d_pct, a_mbar, valve_pct, trims, note, when`, then the fit it ended on and the last check's shape: `K, L_s, tau_s, t63_s, t90_s, backoff_pct`. Files from before the fit load with those columns empty, and such a setpoint starts from Ku / 4 and 2 Pu. With Start from Learned gains (the default), a setpoint learned before reaches with its own learned KP and TI, sizes its relay step from its Ku and starts its first check from the rule on its learned fit. Fresh ignores the file (its results still go in it). With no learned file yet, it is built from the `results.csv` of the earlier autotune runs in the same log folder.

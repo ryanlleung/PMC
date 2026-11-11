@@ -65,6 +65,7 @@ AUTO_GUESS_S = 1500         # an autotune setpoint, until one has finished
 RIDE_S = 120                # an autotune run waits this long for the link
 GAP_S = 60                  # no sample for this long: noted in the event log
 COLS = ['t_s', 'sp_mbar', 'p_mbar', 'valve_pct', 'mode', 'alarm', 'stage']
+LOG_SHOWN = 200             # the autotune log rows sent to the page (the file has them all)
 # The 336 inputs on this rig, used when an input is given without a name.
 LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
 LS_INPUT = re.compile(r'^[A-D][1-5]?$')
@@ -350,21 +351,23 @@ class GuiAutoTuner(pmc_autotune.AutoTuner):
         self.board.note('autotune: ' + msg)
 
     def stage(self, text, phase=None, most=None):
+        if phase:
+            self.phase_now = phase
         self.board.stage(text, phase, most)
 
     def show(self):
         with self.board.lock:
             if self.board.at is not None:
                 self.board.at['calc'], self.board.at['calc_now'] = list(self.calcs), self.calc_now
+                self.board.at['log'] = self.log_rows[-LOG_SHOWN:]
 
-    def calc(self, text):
-        super().calc(text)
-        if self.log_dir:     # the working, as it was worked out
-            try:
-                with open(os.path.join(self.log_dir, 'working.txt'), 'a', encoding='utf-8') as f:
-                    f.write(pc_time() + '  ' + text + '\n')
-            except OSError:
-                pass
+    def log(self, kind, text, change=''):
+        # The calculations, decisions, gain changes and commands go to
+        # autotune_log.csv in the run folder (pmc_autotune.AutoTuner.log);
+        # the page shows all but the calculations, which the Working card has.
+        super().log(kind, text, change)
+        if kind != 'calc':
+            self.show()
 
     def left(self, want, mode):
         alarm = self.board.hist[-1][5] if self.board.hist else ''
@@ -784,7 +787,18 @@ class Board:
             f = pmc_autotune.found(link)
             t.say('found setpoint %s mbar, %s, PID %s, PID table %s' %
                   (f['sp'], f['mode'], ', '.join('%.2f' % x for x in f['pid']), f['sched'] or 'not in this firmware'))
+            t.gains = (list(f['pid']) + [0.0] * 3)[:3]
+            t.log('start', 'PID autotune: setpoints %s mbar, first gains KP %.2f TI %.2f, first relay step %.1f %%, '
+                  'PID table B1 %g B2 %g H %d %%, start from %s. Found: setpoint %s mbar, %s, PID %s, PID table %s; '
+                  'firmware %s; GUI %s' % (
+                      ' '.join('%g' % x for x in a.sps), a.kp0, a.ti0, a.d, a.b1, a.b2, a.h,
+                      'learned gains' if a.learned else 'fresh', f['sp'], f['mode'],
+                      ', '.join('%.2f' % x for x in f['pid']), f['sched'] or 'not in this firmware',
+                      (self.state.get('idn') or '').split(',')[-1].strip() or '--', GUI_BUILD or '--'))
             pmc_autotune.pid_table_off(link, f)
+            if f.get('sched') and not f['sched'].startswith('OFF'):
+                t.log('command', 'SCHED SET OFF,%s: the PID table Off while the autotune runs, so set 1 carries '
+                      'the gains under test' % f['sched'].split(',', 1)[1])
             fw = (self.state.get('idn') or '').split(',')[3:4]
             ver = tuple(int(x) for x in re.findall(r'\d+', fw[0])[:3]) if fw else None
             if ver and ver < OLD_FIRMWARE:
@@ -817,6 +831,7 @@ class Board:
                     # One point with no usable oscillation (or a warning that
                     # dropped AUTO) should not lose the others.
                     t.say('%g mbar skipped: %s' % (sp, e))
+                    t.log('decision', '%g mbar skipped: %s' % (sp, e))
                     self.step(i, 'failed', str(e))
                     skipped.append('%g' % sp)
                     continue
@@ -837,6 +852,11 @@ class Board:
                 sets = pmc_autotune.table_sets(rows, a.b1, a.b2)
                 self.step(last, 'done', '; '.join('set %d %s' % (n, 'KP %.2f TI %.2f' % (kp, ti) if kp is not None
                                                                    else 'not measured') for n, kp, ti, _ in sets))
+                t.sp_now, t.phase_now = None, 'PID table sets'
+                with self.lock:
+                    how = list(self.at.get('sets_calc') or [])
+                t.log('result', 'PID table sets (not written to the board; Write to board sends them): ' +
+                      '; '.join(how or ['none']))
             else:
                 self.step(last, 'failed', 'no point measured')
             if skipped:
@@ -855,14 +875,27 @@ class Board:
             if outcome not in ('done',) and not outcome.startswith('done,') and self.prog:
                 with self.lock:
                     self.where(self.prog)
+            t.sp_now, t.phase_now = None, 'put back'
             if self.abort:
                 t.say('STOP pressed: nothing put back')
+                t.log('decision', 'STOP pressed: nothing put back')
             elif f:
                 back = pmc_autotune.put_back_lines(f)
                 self.stage('putting back what it found: ' + ', '.join(back), 'put back')
                 for c in back:
                     r = self.send(c)
                     t.say('put back: %s%s' % (c, ' (' + r + ')' if r else ''))
+                    t.log('command', 'put back as found: %s%s' % (c, ' (' + r + ')' if r else ''))
+            # The gains in force at the end, from the board (with the PID
+            # table back on, the set it picks).
+            pid = self.raw('PID?')
+            if pid.startswith('PID '):
+                try:
+                    new = [float(x) for x in pid[4:].split(',')][:3]
+                    t.set_gains(new, 'PID? at the end', 'the board after the put back')
+                except ValueError:
+                    pass
+            t.log('end', 'PID autotune %s' % outcome)
             self.end(outcome)
             self.job = None
 
@@ -884,6 +917,11 @@ class Board:
         with self.lock:
             at['written'] = time.strftime('%H:%M')
         self.note('autotune: PID table written to the board: ' + '; '.join(lines))
+        for line in lines:     # in the run's log, after its end
+            m = re.match(r'PIDS SET (\d),([\d.]+),([\d.]+),([\d.]+)$', line)
+            pmc_autotune.log_row(at.get('dir'), [pc_time(), '', '', 'Write to board', 'gains', '', '', '',
+                                                 'set %s: KP %s, TI %s, KD %s' % m.groups() if m else '',
+                                                 'Write to board: ' + line])
         return ''
 
     # STOP ----------------------------------------------------------------
@@ -909,6 +947,18 @@ class Board:
                     'board_sched': self.state.get('board_sched'), 'pid_set': self.state.get('pid_set'),
                     'log': self.state['log'], 'rows': rows, 'prog': self.prog_view(), 'last_prog': self.last_prog,
                     'logger': self.logger.view(), 'ls': ls, 'autotune': self.at, 'learned': learned}
+
+    def autotune_log(self):
+        """(file name, text) of the last autotune's log, or None."""
+        with self.lock:
+            d = self.at.get('dir') if self.at else None
+        if not d:
+            return None
+        try:
+            with open(os.path.join(d, pmc_autotune.LOG_FILE), encoding='utf-8') as f:
+                return '%s_%s' % (os.path.basename(d), pmc_autotune.LOG_FILE), f.read()
+        except OSError:
+            return None
 
     def csv_text(self):
         f = io.StringIO()
@@ -947,6 +997,12 @@ def make_handler(board):
             elif self.path == '/api/csv':
                 self.out(board.csv_text(), 'text/csv',
                          {'Content-Disposition': 'attachment; filename="pmc_session_%s.csv"' % stamp()})
+            elif self.path == '/api/autotune/log':
+                got = board.autotune_log()
+                if got is None:
+                    self.send_error(404, 'no autotune log yet')
+                else:
+                    self.out(got[1], 'text/csv', {'Content-Disposition': 'attachment; filename="%s"' % got[0]})
             else:
                 self.send_error(404)
 
