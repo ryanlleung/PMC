@@ -47,6 +47,7 @@ import socket
 import sys
 import threading
 import time
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
@@ -66,6 +67,7 @@ RIDE_S = 120                # an autotune run waits this long for the link
 GAP_S = 60                  # no sample for this long: noted in the event log
 COLS = ['t_s', 'sp_mbar', 'p_mbar', 'valve_pct', 'mode', 'alarm', 'stage']
 LOG_SHOWN = 200             # the autotune log rows sent to the page (the file has them all)
+PREDS_KEPT = 8              # the check steps' predicted lines kept for the charts
 # The 336 inputs on this rig, used when an input is given without a name.
 LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
 LS_INPUT = re.compile(r'^[A-D][1-5]?$')
@@ -361,6 +363,27 @@ class GuiAutoTuner(pmc_autotune.AutoTuner):
                 self.board.at['calc'], self.board.at['calc_now'] = list(self.calcs), self.calc_now
                 self.board.at['log'] = self.log_rows[-LOG_SHOWN:]
 
+    def predicted(self, rows, label):
+        # The check step's predicted answer, for the charts: drawn from the
+        # board time the step starts, ahead of the readings.
+        b = self.board
+        with b.lock:
+            self.pred_open = {'t0': b.now(), 'label': label,
+                              'pts': [[t, round(p, 3), round(x, 2)] for t, p, x in rows]}
+            b.preds = (b.preds + [self.pred_open])[-PREDS_KEPT:]
+            b.preds_v += 1
+
+    def predicted_end(self, t):
+        # The step ended (settled sooner, the watchdog, or AUTO left): its
+        # line stops there.
+        b, q = self.board, getattr(self, 'pred_open', None)
+        if q is None:
+            return
+        with b.lock:
+            q['pts'] = [r for r in q['pts'] if r[0] <= t] or q['pts'][:1]
+            b.preds_v += 1
+        self.pred_open = None
+
     def log(self, kind, text, change=''):
         # The calculations, decisions, gain changes and commands go to
         # autotune_log.csv in the run folder (pmc_autotune.AutoTuner.log);
@@ -400,6 +423,7 @@ class Board:
         self.phase = ''           # the stage column of every sample
         self.run_dir, self.run_files, self.run_log = None, {}, None
         self.at = None            # the last autotune: its rows, the three sets, written or not
+        self.preds, self.preds_v = [], 0   # predicted lines (GuiAutoTuner.predicted), sent when they change
 
     def now(self):
         return round((time.time() - self.t0) * self.speed, 2)
@@ -743,6 +767,7 @@ class Board:
                    'PID table B1 %g B2 %g H %d %%, start from %s' % (
                        ' '.join('%g' % x for x in sps), kp0, ti0, d, b1, b2, h, 'learned gains' if a.learned else 'fresh'))
         with self.lock:
+            self.preds, self.preds_v = [], self.preds_v + 1
             self.at = {'rows': [], 'sets': [], 'b1': b1, 'b2': b2, 'h': h, 'dir': self.run_dir, 'lines': [],
                        'written': '', 'running': True, 'calc': [], 'calc_now': '', 'sets_calc': []}
         threading.Thread(target=self.autotune_job, args=(a,), daemon=True).start()
@@ -938,15 +963,21 @@ class Board:
             self.abort, self.stop_job = False, True
 
     # For the page --------------------------------------------------------
-    def snapshot(self, since):
+    def snapshot(self, since, pv=None):
+        """The page's state: rows after `since`; the predicted lines only when
+        the page's version `pv` is not the current one."""
         ls = self.ls.view() if self.ls else None
         learned = self.learned_list()
         with self.lock:
             rows = [r for r in self.hist if r[0] > since]
-            return {'link': self.state['link'], 'idn': self.state['idn'], 'pid': self.state['pid'], 'build': GUI_BUILD,
-                    'board_sched': self.state.get('board_sched'), 'pid_set': self.state.get('pid_set'),
-                    'log': self.state['log'], 'rows': rows, 'prog': self.prog_view(), 'last_prog': self.last_prog,
-                    'logger': self.logger.view(), 'ls': ls, 'autotune': self.at, 'learned': learned}
+            out = {'link': self.state['link'], 'idn': self.state['idn'], 'pid': self.state['pid'], 'build': GUI_BUILD,
+                   'board_sched': self.state.get('board_sched'), 'pid_set': self.state.get('pid_set'),
+                   'log': self.state['log'], 'rows': rows, 'prog': self.prog_view(), 'last_prog': self.last_prog,
+                   'logger': self.logger.view(), 'ls': ls, 'autotune': self.at, 'learned': learned,
+                   'preds_v': self.preds_v}
+            if pv != self.preds_v:
+                out['preds'] = list(self.preds)
+            return out
 
     def autotune_log(self):
         """(file name, text) of the last autotune's log, or None."""
@@ -992,8 +1023,10 @@ def make_handler(board):
             if self.path == '/':
                 self.out(page, 'text/html; charset=utf-8')
             elif self.path.startswith('/api/state'):
-                since = float(self.path.partition('since=')[2] or -1)
-                self.out(json.dumps(board.snapshot(since)))
+                q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                since = float((q.get('since') or ['-1'])[0] or -1)
+                pv = int((q.get('pv') or ['-1'])[0] or -1)
+                self.out(json.dumps(board.snapshot(since, pv)))
             elif self.path == '/api/csv':
                 self.out(board.csv_text(), 'text/csv',
                          {'Content-Disposition': 'attachment; filename="pmc_session_%s.csv"' % stamp()})

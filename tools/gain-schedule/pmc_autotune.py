@@ -146,6 +146,9 @@ LEARNED_NUM = ('sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valv
                'K', 'L_s', 'tau_s', 't63_s', 't90_s', 'backoff_pct')
 LEARNED_AGREE = 2.0            # learned Ku within this factor of the new relay's: use its fit
 MAX_CUTS = 6                   # most KP cuts by the watchdog while reaching or holding one point
+PRED_SLEW = 0.4               # the valve's speed in the predicted line, % a second (bench 0.28 to 0.62)
+PRED_K_GRID = [0.25 * 1.25 ** i for i in range(25)]   # process gain for the predicted line's fit, 0.25 to 53 mbar/%
+PRED_SHARE_MAX = 0.5          # ...used when its RMS error is under this share of the step
 LOG_FILE = 'autotune_log.csv'  # in the run's folder
 # time: PC clock; t_s: seconds since the autotune started (board time);
 # kind: start, calc, decision, gains, command, result, end; kp, ti_min, kd:
@@ -359,6 +362,77 @@ def fit_response(ps, xs):
     return {'K': k, 'L': L, 'tau': tau, 'R2': r2, 'drift': drift, 'n': n, 'moved': moved,
             'ok': r2 >= R2_MIN and k > 0 and moved > MOVE_MIN}
 
+
+def predict_leg(fit, kp, ti, p_start, x_start, sp_from, sp_to, n, lo=0.0):
+    """The predicted answer to a setpoint step in AUTO, one sample a second
+    for n s: [(t, p, x)]. The plant is the fit (p = c + K x lag_tau(valve(t -
+    L)), drift left out), starting steady at p_start with the valve at
+    x_start; the controller is the board's PI in position form (ctrl.c: KP x
+    error + the integral, KP / (60 TI) x error a second, no integration past
+    100 % or AUTO min, the integral set so the first output is the valve in
+    force), the valve following at PRED_SLEW % a second. Left out: the
+    deadbands, the reversal hold and the needle's stick, so the real valve
+    moves in fewer, larger steps."""
+    K, L, tau = fit['K'], int(fit['L']), fit['tau']
+    a = 1.0 - math.exp(-1.0 / tau)
+    c = p_start - K * x_start
+    ki = kp / (60.0 * ti) if ti > 0 else 0.0
+    i = x_start - kp * (sp_from - p_start)
+    hist = [x_start] * (L + 1)          # the valve, a ring: hist[j] is L s ago
+    j = 0
+    y, x, p, out = x_start, x_start, p_start, []
+    for t in range(1, n + 1):
+        e = sp_to - p
+        i_new = i + ki * e
+        raw = kp * e + i_new
+        if raw > 100 and e > 0:
+            i_new = max(i, 100 - kp * e)
+        if raw < lo and e < 0:
+            i_new = min(i, lo - kp * e)
+        i = i_new
+        cmd = min(max(kp * e + i, lo), 100.0)
+        x += max(-PRED_SLEW, min(PRED_SLEW, cmd - x))
+        hist[j] = x
+        j = (j + 1) % (L + 1)
+        y += a * (hist[j] - y)
+        p = c + K * y
+        out.append((float(t), p, x))
+    return out
+
+
+def fit_closed_loop(legs):
+    """The fit for the predicted line from check steps as they ran: K, L and
+    tau on the grids (PRED_K_GRID, L_GRID, TAU_GRID) for which the board's PI
+    on the fit (predict_leg, from each step's start, with its gains) comes
+    closest to the pressure measured, least squares over all the steps. Each
+    leg: {'p', 'x' (at the change), 'p0', 'p1', 'kp', 'ti', 'rows' [(t, p,
+    x)]}. Returns the fit with rms (mbar) and share (rms / the step), or None.
+    Unlike fit_response it sees the loop as it ran, so it is fitted to what
+    the line has to show."""
+    legs = [g for g in legs if g['rows'] and g['kp']]
+    if not legs:
+        return None
+    meas = [[(int(round(t)) - 1, p) for t, p, _ in g['rows'] if p is not None and t >= 1] for g in legs]
+    best = None
+    for L in L_GRID:
+        for tau in TAU_GRID:
+            for K in PRED_K_GRID:
+                f, se, n = {'K': K, 'L': L, 'tau': tau}, 0.0, 0
+                for g, m in zip(legs, meas):
+                    pr = predict_leg(f, g['kp'], g['ti'], g['p'], g['x'], g['p0'], g['p1'], m[-1][0] + 1 if m else 0)
+                    for i, p in m:
+                        se += (pr[i][1] - p) ** 2
+                    n += len(m)
+                    if best is not None and se >= best[0]:
+                        break
+                if n and (best is None or se < best[0]):
+                    best = (se, n, f)
+    if best is None:
+        return None
+    se, n, f = best
+    step = max(abs(g['p1'] - g['p0']) for g in legs)
+    rms = math.sqrt(se / n)
+    return dict(f, rms=rms, share=rms / step if step > 0 else float('inf'), n=n)
 
 def l_eff(fit, pu_s):
     """The dead time the loop has to allow for, s: the fit's, but never under
@@ -891,6 +965,18 @@ class AutoTuner(Tuner):
     # the point and the stage the rows belong to; log_rows: the rows other
     # than calculations, for the page.
     gains, sp_now, phase_now, t_log0, check_why = None, None, '', None, ''
+    # The predicted line (Ryan, 11 Nov: "a predicted response to the auto
+    # tuning live graph"): the fit it is worked out on, and the last reach
+    # and relay samples it can come from before the first check.
+    pred_fit, relay_rows, leg_runs = None, [], []
+
+    def predicted(self, rows, label):
+        """A check step's predicted answer, [(t from the change, p, x)]: the
+        GUI draws it ahead of the readings; nothing here."""
+
+    def predicted_end(self, t):
+        """The step the last predicted() was for ended t s after it began
+        (settled, the watchdog, or AUTO left): the GUI cuts the line there."""
     log_rows = []
 
     def log(self, kind, text, change=''):
@@ -1037,6 +1123,7 @@ class AutoTuner(Tuner):
         self.send('VALV SET %.1f' % x0, 'x0, the valve AUTO held %g mbar at' % sp)
         self.stage('MANUAL at %.1f %%, %d s for the noise' % (x0, NOISE_S), '%g mbar noise' % sp, NOISE_S)
         rows = self.samples(NOISE_S)
+        held = [(r[1], r[2]) for r in rows]
         sd = noise([r[1] for r in rows])
         wd = wander([(r[0], r[1]) for r in rows])
         eps = max(3 * sd, 0.01 * sp, 0.02)
@@ -1074,6 +1161,7 @@ class AutoTuner(Tuner):
         if R.why:
             self.send('VALV SET %.1f' % x0, 'relay test ended: ' + R.why)
             raise RuntimeError('relay test: ' + R.why)
+        self.relay_rows = held + [(row[1], row[2]) for row in R.rows]
         r = R.result()
         if r is None:
             raise RuntimeError('relay test: too few cycles')
@@ -1089,36 +1177,122 @@ class AutoTuner(Tuner):
                       (r['d_pct'], r['a_mbar'], r['eps_mbar'], r['Ku']))
         return r
 
+    def predict(self, p0, p1, band, most, slack, name, p, x):
+        """The predicted answer to the step about to start from pressure p and
+        valve x, from pred_fit and the gains on the board, as the leg would
+        end it (settled for SETTLED_S, or `most`); logged with its figures,
+        handed to predicted(). None without a fit or gains."""
+        f, g = self.pred_fit, self.gains
+        if not f or not g or g[0] is None or p is None or x is None:
+            return None
+        rows = predict_leg(f, g[0], g[1], p, x, p0, p1, int(most))
+        fig = step_figures(rows, p0, p1, band, slack)
+        if fig and fig['settle_s'] is not None:
+            rows = rows[:int(min(most, fig['settle_s'] + SETTLED_S))]
+        if fig:
+            self.calc('Predicted for %s (fit K %.2f mbar/%%, L %d s, tau %d s, %s; KP %.2f TI %.2f): overshoot %.1f %%, '
+                      '%s, 63 %% in %s, 90 %% in %s' % (
+                          name.replace('_', ' '), f['K'], f['L'], f['tau'], f.get('src', 'fit'), g[0], g[1],
+                          fig['overshoot_pct'], 'not settled' if fig['settle_s'] is None else 'settled in %.0f s' %
+                          fig['settle_s'], '--' if fig['t63_s'] is None else '%d s' % fig['t63_s'],
+                          '--' if fig['t90_s'] is None else '%d s' % fig['t90_s']))
+        self.predicted(rows, '%g -> %g mbar, KP %.2f TI %.2f, fit K %.2f L %d s tau %d s' % (
+            p0, p1, g[0], g[1], f['K'], f['L'], f['tau']))
+        return rows
+
+    def fit_for_prediction(self, sp, fit):
+        """The fit the first check's predicted line is worked out on: the
+        learned fit when there is one, else a fit of the reach, the noise hold
+        and the relay test as one series (the reach has the slow part of the
+        answer, the relay the fast part), else the better of the reach and the
+        relay alone. For the line only: the gains do not use them."""
+        if fit:
+            return dict(fit, src='learned')
+        reach = [(r[1], r[2]) for r in self.held_rows]
+        best = None
+        for src, pairs in (('the reach and the relay test', reach + self.relay_rows), ('the reach', reach),
+                           ('the relay test', self.relay_rows)):
+            ps, xs, last = [], [], None
+            for p, x in pairs:
+                last = x if x is not None else last
+                if p is not None and last is not None:
+                    ps.append(p)
+                    xs.append(last)
+            f = fit_response(ps, xs)
+            if f is None:
+                continue
+            self.calc('Fit of %s at %g mbar, for the predicted line only (%d samples): K %.2f mbar/%%, L %d s, '
+                      'tau %d s, R2 %.2f, valve moved %.2f %%: %s' % (
+                          src, sp, f['n'], f['K'], f['L'], f['tau'], f['R2'], f['moved'],
+                          'good' if f['ok'] else 'not good enough'))
+            if f['ok'] and src.startswith('the reach and'):
+                return dict(f, src=src)
+            if f['ok'] and (best is None or f['R2'] > best['R2']):
+                best = dict(f, src=src)
+        return best
+
+    def fit_line(self, sp, k, new):
+        """The fit the next check's predicted line is worked out on: check k's
+        steps as they ran (fit_closed_loop) when they come within
+        PRED_SHARE_MAX of the step, else `new` (check k's fit, when good),
+        else the one before."""
+        cl = fit_closed_loop(self.leg_runs)
+        if cl:
+            ok = cl['share'] <= PRED_SHARE_MAX
+            self.calc('Fit of check %d at %g mbar as it ran, for the predicted line only (the board\'s PI on the fit, '
+                      'from each step\'s start): K %.2f mbar/%%, L %d s, tau %d s, error %.3f mbar RMS, %.0f %% of the '
+                      'step: %s' % (k, sp, cl['K'], cl['L'], cl['tau'], cl['rms'], 100 * cl['share'],
+                                    'good' if ok else 'not good enough'))
+            if ok:
+                return dict(cl, src='check %d as it ran' % k)
+        if new is not None:
+            return dict(new, src='the fit after check %d' % k)
+        return self.pred_fit
+
     def leg(self, sp, p0, p1, band, most, name, slack=0.0):
         """One step of a check. Ends early when the watchdog trips; the
         figures then carry the swing (wild_pp)."""
+        p_s, x_s, _ = self.sample()
+        pred = self.predict(p0, p1, band, most, slack, name, p_s, x_s)
+        g = self.gains
         self.send('PRES SP %.1f' % p1, 'check step %g -> %g mbar' % (p0, p1))
         t0, n, rows, since = self.clock.now(), 0, [], None
         wd = Wild(p1)
-        while True:
-            n += 1
-            self.clock.wait_until(t0 + n)
-            p, x, m = self.sample()
-            if m != 'AUTO':
-                raise RuntimeError(self.left('AUTO', m))
-            t = self.clock.now() - t0
-            rows.append((t, p, x))
-            if p is not None:
-                self.now('Check step %g -> %g mbar, %.0f s: pressure %.3f mbar, %s; watchdog %d of %d swings over %.2f mbar'
-                         % (p0, p1, t, p, 'in the band %.0f s of %d' % (t - since, SETTLED_S) if since is not None
-                            else 'outside the band +/- %.2f' % band, wd.status(), 2 * WILD_CYCLES, wd.big))
-            if p is not None:
-                since = (since if since is not None else t) if abs(p - p1) <= band else None
-            if (since is not None and t - since >= SETTLED_S) or t >= most or wd.feed(p):
-                break
+        try:
+            while True:
+                n += 1
+                self.clock.wait_until(t0 + n)
+                p, x, m = self.sample()
+                if m != 'AUTO':
+                    raise RuntimeError(self.left('AUTO', m))
+                t = self.clock.now() - t0
+                rows.append((t, p, x))
+                if p is not None:
+                    self.now('Check step %g -> %g mbar, %.0f s: pressure %.3f mbar, %s; watchdog %d of %d swings over '
+                             '%.2f mbar' % (p0, p1, t, p, 'in the band %.0f s of %d' % (t - since, SETTLED_S)
+                                            if since is not None else 'outside the band +/- %.2f' % band,
+                                            wd.status(), 2 * WILD_CYCLES, wd.big))
+                if p is not None:
+                    since = (since if since is not None else t) if abs(p - p1) <= band else None
+                if (since is not None and t - since >= SETTLED_S) or t >= most or wd.feed(p):
+                    break
+        finally:
+            if pred:
+                self.predicted_end(self.clock.now() - t0)
         if self.log_dir:
             with open(os.path.join(self.log_dir, '%s.csv' % name), 'w', newline='') as f:
                 w = csv.writer(f)
-                w.writerow(['t_s', 'p_mbar', 'valve_pct', 'from_mbar', 'to_mbar'])
+                w.writerow(['t_s', 'p_mbar', 'valve_pct', 'from_mbar', 'to_mbar', 'p_predicted_mbar',
+                            'valve_predicted_pct'])
+                at = {int(round(t)): (q, x) for t, q, x in pred or []}
                 for r in rows:
+                    q = at.get(int(round(r[0])))
                     w.writerow(['%.1f' % r[0], '' if r[1] is None else '%.3f' % r[1],
-                                '' if r[2] is None else '%.2f' % r[2], p0, p1])
+                                '' if r[2] is None else '%.2f' % r[2], p0, p1,
+                                '' if q is None else '%.3f' % q[0], '' if q is None else '%.2f' % q[1]])
         self.leg_rows = rows
+        if p_s is not None and x_s is not None and g and g[0] is not None:
+            self.leg_runs.append({'p': p_s, 'x': x_s, 'p0': p0, 'p1': p1, 'kp': g[0], 'ti': g[1], 'rows': rows})
         fig = step_figures(rows, p0, p1, band, slack)
         if fig is not None and wd.wild:
             fig['wild_pp'], fig['wild_big'], fig['wild_cut'] = round(wd.pp, 3), wd.pp > p1, wd.cut()
@@ -1145,7 +1319,7 @@ class AutoTuner(Tuner):
                           band, hi - sp, slack, WANDER_MAX * 100))
         most = min(max(12 * r['Pu_s'] + 90, 150), 360)
         rows = list(self.held_rows)     # the hold, then the two legs: one series for the fit
-        legs = []
+        legs, self.leg_runs = [], []
         for k2, (a, b) in enumerate([(sp, hi), (hi, sp)]):
             self.stage('check %d: setpoint %g -> %g mbar, waiting for it to hold within %.2f mbar for %d s' %
                        (k, a, b, band, SETTLED_S), '%g mbar check %d %s' % (sp, k, 'up' if k2 == 0 else 'back'), most)
@@ -1262,6 +1436,7 @@ class AutoTuner(Tuner):
                                              FIRST_TI_PU * pu, ti))
         self.say('%g mbar: KP %.2f TI %.2f for the first check' % (sp, kp, ti))
         kp0 = kp
+        self.pred_fit = self.fit_for_prediction(sp, fit)
 
         # Check and refine: after every check the fit is redone, then the first
         # rule that applies changes KP or TI, until the check passes, a
@@ -1275,7 +1450,9 @@ class AutoTuner(Tuner):
             if fig is not None and kp_after < kp - 1e-9:
                 fig['cut'] = True            # the watchdog cut KP while the check held
             kp = kp_after
-            fit = self.refit(k, fit)
+            new = self.refit(k, fit)
+            self.pred_fit = self.fit_line(sp, k, new if new is not fit else None)
+            fit = new
             if fig:
                 self.say('%g mbar check %d (KP %.2f TI %.2f): %s' % (
                     sp, k, kp, ti, 'oscillating, swing %.2f mbar' % fig['wild_pp'] if fig.get('wild_pp') else

@@ -151,7 +151,7 @@
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
-        <div class="legend"><span><i style="background:#2d5877"></i>Pressure <span class="rate" id="rP"></span></span><span><i style="background:#3f3f3f"></i>Setpoint <span class="rate" id="rSp"></span></span><span><i style="background:#b9c9d6"></i>Autotune stage</span></div>
+        <div class="legend"><span><i style="background:#2d5877"></i>Pressure <span class="rate" id="rP"></span></span><span><i style="background:#3f3f3f"></i>Setpoint <span class="rate" id="rSp"></span></span><span><i style="background:#b9c9d6"></i>Autotune stage</span><span id="lgPred" style="display:none" title="The check step's predicted answer: the board's PI with the gains under test, on the fit of the pressure to the valve"><i style="background:#7a4fa3"></i>Predicted <span class="rate" id="rPred"></span></span></div>
         <div><label>Show</label> <select id="win"><option value="300">5 min</option><option value="900" selected>15 min</option><option value="3600">1 hour</option><option value="14400">4 hours</option></select></div>
       </div>
       <canvas id="chart"></canvas>
@@ -283,6 +283,8 @@ const val = id => $(id).value.trim();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TCOL = ['#b5541c', '#6b4fa0', '#2e7d4f', '#8a6d1d'];
 let calcKey = '', logKey = '';
+let preds = [], predsV = -1;   // the check steps' predicted lines, sent when they change
+const PRED_COL = '#7a4fa3';
 // The one-minute average rate of change of column k, per minute: the
 // least-squares slope through the last 60 s of samples (null with fewer than 10).
 function rate(k) {
@@ -434,10 +436,12 @@ async function refresh() {
   if (inFlight) return;
   inFlight = true;
   let s;
-  try { s = await (await fetch('/api/state?since=' + last)).json(); }
+  try { s = await (await fetch('/api/state?since=' + last + '&pv=' + predsV)).json(); }
   catch (e) { setPill('pBoard', 'bad', 'pmc_gui.py not answering: is it still running?'); inFlight = false; return; }
   inFlight = false;
   S = s;
+  if (s.preds) preds = s.preds;
+  predsV = s.preds_v;
   rows = rows.concat(s.rows);
   if (rows.length > 14400) rows = rows.slice(-14400);
   if (rows.length) last = rows[rows.length - 1][0];
@@ -575,6 +579,33 @@ function canvas(c) {
 function draw() {
   const win = +val('win'), now = rows.length ? rows[rows.length - 1][0] : 0, t0 = now - win;
   const vis = rows.filter(r => r[0] >= t0);
+  // The predicted lines in the window, each cut where the next step's
+  // starts; one still ahead of the readings pushes the right edge past now,
+  // so the rest of it shows.
+  const pv = preds.map((q, j) => {
+    const cut = j + 1 < preds.length ? preds[j + 1].t0 - q.t0 : Infinity;
+    return { t0: q.t0, label: q.label, pts: q.pts.filter(r => r[0] <= cut) };
+  }).filter(q => q.pts.length && q.t0 + q.pts[q.pts.length - 1][0] >= t0);
+  const tEnd = Math.max(now, ...pv.map(q => q.t0 + q.pts[q.pts.length - 1][0])), span = Math.max(tEnd - t0, 1);
+  $('lgPred').style.display = pv.length ? '' : 'none';
+  $('rPred').textContent = pv.length ? pv[pv.length - 1].label : '';
+  const predPen = (g, X, Y, k) => {
+    g.strokeStyle = PRED_COL; g.lineWidth = 1.5; g.setLineDash([6, 4]);
+    pv.forEach(q => {
+      g.beginPath(); let on = false;
+      q.pts.forEach(r => { const t = q.t0 + r[0]; if (t < t0) return; const x = X(t), y = Y(r[k]); on ? g.lineTo(x, y) : g.moveTo(x, y); on = true; });
+      g.stroke();
+    });
+    g.setLineDash([]);
+  };
+  const predRange = (k, lo, hi) => {
+    pv.forEach(q => q.pts.forEach(r => { if (q.t0 + r[0] >= t0) { lo = Math.min(lo, r[k]); hi = Math.max(hi, r[k]); } }));
+    return [lo, hi];
+  };
+  const nowLine = (g, X, Tp, h) => {
+    if (tEnd <= now + 0.5) return;
+    g.strokeStyle = '#9aa7b2'; g.lineWidth = 1; g.beginPath(); g.moveTo(X(now), Tp); g.lineTo(X(now), Tp + h); g.stroke();
+  };
   const L = 54, R = 44, T = 10, B = 24;
   const pen = (g, X, k, y, col, wid, dash) => {
     g.strokeStyle = col; g.lineWidth = wid; g.setLineDash(dash || []); g.beginPath(); let on = false;
@@ -607,14 +638,18 @@ function draw() {
     const { g, W, H } = c, w = W - L - R, h = H - T - B;
     let lo = Infinity, hi = -Infinity;
     vis.forEach(r => [r[1], r[2]].forEach(x => { if (x !== null) { lo = Math.min(lo, x); hi = Math.max(hi, x); } }));
+    [lo, hi] = predRange(1, lo, hi);
     const a = nice(lo, hi, 0.5);
-    const X = t => L + (t - t0) / win * w, Y = p => T + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
+    const X = t => L + (t - t0) / span * w, Y = p => T + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
     grid(g, a, Y, L, L + w);
     g.textAlign = 'left';
     g.fillText('-' + (win >= 3600 ? win / 3600 + ' h' : win / 60 + ' min'), L, H - 6);
-    g.textAlign = 'right'; g.fillText('now', L + w, H - 6);
+    g.textAlign = 'right';
+    if (tEnd > now + 0.5 && X(tEnd) - X(now) > 70) { g.fillText('now', X(now) + 12, H - 6); g.fillText('+' + Math.round(tEnd - now) + ' s', L + w, H - 6); }
+    else g.fillText('now', L + w, H - 6);
     stages(g, X, T, h, true);
-    pen(g, X, 1, Y, '#3f3f3f', 1.5, [5, 4]); pen(g, X, 2, Y, '#2d5877', 2);
+    nowLine(g, X, T, h);
+    pen(g, X, 1, Y, '#3f3f3f', 1.5, [5, 4]); predPen(g, X, Y, 1); pen(g, X, 2, Y, '#2d5877', 2);
   }
   // The valve on its own chart and its own scale, so a move of a few
   // tenths of a percent shows as clearly as one of tens.
@@ -623,15 +658,17 @@ function draw() {
     const { g, W, H } = c, Tt = 18, w = W - L - R, h = H - Tt - 6;
     let lo = Infinity, hi = -Infinity;
     vis.forEach(r => { const v = r[3]; if (v !== null && v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
+    [lo, hi] = predRange(2, lo, hi);
     const a = nice(lo, hi, 0.5, 4);
-    const X = t => L + (t - t0) / win * w, Y = p => Tt + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
+    const X = t => L + (t - t0) / span * w, Y = p => Tt + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
     grid(g, a, Y, L, L + w);
     stages(g, X, Tt, h, false);
     g.textAlign = 'left'; g.fillStyle = '#5d6b78'; g.font = '600 12px system-ui, sans-serif';
     g.fillText('Valve, %', L, 12);
     const vr = rateTxt(rate(3), 2, '%');
     if (vr) { const tw = g.measureText('Valve, %').width; g.font = '12px system-ui, sans-serif'; g.fillStyle = '#5a646c'; g.fillText(vr + ', last min', L + tw + 10, 12); }
-    pen(g, X, 3, Y, '#5d6b78', 2);
+    nowLine(g, X, Tt, h);
+    predPen(g, X, Y, 2); pen(g, X, 3, Y, '#5d6b78', 2);
   }
   // Each 336 input on its own strip and its own scale, so a few mK of
   // change in one shows up beside kelvins in another.
@@ -643,7 +680,7 @@ function draw() {
     let lo = Infinity, hi = -Infinity;
     vis.forEach(r => { const v = r[7 + k]; if (v !== null && v !== undefined) { lo = Math.min(lo, v); hi = Math.max(hi, v); } });
     const a = nice(lo, hi, 0.02, 3);
-    const X = t => L + (t - t0) / win * w, Y = p => Tt + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
+    const X = t => L + (t - t0) / span * w, Y = p => Tt + (1 - (p - a.lo) / (a.hi - a.lo)) * h;
     grid(g, a, Y, L, L + w);
     g.textAlign = 'left'; g.fillStyle = TCOL[k % 4]; g.font = '600 12px system-ui, sans-serif';
     g.fillText(`${x[1]} (${x[0]}), K`, L, 12);

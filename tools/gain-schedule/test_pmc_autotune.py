@@ -583,6 +583,65 @@ class Sequence(unittest.TestCase):
         self.assertEqual(times, sorted(times))
 
 
+class Prediction(unittest.TestCase):
+    """The predicted line (Ryan, 11 Nov): the board's PI on the fit."""
+
+    def test_settles_on_the_new_setpoint_from_where_it_was(self):
+        f = {'K': 2.0, 'L': 4, 'tau': 10}
+        rows = at.predict_leg(f, 0.3, 0.5, 8.0, 4.0, 8.0, 9.6, 600)
+        self.assertAlmostEqual(rows[0][1], 8.0, places=6)          # dead time: nothing moves at first
+        self.assertAlmostEqual(rows[-1][1], 9.6, places=2)
+        self.assertAlmostEqual(rows[-1][2], 4.8, places=2)         # 1.6 mbar at 2 mbar/% = 0.8 % more valve
+        self.assertAlmostEqual(rows[0][2], 4.0 + at.PRED_SLEW, places=6)   # the proportional kick, at the slew
+
+    def test_the_valve_follows_at_the_slew_and_stays_in_range(self):
+        f = {'K': 2.0, 'L': 0, 'tau': 4}
+        rows = at.predict_leg(f, 50.0, 0.1, 8.0, 4.0, 8.0, 30.0, 300)
+        steps = [b[2] - a[2] for a, b in zip(rows, rows[1:])]
+        self.assertLessEqual(max(abs(v) for v in steps), at.PRED_SLEW + 1e-9)
+        self.assertTrue(all(0.0 <= r[2] <= 100.0 for r in rows))
+
+    def test_closed_loop_fit_finds_the_plant_the_steps_ran_on(self):
+        true = {'K': 0.25 * 1.25 ** 9, 'L': 4, 'tau': 9}
+        legs = []
+        for p0, p1 in ((8.0, 9.6), (9.6, 8.0)):
+            rows = at.predict_leg(true, 0.3, 0.5, p0, 3.0, p0, p1, 150)
+            legs.append({'p': p0, 'x': 3.0, 'p0': p0, 'p1': p1, 'kp': 0.3, 'ti': 0.5, 'rows': rows})
+        f = at.fit_closed_loop(legs)
+        self.assertEqual((f['L'], f['tau']), (4, 9))
+        self.assertAlmostEqual(f['K'], true['K'], places=6)
+        self.assertLess(f['share'], 0.01)
+        self.assertIsNone(at.fit_closed_loop([]))
+
+    def test_matches_a_check_on_the_model(self):
+        # A plant the fit can describe: the predicted line should follow the
+        # check it was drawn for, and every check step gets one after the reach.
+        plant = Plant(K=2.0, L=2.0, tau=8.0, noise=0.005, curve=lambda v: 0.67 + 2.0 * max(v, 0))
+        b = FakeBoard(plant)
+        b.advance(200)
+        d = tempfile.mkdtemp()
+        t = at.AutoTuner(b, Clock(b), SimpleNamespace(d=0.4), d)
+        t.say = lambda m: None
+        got, ends = [], []
+        t.predicted = lambda rows, label: got.append((rows, label))
+        t.predicted_end = ends.append
+        t.point(8, (0.10, 0.40), 0.4)
+        self.assertTrue(got)
+        self.assertEqual(len(ends), len(got))   # every predicted step is ended, where it ended
+        self.assertTrue(all(e > 0 for e in ends))
+        self.assertTrue(any(c.startswith('Predicted for check') for c in t.calcs))
+        self.assertTrue(any(c.startswith('Fit of check 1 at 8 mbar as it ran') for c in t.calcs))
+        for name in os.listdir(d):
+            if not name.startswith('check_'):
+                continue
+            with open(os.path.join(d, name), newline='') as fh:
+                rs = [r for r in csv.DictReader(fh) if r['p_predicted_mbar'] and r['p_mbar']]
+            self.assertGreater(len(rs), 20, name)
+            step = abs(float(rs[0]['to_mbar']) - float(rs[0]['from_mbar']))
+            err = math.sqrt(sum((float(r['p_mbar']) - float(r['p_predicted_mbar'])) ** 2 for r in rs) / len(rs))
+            self.assertLess(err, 0.25 * step, name)
+
+
 class LogHelpers(unittest.TestCase):
     def test_gains_change_names_what_changed(self):
         self.assertEqual(at.gains_change([0.64, 0.88, 0.0], [0.45, 0.88, 0.0]), 'KP 0.64 -> 0.45')
