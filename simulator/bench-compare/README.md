@@ -18,6 +18,8 @@ python3 plot_bench.py replay.csv out.png "title" [--log] [--from S] [--to S] [--
 | `1111-step-test.png` | 11 Nov 17:26: the GUI setpoint step test, each step against the simulator's step test with the table as run (0.16.12) and with the proposed table (0.16.13) |
 | `1111-step-test-4sets.png` | The same bench run against the simulator's step test with four sets (0.16.14, B1 6, B2 10, B3 14 mbar, H 10 %, set 1 0.06/0.70, set 3 0.50/1.00, set 4 0.30/0.25): set 2 0.14/1.50 (12 to 8 mbar ends 8.55 after 6 min) and set 2 0.08/0.80 (settles in 209 s) |
 | `1111-setpoint-kick.png` | Simulator only, the four-set step test with 6 min a step: the PI as now against the PI with its proportional part on the pressure only (no kick when the setpoint changes; a test build, not in the firmware). The bounces on 12 to 16, 16 to 12 and 24 to 16 mbar are the kick being given back; the flat-then-jump on 8 to 12, 2 to 4 and 4 to 8 mbar is the needle sticking when it opens |
+| `1111-step-test-refit.png` | The 17:26 bench run against the simulator refitted to it (draft PR #49, 1b9cc01, not merged: cold head, 0.30 % play in the needle): the table as run, and the four-set table with set 2 0.08/0.80 |
+| `1111-setpoint-kick-refit.png` | `1111-setpoint-kick.png` again on the refitted simulator: the needle's flat-then-jump is gone (play, not stick); the kick's bounce and overshoot are not |
 
 For a GUI step test, `step_figures.py` works out each step's figures from the session CSV (rise 10 to 90 %, settling into 5 % of the setpoint, overshoot, end error over the last 30 s, the valve's kick in the first 3 s), and `plot_step_test.py` puts each step of the bench and of simulator runs of the same steps side by side:
 
