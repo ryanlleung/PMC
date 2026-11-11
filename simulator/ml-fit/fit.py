@@ -4,7 +4,7 @@ has not seen.
 
     python3 fit.py <folder of pmc_session_*.csv> [--out results]
 
-The learned model is the physics model (bench.c, through fit_bench.py) times
+The learned model is the physics model (bench.c of 10 Nov, bench_10nov.py) times
 a learned correction: gradient-boosted trees that read the valve's recent
 history and the physics model's own state, and give the factor the bench
 pressure is off the physics by. No correction is the physics model itself.

@@ -6,6 +6,8 @@ Machine learning on the bench session logs: does a model trained on the logs pre
 python3 fit.py <folder of pmc_session_*.csv> [--out results]
 ```
 
+**The physics model here is the simulator's bench cryostat as it was on 10 Nov 2026** (`bench_10nov.py`). On 11 Nov bench.c was refitted with a cold head and play in the needle (`../wasm/fit_bench.py`), which took in what this study found: the cold head temperature carries what the valve does not. The scores below have not been run again against the new model.
+
 Needs numpy, scikit-learn and matplotlib (`tried/` also needs torch). Takes about 5 min the first time (it caches the physics runs in `results/features.pkl`). The session logs themselves are not in the repository.
 
 ## Result (16 logs, 5 to 10 Nov 2026)
@@ -38,7 +40,7 @@ What the logs say beyond the scores:
 
 `logs.py` reads the CSVs. The GUI saves its last 4 h, so saves a few minutes apart share samples: 171,664 rows hold 92,303 different samples. They are cut into runs (no gap over 5 s, MANUAL or AUTO), and runs less than an hour apart are held out together: 9 groups.
 
-`physics.py` runs bench.c's model on a logged valve (through `../wasm/fit_bench.py`, same numbers), finds each run's valve offset, and builds what the learned model reads each second: the valve, the needle after the opening stick, how far the valve is from its own average over the last 5 s to 33 min, the time since the last opening and closing move, how much it travelled in the last 1 and 10 min, and the physics model's own pressure and heat exchanger temperature.
+`physics.py` runs bench.c's model of 10 Nov on a logged valve (`bench_10nov.py`), finds each run's valve offset, and builds what the learned model reads each second: the valve, the needle after the opening stick, how far the valve is from its own average over the last 5 s to 33 min, the time since the last opening and closing move, how much it travelled in the last 1 and 10 min, and the physics model's own pressure and heat exchanger temperature.
 
 `fit.py` trains the learned model and scores it. The learned model is the physics model times a correction: gradient-boosted trees (scikit-learn, 200 trees of depth 4) that predict the factor the bench pressure is off the physics by. No correction is the physics model itself, so it cannot go far wrong where it has no data. Each group of runs is left out in turn; the trees are trained on the other eight and scored on the one left out. Their settings were fixed before the first score and not tuned on the held-out runs.
 
