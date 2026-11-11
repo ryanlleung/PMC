@@ -63,7 +63,7 @@ if writes is not None:
         check(c.write_coil(0, True).exception_code == 1, "AUTO coil refused, exception 1")
     e = c.read_input_registers(0, count=1)
     check(e.isError() and e.exception_code == 1, "FC4 answers exception 1")
-    e = c.read_holding_registers(20, count=10)
+    e = c.read_holding_registers(45, count=10)   # the map ends at 50 (version 2)
     check(e.isError() and e.exception_code == 2, "read past the map answers exception 2")
     c.close()
     sys.exit(0 if ok else 1)
