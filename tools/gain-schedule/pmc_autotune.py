@@ -1731,7 +1731,11 @@ STEP_FIRST_MAX_S = 600         # the most it waits for the first setpoint to hol
 # and the old set 3 moves to set 4; B1, B2, B3 6, 10, 14 mbar. Set 2 is
 # 0.08/0.80 (the model thread's under 10 mbar set): with 0.14/1.50 the
 # simulator's 12 to 8 mbar step still ended 0.55 mbar high after 6 min.
-STEP_SETS = [(0.06, 0.70, 0.0), (0.08, 0.80, 0.0), (0.50, 1.00, 0.0), (0.30, 0.25, 0.0)]
+# From 0.16.15 (KP on the pressure only, Ryan 12 Nov "give me the pid table
+# then"): each set is gains the bench has run at that pressure: set 2
+# 0.12/0.83 (8 mbar, 10 Nov), set 3 0.80/0.94 (12 mbar, 9 and 10 Nov),
+# sets 1 and 4 as in the 11 Nov 17:26 step test.
+STEP_SETS = [(0.06, 0.70, 0.0), (0.12, 0.83, 0.0), (0.80, 0.94, 0.0), (0.30, 0.25, 0.0)]
 STEP_B1, STEP_B2, STEP_B3, STEP_H = 6.0, 10.0, 14.0, 10
 
 

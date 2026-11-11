@@ -1023,7 +1023,7 @@ class SetpointSteps(unittest.TestCase):
 
     def test_the_table_it_writes_first(self):
         self.assertEqual(at.table_lines(at.STEP_SETS, at.STEP_B1, at.STEP_B2, at.STEP_B3, at.STEP_H),
-                         ['PIDS SET 1,0.06,0.70,0.00', 'PIDS SET 2,0.08,0.80,0.00', 'PIDS SET 3,0.50,1.00,0.00',
+                         ['PIDS SET 1,0.06,0.70,0.00', 'PIDS SET 2,0.12,0.83,0.00', 'PIDS SET 3,0.80,0.94,0.00',
                           'PIDS SET 4,0.30,0.25,0.00', 'SCHED SET PV,6,10,14,10'])
 
     def test_ends_when_the_board_leaves_auto(self):
