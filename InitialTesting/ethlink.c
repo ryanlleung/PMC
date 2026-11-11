@@ -334,7 +334,7 @@ bool ethlink_getline(char *buf, size_t n)
             rx_pos = rx_len = 0;
             if (socketReceive(client, rx, sizeof rx, &got, 0) != NO_ERROR || got == 0) {
                 // Closed by the client and all read. A last line with no
-                // line ending is not run (it may be cut short: VALV SET 5 of
+                // line ending is not run (it may be cut short: VALVE SET 5 of
                 // 50). The socket goes once the replies have been sent and
                 // acknowledged, so a reply is not lost to the close.
                 if (tcpGetState(client) == TCP_STATE_CLOSE_WAIT && tx_drained(client))

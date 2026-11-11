@@ -37,7 +37,7 @@ const char *ethlink_mac(void);
 
 // IPv4 address as text, "" until one is set.
 const char *ethlink_ip(void);
-// Subnet mask as text, "" until an address is set (NETW?).
+// Subnet mask as text, "" until an address is set (NETWORK?).
 const char *ethlink_mask(void);
 
 bool ethlink_link_up(void);

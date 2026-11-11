@@ -6,14 +6,15 @@
     python log_druck.py 192.168.1.23 -o run1.csv
 
 Writes druck_YYYYMMDD_HHMMSS.csv unless -o is given. Stop with Ctrl+C.
-Ethernet: TCP port 8888 (firmware 0.13.0 on; give host:port for another).
+Ethernet: TCP port 8888 (give host:port for another). Needs firmware 0.16.10
+or later: the command names are whole words from there (PRESSURE?, not PRES?).
 The board takes one connection at a time; a new one replaces the old, and
 the logger then reconnects on its own. USB: close the NECTO UART Terminal
 first, only one program can hold the COM port. Needs pyserial either way
 (pip install pyserial).
 
 The board sends nothing unasked (0.13.0), so the logger polls one line a
-second, PRES?;PRES SP?;VALV?;MODE?;ALRM?;BARO?, and sets the board clock
+second, PRESSURE?;SETPOINT?;VALVE?;MODE?;ALARM?;BAROMETER?, and sets the board clock
 from the PC at connect. Columns: pc_time (local, ISO), p_mbar, target_mbar,
 valve_pct, mode, alarm (the active tags, spaces between), baro_mbar. An
 empty field has no value (no reading, not homed, no target, no barometer).
@@ -27,9 +28,9 @@ import time
 import serial   # pip install pyserial
 
 TCP_PORT = 8888
-POLL = "PRES?;PRES SP?;VALV?;MODE?;ALRM?;BARO?"
+POLL = "PRESSURE?;SETPOINT?;VALVE?;MODE?;ALARM?;BAROMETER?"
 # The words each reply starts with, in POLL order.
-WORDS = ["PRES", "PRES SP", "VALV", "MODE", "ALRM", "BARO"]
+WORDS = ["PRESSURE", "SETPOINT", "VALVE", "MODE", "ALARM", "BAROMETER"]
 FIELDS = ["p_mbar", "target_mbar", "valve_pct", "mode", "alarm", "baro_mbar"]
 
 
@@ -48,7 +49,12 @@ class Link:
         self.port.dtr = True    # baud and DTR are ignored over TCP
         idn = self.ask("*IDN?")
         if not idn.startswith("MercShore,iPC,"):
-            raise ConnectionError(f"not an mm4 with firmware 0.13.0 or later (*IDN? gave {idn!r})")
+            raise ConnectionError(f"not an mm4 with firmware 0.16.10 or later (*IDN? gave {idn!r})")
+        # The command names are whole words from 0.16.10 (PRESSURE?, not PRES?).
+        version = tuple(int(n) for n in re.findall(r"\d+", idn.split(",")[-1])[:3])
+        if version < (0, 16, 10):
+            raise ConnectionError(f"firmware {idn.split(',')[-1]} has the old command names: "
+                                  "flash 0.16.10 or later, or use the logger from that firmware's commit")
         print(idn)
         # Board clock from the PC's local time; the TIME? query makes one reply line.
         print(self.ask(time.strftime("TIME SET %Y-%m-%d %H:%M:%S;TIME?")))
@@ -63,13 +69,13 @@ class Link:
 
 
 def value(reply, words):
-    """The value of one reply ("PRES 4.625 mbar" -> "4.625"), "" for NONE."""
+    """The value of one reply ("PRESSURE 4.625 mbar" -> "4.625"), "" for NONE."""
     if not reply.startswith(words + " "):
         raise ValueError(f"expected {words} ..., got {reply!r}")
     v = reply[len(words) + 1:]
     if v == "NONE":
         return ""
-    if words == "ALRM":
+    if words == "ALARM":
         return " ".join(a.split(",")[0] for a in v.split("|"))
     return v.split(" ")[0]
 

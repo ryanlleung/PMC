@@ -82,7 +82,7 @@ typedef struct {
 static event_t events[EVT_N];
 static uint32_t evt_count;     // total logged since boot
 
-#define EVT_LINE 128   // link room wanted before an EVNT? line goes out (and its size)
+#define EVT_LINE 128   // link room wanted before an EVENT? line goes out (and its size)
 static struct {
     bool active;
     uint32_t next, end, since;
@@ -903,7 +903,7 @@ bool valve_set_target(int32_t mmbar, const char **why)
         return false;
     }
     int32_t v = (int32_t)fixed_round(mmbar, 2);   // 0.1 mbar
-    // The same target again (a master writing it every scan, PRES SP
+    // The same target again (a master writing it every scan, SETPOINT
     // repeated) changes nothing: no event, and the W-2 and Stable timers
     // are not restarted.
     if (ctl.sp_set && lroundf(ctl.sp * 10.0f) == v)
@@ -1156,7 +1156,7 @@ int valve_reset(char *left, size_t n)
 }
 
 
-// EVNT? <n> (remote.c): "EVNT <count>" now, then the newest count events,
+// EVENT? <n> (remote.c): "EVENT <count>" now, then the newest count events,
 // newest first, as "<age s>,<tag>,<text>", a line at a time from
 // valve_task() as the link has room, so a slow reader does not hold up the
 // main loop (as TREND DUMP).
@@ -1169,7 +1169,7 @@ void valve_events_send(int n)
     if ((uint32_t)n > have)
         n = (int)have;
     char c[24];
-    lv_snprintf(c, sizeof c, "EVNT %d\r\n", n);
+    lv_snprintf(c, sizeof c, "EVENT %d\r\n", n);
     link_write(c);
     edump.next = evt_count;
     edump.end = evt_count - (uint32_t)n;

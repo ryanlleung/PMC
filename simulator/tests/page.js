@@ -27,11 +27,11 @@ const path = require('path');
     homed = (await p.locator('#console').textContent()).includes('MODE MANUAL');
   }
   await p.selectOption('#speed', '1');
-  await p.fill('#cmd', 'valv?');
+  await p.fill('#cmd', 'valve?');
   await p.press('#cmd', 'Enter');
   await p.waitForTimeout(500);
   const text = await p.locator('#console').textContent();
-  const ok1 = homed && /> VALV\?\nVALV \d+\.\d\d %/.test(text);
+  const ok1 = homed && /> VALVE\?\nVALVE \d+\.\d\d %/.test(text);
   // Save settings with KP 3.00 (the test hook, as Review and save), reload, read it back.
   await p.evaluate(() => x.sim_save(9, 300));
   await p.waitForTimeout(1500);
@@ -39,7 +39,7 @@ const path = require('path');
   const ok2 = (await p.evaluate(() => x.sim_setting(9))) === 300;
   if (process.argv[2]) await p.screenshot({ path: process.argv[2], fullPage: true });
   await b.close();
-  console.log((ok1 ? 'ok   ' : 'FAIL ') + 'homed from the screen and VALV? answered');
+  console.log((ok1 ? 'ok   ' : 'FAIL ') + 'homed from the screen and VALVE? answered');
   console.log((ok2 ? 'ok   ' : 'FAIL ') + 'settings kept over a reload');
   console.log((errs.length ? 'FAIL ' : 'ok   ') + 'no page errors' + (errs.length ? ': ' + errs.join('; ') : ''));
   process.exit(ok1 && ok2 && !errs.length ? 0 : 1);

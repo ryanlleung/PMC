@@ -15,7 +15,7 @@
  * Once a second from the main loop (was main_screen.c to 0.8.x): re-read
  * the boards, update the cal and valve fault checks. Outside LVGL, so a
  * slow redraw does not delay the reading or the fault checks.
- * The remote set (remote.c) has PRES?, VALV?, ALRM? and the rest.
+ * The remote set (remote.c) has PRESSURE?, VALVE?, ALARM? and the rest.
  */
 
 static bool hot;

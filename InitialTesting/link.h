@@ -21,7 +21,7 @@ void link_task(void);
 /*
  * Output. The board never sends a line by itself: the remote command set
  * (remote.c) sends its reply lines with link_write. Status changes, events
- * and saves from the screen go to the event log (EVNT?), not the link.
+ * and saves from the screen go to the event log (EVENT?), not the link.
  */
 void link_write(const char *s);
 

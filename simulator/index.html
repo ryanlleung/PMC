@@ -54,10 +54,10 @@ select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; ba
       <h2>Text console (as port 8888)</h2>
       <pre id="console"></pre>
       <div class="row">
-        <input id="cmd" placeholder="Command, e.g. PRES?;MODE?, PRES SP 5, MODE AUTO" autocomplete="off" spellcheck="false">
+        <input id="cmd" placeholder="Command, e.g. PRESSURE?;MODE?, SETPOINT 5, MODE AUTO" autocomplete="off" spellcheck="false">
         <button id="send">Send</button>
-        <button data-cmd="PRES?;PRES SP?;MODE?;VALV?;ALRM?">Poll</button>
-        <button data-cmd="EVNT? 10">EVNT? 10</button>
+        <button data-cmd="PRESSURE?;SETPOINT?;MODE?;VALVE?;ALARM?">Poll</button>
+        <button data-cmd="EVENT? 10">EVENT? 10</button>
         <button data-cmd="*IDN?">*IDN?</button>
         <button id="clear">Clear</button>
       </div>

@@ -37,7 +37,7 @@
 // settings, tuning, saving and the motor are on the touch screen.
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.16.9"
+#define PMC_FW_VERSION    "0.16.10"
 
 // Valve limit switch: one NC dry contact to GND on S1 TX, PD5 (Adapter Click
 // IDC10 pad 8, printed RX: the Adapter labels from the Click's side; 0.14.6).
@@ -54,7 +54,7 @@
 
 // Room pressure (0.11.47): a Pressure 21 Click (BMP581, I2C2 0x46) on the
 // Adapter Click in S1. 1: probed at start-up and read once a second
-// (BARO?, baro.c); nothing changes if it is not fitted.
+// (BAROMETER?, baro.c); nothing changes if it is not fitted.
 // 0: not built in.
 #define PMC_BARO          1
 

@@ -31,7 +31,7 @@ The controller is one MikroE development board with a socket shield and four Cli
 | Mikromedia 4 for STM32 Capacitive | MIKROE-3618 | STM32F407ZG (168 MHz, 1 MB flash, 192 KB RAM); SSD1963 display controller; LAN8720A Ethernet PHY; SST26VF064B 8 MB serial flash | Main board | Runs the firmware. 4.3 in 480x272 capacitive touchscreen, 12 V terminal, USB-C (power and flashing), real-time clock |
 | Mikromedia 4 Capacitive Shield | MIKROE-3631 | none | Plugs onto the back of the main board | Four mikroBUS sockets, S1 to S4, and the RJ45 for Ethernet |
 | Adapter Click | MIKROE-1432 | none (a pass-through) | Socket S1 | Raises the Pressure 21 Click above the shield and brings every socket pin out on a 2x5 IDC10 header. The valve limit switch is wired to this header |
-| Pressure 21 Click | Pressure 21 Click | Bosch BMP581 barometric sensor | On top of the Adapter Click in S1 | Room (atmospheric) pressure. Used as the air point of the transducer calibration and shown on Diagnostics and `BARO?` |
+| Pressure 21 Click | Pressure 21 Click | Bosch BMP581 barometric sensor | On top of the Adapter Click in S1 | Room (atmospheric) pressure. Used as the air point of the transducer calibration and shown on Diagnostics and `BAROMETER?` |
 | Stepper 3 Click | MIKROE-2035 | ULN2003 Darlington array | Socket S2 | Drives the valve's unipolar stepper motor from the 12 V motor supply |
 | Boost 10 Click | MIKROE-6927 | LT8337 boost converter, TPL0501 digital potentiometer | Socket S3 | Makes the 10 V excitation for the Druck transducer from the socket's 5 V |
 | Power Monitor Click | MIKROE-4810 | TI INA228 | Socket S4 | Measures the Druck output (shunt input, ±163.84 mV) and the excitation (bus input), so the firmware can use their ratio. Its die temperature drives the W-3 warning |
@@ -173,37 +173,39 @@ The text port and Modbus take the same operator command set, and nothing else: w
 
 Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in the USB build. One client at a time; a new connection replaces the old. Send upper case ASCII, a line ending in LF or CR LF, at most 96 characters. Replies end in CR LF.
 
-- No echo, and nothing is sent unasked: faults, warnings and switch changes go to the event log (`EVNT?`) and show in `ALRM?` and `MODE?`.
-- A query (ending in `?`) replies one line starting with its own words, the value then the unit: `PRES 4.625 mbar`, `VALV 34.12 %`, `VALV NONE` when there is no value. Pressure 3 dp, target 1 dp, valve 2 dp, room pressure 2 dp.
-- A set command replies nothing when accepted, and `ERR <code> <text>` when refused. End a line that sets something with a query (`PRES SP 5;MODE AUTO;MODE?`) to always get one line back.
-- Commands can share a line with `;`: they run in order, the query replies come back on one line joined by `;`, and the first `ERR` ends the line. `EVNT?` is the only multi-line reply and must be on a line of its own.
+The command names are whole words from firmware 0.16.10. To 0.16.9 every first word had four letters (`PRES`, `PRES SP`, `VALV`, `ALRM`, `EVNT`, `BARO`, `NETW`); those names now answer `ERR 100`, so the board and anything that talks to it (the GUI, the logger, a driver) change together.
+
+- No echo, and nothing is sent unasked: faults, warnings and switch changes go to the event log (`EVENT?`) and show in `ALARM?` and `MODE?`.
+- A query (ending in `?`) replies one line starting with its own words, the value then the unit: `PRESSURE 4.625 mbar`, `VALVE 34.12 %`, `VALVE NONE` when there is no value. Pressure 3 dp, setpoint 1 dp, valve 2 dp, room pressure 2 dp.
+- A set command replies nothing when accepted, and `ERR <code> <text>` when refused. End a line that sets something with a query (`SETPOINT 5;MODE AUTO;MODE?`) to always get one line back.
+- Commands can share a line with `;`: they run in order, the query replies come back on one line joined by `;`, and the first `ERR` ends the line. `EVENT?` is the only multi-line reply and must be on a line of its own.
 
 | Command | Reply or action |
 | --- | --- |
-| `PRES SP <mbar>` | Target, 0 to the sensor range, kept to 0.1 mbar. Does not start AUTO |
+| `SETPOINT <mbar>` | The pressure setpoint, 0 to the sensor range, kept to 0.1 mbar. Does not start AUTO |
 | `MODE AUTO` / `MODE MANUAL` | Start regulating after the entry checks / stop regulating, the valve stays where it is. Both refused (`ERR 213`) while OFF or shutting down: only the screen turns it on |
-| `VALV SET <%>` | Move the valve, 0 to 100 % in 0.1 steps; MANUAL only, valve homed |
+| `VALVE SET <%>` | Move the valve, 0 to 100 % in 0.1 steps; MANUAL only, valve homed |
 | `STOP` | Stop the valve now; in AUTO it also ends AUTO. Cancels homing and a shut down. The only stop |
-| `ALRM RESET` / `ALRM OK` | Clear the latched faults whose cause has gone / acknowledge the warning, as the screen's OK |
+| `ALARM RESET` / `ALARM OK` | Clear the latched faults whose cause has gone / acknowledge the warning, as the screen's OK |
 | `TIME SET <YYYY-MM-DD> <HH:MM:SS>` | Set the clock |
 | `PID SET <kp>,<ti>[,<kd>]` | Set and save the gains of the PID set in use (set 1 with the gain schedule Off), as Save on the PID tuning page: KP in %/mB, TI in min (0 off), KD in %/(mB/s) (0 off, left as it is when not given), 2 dp. KP 0.01 to 100, TI and KD 0 to 100. Taken in AUTO too, at the next control step. Each change is a settings save in flash, so send it when the gains change, not every poll; gains equal to the present ones write nothing |
 | `PIDS SET <set>,<kp>,<ti>[,<kd>]` | As `PID SET`, for PID set 1, 2 or 3 |
 | `SCHED SET <OFF\|PV>,<b1>,<b2>,<h>` | The PID table (gain schedule), saved as `PID SET`: Off (set 1 always) or on the pressure (`SP`, the setpoint, removed in 0.15.20: `ERR 101`); boundaries B1 and B2 in mbar (1 dp, 0.1 to 1000; set 1 below B1, set 2 to B2, set 3 above), hysteresis H in % of the boundary (0 to 40). B2 must be above B1 by more than H either side (`ERR 102`) |
-| `PRES?` | `PRES 4.625 mbar` or `PRES NONE` |
-| `PRES SP?` | `PRES SP 5.0 mbar` or `PRES SP NONE` |
+| `PRESSURE?` | `PRESSURE 4.625 mbar` or `PRESSURE NONE` |
+| `SETPOINT?` | `SETPOINT 5.0 mbar` or `SETPOINT NONE` |
 | `MODE?` | `MODE MANUAL`, `MODE AUTO`, `MODE HOMING`, `MODE NOT HOMED`, `MODE SHUTDOWN` (going to 0 % for Shut down) or `MODE OFF` |
-| `VALV?` / `VALV MOVING?` | `VALV 34.12 %` or `VALV NONE` / `VALV MOVING 1` while moving or homing, else 0 |
-| `BARO?` | `BARO 1013.25 mbar` or `BARO NONE` (Pressure 21 Click not fitted or not reading) |
-| `ALRM?` | `ALRM NONE`, or the active alarms joined by `\|`, faults first: `<tag>,<0\|1>,<text>`. For a fault, 1 when `ALRM RESET` clears it now; for a warning, 1 when `ALRM OK` clears it |
-| `EVNT? [<n>]` | `EVNT <n>`, then n lines `<age s>,<tag>,<text>`, newest first; default 1, at most 100 |
-| `NETW?` | `NETW STATIC,<address>,<mask>,<MAC>`; `NETW NONE` in the USB build |
+| `VALVE?` / `VALVE MOVING?` | `VALVE 34.12 %` or `VALVE NONE` / `VALVE MOVING 1` while moving or homing, else 0 |
+| `BAROMETER?` | `BAROMETER 1013.25 mbar` or `BAROMETER NONE` (Pressure 21 Click not fitted or not reading) |
+| `ALARM?` | `ALARM NONE`, or the active alarms joined by `\|`, faults first: `<tag>,<0\|1>,<text>`. For a fault, 1 when `ALARM RESET` clears it now; for a warning, 1 when `ALARM OK` clears it |
+| `EVENT? [<n>]` | `EVENT <n>`, then n lines `<age s>,<tag>,<text>`, newest first; default 1, at most 100 |
+| `NETWORK?` | `NETWORK STATIC,<address>,<mask>,<MAC>`; `NETWORK NONE` in the USB build |
 | `TIME?` | `TIME 2026-10-27 11:05:00` or `TIME NONE` |
 | `PID?` | `PID 4.00,0.25,0.00`: KP, TI, KD of the PID set in use |
 | `PIDS?` | `PIDS 2,0.10,0.40,0.00,0.80,0.30,0.00,1.20,0.30,0.00`: the set in use (in AUTO the one the schedule has switched to, else the one AUTO would start with), then KP, TI, KD of sets 1, 2 and 3 |
 | `SCHED?` | `SCHED PV,6.0,20.0,15`: the PID table (`OFF` or `PV`), B1, B2 in mbar, H in % |
 | `*IDN?` | `MercShore,iPC,<chip id>,<version>` |
 
-Error codes: 100 unknown command (anything not in the table above when network writes are enabled; with writes off, unrecognised input also gets 211), 101 expected form, 102 outside range, 103 line too long, 104 `EVNT?` not on its own line, 201 homing, STOP to cancel, 202 switch to MANUAL first, 203 reset the fault first, 204 home the valve first, 205 no valid pressure, 206 set a target first, 207 target outside the sensor range, 208 pressure above the sensor range, 209 control settings not set, 210 not reset, cause still present, 211 read only over the network, 212 the valve cannot move now (the limit switch, Close or Open held on the screen, the switch question waiting, a calibration point being taken) or the clock is not running, 213 controller off or shutting down (turned on at the screen).
+Error codes: 100 unknown command (anything not in the table above when network writes are enabled; with writes off, unrecognised input also gets 211), 101 expected form, 102 outside range, 103 line too long, 104 `EVENT?` not on its own line, 201 homing, STOP to cancel, 202 switch to MANUAL first, 203 reset the fault first, 204 home the valve first, 205 no valid pressure, 206 set a setpoint first, 207 setpoint outside the sensor range, 208 pressure above the sensor range, 209 control settings not set, 210 not reset, cause still present, 211 read only over the network, 212 the valve cannot move now (the limit switch, Close or Open held on the screen, the switch question waiting, a calibration point being taken) or the clock is not running, 213 controller off or shutting down (turned on at the screen).
 
 ## Tools
 
