@@ -100,9 +100,11 @@ typedef struct {
                        // initialisers without it read 0
     // Gain schedule and the closing deadband (0.15.15); zero (initialisers
     // without them): schedule Off, closing deadband = db, as before.
-    ctrl_pid_t set23[2];   // sets 2 and 3
+    ctrl_pid_t sets[3];    // sets 2, 3 and 4 (set 4 from 0.16.14)
     int sched;             // ctrl_sched_t
-    float b1, b2;          // boundaries, mbar: set 1 below b1, set 3 from b2
+    float b1, b2;          // boundaries, mbar: set 1 below b1, set 2 to b2, set 3 from b2
+    float b3;              // boundary set 3 / set 4, mbar (0.16.14); not above b2 (0: initialisers
+                           // without it): three sets, as before
     float hyst;            // hysteresis on the pressure, fraction of the boundary (0.15)
     int32_t db_close;      // deadband closing, steps; 0 = db
 } ctrl_tune_t;
@@ -146,18 +148,21 @@ typedef struct {
     int move_dir;      // way of the move asked for
     float pv_tau;      // CTRL_PV_TAU_S from ctrl_init; 0 off (the host test's reference runs)
     float rev_pct;     // CTRL_REV_PCT from ctrl_init, the most the hold is; 0 off
-    int set;           // PID set in use, 1 to 3 (0 before AUTO first starts)
+    int set;           // PID set in use, 1 to 4 (0 before AUTO first starts)
     float kd_used;     // derivative of the last step: a change re-bases too
     float e_last;      // setpoint less pressure at the last step (before a setpoint change), mbar, no KDIR: the re-base keeps the output there (0.16.13)
 } ctrl_t;
 
 void ctrl_init(ctrl_t *c);
 // The PID set the schedule gives for x (in AUTO the lower of the pressure
-// and the setpoint), from set now (1 to 3; 0 picks with no hysteresis). 1
+// and the setpoint), from set now (1 to 4; 0 picks with no hysteresis). 1
 // when Off.
 int ctrl_pick_set(const ctrl_tune_t *k, int now, float x);
 // That set's gains.
 ctrl_pid_t ctrl_set_gains(const ctrl_tune_t *k, int set);
+// How many sets the PID table has: 4 when boundary 3 is above boundary 2
+// (0.16.14), else 3.
+int ctrl_sets(const ctrl_tune_t *k);
 // Every Ts in every mode: the lagged position follows the count (only
 // through the lag once the valve is homed and not homing).
 void ctrl_track(ctrl_t *c, int32_t pos, bool lagged);

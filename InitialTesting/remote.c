@@ -91,6 +91,7 @@ static const struct { const char *head; int num; const char *text; } why_codes[]
     { "Controller is off", 213, "Controller is off" },
     { "Shutting down", 213, "Shutting down, STOP to cancel" },
     { "B2 must", 102, NULL },   // SCHED SET boundaries (0.15.15)
+    { "B3 must", 102, NULL },   // and the third (0.16.14)
     { "Expected", 101, NULL },
     { "Outside", 102, NULL },
 };
@@ -222,16 +223,18 @@ static bool query(const char *c)
               fixed_fmt(ti, sizeof ti, cfg_tune(cfg_pid_key(n, 1)), 2),
               fixed_fmt(v, sizeof v, cfg_tune(cfg_pid_key(n, 2)), 2));
     } else if (strcmp(c, "PIDS?") == 0) {
-        char g[3][3][16];
-        for (int n = 1; n <= 3; n++)
+        // The set in use, then sets 1 to 4 (set 4 from 0.16.14).
+        char g[4][3][16];
+        for (int n = 1; n <= 4; n++)
             for (int w = 0; w < 3; w++)
                 fixed_fmt(g[n - 1][w], sizeof g[0][0], cfg_tune(cfg_pid_key(n, w)), 2);
-        reply("PIDS %d,%s,%s,%s,%s,%s,%s,%s,%s,%s", valve_pid_set(), g[0][0], g[0][1], g[0][2],
-              g[1][0], g[1][1], g[1][2], g[2][0], g[2][1], g[2][2]);
+        reply("PIDS %d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s", valve_pid_set(), g[0][0], g[0][1], g[0][2],
+              g[1][0], g[1][1], g[1][2], g[2][0], g[2][1], g[2][2], g[3][0], g[3][1], g[3][2]);
     } else if (strcmp(c, "SCHED?") == 0) {
-        char b1[16], b2[16];
-        reply("SCHED %s,%s,%s,%ld", cfg_tune(CFG_SCHED) == CTRL_SCHED_PV ? "PV" : "OFF", fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1),
-              fixed_fmt(b2, sizeof b2, cfg_tune(CFG_B2), 1), (long)cfg_tune(CFG_HYST));
+        char b1[16], b2[16], b3[16];
+        reply("SCHED %s,%s,%s,%s,%ld", cfg_tune(CFG_SCHED) == CTRL_SCHED_PV ? "PV" : "OFF",
+              fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1), fixed_fmt(b2, sizeof b2, cfg_tune(CFG_B2), 1),
+              fixed_fmt(b3, sizeof b3, cfg_tune(CFG_B3), 1), (long)cfg_tune(CFG_HYST));
     } else {
         return false;
     }
@@ -279,8 +282,8 @@ static void pid_set(const char *c, bool pick)
             refuse(101, form);
             return;
         }
-        if (x < 1 || x > 3) {
-            refuse(102, "Outside 1 to 3 for the set");
+        if (x < 1 || x > 4) {
+            refuse(102, "Outside 1 to 4 for the set");
             return;
         }
         set = (int)x;
@@ -317,22 +320,23 @@ static void pid_set(const char *c, bool pick)
         refuse_why(why);
 }
 
-// SCHED SET <OFF|PV>,<b1>,<b2>,<h> (0.15.15; SP removed in 0.15.20): the PID table, as the
-// PID tuning Schedule tab's Save. Boundaries in mbar (1 dp), hysteresis %.
+// SCHED SET <OFF|PV>,<b1>,<b2>,<b3>,<h> (0.15.15; SP removed in 0.15.20; b3, the
+// boundary to set 4, from 0.16.14): the PID table, as the PID tuning PID
+// table tab's Save. Boundaries in mbar (1 dp), hysteresis %.
 static void sched_set(const char *c)
 {
-    static const char *const form = "Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<h>";
-    static const cfg_key_t key[4] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST };
-    static const char *const nm[4] = { "", "B1", "B2", "H" };
-    static const int dec[4] = { 0, 1, 1, 0 };
+    static const char *const form = "Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<b3>,<h>";
+    static const cfg_key_t key[5] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    static const char *const nm[5] = { "", "B1", "B2", "B3", "H" };
+    static const int dec[5] = { 0, 1, 1, 1, 0 };
     int32_t v[CFG_N] = { 0 };
     bool on[CFG_N] = { false }, same = true;
     char buf[LINK_LINE_MAX + 1], a[16], b[16];
     lv_strlcpy(buf, c, sizeof buf);
     char *p = buf, *e = NULL;
-    for (int n = 0; n < 4; n++, p = e + 1) {
+    for (int n = 0; n < 5; n++, p = e + 1) {
         e = strchr(p, ',');
-        if ((n < 3) != (e != NULL)) {
+        if ((n < 4) != (e != NULL)) {
             refuse(101, form);
             return;
         }

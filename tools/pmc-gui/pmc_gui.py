@@ -12,7 +12,7 @@ to a Lake Shore 336 (TCP 7777) when one is given, and serves one page:
   Gains     the autotune for the board's PID table (pmc_autotune.py: a relay
             test per setpoint for Ku and Pu, first gains from a fit of the
             cryostat's response, a checking step that refines KP and TI, the
-            three sets, Write to board).
+            four sets from firmware 0.16.14, Write to board).
   Board     the event log (EVENT?), reset and OK for alarms, the board clock
             from this PC, and a command line for any text port command.
 A bar under the tabs shows the autotune while it runs: its steps, the stage it
@@ -74,6 +74,7 @@ LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
 LS_INPUT = re.compile(r'^[A-D][1-5]?$')
 OLD_FIRMWARE = (0, 16, 9)   # the reversal hold scales with KP from this version
 NAMES_FIRMWARE = (0, 16, 12)   # the text port names are whole words from this version (PRESSURE?, not PRES?)
+TABLE_FIRMWARE = (0, 16, 14)   # four PID sets and SCHED SET with B3 from this version
 GUI_BUILD = ''              # set by main(): gui_build()
 
 
@@ -453,7 +454,7 @@ class Board:
         self.prog, self.last_prog = None, None    # what the run bar shows
         self.phase = ''           # the stage column of every sample
         self.run_dir, self.run_files, self.run_log = None, {}, None
-        self.at = None            # the last autotune: its rows, the three sets, written or not
+        self.at = None            # the last autotune: its rows, the sets, written or not
         self.st = None            # the last setpoint step test: its steps' figures
         self.preds, self.preds_v = [], 0   # predicted lines (GuiAutoTuner.predicted), sent when they change
 
@@ -488,6 +489,7 @@ class Board:
         if ver and ver < NAMES_FIRMWARE:
             raise ConnectionError('board firmware %s has the old command names: flash %s or later' % (
                 fw[0].strip(), '.'.join(map(str, NAMES_FIRMWARE))))
+        self.fw_ver = ver
         self.state['link'] = 'connected'
 
     def line(self):
@@ -766,7 +768,15 @@ class Board:
         L = self.learned_load()
         return [[L[k]['sp_mbar'], L[k]['kp'], L[k]['ti_min'], L[k].get('when') or ''] for k in sorted(L, key=float)]
 
-    def start_autotune(self, sps, d, b1, b2, h, kp0=0.10, ti0=0.40, start='learned'):
+    def table_old(self):
+        """Why the board cannot take a four-set PID table, or ''."""
+        v = getattr(self, 'fw_ver', None)
+        if v and v < TABLE_FIRMWARE:
+            return 'the PID table with B3 (four sets) needs firmware %s or later: flash it first' % (
+                '.'.join(map(str, TABLE_FIRMWARE)))
+        return ''
+
+    def start_autotune(self, sps, d, b1, b2, b3, h, kp0=0.10, ti0=0.40, start='learned'):
         if self.busy():
             return 'a test is already running'
         # In the order typed (Ryan 10 Nov asked about going down in mbar:
@@ -776,6 +786,8 @@ class Board:
             return 'give at least one setpoint'
         if not 0 < b1 < b2:
             return 'B1 must be above 0 and below B2'
+        if not (b3 == 0 or b3 > b2):
+            return 'B3 must be above B2, or 0 for three sets'
         if not 0 <= h <= 50:
             return 'H must be 0 to 50 %'
         if not 0.1 <= d <= pmc_autotune.D_MAX:
@@ -798,15 +810,15 @@ class Board:
         r = self.send('PID SET ' + parts[4][4:])   # the same gains, so nothing is written: ERR 211 when Remote control is Off
         if r:
             return r
-        a = SimpleNamespace(sps=sps, d=d, b1=b1, b2=b2, h=h, kp0=kp0, ti0=ti0, learned=start != 'fresh')
+        a = SimpleNamespace(sps=sps, d=d, b1=b1, b2=b2, b3=b3, h=h, kp0=kp0, ti0=ti0, learned=start != 'fresh')
         self.job, self.stop_job, self.abort = 'autotune', False, False
         self.begin('autotune', 'PID autotune', ['%g mbar' % x for x in sps] + ['PID table sets'],
                    'setpoints %s mbar, first gains KP %.2f TI %.2f, first relay step %.1f %%, '
-                   'PID table B1 %g B2 %g H %d %%, start from %s' % (
-                       ' '.join('%g' % x for x in sps), kp0, ti0, d, b1, b2, h, 'learned gains' if a.learned else 'fresh'))
+                   'PID table B1 %g B2 %g B3 %g H %d %%, start from %s' % (
+                       ' '.join('%g' % x for x in sps), kp0, ti0, d, b1, b2, b3, h, 'learned gains' if a.learned else 'fresh'))
         with self.lock:
             self.preds, self.preds_v = [], self.preds_v + 1
-            self.at = {'rows': [], 'sets': [], 'b1': b1, 'b2': b2, 'h': h, 'dir': self.run_dir, 'lines': [],
+            self.at = {'rows': [], 'sets': [], 'b1': b1, 'b2': b2, 'b3': b3, 'h': h, 'dir': self.run_dir, 'lines': [],
                        'written': '', 'running': True, 'calc': [], 'calc_now': '', 'sets_calc': []}
         threading.Thread(target=self.autotune_job, args=(a,), daemon=True).start()
         return ''
@@ -815,8 +827,9 @@ class Board:
     def start_steptest(self, sps, most_min, table=None):
         """AUTO through the setpoints in the order typed, each step until it
         holds, with the board's gains and PID table (Ryan, 11 Nov). table:
-        {'sets': [[kp, ti, kd]] x 3, 'b1', 'b2', 'h'} is written to the board
-        first; None leaves the board's as they are."""
+        {'sets': [[kp, ti, kd]] x 4, 'b1', 'b2', 'b3', 'h'} (four sets from
+        0.16.14; b3 0: the first three) is written to the board first; None
+        leaves the board's as they are."""
         if self.busy():
             return 'a test is already running'
         sps = [round(x, 1) for x in sps]
@@ -828,8 +841,11 @@ class Board:
         if table:
             sets = [[float(v) for v in x] for x in table['sets']]
             b1, b2, h = float(table['b1']), float(table['b2']), int(float(table['h']))
-            if len(sets) != 3 or any(len(x) != 3 for x in sets):
-                return 'give KP, TI and KD for each of the three sets'
+            b3 = float(table.get('b3', 0))
+            if len(sets) != 4 or any(len(x) != 3 for x in sets):
+                return 'give KP, TI and KD for each of the four sets'
+            if b3 == 0:
+                sets = sets[:3]        # three sets: set 4 is not used
             for n, (kp, ti, kd) in enumerate(sets, 1):
                 if not (pmc_autotune.KP_MIN <= kp <= pmc_autotune.KP_MAX and pmc_autotune.TI_MIN <= ti <= pmc_autotune.TI_MAX
                         and 0 <= kd <= 10000):
@@ -837,9 +853,14 @@ class Board:
                         n, pmc_autotune.KP_MIN, pmc_autotune.KP_MAX, pmc_autotune.TI_MIN, pmc_autotune.TI_MAX)
             if not 0 < b1 < b2:
                 return 'B1 must be above 0 and below B2'
+            if not (b3 == 0 or b3 > b2):
+                return 'B3 must be above B2, or 0 for three sets'
             if not 0 <= h <= 50:
                 return 'H must be 0 to 50 %'
-            lines = pmc_autotune.table_lines(sets, b1, b2, h)
+            lines = pmc_autotune.table_lines(sets, b1, b2, b3, h)
+            r = self.table_old()
+            if r:
+                return r + ", or pick Leave the board's"
         r = self.raw('SETPOINT?;PRESSURE?;VALVE?;ALARM?')
         if r.startswith('LINK '):
             return r
@@ -900,8 +921,8 @@ class Board:
 
     def at_rows(self, rows, a):
         """The results so far: the sets, and the files that hold them."""
-        sets = pmc_autotune.table_sets(rows, a.b1, a.b2)
-        lines = pmc_autotune.write_lines(sets, a.b1, a.b2, a.h)
+        sets = pmc_autotune.table_sets(rows, a.b1, a.b2, a.b3)
+        lines = pmc_autotune.write_lines(sets, a.b1, a.b2, a.b3, a.h)
         how = []
         for n, kp, ti, pts in sets:
             if kp is None:
@@ -919,9 +940,9 @@ class Board:
         try:
             with open(os.path.join(self.run_dir, 'sets.csv'), 'w', newline='', encoding='utf-8') as f:
                 w = csv.writer(f)
-                w.writerow(['set', 'kp', 'ti_min', 'from_mbar', 'b1_mbar', 'b2_mbar', 'h_pct'])
+                w.writerow(['set', 'kp', 'ti_min', 'from_mbar', 'b1_mbar', 'b2_mbar', 'b3_mbar', 'h_pct'])
                 for n, kp, ti, pts in sets:
-                    w.writerow([n, kp, ti, ' '.join('%g' % x for x in pts), a.b1, a.b2, a.h])
+                    w.writerow([n, kp, ti, ' '.join('%g' % x for x in pts), a.b1, a.b2, a.b3, a.h])
             with open(os.path.join(self.run_dir, 'write-to-board.txt'), 'w', encoding='utf-8') as f:
                 f.write('\n'.join(lines) + '\n')
         except OSError as e:
@@ -999,7 +1020,7 @@ class Board:
                 ku, gains = r['Ku'], (r['kp'], r['ti_min'])
             self.step(last, 'now')
             if rows:
-                sets = pmc_autotune.table_sets(rows, a.b1, a.b2)
+                sets = pmc_autotune.table_sets(rows, a.b1, a.b2, a.b3)
                 self.step(last, 'done', '; '.join('set %d %s' % (n, 'KP %.2f TI %.2f' % (kp, ti) if kp is not None
                                                                    else 'not measured') for n, kp, ti, _ in sets))
                 t.sp_now, t.phase_now = None, 'PID table sets'
@@ -1050,7 +1071,7 @@ class Board:
             self.job = None
 
     def write_sets(self):
-        """The three sets and the PID table (pressure) to the board."""
+        """The sets and the PID table (pressure) to the board."""
         if self.busy():
             return 'a test is running'
         with self.lock:
@@ -1058,6 +1079,9 @@ class Board:
             lines = list(at['lines']) if at else []
         if not lines or not any(x[1] is not None for x in at['sets']):
             return 'run the autotune first'
+        r = self.table_old()
+        if r:
+            return r
         for line in lines:
             r = self.send(line)
             if r.startswith('ERR 100'):
@@ -1190,7 +1214,8 @@ def make_handler(board):
                 elif p == '/api/autotune':
                     r = board.start_autotune([float(x) for x in str(q['sps']).replace(',', ' ').split()],
                                              float(q.get('d', 0.4)), float(q.get('b1', pmc_autotune.B1)),
-                                             float(q.get('b2', pmc_autotune.B2)), int(float(q.get('h', pmc_autotune.HYST))),
+                                             float(q.get('b2', pmc_autotune.B2)), float(q.get('b3', pmc_autotune.B3)),
+                                             int(float(q.get('h', pmc_autotune.HYST))),
                                              float(q.get('kp0', 0.10)), float(q.get('ti0', 0.40)),
                                              str(q.get('start', 'learned')))
                 elif p == '/api/steptest':

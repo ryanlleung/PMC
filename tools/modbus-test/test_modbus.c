@@ -57,30 +57,30 @@ bool stepper3_busy(void) { return busy; }
 bool stepper3_limit_open(void) { return limit_open; }
 bool cfg_remote(void) { return remote; }
 
-// The gain schedule settings (0.15.15): defaults, ranges and the boundary
-// check as cfg.c; saves counts the settings saves.
+// The gain schedule settings (0.15.15; set 4 and B3 from 0.16.14): defaults,
+// ranges and the boundary checks as cfg.c; saves counts the settings saves.
 static int32_t tune[CFG_N];
 static int saves, pid_set_now = 1;
 static void tune_reset(void)
 {
     static const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KD, CFG_KP2, CFG_TI2, CFG_KD2, CFG_KP3, CFG_TI3, CFG_KD3,
-                                   CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST };
-    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 0, 60, 200, 15 };
+                                   CFG_KP4, CFG_TI4, CFG_KD4, CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 400, 25, 0, 0, 60, 100, 140, 15 };
     for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
         tune[k[i]] = v[i];
 }
 int32_t cfg_tune(cfg_key_t k) { return tune[k]; }
 cfg_key_t cfg_pid_key(int set, int which)
 {
-    static const cfg_key_t key[3][3] = { { CFG_KP, CFG_TI, CFG_KD }, { CFG_KP2, CFG_TI2, CFG_KD2 },
-                                         { CFG_KP3, CFG_TI3, CFG_KD3 } };
+    static const cfg_key_t key[4][3] = { { CFG_KP, CFG_TI, CFG_KD }, { CFG_KP2, CFG_TI2, CFG_KD2 },
+                                         { CFG_KP3, CFG_TI3, CFG_KD3 }, { CFG_KP4, CFG_TI4, CFG_KD4 } };
     return key[set - 1][which];
 }
 void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
 {
     *lo = 0;
     *hi = 10000;
-    if (k == CFG_KP || k == CFG_KP2 || k == CFG_KP3 || k == CFG_B1 || k == CFG_B2) *lo = 1;
+    if (k == CFG_KP || k == CFG_KP2 || k == CFG_KP3 || k == CFG_KP4 || k == CFG_B1 || k == CFG_B2) *lo = 1;
     if (k == CFG_SCHED) *hi = 2;
     if (k == CFG_HYST) *hi = 40;
 }
@@ -93,6 +93,10 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
             t[k] = v[k];
     if ((int64_t)t[CFG_B1] * (100 + t[CFG_HYST]) >= (int64_t)t[CFG_B2] * (100 - t[CFG_HYST])) {
         *why = "B2 must be above B1, by more than the hysteresis either side";
+        return false;
+    }
+    if (t[CFG_B3] != 0 && (int64_t)t[CFG_B2] * (100 + t[CFG_HYST]) >= (int64_t)t[CFG_B3] * (100 - t[CFG_HYST])) {
+        *why = "B3 must be above B2, by more than the hysteresis either side, or 0 for three sets";
         return false;
     }
     memcpy(tune, t, sizeof t);
@@ -190,7 +194,7 @@ static void tests(void)
     // Read the version 1 map.
     REQ(0x03, 0, 0, 0, 26);
     CHECK(rlen == 9 + 52 && rsp[7] == 3 && rsp[8] == 52 && rsp[5] == 3 + 52 && rsp[6] == 0x11);
-    CHECK(r16(0) == 2);                         // map version (2 from 0.15.15)
+    CHECK(r16(0) == 3);                         // map version (2 from 0.15.15, 3 from 0.16.14)
     CHECK(r16(1) == (uint16_t)123456);          // heartbeat
     CHECK(r16(2) == VALVE_MANUAL);
     CHECK(r16(3) & 1);                          // reading OK
@@ -208,16 +212,19 @@ static void tests(void)
     REQ(0x03, 0, 10, 0, 2);
     CHECK(rlen == 13 && isnan(rf(0)));
     cs.reading_ok = true;
-    // The gain schedule (version 2, 0.15.15): set in use, type, B1, B2, H, the nine gains.
-    pid_set_now = 2;
-    REQ(0x03, 0, 0, 0, 51);
-    CHECK(rlen == 9 + 102 && r16(26) == 2 && r16(27) == 0 && fabsf(rf(28) - 6.0f) < 1e-5f &&
-          fabsf(rf(30) - 20.0f) < 1e-5f && r16(32) == 15);
+    // The gain schedule (version 2, 0.15.15): set in use, type, B1, B2, H, the nine gains;
+    // version 3 (0.16.14): set 4's gains (51-56) and B3 (57-58).
+    pid_set_now = 4;
+    REQ(0x03, 0, 0, 0, 59);
+    CHECK(rlen == 9 + 118 && r16(26) == 4 && r16(27) == 0 && fabsf(rf(28) - 6.0f) < 1e-5f &&
+          fabsf(rf(30) - 10.0f) < 1e-5f && r16(32) == 15);
     CHECK(fabsf(rf(33) - 4.0f) < 1e-5f && fabsf(rf(35) - 0.25f) < 1e-5f && rf(37) == 0.0f &&
           fabsf(rf(45) - 4.0f) < 1e-5f && fabsf(rf(49) - 0.0f) < 1e-5f);
+    CHECK(fabsf(rf(51) - 4.0f) < 1e-5f && fabsf(rf(53) - 0.25f) < 1e-5f && rf(55) == 0.0f &&
+          fabsf(rf(57) - 14.0f) < 1e-5f);
     pid_set_now = 1;
     // Past the end, zero count, too many.
-    REQ(0x03, 0, 50, 0, 2);   CHECK(is_ex(3, MODBUS_EX_ADDRESS));
+    REQ(0x03, 0, 58, 0, 2);   CHECK(is_ex(3, MODBUS_EX_ADDRESS));
     REQ(0x03, 0, 0, 0, 0);    CHECK(is_ex(3, MODBUS_EX_VALUE));
     REQ(0x03, 0, 0, 0, 126);  CHECK(is_ex(3, MODBUS_EX_VALUE));
     REQ(0x03, 0xFF, 0xFF, 0, 2); CHECK(is_ex(3, MODBUS_EX_ADDRESS));
@@ -258,14 +265,14 @@ static void tests(void)
     f32(NAN, w + 6); req(sizeof w, w);           CHECK(is_ex(0x10, MODBUS_EX_VALUE));
     // Byte count that does not match.
     REQ(0x10, 0, 12, 0, 2, 3, 0x40, 0x99, 0);    CHECK(is_ex(0x10, MODBUS_EX_VALUE));
-    // The schedule in one write (27-32): PV, 6.5 and 22 mbar, 10 %; one save.
+    // The schedule in one write (27-32): PV, 6.5 and 11 mbar, 10 %; one save.
     {
         uint8_t q[] = { 0x10, 0, 27, 0, 6, 12, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10 };
-        f32(6.5f, q + 8); f32(22.0f, q + 12);
+        f32(6.5f, q + 8); f32(11.0f, q + 12);
         int s0 = saves;
         req(sizeof q, q);
         CHECK(rlen == 12 && rsp[9] == 27 && rsp[11] == 6 && tune[CFG_SCHED] == 2 && tune[CFG_B1] == 65 &&
-              tune[CFG_B2] == 220 && tune[CFG_HYST] == 10 && saves == s0 + 1);
+              tune[CFG_B2] == 110 && tune[CFG_HYST] == 10 && saves == s0 + 1);
         CHECK(strstr(last_event, "gain schedule") != NULL);
         req(sizeof q, q);   // the same again: nothing saved
         CHECK(rlen == 12 && saves == s0 + 1);
@@ -275,6 +282,19 @@ static void tests(void)
         req(sizeof g, g);
         CHECK(rlen == 12 && tune[CFG_KP3] == 120 && tune[CFG_TI3] == 30 && tune[CFG_KD3] == 5 && tune[CFG_KP] == 400);
         REQ(0x03, 0, 45, 0, 2);   CHECK(fabsf(rf(0) - 1.2f) < 1e-5f);
+        // Set 4's gains and B3 in one write (51-58, 0.16.14): KP 0.3, TI 0.25, KD 0, 16 mbar.
+        uint8_t g4[] = { 0x10, 0, 51, 0, 8, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        f32(0.3f, g4 + 6); f32(0.25f, g4 + 10); f32(0.0f, g4 + 14); f32(16.0f, g4 + 18);
+        s0 = saves;
+        req(sizeof g4, g4);
+        CHECK(rlen == 12 && rsp[9] == 51 && rsp[11] == 8 && tune[CFG_KP4] == 30 && tune[CFG_TI4] == 25 &&
+              tune[CFG_KD4] == 0 && tune[CFG_B3] == 160 && saves == s0 + 1);
+        REQ(0x03, 0, 57, 0, 2);   CHECK(fabsf(rf(0) - 16.0f) < 1e-5f);
+        // B3 within the hysteresis of B2: refused; 0, three sets: taken.
+        uint8_t b3[] = { 0x10, 0, 57, 0, 2, 4, 0, 0, 0, 0 };
+        f32(11.5f, b3 + 6); req(sizeof b3, b3);      CHECK(is_ex(0x10, MODBUS_EX_REFUSED) && tune[CFG_B3] == 160);
+        CHECK(strstr(last_event, "B3 must be above B2") != NULL);
+        f32(0.0f, b3 + 6); req(sizeof b3, b3);       CHECK(rlen == 12 && tune[CFG_B3] == 0);
         // Out of range, a type past 2 or 1 (the setpoint, removed), half a float, the read-only set register, B2 under B1.
         uint8_t k0[] = { 0x10, 0, 33, 0, 2, 4, 0, 0, 0, 0 };
         f32(0.0f, k0 + 6); req(sizeof k0, k0);       CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_KP] == 400);
@@ -287,7 +307,7 @@ static void tests(void)
         REQ(0x10, 0, 26, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 29, 0, 2, 4, 0, 0, 0, 0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));   // the second half of B1
         uint8_t b[] = { 0x10, 0, 30, 0, 2, 4, 0, 0, 0, 0 };
-        f32(6.0f, b + 6); req(sizeof b, b);          CHECK(is_ex(0x10, MODBUS_EX_REFUSED) && tune[CFG_B2] == 220);
+        f32(6.0f, b + 6); req(sizeof b, b);          CHECK(is_ex(0x10, MODBUS_EX_REFUSED) && tune[CFG_B2] == 110);
         CHECK(strstr(last_event, "B2 must be above B1") != NULL);
         tune_reset();
     }

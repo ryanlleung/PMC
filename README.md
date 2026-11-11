@@ -92,7 +92,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | `limit.c` | Limit switch input: a trip counts at once, the release is debounced (20 ms) |
 | `stepper3.c` | Step sequences (wave, full, half), ramps, absolute moves with retarget, the limit stop, motion timeout |
 | `valve.c` | Modes (NOT HOMED, HOMING, MANUAL, AUTO, SHUTDOWN, OFF), homing, Shut down, % position, STOP, fault latches, the event log (100 kept), runs AUTO |
-| `ctrl.c` | AUTO control step: PID, gain schedule (three sets), anti-windup, deadbands, response monitor and settling checks (no hardware calls; `tools/ctrl-test` runs it on a PC) |
+| `ctrl.c` | AUTO control step: PID, gain schedule (four sets from 0.16.14), anti-windup, deadbands, response monitor and settling checks (no hardware calls; `tools/ctrl-test` runs it on a PC) |
 | `valvepos.c` | Saves the step count at standstill and every 2 s while moving, so a restart can offer it |
 | `cfg.c` | Settings record in serial flash, two sectors in turn, CRC32, read back before it counts |
 | `trend.c` | Trend rings in RAM: 600 one-second samples and 360 ten-second means, on fixed one-second slots |
@@ -169,7 +169,7 @@ The trend and the event log are in RAM and empty after a restart.
 
 ## Text port commands
 
-The text port and Modbus take the same operator command set, and nothing else: what an operator can use and judge away from the cryostat. The text port and Modbus also take the PID gains and the gain schedule (`PID?`, `PID SET`, `PIDS?`, `PIDS SET`, `SCHED?`, `SCHED SET`; Modbus registers 26 to 50). Homing, calibration, the other settings and the motor are on the touch screen. `InitialTesting/remote.c` is the text port; the Modbus registers and coils for the same commands are in `docs/modbus-register-map.md`.
+The text port and Modbus take the same operator command set, and nothing else: what an operator can use and judge away from the cryostat. The text port and Modbus also take the PID gains and the gain schedule (`PID?`, `PID SET`, `PIDS?`, `PIDS SET`, `SCHED?`, `SCHED SET`; Modbus registers 26 to 58). Homing, calibration, the other settings and the motor are on the touch screen. `InitialTesting/remote.c` is the text port; the Modbus registers and coils for the same commands are in `docs/modbus-register-map.md`.
 
 Connect to TCP port 8888 (for example PuTTY in Raw mode), or the USB COM port in the USB build. One client at a time; a new connection replaces the old. Send upper case ASCII, a line ending in LF or CR LF, at most 96 characters. Replies end in CR LF.
 
@@ -189,8 +189,8 @@ The command names are whole words from firmware 0.16.12. To 0.16.11 every first 
 | `ALARM RESET` / `ALARM OK` | Clear the latched faults whose cause has gone / acknowledge the warning, as the screen's OK |
 | `TIME SET <YYYY-MM-DD> <HH:MM:SS>` | Set the clock |
 | `PID SET <kp>,<ti>[,<kd>]` | Set and save the gains of the PID set in use (set 1 with the gain schedule Off), as Save on the PID tuning page: KP in %/mB, TI in min (0 off), KD in %/(mB/s) (0 off, left as it is when not given), 2 dp. KP 0.01 to 100, TI and KD 0 to 100. Taken in AUTO too, at the next control step. Each change is a settings save in flash, so send it when the gains change, not every poll; gains equal to the present ones write nothing |
-| `PIDS SET <set>,<kp>,<ti>[,<kd>]` | As `PID SET`, for PID set 1, 2 or 3 |
-| `SCHED SET <OFF\|PV>,<b1>,<b2>,<h>` | The PID table (gain schedule), saved as `PID SET`: Off (set 1 always) or on the pressure (`SP`, the setpoint, removed in 0.15.20: `ERR 101`); boundaries B1 and B2 in mbar (1 dp, 0.1 to 1000; set 1 below B1, set 2 to B2, set 3 above), hysteresis H in % of the boundary (0 to 40). B2 must be above B1 by more than H either side (`ERR 102`) |
+| `PIDS SET <set>,<kp>,<ti>[,<kd>]` | As `PID SET`, for PID set 1 to 4 (set 4 from 0.16.14) |
+| `SCHED SET <OFF\|PV>,<b1>,<b2>,<b3>,<h>` | The PID table (gain schedule), saved as `PID SET`: Off (set 1 always) or on the pressure (`SP`, the setpoint, removed in 0.15.20: `ERR 101`); boundaries B1, B2 and B3 in mbar (1 dp, 0.1 to 1000; set 1 below B1, set 2 to B2, set 3 to B3, set 4 above; B3 0 for three sets), hysteresis H in % of the boundary (0 to 40). B2 must be above B1, and B3 (unless 0) above B2, by more than H either side (`ERR 102`). B3 from 0.16.14: the four-number form answers `ERR 101` |
 | `PRESSURE?` | `PRESSURE 4.625 mbar` or `PRESSURE NONE` |
 | `SETPOINT?` | `SETPOINT 5.0 mbar` or `SETPOINT NONE` |
 | `MODE?` | `MODE MANUAL`, `MODE AUTO`, `MODE HOMING`, `MODE NOT HOMED`, `MODE SHUTDOWN` (going to 0 % for Shut down) or `MODE OFF` |
@@ -201,8 +201,8 @@ The command names are whole words from firmware 0.16.12. To 0.16.11 every first 
 | `NETWORK?` | `NETWORK STATIC,<address>,<mask>,<MAC>`; `NETWORK NONE` in the USB build |
 | `TIME?` | `TIME 2026-10-27 11:05:00` or `TIME NONE` |
 | `PID?` | `PID 4.00,0.25,0.00`: KP, TI, KD of the PID set in use |
-| `PIDS?` | `PIDS 2,0.10,0.40,0.00,0.80,0.30,0.00,1.20,0.30,0.00`: the set in use (in AUTO the one the schedule has switched to, else the one AUTO would start with), then KP, TI, KD of sets 1, 2 and 3 |
-| `SCHED?` | `SCHED PV,6.0,20.0,15`: the PID table (`OFF` or `PV`), B1, B2 in mbar, H in % |
+| `PIDS?` | `PIDS 2,0.06,0.70,0.00,0.14,1.50,0.00,0.50,1.00,0.00,0.30,0.25,0.00`: the set in use (in AUTO the one the schedule has switched to, else the one AUTO would start with), then KP, TI, KD of sets 1 to 4 |
+| `SCHED?` | `SCHED PV,6.0,10.0,14.0,10`: the PID table (`OFF` or `PV`), B1, B2, B3 in mbar, H in % |
 | `*IDN?` | `MercShore,iPC,<chip id>,<version>` |
 
 Error codes: 100 unknown command (anything not in the table above when network writes are enabled; with writes off, unrecognised input also gets 211), 101 expected form, 102 outside range, 103 line too long, 104 `EVENT?` not on its own line, 201 homing, STOP to cancel, 202 switch to MANUAL first, 203 reset the fault first, 204 home the valve first, 205 no valid pressure, 206 set a setpoint first, 207 setpoint outside the sensor range, 208 pressure above the sensor range, 209 control settings not set, 210 not reset, cause still present, 211 read only over the network, 212 the valve cannot move now (the limit switch, Close or Open held on the screen, the switch question waiting, a calibration point being taken) or the clock is not running, 213 controller off or shutting down (turned on at the screen).

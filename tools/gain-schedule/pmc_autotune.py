@@ -45,9 +45,10 @@ x 0.25 when the swing is larger than the setpoint itself) with PID SET and
 carries on with the lower gain (Ryan, 9 Nov: "make sure it tunes down the
 gains when it oscillates like crazy"; at 2 mbar the 1 mbar gains swung the
 pressure 1 to 10 mbar every 14 s).
-Then the three PID table sets come from the rows in each band (below B1, B1
-to B2, above B2; 6 and 14 mbar by default): the lowest KP of the rows in the
-band and the geometric mean of their TIs.
+Then the PID table sets come from the rows in each band (below B1, B1 to B2,
+B2 to B3, above B3; 6, 10 and 14 mbar by default, four sets from firmware
+0.16.14; B3 0 gives three sets, above B2 the third): the lowest KP of the
+rows in the band and the geometric mean of their TIs.
 
 Learned gains (Ryan, 9 Nov: "it should refine the numbers rather than
 starting fresh every time"): each point's result, with the fit it ended on,
@@ -72,7 +73,7 @@ command, as it happens, each with the KP, TI and KD in force on the board
 after it (log_row, LOG_COLS).
 
 Python 3.8 or later, standard library only. Needs firmware 0.15.8 or later
-(PID SET); the sets need 0.15.15 or later (PIDS SET, SCHED SET).
+(PID SET); the sets need 0.16.14 or later (four sets, SCHED SET with B3).
 """
 import cmath
 import csv
@@ -88,7 +89,7 @@ KP_MIN, KP_MAX = 0.01, 100.0
 TI_MIN, TI_MAX = 0.01, 100.0
 
 POINTS = [1, 2, 4, 8, 12, 16, 24, 48]
-B1, B2, HYST = 6.0, 14.0, 10
+B1, B2, B3, HYST = 6.0, 10.0, 14.0, 10   # four sets (0.16.14); B3 0: three
 
 # Relay test limits.
 D_MIN, D_MAX = 0.1, 5.0        # valve half swing, %
@@ -970,12 +971,16 @@ def geomean(xs):
     return math.exp(sum(math.log(x) for x in xs) / len(xs))
 
 
-def table_sets(rows, b1=B1, b2=B2):
-    """The three PID table sets from the rows: [(set, kp, ti, [points])],
-    kp and ti None where no point fell in that band. Per band: the lowest KP
-    of the rows in it (so no setpoint in the band gets more KP than it was
-    tuned for) and the geometric mean of their TIs; KD is 0."""
-    bands = [lambda s: s < b1, lambda s: b1 <= s < b2, lambda s: s >= b2]
+def table_sets(rows, b1=B1, b2=B2, b3=B3):
+    """The PID table sets from the rows: [(set, kp, ti, [points])], four
+    (three with b3 0), kp and ti None where no point fell in that band. Per
+    band: the lowest KP of the rows in it (so no setpoint in the band gets
+    more KP than it was tuned for) and the geometric mean of their TIs; KD
+    is 0."""
+    if b3:
+        bands = [lambda s: s < b1, lambda s: b1 <= s < b2, lambda s: b2 <= s < b3, lambda s: s >= b3]
+    else:
+        bands = [lambda s: s < b1, lambda s: b1 <= s < b2, lambda s: s >= b2]
     out = []
     for n, inside in enumerate(bands, 1):
         rs = [r for r in rows if inside(r['sp_mbar'])]
@@ -987,10 +992,11 @@ def table_sets(rows, b1=B1, b2=B2):
     return out
 
 
-def write_lines(sets, b1=B1, b2=B2, h=HYST):
-    """The text-port lines that put the sets and the PID table on the board."""
+def write_lines(sets, b1=B1, b2=B2, b3=B3, h=HYST):
+    """The text-port lines that put the sets and the PID table on the board
+    (firmware 0.16.14: SCHED SET with B3)."""
     lines = ['PIDS SET %d,%.2f,%.2f,0' % (n, kp, ti) for n, kp, ti, _ in sets if kp is not None]
-    lines.append('SCHED SET PV,%.1f,%.1f,%d' % (b1, b2, h))
+    lines.append('SCHED SET PV,%.1f,%.1f,%.1f,%d' % (b1, b2, b3, h))
     return lines
 
 
@@ -1714,15 +1720,19 @@ STEP_FIRST_MAX_S = 600         # the most it waits for the first setpoint to hol
 # "initialise to the kp ti kd values that you came up with for 6 and 14 mbar
 # boundaries"): sets 1 and 2 from the 10 Nov proposal, set 3 from the 11 Nov
 # bench run; (KP %/mbar, TI min, KD) per set, then B1, B2 mbar and H %.
-STEP_SETS = [(0.06, 0.70, 0.0), (0.14, 1.50, 0.0), (0.30, 0.25, 0.0)]
-STEP_B1, STEP_B2, STEP_H = 6.0, 14.0, 10
+# Four sets from firmware 0.16.14 (Ryan, 11 Nov "Yes fourth set", after the
+# 17:26 step test stalled at 8 to 16 mbar on set 2): 10 to 14 mbar gets a
+# set of its own, 0.50/1.00 (bench model thread, fitted to the 17:26 log),
+# and the old set 3 moves to set 4; B1, B2, B3 6, 10, 14 mbar.
+STEP_SETS = [(0.06, 0.70, 0.0), (0.14, 1.50, 0.0), (0.50, 1.00, 0.0), (0.30, 0.25, 0.0)]
+STEP_B1, STEP_B2, STEP_B3, STEP_H = 6.0, 10.0, 14.0, 10
 
 
-def table_lines(sets, b1, b2, h):
-    """The text-port lines for three PID sets [(kp, ti, kd)] and the PID
-    table on the pressure."""
+def table_lines(sets, b1, b2, b3, h):
+    """The text-port lines for the PID sets [(kp, ti, kd)] (four, or three
+    with b3 0) and the PID table on the pressure (firmware 0.16.14)."""
     return ['PIDS SET %d,%.2f,%.2f,%.2f' % (n, kp, ti, kd) for n, (kp, ti, kd) in enumerate(sets, 1)] + \
-        ['SCHED SET PV,%g,%g,%d' % (b1, b2, h)]
+        ['SCHED SET PV,%g,%g,%g,%d' % (b1, b2, b3, h)]
 
 
 def step_band(sp):
@@ -1935,7 +1945,7 @@ def found(link):
         out['sched'] = s[6:]
         g = link.ask('PIDS?')[0][5:].split(',')
         out['set1'] = [float(v) for v in g[1:4]]
-        out['sets'] = [[float(v) for v in g[1 + 3 * k:4 + 3 * k]] for k in range(3)]
+        out['sets'] = [[float(v) for v in g[1 + 3 * k:4 + 3 * k]] for k in range((len(g) - 1) // 3)]
     except Refused:
         pass                     # firmware before 0.15.15: one set
     return out

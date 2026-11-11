@@ -20,23 +20,32 @@ int ctrl_pick_set(const ctrl_tune_t *k, int now, float x)
 {
     if (k->sched != CTRL_SCHED_PV)
         return 1;
+    // Four sets when boundary 3 is above boundary 2 (0.16.14), else three.
+    const int top = ctrl_sets(k);
     // With no set yet, straight from the boundaries.
-    if (now < 1 || now > 3)
-        return x < k->b1 ? 1 : x < k->b2 ? 2 : 3;
+    if (now < 1 || now > top)
+        return x < k->b1 ? 1 : x < k->b2 ? 2 : top == 3 || x < k->b3 ? 3 : 4;
     // On the pressure, a set holds until the pressure is past its boundary
-    // by the hysteresis; a large move can pass both in one step.
+    // by the hysteresis; a large move can pass several in one step.
     const float up = 1.0f + k->hyst, down = 1.0f - k->hyst;
     if (now == 1 && x > k->b1 * up) now = 2;
     if (now == 2 && x > k->b2 * up) now = 3;
+    if (now == 3 && top == 4 && x > k->b3 * up) now = 4;
+    if (now == 4 && x < k->b3 * down) now = 3;
     if (now == 3 && x < k->b2 * down) now = 2;
     if (now == 2 && x < k->b1 * down) now = 1;
     return now;
 }
 
+int ctrl_sets(const ctrl_tune_t *k)
+{
+    return k->b3 > k->b2 ? 4 : 3;
+}
+
 ctrl_pid_t ctrl_set_gains(const ctrl_tune_t *k, int set)
 {
-    if (set == 2 || set == 3)
-        return k->set23[set - 2];
+    if (set >= 2 && set <= 4)
+        return k->sets[set - 2];
     ctrl_pid_t g = { k->kp, k->ti, k->kd };
     return g;
 }
@@ -70,8 +79,8 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
     if (c->sp < 0 || c->sp > fs)    return "Setpoint outside the sensor range";
     if (pv > fs)                    return "Pressure above the sensor range";
     if (!k->kdir)                   return "Pressure response not set";
-    // Set 1 always; sets 2 and 3 when the schedule can pick them.
-    for (int s = 1; s <= (k->sched == CTRL_SCHED_OFF ? 1 : 3); s++) {
+    // Set 1 always; sets 2 to 4 when the schedule can pick them.
+    for (int s = 1; s <= (k->sched == CTRL_SCHED_OFF ? 1 : ctrl_sets(k)); s++) {
         const ctrl_pid_t g = ctrl_set_gains(k, s);
         if (!(g.kp > 0) || g.ti < 0)
             return "Tuning not set";

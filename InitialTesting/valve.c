@@ -660,16 +660,17 @@ static ctrl_tune_t tune_now(void)
     k.kd = (float)cfg_tune(CFG_KD) / 100.0f;
     k.pos_max = pm();
     k.steps = stepper3_scale();
-    // Sets 2 and 3, the schedule (0.1 mbar boundaries, % hysteresis) and
+    // Sets 2 to 4, the schedule (0.1 mbar boundaries, % hysteresis) and
     // the closing deadband (0 = none: one step).
-    for (int s = 2; s <= 3; s++) {
-        k.set23[s - 2].kp = (float)cfg_tune(cfg_pid_key(s, 0)) / 100.0f;
-        k.set23[s - 2].ti = (float)cfg_tune(cfg_pid_key(s, 1)) / 100.0f;
-        k.set23[s - 2].kd = (float)cfg_tune(cfg_pid_key(s, 2)) / 100.0f;
+    for (int s = 2; s <= 4; s++) {
+        k.sets[s - 2].kp = (float)cfg_tune(cfg_pid_key(s, 0)) / 100.0f;
+        k.sets[s - 2].ti = (float)cfg_tune(cfg_pid_key(s, 1)) / 100.0f;
+        k.sets[s - 2].kd = (float)cfg_tune(cfg_pid_key(s, 2)) / 100.0f;
     }
     k.sched = (int)cfg_tune(CFG_SCHED);
     k.b1 = (float)cfg_tune(CFG_B1) / 10.0f;
     k.b2 = (float)cfg_tune(CFG_B2) / 10.0f;
+    k.b3 = (float)cfg_tune(CFG_B3) / 10.0f;
     k.hyst = (float)cfg_tune(CFG_HYST) / 100.0f;
     k.db_close = cfg_tune(CFG_DBC) > 0 ? sc(cfg_tune(CFG_DBC)) : 1;
     return k;
@@ -683,7 +684,7 @@ int valve_pid_set(void)
     ctrl_tune_t k = tune_now();
     if (k.sched == CTRL_SCHED_OFF)
         return 1;
-    if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 3)
+    if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 4)
         return ctl.set;
     return pv_ok ? ctrl_pick_set(&k, 0, ctl.sp_set ? fminf(pv_mbar, ctl.sp) : pv_mbar) : 1;
 }

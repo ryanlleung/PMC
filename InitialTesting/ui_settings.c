@@ -141,7 +141,8 @@ static const field_t F[CFG_N] = {
     [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "Process direction; normally opening raises the pressure" },
     [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "In-band tolerance about the setpoint" },
     [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
-    // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD).
+    // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD);
+    // set 4 and boundary 3 from 0.16.14.
     [CFG_KP2]     = { "Set 2 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI2]     = { "Set 2 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD2]     = { "Set 2 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
@@ -153,6 +154,10 @@ static const field_t F[CFG_N] = {
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
     [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },
     [CFG_DBC]     = { "Deadband close", "steps", 0, K_NUM, "AUTO closing moves below this are skipped" },
+    [CFG_KP4]     = { "Set 4 KP", "%/mB", 2, K_NUM, "Proportional gain" },
+    [CFG_TI4]     = { "Set 4 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
+    [CFG_KD4]     = { "Set 4 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
+    [CFG_B3]      = { "Boundary 3", "mB", 1, K_NUM, "Set 3 / set 4 switch point; 0 = no set 4 (three sets)" },
 };
 
 static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
@@ -883,13 +888,15 @@ static const tab_t valve_tabs[3] = {
 // name on their own tab, the rest of AUTO's settings on the other. From
 // 0.15.15 (Ryan 5 Nov, "build like industry ones"): three PID sets, the
 // PID tab showing one at a time (the keys here are set 1's; the set row
-// picks), and the gain schedule on its own tab.
+// picks), and the gain schedule on its own tab. From 0.16.14 (Ryan 11 Nov,
+// "Yes fourth set"): four sets and a third boundary; the PID table tab has
+// the two switches on its first row and the three boundaries under them.
 static const tab_t tune_tabs[3] = {
     { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3,
-      "PID table on: three sets, tap one to edit; dot = set in use. PID table off: set 1 only. "
+      "PID table on: four sets, tap one to edit; dot = set in use. PID table off: set 1 only. "
       "Applied at the next control step; Save to keep.", true },
-    { "PID table", { CFG_SCHED, CFG_HYST, CFG_B1, CFG_B2 }, 4,
-      "Set 1 below B1, set 2 between, set 3 above B2. Set changes are bumpless. "
+    { "PID table", { CFG_SCHED, CFG_HYST, CFG_B1, CFG_B2, CFG_B3 }, 5,
+      "Set 1 below B1, set 2 to B2, set 3 to B3, set 4 above B3 (B3 0: three sets). Set changes are bumpless. "
       "Applied at the next control step; Save to keep." },
     { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
       "Applied at the next control step; Save to keep." },
@@ -924,9 +931,9 @@ static struct {
     ecard_t f[6];
     lv_obj_t *seg, *segb[3];
     lv_obj_t *scr;
-    int set;                                   // the PID set the PID tab shows, 1 to 3
+    int set;                                   // the PID set the PID tab shows, 1 to 4
     bool sets;                                 // the PID tab shows the set row (schedule on)
-    lv_obj_t *sel, *selb[3], *selr[3], *seld[3];   // the set row: track, segments, range lines, in-use dots
+    lv_obj_t *sel, *selb[4], *selr[4], *seld[4];   // the set row: track, segments, range lines, in-use dots
 } pg;
 
 // The key a tab shows in place i: on the PID tab, the set picked.
@@ -970,9 +977,9 @@ static lv_obj_t *segs_make(lv_obj_t *scr, int32_t y, int n, lv_obj_t **b, lv_eve
 // The set row: "Set 2" over its pressures, a dot on the set in use.
 static void sel_make(void)
 {
-    pg.sel = segs_make(pg.scr, RY[1], 3, pg.selb, set_cb, 1);
-    int32_t iw = (343 - 8) / 3;
-    for (int i = 0; i < 3; i++) {
+    pg.sel = segs_make(pg.scr, RY[1], 4, pg.selb, set_cb, 1);
+    int32_t iw = (343 - 8) / 4;
+    for (int i = 0; i < 4; i++) {
         char t[8];
         lv_snprintf(t, sizeof t, "Set %d", i + 1);
         ui_label(pg.selb[i], 0, 2, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, t);
@@ -987,21 +994,30 @@ static void sel_make(void)
         lv_obj_set_style_border_width(pg.seld[i], 0, 0);
         lv_obj_set_style_bg_color(pg.seld[i], UI_TEXT, 0);
     }
-    segs_draw(pg.selb, 3, pg.set - 1);
+    segs_draw(pg.selb, 4, pg.set - 1);
 }
 
 static void sel_refresh(void)
 {
-    char a[16], b[16], t[3][28];
-    fixed_fmt(a, sizeof a, shown(CFG_B1), 1);
-    fixed_fmt(b, sizeof b, shown(CFG_B2), 1);
-    lv_snprintf(t[0], sizeof t[0], "below %s mB", a);
-    lv_snprintf(t[1], sizeof t[1], "%s to %s mB", a, b);
-    lv_snprintf(t[2], sizeof t[2], "%s mB up", b);
+    // Four segments of 83 px (0.16.14): the pressures without "mB",
+    // "< 6.0", "6.0-10.0", "> 14.0"; B3 0 (three sets): set 4 "Not used".
+    char b[3][16], t[4][28];
+    fixed_fmt(b[0], sizeof b[0], shown(CFG_B1), 1);
+    fixed_fmt(b[1], sizeof b[1], shown(CFG_B2), 1);
+    fixed_fmt(b[2], sizeof b[2], shown(CFG_B3), 1);
+    lv_snprintf(t[0], sizeof t[0], "< %s", b[0]);
+    lv_snprintf(t[1], sizeof t[1], "%s-%s", b[0], b[1]);
+    if (shown(CFG_B3) != 0) {
+        lv_snprintf(t[2], sizeof t[2], "%s-%s", b[1], b[2]);
+        lv_snprintf(t[3], sizeof t[3], "> %s", b[2]);
+    } else {
+        lv_snprintf(t[2], sizeof t[2], "> %s", b[1]);
+        lv_snprintf(t[3], sizeof t[3], "Not used");
+    }
     // The dot only while the schedule in use is on (a draft schedule
     // picks nothing yet).
     const int use = live(CFG_SCHED) != CTRL_SCHED_OFF ? valve_pid_set() : 0;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
         ui_set_text(pg.selr[i], t[i]);
         if ((i + 1 == use) == lv_obj_has_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN)) {
             if (i + 1 == use) lv_obj_remove_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN);
@@ -1043,9 +1059,18 @@ static void pg_fields(void)
             ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, cap, field_event, (void *)(intptr_t)k);
         }
     }
-    for (int i = 0; i < t->n && !t->tall; i++)
+    // Two columns; five fields (the PID table tab, 0.16.14) as two over
+    // three, the three short-captioned.
+    for (int i = 0; i < t->n && !t->tall; i++) {
+        if (t->n == 5 && i >= 2) {
+            static const char *const bn[3] = { "B1, mB", "B2, mB", "B3, mB" };
+            ecard_make(&pg.f[i], pg.scr, 10 + (i - 2) * 117, RY[y0 + 1], 109, bn[i - 2],
+                       field_event, (void *)(intptr_t)t->keys[i]);
+            continue;
+        }
         ecard_make(&pg.f[i], pg.scr, C2X[i % 2], RY[y0 + i / 2], C2W[i % 2], caption(cap, sizeof cap, t->keys[i]),
                    field_event, (void *)(intptr_t)t->keys[i]);
+    }
 }
 
 static void segs_draw(lv_obj_t *const *b, int n, int on)

@@ -333,31 +333,37 @@ class Rules(unittest.TestCase):
         self.assertEqual(at.step_figures(rows, 6.0, 5.0, 0.05)['sag_s'], 0)
 
     def test_sets(self):
-        # the six bench results: 2 and 4 mbar below B1 = 6, 8 and 12 to B2 = 14, 16 and 24 above (16 mbar is
-        # clear of the switching point at 14 mbar with H = 10 %: it would sit on it at 20 mbar with 15 %)
+        # the six bench results: 2 and 4 mbar below B1 = 6, 8 to B2 = 10, 12 to B3 = 14, 16 and 24 above (16 mbar
+        # is clear of the switching point at 14 mbar with H = 10 %: it would sit on it at 20 mbar with 15 %)
         rows = [{'sp_mbar': s, 'kp': kp, 'ti_min': ti} for s, _, _, _, _, _, kp, ti in BENCH]
         sets = at.table_sets(rows)
-        self.assertEqual((at.B1, at.B2, at.HYST), (6.0, 14.0, 10))
-        self.assertEqual([s[3] for s in sets], [[2, 4], [8, 12], [16, 24]])
-        self.assertEqual([s[1] for s in sets], [0.07, 0.16, 0.20])             # the lowest KP of the rows
+        self.assertEqual((at.B1, at.B2, at.B3, at.HYST), (6.0, 10.0, 14.0, 10))
+        self.assertEqual([s[3] for s in sets], [[2, 4], [8], [12], [16, 24]])
+        self.assertEqual([s[1] for s in sets], [0.07, 0.16, 0.45, 0.20])       # the lowest KP of the rows
         self.assertAlmostEqual(sets[0][2], round(math.sqrt(2.33 * 1.17), 2))   # the geometric mean of the TIs
-        self.assertAlmostEqual(sets[1][2], round(math.sqrt(1.42 * 1.67), 2))
-        self.assertAlmostEqual(sets[2][2], round(math.sqrt(0.21 * 0.25), 2))
+        self.assertAlmostEqual(sets[1][2], 1.42)
+        self.assertAlmostEqual(sets[2][2], 1.67)
+        self.assertAlmostEqual(sets[3][2], round(math.sqrt(0.21 * 0.25), 2))
         self.assertEqual(at.write_lines(sets),
-                         ['PIDS SET 1,0.07,1.65,0', 'PIDS SET 2,0.16,1.54,0', 'PIDS SET 3,0.20,0.23,0',
-                          'SCHED SET PV,6.0,14.0,10'])
-        # on the boundary: 6 is in set 2, 14 in set 3
-        sets = at.table_sets([{'sp_mbar': s, 'kp': 0.1, 'ti_min': 1.0} for s in (6, 14)])
-        self.assertEqual([s[3] for s in sets], [[], [6], [14]])
+                         ['PIDS SET 1,0.07,1.65,0', 'PIDS SET 2,0.16,1.42,0', 'PIDS SET 3,0.45,1.67,0',
+                          'PIDS SET 4,0.20,0.23,0', 'SCHED SET PV,6.0,10.0,14.0,10'])
+        # B3 0: three sets, 8 and 12 together as before 0.16.14
+        sets = at.table_sets(rows, 6.0, 14.0, 0)
+        self.assertEqual([s[3] for s in sets], [[2, 4], [8, 12], [16, 24]])
+        self.assertEqual([s[1] for s in sets], [0.07, 0.16, 0.20])
+        self.assertEqual(at.write_lines(sets, 6.0, 14.0, 0)[-1], 'SCHED SET PV,6.0,14.0,0.0,10')
+        # on the boundary: 6 is in set 2, 10 in set 3, 14 in set 4
+        sets = at.table_sets([{'sp_mbar': s, 'kp': 0.1, 'ti_min': 1.0} for s in (6, 10, 14)])
+        self.assertEqual([s[3] for s in sets], [[], [6], [10], [14]])
         # A band with no point: left as it is.
         sets = at.table_sets(rows[2:])
         self.assertEqual(sets[0][1:], (None, None, []))
-        self.assertEqual(len(at.write_lines(sets)), 3)
+        self.assertEqual(len(at.write_lines(sets)), 4)
 
     def test_put_back(self):
-        f = {'sp': 8.0, 'mode': 'AUTO', 'valve': 4.2, 'pid': [0.1, 0.4, 0.0], 'sched': 'PV,6.0,20.0,15',
+        f = {'sp': 8.0, 'mode': 'AUTO', 'valve': 4.2, 'pid': [0.1, 0.4, 0.0], 'sched': 'PV,6.0,10.0,14.0,15',
              'set1': [0.1, 0.4, 0.0]}
-        self.assertEqual(at.put_back_lines(f), ['PIDS SET 1,0.10,0.40,0.00', 'SCHED SET PV,6.0,20.0,15',
+        self.assertEqual(at.put_back_lines(f), ['PIDS SET 1,0.10,0.40,0.00', 'SCHED SET PV,6.0,10.0,14.0,15',
                                                 'SETPOINT 8.0', 'MODE AUTO'])
         f.update(mode='MANUAL', sched=None)
         self.assertEqual(at.put_back_lines(f), ['PID SET 0.10,0.40,0.00', 'SETPOINT 8.0', 'MODE MANUAL',
@@ -410,8 +416,8 @@ class FakeBoard:
     def __init__(self, plant, sched=True):
         self.P, self.sched = plant, sched
         self.mode, self.sp = 'MANUAL', 5.0
-        self.sets = [[4.0, 0.25, 0.0], [4.0, 0.25, 0.0], [4.0, 0.25, 0.0]]
-        self.table = 'OFF,6.0,20.0,15'
+        self.sets = [[4.0, 0.25, 0.0], [4.0, 0.25, 0.0], [4.0, 0.25, 0.0], [4.0, 0.25, 0.0]]
+        self.table = 'OFF,6.0,10.0,14.0,15'
         self.i = 0.0
         self.t_loop = 0.0
         self.log = []
@@ -527,7 +533,7 @@ class Sequence(unittest.TestCase):
         b = FakeBoard(plant)
         b.advance(200)
         f = at.found(b)
-        self.assertEqual(f['sched'], 'OFF,6.0,20.0,15')
+        self.assertEqual(f['sched'], 'OFF,6.0,10.0,14.0,15')
         a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
         d = tempfile.mkdtemp()
         t = at.AutoTuner(b, Clock(b), a, d)
@@ -550,7 +556,7 @@ class Sequence(unittest.TestCase):
             self.assertEqual(len(ups), 1, ups)
         for line in at.put_back_lines(f):
             b.do(line)
-        self.assertEqual((b.mode, b.sets[0], b.table), ('MANUAL', [4.0, 0.25, 0.0], 'OFF,6.0,20.0,15'))
+        self.assertEqual((b.mode, b.sets[0], b.table), ('MANUAL', [4.0, 0.25, 0.0], 'OFF,6.0,10.0,14.0,15'))
 
         # The log (Ryan, 11 Nov): every calculation, decision, gain change and
         # command, each with the gains on the board after it.
@@ -1013,9 +1019,9 @@ class SetpointSteps(unittest.TestCase):
         self.assertFalse(any(x.startswith(('PID SET', 'PIDS SET', 'SCHED SET')) for x in b.log))   # the board's gains
 
     def test_the_table_it_writes_first(self):
-        self.assertEqual(at.table_lines(at.STEP_SETS, at.STEP_B1, at.STEP_B2, at.STEP_H),
-                         ['PIDS SET 1,0.06,0.70,0.00', 'PIDS SET 2,0.14,1.50,0.00', 'PIDS SET 3,0.30,0.25,0.00',
-                          'SCHED SET PV,6,14,10'])
+        self.assertEqual(at.table_lines(at.STEP_SETS, at.STEP_B1, at.STEP_B2, at.STEP_B3, at.STEP_H),
+                         ['PIDS SET 1,0.06,0.70,0.00', 'PIDS SET 2,0.14,1.50,0.00', 'PIDS SET 3,0.50,1.00,0.00',
+                          'PIDS SET 4,0.30,0.25,0.00', 'SCHED SET PV,6,10,14,10'])
 
     def test_ends_when_the_board_leaves_auto(self):
         plant = Plant(K=2.0, L=2.0, tau=8.0, noise=0.01)

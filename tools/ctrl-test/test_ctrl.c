@@ -415,10 +415,34 @@ int main(int argc, char **argv)
                   ctrl_pick_set(&k, 1, 50) == 3 && ctrl_pick_set(&k, 3, 2) == 1;
         CHECK(off && sp && pv, "schedule: Off (and 1, the old SP) set 1; PV 1>2 past 9.2, 2>3 past 34.5, 3>2 under 25.5, "
               "2>1 under 6.8 mB, both at once on a large move");
-        k.set23[1].kp = 0;
+        k.sets[1].kp = 0;
         CHECK(!strcmp(ctrl_check(&C, &k, true, false, true, 5, FS), "Tuning not set"), "schedule on: a set with KP 0 refused");
         k.sched = CTRL_SCHED_OFF;
         CHECK(ctrl_check(&C, &k, true, false, true, 5, FS) == NULL, "schedule Off: sets 2 and 3 not checked");
+    }
+    // Four sets (0.16.14): boundary 3 above boundary 2 adds set 4; not above
+    // it (0, initialisers without it), three sets as before.
+    {
+        ctrl_tune_t k = K;
+        k.sched = CTRL_SCHED_PV;
+        k.b1 = 6; k.b2 = 10; k.b3 = 14; k.hyst = 0.1f;
+        for (int s = 0; s < 3; s++)
+            k.sets[s] = (ctrl_pid_t){ 0.5f, 1.0f, 0 };
+        // Up: 1>2 past 6.6, 2>3 past 11, 3>4 past 15.4. Down: 4>3 under 12.6, 3>2 under 9, 2>1 under 5.4.
+        const bool four = ctrl_sets(&k) == 4 &&
+            ctrl_pick_set(&k, 0, 5) == 1 && ctrl_pick_set(&k, 0, 8) == 2 && ctrl_pick_set(&k, 0, 12) == 3 &&
+            ctrl_pick_set(&k, 0, 20) == 4 &&
+            ctrl_pick_set(&k, 3, 15.3f) == 3 && ctrl_pick_set(&k, 3, 15.5f) == 4 &&
+            ctrl_pick_set(&k, 4, 12.7f) == 4 && ctrl_pick_set(&k, 4, 12.5f) == 3 &&
+            ctrl_pick_set(&k, 3, 9.1f) == 3 && ctrl_pick_set(&k, 3, 8.9f) == 2 &&
+            ctrl_pick_set(&k, 1, 50) == 4 && ctrl_pick_set(&k, 4, 2) == 1;
+        k.sets[2].kp = 0;
+        const bool check4 = ctrl_check(&C, &k, true, false, true, 5, FS) != NULL;
+        k.b3 = 0;
+        const bool three = ctrl_sets(&k) == 3 && ctrl_pick_set(&k, 0, 20) == 3 && ctrl_pick_set(&k, 3, 500) == 3 &&
+                           ctrl_check(&C, &k, true, false, true, 5, FS) == NULL;
+        CHECK(four && check4 && three, "four sets: 6, 10 and 14 mB with 10 %%: 1>2>3>4 past 6.6, 11 and 15.4, back under "
+              "12.6, 9 and 5.4, all at once on a large move; set 4 with KP 0 refused; boundary 3 0 keeps three sets");
     }
     // Schedule Off runs exactly as before, whatever sets 2 and 3 hold.
     {
@@ -428,8 +452,8 @@ int main(int argc, char **argv)
         for (int f = 0; f < 2; f++) {
             K = kk;
             if (f) {
-                K.set23[0] = (ctrl_pid_t){ 1.0f, 0.5f, 0 };
-                K.set23[1] = (ctrl_pid_t){ 9.0f, 0.1f, 0.5f };
+                K.sets[0] = (ctrl_pid_t){ 1.0f, 0.5f, 0 };
+                K.sets[1] = (ctrl_pid_t){ 9.0f, 0.1f, 0.5f };
                 K.b1 = 6; K.b2 = 8; K.hyst = 0.1f;
             }
             fresh();
@@ -453,8 +477,8 @@ int main(int argc, char **argv)
         const ctrl_tune_t kk = K;
         K.sched = CTRL_SCHED_PV;
         K.b1 = 6; K.b2 = 8.5f; K.hyst = 0.1f;   // up past 6.6 and 9.35, down under 7.65 and 5.4
-        K.set23[0] = (ctrl_pid_t){ 3.0f, 0.25f, 0 };
-        K.set23[1] = (ctrl_pid_t){ 2.0f, 0.30f, 0 };
+        K.sets[0] = (ctrl_pid_t){ 3.0f, 0.25f, 0 };
+        K.sets[1] = (ctrl_pid_t){ 2.0f, 0.30f, 0 };
         fresh();
         set_sp(5);
         to_auto();
@@ -500,8 +524,8 @@ int main(int argc, char **argv)
         ctrl_tune_t k = K;
         k.sched = CTRL_SCHED_PV;
         k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
-        k.set23[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
-        k.set23[1] = (ctrl_pid_t){ 0.20f, 0.25f, 0 };
+        k.sets[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
+        k.sets[1] = (ctrl_pid_t){ 0.20f, 0.25f, 0 };
         ctrl_t c;
         ctrl_init(&c);
         ctrl_set_sp(&c, 4, FS, 0);
@@ -536,8 +560,8 @@ int main(int argc, char **argv)
         ctrl_tune_t k = K;
         k.sched = CTRL_SCHED_PV;
         k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
-        k.set23[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
-        k.set23[1] = (ctrl_pid_t){ 0.30f, 0.25f, 0 };
+        k.sets[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
+        k.sets[1] = (ctrl_pid_t){ 0.30f, 0.25f, 0 };
         k.db = k.db_close = 1;
         const float per = 0.14f / 100.0f * (float)k.pos_max;   // set 2's KP, steps per mB
         long kick[2];
