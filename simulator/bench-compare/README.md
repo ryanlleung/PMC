@@ -15,5 +15,13 @@ python3 plot_bench.py replay.csv out.png "title" [--log] [--from S] [--to S] [--
 | `1109-1-mbar.png` | 9 Nov: 1 mbar autotune, then the 2 mbar reach that swung |
 | `1109-2-to-16-mbar.png` | 9 Nov: 2 to 16 mbar autotune |
 | `1109-16-and-24-mbar.png` | 9 Nov 16:23: 16 and 24 mbar autotune |
+| `1111-step-test.png` | 11 Nov 17:26: the GUI setpoint step test, each step against the simulator's step test with the table as run (0.16.12) and with the proposed table (0.16.13) |
+
+For a GUI step test, `step_figures.py` works out each step's figures from the session CSV (rise 10 to 90 %, settling into 5 % of the setpoint, overshoot, end error over the last 30 s, the valve's kick in the first 3 s), and `plot_step_test.py` puts each step of the bench and of simulator runs of the same steps side by side:
+
+```
+python3 step_figures.py pmc_session_<date>_<time>.csv figures.json
+python3 plot_step_test.py out.png pmc_session_<date>_<time>.csv "sim=pmc_<sim run>.csv"
+```
 
 The session logs themselves are not in the repository.
