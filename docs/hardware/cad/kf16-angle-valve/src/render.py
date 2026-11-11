@@ -8,7 +8,7 @@ src, out = sys.argv[1], sys.argv[2]
 os.makedirs(out, exist_ok=True)
 COL = {"steel": (0.78, 0.80, 0.83), "alu": (0.84, 0.85, 0.87), "alu_d": (0.66, 0.68, 0.71), "black": (0.07, 0.07, 0.08),
        "black2": (0.16, 0.16, 0.17), "cable": (0.10, 0.10, 0.10), "nickel": (0.78, 0.78, 0.74), "tube": (0.25, 0.45, 0.85),
-       "bronze": (0.62, 0.52, 0.35)}
+       "bronze": (0.62, 0.52, 0.35), "label": (0.86, 0.86, 0.84)}
 
 
 def actors():
@@ -34,7 +34,7 @@ def shot(direction, fn, zoom=1.15, up=(0, 0, 1), size=(1100, 1300)):
     for a in actors():
         r.AddActor(a)
     w = vtk.vtkRenderWindow(); w.SetOffScreenRendering(1); w.AddRenderer(r); w.SetSize(*size); w.SetMultiSamples(8)
-    c = r.GetActiveCamera(); fp = (-10, -10, 40)
+    c = r.GetActiveCamera(); fp = (-5, 0, 55)
     c.SetFocalPoint(*fp); c.SetPosition(*(fp[i] + direction[i] * 400 for i in range(3))); c.SetViewUp(*up)
     r.ResetCamera(); c.Zoom(zoom); w.Render()
     f = vtk.vtkWindowToImageFilter(); f.SetInput(w); f.Update()

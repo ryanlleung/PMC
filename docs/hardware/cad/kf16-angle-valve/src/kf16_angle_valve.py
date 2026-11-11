@@ -1,37 +1,44 @@
 """KF16 right-angle ("L type") pneumatic vacuum valve with a 24 V solenoid pilot, CadQuery.
 
-Taken as the usual Chinese GDQ-J16(B) pattern: stainless angle body with two
-ISO-KF DN16 ports, bellows bonnet, single-acting air cylinder (spring closes,
-air opens) and a small 3/2 solenoid pilot valve on top, whose black coil takes
-a DIN plug and cable. Only the KF16 flange is a standard size; every other size
-is ESTIMATED until the part or the listing drawing is measured.
+GDQ-J16/KF (B version: solenoid pilot fitted). The flange, A and H are from the
+listing's dimension table and drawing. The other sizes are read off the listing
+photo, scaled from the 30 mm flange, and are ESTIMATED.
 
 Origin: where the two port axes meet. Axial port faces -Z, side port faces +X,
-actuator up +Z.
+actuator up +Z, pilot on the -X face of the cylinder with its fittings facing -Y.
 
     python3 kf16_angle_valve.py OUTDIR
 """
 import math, os, sys
 import cadquery as cq
 
-# ---- ISO-KF DN16 flange (standard)
-KF_OD, KF_BORE, KF_RIM, KF_TAPER = 30.0, 16.0, 3.0, 15.0   # RIM ASSUMED
-TUBE_OD = 19.0                                              # ASSUMED
+# ---- from the listing (GDQ-J16/KF row of the dimension table, and the drawing)
+KF_OD = 30.0      # phi D
+KF_RECESS = 17.2  # phi B, bore at the sealing face (centring ring seat)
+RECESS_DEPTH = 2.5  # "2.5" on the drawing, READ as the depth of phi B
+KF_BORE = 16.0    # DN
+KF_RIM = 3.0      # "3 +/- 0.05" on the drawing
+KF_TAPER = 15.0   # "15 deg +/- 10'"
+A = 40.0          # centre to each sealing face
+H = 190.0         # axial port face to the top of the pilot
 
-# ---- valve, all ESTIMATED
-A = 40.0          # centre to sealing face, both ports
-H = 118.0         # axial port face to top of the cylinder
-BODY_D = 30.0     # angle body (vertical cylinder)
-BODY_TOP = 12.0
-BONNET_D, BONNET_H = 38.0, 6.0      # bonnet clamp collar
-NECK_D = 26.0                        # bellows housing
-CYL_D = 46.0                         # air cylinder (anodised aluminium)
-CYL_Z0 = 40.0
-CYL_TOP = H - A                      # = 78 above the origin
-# pilot valve (3/2 solenoid, 24 V DC), lying on the cylinder cap
-PIL_L, PIL_W, PIL_H = 40.0, 18.0, 16.0
-COIL = (22.0, 22.0, 28.0)            # black coil, square body
-PLUG = (27.0, 27.0, 18.0)            # DIN 43650 form B (industrial) plug, black
+# ---- read off the listing photo, scaled from the 30 mm flange: ESTIMATED
+TUBE_OD = 20.0                     # side port tube and the neck under the axial flange
+BODY_D, BODY_TOP = 28.0, 17.0      # round stainless body, top above the origin
+COLLAR_D = 48.0                    # bonnet collar stack with the label band
+PLATE = 44.0                       # square plate under the cylinder
+CYL_Z0, CYL_Z1 = 45.0, 92.0        # square compact air cylinder
+CYL_W = 40.0
+BOSS_D = 22.0
+# pilot (5-port solenoid valve) on the -X face of the cylinder, coil on top
+PIL_X0, PIL_X1 = -CYL_W / 2 - 18.0, -CYL_W / 2
+PIL_Y = 11.0                       # half depth
+PIL_Z0, PIL_Z1 = 48.0, 97.0
+SOL_Z1 = 115.0                     # black solenoid tube section
+COIL_Z0, COIL_Z1 = 115.0, 143.0    # black coil, 28 x 28
+COIL_W = 28.0
+COIL_XC = -20.0
+PLUG_D = 18.0                      # DIN plug, on the coil +X face, gland pointing down
 CABLE_D = 6.0
 
 
@@ -41,7 +48,6 @@ def kf_flange(face, direction):
     t2 = KF_RIM + (ro - rt) * math.tan(math.radians(KF_TAPER))
     pts = [(0, 0), (ro, 0), (ro, KF_RIM), (rt, t2), (0, t2)]
     s = cq.Workplane("XZ").polyline(pts).close().revolve(360, (0, 0, 0), (0, 1, 0)).val()
-    # built facing -Z (t runs +Z from the face). Turn to face `direction`.
     d = cq.Vector(*direction)
     if d.z > 0.5:
         s = s.rotate((0, 0, 0), (1, 0, 0), 180)
@@ -58,50 +64,60 @@ def box(x0, x1, y0, y1, z0, z1):
     return cq.Solid.makeBox(x1 - x0, y1 - y0, z1 - z0, cq.Vector(x0, y0, z0))
 
 
+def W(s):
+    return cq.Workplane().add(s)
+
+
 def build():
     parts = {}
-    # body: vertical cylinder plus the side branch
     fa, t = kf_flange((0, 0, -A), (0, 0, -1))
     fs, _ = kf_flange((A, 0, 0), (1, 0, 0))
-    body = (cq.Workplane().add(cyl((0, 0, -A + t - 0.1), TUBE_OD, A - t + 0.1 - 6))
-            .union(cq.Workplane().add(cyl((0, 0, -9), BODY_D, BODY_TOP + 9)))
-            .union(cq.Workplane().add(cyl((0, 0, 0), TUBE_OD, A - t + 0.1, (1, 0, 0))))
-            .union(cq.Workplane().add(fa)).union(cq.Workplane().add(fs)))
-    bore = (cq.Workplane().add(cyl((0, 0, -A - 1), KF_BORE, A + 1))
-            .union(cq.Workplane().add(cyl((0, 0, 0), KF_BORE, A + 1, (1, 0, 0))))
-            .union(cq.Workplane().add(cyl((0, 0, -KF_BORE / 2), BODY_D - 6, KF_BORE / 2 + BODY_TOP - 3))))
+    body = (W(cyl((0, 0, -A + t - 0.1), TUBE_OD, 12))
+            .union(W(cyl((0, 0, -A + t + 8), BODY_D, BODY_TOP + A - t - 8)).edges("<Z").chamfer(2.0))
+            .union(W(cyl((0, 0, 0), TUBE_OD, A - t + 0.1, (1, 0, 0))))
+            .union(W(fa)).union(W(fs)))
+    bore = (W(cyl((0, 0, -A - 1), KF_BORE, A + 1))
+            .union(W(cyl((0, 0, 0), KF_BORE, A + 1, (1, 0, 0))))
+            .union(W(cyl((0, 0, -KF_BORE / 2), BODY_D - 6, KF_BORE / 2 + BODY_TOP - 3)))
+            .union(W(cyl((0, 0, -A - 1), KF_RECESS, RECESS_DEPTH + 1)))
+            .union(W(cyl((A + 1, 0, 0), KF_RECESS, RECESS_DEPTH + 1, (-1, 0, 0)))))
     parts["body"] = (body.cut(bore), "steel")
-    # bonnet collar, bellows housing
-    parts["bonnet"] = (cq.Workplane().add(cyl((0, 0, BODY_TOP), BONNET_D, BONNET_H)).edges().chamfer(0.8), "steel")
-    parts["neck"] = (cq.Workplane().add(cyl((0, 0, BODY_TOP + BONNET_H), NECK_D, CYL_Z0 - BODY_TOP - BONNET_H)), "steel")
-    # air cylinder with end caps
-    parts["cylinder"] = (cq.Workplane().add(cyl((0, 0, CYL_Z0 + 3), CYL_D, CYL_TOP - CYL_Z0 - 6)), "alu")
-    parts["cap_low"] = (cq.Workplane().add(cyl((0, 0, CYL_Z0), CYL_D + 2, 3)).edges().chamfer(0.6), "alu_d")
-    parts["cap_top"] = (cq.Workplane().add(cyl((0, 0, CYL_TOP - 3), CYL_D + 2, 3)).edges().chamfer(0.6), "alu_d")
-    # pilot valve body on the cap (long axis along Y), coil standing up at the +Y end
-    z0 = CYL_TOP
-    parts["pilot_body"] = (cq.Workplane().add(box(-PIL_W / 2, PIL_W / 2, -PIL_L / 2, PIL_L / 2, z0, z0 + PIL_H)).edges("|Z").fillet(1.5), "alu_d")
-    cy = PIL_L / 2 - COIL[1] / 2
-    zc = z0 + PIL_H
-    parts["armature_nut"] = (cq.Workplane().add(cyl((0, cy, zc + COIL[2]), 8.0, 4.0)), "steel")
-    coil = cq.Workplane().add(box(-COIL[0] / 2, COIL[0] / 2, cy - COIL[1] / 2, cy + COIL[1] / 2, zc, zc + COIL[2])).edges("|Z").fillet(2.0)
-    parts["coil"] = (coil, "black")
-    # DIN plug on the coil's -X face, cable out of its gland downward... sideways (-X)
-    px1 = -COIL[0] / 2
-    px0 = px1 - PLUG[2]
-    pz0 = zc + COIL[2] / 2 - PLUG[1] / 2 + 2
-    plug = cq.Workplane().add(box(px0, px1, cy - PLUG[0] / 2, cy + PLUG[0] / 2, pz0, pz0 + PLUG[1])).edges("|X").fillet(2.0)
-    parts["plug"] = (plug, "black2")
-    gz = pz0 + PLUG[1] / 2
-    parts["gland"] = (cq.Workplane().add(cyl((px0, cy, gz), 11.0, 8.0, (-1, 0, 0))), "black2")
-    path = cq.Workplane().spline([(px0 - 8, cy, gz), (px0 - 35, cy + 5, gz - 15), (px0 - 50, cy + 10, gz - 70)],
-                                 tangents=[(-1, 0, 0), (0, 0, -1)], includeCurrent=False)
-    cable = cq.Workplane(cq.Plane(origin=(px0 - 8, cy, gz), xDir=(0, 1, 0), normal=(-1, 0, 0))).circle(CABLE_D / 2).sweep(path)
-    parts["cable"] = (cable, "cable")
-    # air supply push-in fitting (6 mm) and exhaust silencer on the -Y end of the pilot
-    parts["air_in"] = (cq.Workplane().add(cyl((-4, -PIL_L / 2, z0 + PIL_H / 2), 10.0, 12.0, (0, -1, 0))), "nickel")
-    parts["air_tube"] = (cq.Workplane().add(cyl((-4, -PIL_L / 2 - 12, z0 + PIL_H / 2), 6.0, 25.0, (0, -1, 0))), "tube")
-    parts["silencer"] = (cq.Workplane().add(cyl((5, -PIL_L / 2, z0 + PIL_H / 2 - 2), 7.0, 10.0, (0, -1, 0))), "bronze")
+    # bonnet collar stack: lower disc, label band, upper disc, square plate
+    parts["collar_low"] = (W(cyl((0, 0, BODY_TOP), COLLAR_D, 10)).edges().chamfer(0.6), "steel")
+    parts["label_band"] = (W(cyl((0, 0, BODY_TOP + 10), COLLAR_D - 2, 10)), "label")
+    parts["collar_up"] = (W(cyl((0, 0, BODY_TOP + 20), COLLAR_D, 4)).edges().chamfer(0.5), "steel")
+    parts["plate"] = (W(box(-PLATE / 2, PLATE / 2, -PLATE / 2, PLATE / 2, BODY_TOP + 24, CYL_Z0)).edges("|Z").fillet(4.0), "alu_d")
+    # square compact cylinder: corner bosses for the tie rods, a sensor slot on each face
+    c = W(box(-CYL_W / 2, CYL_W / 2, -CYL_W / 2, CYL_W / 2, CYL_Z0, CYL_Z1)).edges("|Z").fillet(3.0)
+    for (x, y, dx, dy) in ((CYL_W / 2, 0, 1, 0), (-CYL_W / 2, 0, 1, 0), (0, CYL_W / 2, 0, 1), (0, -CYL_W / 2, 0, 1)):
+        w = 4.0
+        sl = box(x - (1.2 if dx else w / 2), x + (1.2 if dx else w / 2), y - (1.2 if dy else w / 2), y + (1.2 if dy else w / 2), CYL_Z0 + 2, CYL_Z1 - 2)
+        c = c.cut(W(sl))
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            c = c.cut(W(cyl((sx * (CYL_W / 2 - 5), sy * (CYL_W / 2 - 5), CYL_Z1 - 3), 6.0, 3.1)))
+    parts["cylinder"] = (c, "alu")
+    parts["boss"] = (W(cyl((0, 0, CYL_Z1), BOSS_D, 2.0)), "alu_d")
+    # pilot valve, solenoid tube section, coil, nut cap
+    parts["pilot_body"] = (W(box(PIL_X0, PIL_X1, -PIL_Y, PIL_Y, PIL_Z0, PIL_Z1)).edges("|Z").fillet(1.0), "alu_d")
+    parts["solenoid"] = (W(box(PIL_X0, PIL_X1 + 2, -PIL_Y, PIL_Y, PIL_Z1, SOL_Z1)).edges("|Z").fillet(1.5), "black")
+    parts["coil"] = (W(box(COIL_XC - COIL_W / 2, COIL_XC + COIL_W / 2, -COIL_W / 2, COIL_W / 2, COIL_Z0, COIL_Z1)).edges("|Z").fillet(2.0), "black")
+    parts["coil_cap"] = (W(cyl((COIL_XC, 0, COIL_Z1), 10.0, H - A - COIL_Z1)), "black2")
+    px0 = COIL_XC + COIL_W / 2
+    parts["plug"] = (W(box(px0, px0 + PLUG_D, -COIL_W / 2 + 1, COIL_W / 2 - 1, COIL_Z0 + 1, COIL_Z1 - 1)).edges("|X").fillet(2.0), "black2")
+    gx = px0 + PLUG_D / 2
+    parts["gland"] = (W(cyl((gx, 0, COIL_Z0 + 1), 11.0, 9.0, (0, 0, -1))), "black2")
+    g0 = COIL_Z0 - 8
+    # cable runs out over the cylinder top (boss top at z 94) and drops beside it on the +X side
+    path = cq.Workplane().spline([(gx, 0, g0), (gx + 7, 2, 100), (gx + 25, 6, 100), (gx + 45, 10, 80)],
+                                 tangents=[(0, 0, -1), (0.4, 0.1, -1)], includeCurrent=False)
+    parts["cable"] = (cq.Workplane(cq.Plane(origin=(gx, 0, g0), xDir=(1, 0, 0), normal=(0, 0, -1))).circle(CABLE_D / 2).sweep(path), "cable")
+    # front (-Y) face of the pilot: two brass silencers and the 6 mm push-in air inlet between them
+    xc = (PIL_X0 + PIL_X1) / 2
+    for z in (62.0, 80.0):
+        parts[f"silencer_{int(z)}"] = (W(cyl((xc + 3, -PIL_Y, z), 9.0, 6.0, (0, -1, 0))).union(W(cyl((xc + 3, -PIL_Y - 6, z), 7.0, 5.0, (0, -1, 0)))), "bronze")
+    parts["air_in"] = (W(cyl((xc - 4, -PIL_Y, 71.0), 10.0, 14.0, (0, -1, 0))), "black2")
+    parts["air_tube"] = (W(cyl((xc - 4, -PIL_Y - 14, 71.0), 6.0, 25.0, (0, -1, 0))), "tube")
     return parts
 
 
@@ -111,7 +127,7 @@ if __name__ == "__main__":
     parts = build()
     colours = {"steel": (0.78, 0.80, 0.83), "alu": (0.82, 0.83, 0.85), "alu_d": (0.70, 0.72, 0.75), "black": (0.08, 0.08, 0.09),
                "black2": (0.14, 0.14, 0.15), "cable": (0.12, 0.12, 0.12), "nickel": (0.75, 0.75, 0.72), "tube": (0.25, 0.45, 0.85),
-               "bronze": (0.62, 0.52, 0.35)}
+               "bronze": (0.62, 0.52, 0.35), "label": (0.86, 0.86, 0.84)}
     asm = cq.Assembly(name="kf16_angle_valve")
     allp = None
     for n, (wp, c) in parts.items():

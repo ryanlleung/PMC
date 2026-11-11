@@ -1,29 +1,34 @@
-# KF16 right-angle pneumatic valve with 24 V solenoid pilot
+# KF16 right-angle pneumatic valve with 24 V solenoid pilot (GDQ-J16/KF)
 
-11/11/26. A CadQuery model of the "L type 24 B" option of the AliExpress listing (item 1005012966628004). The listing could not be read here, so the model follows the usual Chinese GDQ-J16(B) pattern: "L type" is the right-angle body, "B" the version with a solenoid pilot valve fitted, "24" a 24 V DC coil. Only the KF16 flange is a standard size. Everything else is ESTIMATED; change the values at the top of `src/kf16_angle_valve.py` once the part or the listing drawing is measured.
+11/11/26. A CadQuery model of the "L type 24 B" option of the AliExpress listing (item 1005012966628004): a GDQ-J16/KF right-angle pneumatic vacuum valve, B version (solenoid pilot fitted), 24 V DC coil. Rev 2 follows the listing's dimension table, drawing and photo.
 
 ## How it works
-- The black block with the cable is the coil of the 3/2 solenoid pilot valve. The cable ends in a DIN 43650 plug held to the coil by one centre screw.
-- Coil on: the pilot lets the supply gas (typically 0.4 to 0.8 MPa) into the cylinder, which lifts the bellows-sealed plate off the seat. The valve opens.
-- Coil off: the pilot vents the cylinder through the silencer and the spring closes the valve (normally closed).
-- The coil comes off its stem after undoing the top nut and can go back facing any direction. The plug can be refitted in 90 degree steps. A plain DC coil is not polarity sensitive, but a plug with an LED or suppression diode is marked + and -. Neither changes normally closed to normally open, which is set by the spring.
+- The black block with the cable is the coil of the solenoid pilot valve, with a DIN plug on its side held by one centre screw.
+- Coil on: the pilot lets the supply air (0.4 to 0.8 MPa) into the square cylinder, which lifts the bellows-sealed plate off the seat. The valve opens.
+- Coil off: the pilot vents the cylinder through the two brass silencers and the spring closes the valve (normally closed).
+- The coil comes off its stem after undoing the top nut and can go back facing any direction; the plug can be refitted in 90 degree steps. A plain DC coil is not polarity sensitive, but a plug with an LED or suppression diode is marked + and -. Neither changes normally closed.
+
+## Listing data (GDQ-J16/KF)
+- Range 1e5 to 1.3e-5 Pa, leak rate 1.3e-6 Pa L/s, -30 to +150 C, air 0.4 to 0.8 MPa, mounting any orientation.
+- Coil AC 220 V default; AC 110 V, DC 24 V, DC 12 V to order. Magnetic switch position feedback to order (not modelled).
 
 ## Sizes
 
 | Size | Value | Source |
 | --- | --- | --- |
-| Flange OD, bore, clamp taper | 30, 16, 15 deg | ISO-KF DN16 standard |
-| Flange rim, tube OD | 3.0, 19 | ASSUMED |
-| Centre to sealing face, both ports | 40 | ESTIMATED (common for KF16 angle valves) |
-| Axial port face to cylinder top | 118 | ESTIMATED (same as XV-1 in the GXC enclosure model) |
-| Cylinder diameter | 46 (48 over the caps) | ESTIMATED |
-| Body, bonnet collar, bellows housing | 30, 38, 26 dia | ESTIMATED |
-| Pilot body | 40 x 18 x 16 on the cylinder cap | ESTIMATED; on some valves it sits on the side of the cylinder |
-| Coil | 22 x 22 x 28, black | ESTIMATED |
-| DIN plug | 27 x 27 x 18, cable 6 mm | ESTIMATED |
-| Air inlet | 6 mm push-in, silencer beside it | ESTIMATED |
+| DN, flange OD (phi D) | 16, 30 | listing table |
+| phi B | 17.2, modelled as a 2.5 deep counterbore at each sealing face | listing table and drawing (my reading of "2.5") |
+| Flange rim, clamp taper | 3 +/- 0.05, 15 deg +/- 10' | listing drawing |
+| A, centre to each sealing face | 40 | listing table |
+| H, axial port face to top of the pilot | 190 | listing table and drawing |
+| Body | 28 dia, top 57 above the axial face | photo, ESTIMATED |
+| Bonnet collar stack with label band | 48 dia, 28 tall incl. 44 square plate | photo, ESTIMATED |
+| Square compact cylinder | 40 x 40, 47 tall, 22 dia boss on top | photo, ESTIMATED |
+| Pilot valve | 18 x 22 on the cylinder's -X face, black solenoid section above it | photo, ESTIMATED |
+| Coil, DIN plug | 28 x 28 x 28; plug 18 deep on the coil's +X side, gland down | photo, ESTIMATED |
+| Air in | 6 mm push-in between two brass silencers, facing -Y | photo, ESTIMATED |
 
-Overall height with the pilot and coil: about 166 from the axial port face.
+The photo sizes are scaled from the 30 mm flange and could be a few mm out. The pilot's side and the fitting direction follow the photo: if your valve has the pilot on another face, rotate those parts about Z.
 
 ## Files
 - `kf16-angle-valve.step`: assembly with a named, coloured solid per part.
