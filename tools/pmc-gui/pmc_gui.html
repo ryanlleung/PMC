@@ -75,6 +75,7 @@
   #vchart { width: 100%; height: 130px; display: block; margin-top: 6px; }
   #aCalc { max-height: 340px; overflow-y: auto; }
   #aCalc b { color: var(--text); }
+  #aLog td:nth-child(-n+5) { white-space: nowrap; }
   .tchart { width: 100%; height: 110px; display: block; margin-top: 6px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
   label { font-size: 13px; color: var(--muted); }
@@ -169,6 +170,11 @@
         <div id="aCalc" class="mono"></div>
       </div>
       <div class="card">
+        <h2>Autotune: log</h2>
+        <div class="scroll"><table><thead><tr><th>Time</th><th>Setpoint</th><th>What</th><th title="On the board after this line">KP, TI, KD</th><th>Change</th><th>Detail</th></tr></thead><tbody id="aLog"></tbody></table></div>
+        <div class="row" style="margin-top:8px"><button id="aLogBtn" onclick="location.href='/api/autotune/log'">Download log</button><span class="hint">Newest first: the decisions, every change to KP, TI and KD, and the setpoint and mode commands. The file, autotune_log.csv in the run folder, also has every calculation in the Working card, with the time and the gains in force on each line.</span></div>
+      </div>
+      <div class="card">
         <h2>Autotune: PID table</h2>
         <table><thead><tr><th>Set</th><th>Pressure, mbar</th><th>KP, %/mbar</th><th>TI, min</th><th>From the setpoints</th></tr></thead><tbody id="aSets"></tbody></table>
         <div class="hint mono" id="aSetsCalc" style="margin-top:6px"></div>
@@ -222,7 +228,7 @@
         <h2>Logger</h2>
         <div id="logInfo" class="info"></div>
         <div class="row"><button id="logBtn" onclick="toggleLog(this)">Stop logging</button><button onclick="post('/api/log', { new: true }, this, 'New log file')">New file</button><button onclick="location.href='/api/csv'">Download session CSV</button></div>
-        <div class="hint">Every sample, one a second, is written to the file as it comes, with the temperatures and the test stage. Each autotune also saves its own folder beside it: its samples, its results after every setpoint, its messages and the working, so a run that stops or stalls keeps everything up to there.</div>
+        <div class="hint">Every sample, one a second, is written to the file as it comes, with the temperatures and the test stage. Each autotune also saves its own folder beside it: its samples, its results after every setpoint, its messages and its log (every calculation, decision and change to KP, TI and KD), so a run that stops or stalls keeps everything up to there.</div>
       </div>
       <div class="card" id="lsCard">
         <h2>Lake Shore 336</h2>
@@ -276,7 +282,7 @@ const $ = id => document.getElementById(id);
 const val = id => $(id).value.trim();
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const TCOL = ['#b5541c', '#6b4fa0', '#2e7d4f', '#8a6d1d'];
-let calcKey = '';
+let calcKey = '', logKey = '';
 // The one-minute average rate of change of column k, per minute: the
 // least-squares slope through the last 60 s of samples (null with fewer than 10).
 function rate(k) {
@@ -526,6 +532,15 @@ async function refresh() {
       '<span class="hint">Nothing yet. Run autotune: each setpoint\'s sums show here as they are done.</span>';
     if (atEnd) box.scrollTop = box.scrollHeight;
     calcKey = ck;
+  }
+  const LG = A && A.log ? A.log : [], lk = LG.length + '|' + (LG.length ? LG[LG.length - 1].join('|') : '');
+  if (lk !== logKey) {
+    const what = { start: 'Start', decision: 'Decision', gains: 'Gains', command: 'Command', result: 'Result', end: 'End' };
+    $('aLog').innerHTML = LG.length ? LG.slice().reverse().map(r => `<tr><td>${esc(r[0].slice(11))}</td><td>${r[2] ? esc(r[2]) + ' mbar' : esc(r[3] || '')}</td>` +
+      `<td>${esc(what[r[4]] || r[4])}</td><td>${r[5] === '' ? '--' : esc(r[5] + ', ' + r[6] + ', ' + r[7])}</td>` +
+      `<td>${r[8] ? '<b>' + esc(r[8]) + '</b>' : ''}</td><td>${esc(r[9])}</td></tr>`).join('') : none(6);
+    $('aLogBtn').disabled = !(A && A.dir);
+    logKey = lk;
   }
   const Cn = correction(s);
   const LN = s.learned || [];

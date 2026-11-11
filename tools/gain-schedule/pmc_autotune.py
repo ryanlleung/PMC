@@ -59,6 +59,12 @@ While it runs, the PID table is Off and set 1 carries the gains under test
 back as found. Writing the sets to the board (PIDS SET, SCHED SET PV) is a
 separate step, after the results have been looked at.
 
+The log (Ryan, 11 Nov: "a logger for the autotune, with the decisions and
+calculations made and the changes to the kp ki kd"): autotune_log.csv in the
+run's folder, one row per calculation, decision, gain change and board
+command, as it happens, each with the KP, TI and KD in force on the board
+after it (log_row, LOG_COLS).
+
 Python 3.8 or later, standard library only. Needs firmware 0.15.8 or later
 (PID SET); the sets need 0.15.15 or later (PIDS SET, SCHED SET).
 """
@@ -140,6 +146,12 @@ LEARNED_NUM = ('sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valv
                'K', 'L_s', 'tau_s', 't63_s', 't90_s', 'backoff_pct')
 LEARNED_AGREE = 2.0            # learned Ku within this factor of the new relay's: use its fit
 MAX_CUTS = 6                   # most KP cuts by the watchdog while reaching or holding one point
+LOG_FILE = 'autotune_log.csv'  # in the run's folder
+# time: PC clock; t_s: seconds since the autotune started (board time);
+# kind: start, calc, decision, gains, command, result, end; kp, ti_min, kd:
+# the gains on the board after the row (as far as the autotune knows);
+# change: what a gains row changed, old -> new.
+LOG_COLS = ['time', 't_s', 'setpoint_mbar', 'stage', 'kind', 'kp', 'ti_min', 'kd', 'change', 'text']
 
 
 # ---------------------------------------------------------------------------
@@ -820,6 +832,35 @@ def write_lines(sets, b1=B1, b2=B2, h=HYST):
     return lines
 
 
+def log_row(log_dir, row):
+    """One row (LOG_COLS) appended to the run's autotune_log.csv, the header
+    first when the file is new. Each row is written as it comes, so a run
+    that stops or stalls keeps its log up to there."""
+    if not log_dir:
+        return
+    path = os.path.join(log_dir, LOG_FILE)
+    try:
+        new = not os.path.exists(path)
+        with open(path, 'a', newline='', encoding='utf-8') as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(LOG_COLS)
+            w.writerow(['' if v is None else v for v in row])
+    except OSError:
+        pass
+
+
+def gains_change(old, new):
+    """'KP 0.64 -> 0.45, TI 0.88 -> 0.62': what changed from old to new
+    ([KP, TI, KD]; old None = not known)."""
+    out = []
+    for name, i in (('KP', 0), ('TI', 1), ('KD', 2)):
+        a = None if not old else old[i]
+        if a is None or abs(a - new[i]) > 1e-9:
+            out.append('%s %s -> %.2f' % (name, '--' if a is None else '%.2f' % a, new[i]))
+    return ', '.join(out)
+
+
 class AutoTuner(Tuner):
     """The sequence on the board, one point at a time."""
 
@@ -827,15 +868,55 @@ class AutoTuner(Tuner):
     held_rows = []  # the samples of the last hold(), for the same
 
     def stage(self, text, phase=None, most=None):
+        if phase:
+            self.phase_now = phase
         self.say(text)
 
     # The working, for the page: the lines of this setpoint's calculations
     # (calc) and one line that changes while a stage runs (now).
     calcs, calc_now = [], ''
 
-    def calc(self, text):
+    def calc(self, text, kind='calc'):
         self.calcs = (self.calcs + [text])[-400:]
+        self.log(kind, text)
         self.show()
+
+    def decide(self, text):
+        """A calculation that chooses what happens next: in the Working card
+        as any other line, and a decision in the log."""
+        self.calc(text, 'decision')
+
+    # The log: see LOG_COLS. gains: [KP, TI, KD] on the board as far as the
+    # autotune knows (None until found or first set); sp_now, phase_now:
+    # the point and the stage the rows belong to; log_rows: the rows other
+    # than calculations, for the page.
+    gains, sp_now, phase_now, t_log0, check_why = None, None, '', None, ''
+    log_rows = []
+
+    def log(self, kind, text, change=''):
+        t = self.clock.now() if self.clock is not None else None
+        if t is not None and self.t_log0 is None:
+            self.t_log0 = t
+        g = self.gains or [None] * 3
+        row = [time.strftime('%Y-%m-%d %H:%M:%S'), '' if t is None else '%.1f' % (t - self.t_log0),
+               '' if self.sp_now is None else '%g' % self.sp_now, self.phase_now, kind] + \
+              ['' if v is None else '%.2f' % v for v in g] + [change, text]
+        log_row(self.log_dir, row)
+        if kind != 'calc':
+            self.log_rows = (self.log_rows + [row])[-300:]
+
+    def send(self, cmd, why=''):
+        """A line that changes the board's setpoint, mode or valve, logged."""
+        self.link.do(cmd)
+        self.log('command', cmd + (': ' + why if why else ''))
+
+    def set_gains(self, new, cmd, why=''):
+        """The autotune changed the gains on the board: logged with old -> new."""
+        new = [round(float(v), 2) for v in new]
+        change = gains_change(self.gains, new)
+        self.gains = new
+        if change:
+            self.log('gains', cmd + (': ' + why if why else ''), change)
 
     def now(self, text):
         self.calc_now = text
@@ -854,14 +935,19 @@ class AutoTuner(Tuner):
         while self.link.ask('VALV MOVING?')[0].endswith(' 1') and self.clock.now() - t0 < 60:
             self.clock.wait_until(self.clock.now() + 0.5)
 
-    def auto(self):
+    def auto(self, why=''):
         self.still()
+        was = self.sample()[2]
         self.link.do('MODE AUTO')
+        if was != 'AUTO':
+            self.log('command', 'MODE AUTO' + (': ' + why if why else ''))
 
-    def pid(self, kp, ti):
+    def pid(self, kp, ti, why=''):
         if self.sample()[2] != 'AUTO':
             self.still()
-        self.link.do('PID SET %.2f,%.2f,0' % (kp, ti))
+        cmd = 'PID SET %.2f,%.2f,0' % (kp, ti)
+        self.link.do(cmd)
+        self.set_gains([kp, ti, 0.0], cmd, why)
 
     def calm(self, sp, kp, ti, w):
         """The watchdog tripped: KP cut at once (in AUTO), the new KP."""
@@ -870,11 +956,11 @@ class AutoTuner(Tuner):
             raise RuntimeError('AUTO oscillating at %g mbar (swing %.2f mbar) with KP already at %.2f'
                                % (sp, w.pp, kp))
         self.say('%g mbar: AUTO oscillating (swing %.2f mbar), KP x %.2f -> %.2f' % (sp, w.pp, w.cut(), new))
-        self.calc('Oscillating: %d swings in a row, the smallest %.2f mbar, each over %.2f mbar (%d %% of %g mbar). '
+        self.decide('Oscillating: %d swings in a row, the smallest %.2f mbar, each over %.2f mbar (%d %% of %g mbar). '
                   'KP x %.2f%s: %.2f x %.2f = %.2f (PID SET, AUTO carries on)' % (
                       2 * WILD_CYCLES, w.pp, w.big, WILD_PP * 100, sp, w.cut(),
                       ', the swing larger than the setpoint' if w.cut() == WILD_CUT_BIG else '', kp, w.cut(), new))
-        self.pid(new, ti)
+        self.pid(new, ti, 'watchdog: AUTO oscillating at %g mbar, KP x %.2f' % (sp, w.cut()))
         self.cuts.append('x%.2f osc' % w.cut())
         return new
 
@@ -929,12 +1015,12 @@ class AutoTuner(Tuner):
         return x0, ok, sum(ps) / len(ps), kp
 
     def reach(self, sp, kp, ti, why=None):
-        self.calc('Reach %g mbar: AUTO with KP %.2f TI %.2f (%s)' % (
+        self.decide('Reach %g mbar: AUTO with KP %.2f TI %.2f (%s)' % (
             sp, kp, ti, why or 'the setpoint before\'s gains, or the first gains'))
-        self.pid(kp, ti)
-        self.link.do('PRES SP %.1f' % sp)
+        self.pid(kp, ti, 'reach %g mbar with %s' % (sp, why or 'the setpoint before\'s gains, or the first gains'))
+        self.send('PRES SP %.1f' % sp, 'reach %g mbar' % sp)
         if self.sample()[2] != 'AUTO':
-            self.auto()
+            self.auto('reach %g mbar' % sp)
         x0, ok, p, _ = self.hold(sp, REACH_MAX_S, kp, ti, '', '%g mbar reach' % sp)
         if x0 is None:
             raise RuntimeError('no valve reading')
@@ -946,8 +1032,9 @@ class AutoTuner(Tuner):
         return x0
 
     def relay(self, sp, x0, d):
-        self.link.do('MODE MANUAL')
-        self.link.do('VALV SET %.1f' % x0)
+        self.phase_now = '%g mbar noise' % sp
+        self.send('MODE MANUAL', 'relay test at %g mbar' % sp)
+        self.send('VALV SET %.1f' % x0, 'x0, the valve AUTO held %g mbar at' % sp)
         self.stage('MANUAL at %.1f %%, %d s for the noise' % (x0, NOISE_S), '%g mbar noise' % sp, NOISE_S)
         rows = self.samples(NOISE_S)
         sd = noise([r[1] for r in rows])
@@ -973,7 +1060,7 @@ class AutoTuner(Tuner):
                     sent = cmd
                 if R.note:
                     self.say('%g mbar relay: %s' % (sp, R.note))
-                    self.calc('Relay: ' + R.note)
+                    self.decide('Relay: ' + R.note)
                     R.note = ''
                 self.now('Relay, %d s: %s' % (n, R.live()))
         finally:
@@ -985,7 +1072,7 @@ class AutoTuner(Tuner):
                         w.writerow(['%.1f' % r[0], '' if r[1] is None else '%.3f' % r[1],
                                     '' if r[2] is None else '%.2f' % r[2], '' if r[3] is None else '%.1f' % r[3]])
         if R.why:
-            self.link.do('VALV SET %.1f' % x0)
+            self.send('VALV SET %.1f' % x0, 'relay test ended: ' + R.why)
             raise RuntimeError('relay test: ' + R.why)
         r = R.result()
         if r is None:
@@ -1005,7 +1092,7 @@ class AutoTuner(Tuner):
     def leg(self, sp, p0, p1, band, most, name, slack=0.0):
         """One step of a check. Ends early when the watchdog trips; the
         figures then carry the swing (wild_pp)."""
-        self.link.do('PRES SP %.1f' % p1)
+        self.send('PRES SP %.1f' % p1, 'check step %g -> %g mbar' % (p0, p1))
         t0, n, rows, since = self.clock.now(), 0, [], None
         wd = Wild(p1)
         while True:
@@ -1042,8 +1129,9 @@ class AutoTuner(Tuner):
         figures, and the KP it ended with (lower if the watchdog cut it
         while it held; then the steps run with that). A leg that oscillates
         ends the check there."""
-        self.pid(kp, ti)
-        self.auto()
+        self.phase_now = '%g mbar check %d hold' % (sp, k)
+        self.pid(kp, ti, 'check %d at %g mbar%s' % (k, sp, ' with ' + self.check_why if self.check_why else ''))
+        self.auto('check %d at %g mbar' % (k, sp))
         kp = self.hold(sp, CHECK_HOLD_MAX_S, kp, ti, 'check %d: ' % k, '%g mbar check %d hold' % (sp, k))[3]
         hi = round(max(sp * (1 + CHECK_UP), sp + 0.2), 1)
         # The pressure's own wander is not the gains': overshoot counts only
@@ -1078,7 +1166,7 @@ class AutoTuner(Tuner):
                         'not reached' if fg['t90_s'] is None else '%d s' % fg['t90_s'],
                         fg['backoff_pct'], fg['sag_s'])))
             if legs[-1] and legs[-1].get('wild_pp'):
-                self.link.do('PRES SP %.1f' % sp)
+                self.send('PRES SP %.1f' % sp, 'check %d ended: oscillating' % k)
                 break
         # One sample a second, the valve held over a missing reading.
         xs, ps, last = [], [], None
@@ -1127,9 +1215,10 @@ class AutoTuner(Tuner):
     def point(self, sp, reach_gains, d, prior=None):
         """One test point: a result row for the table. prior: the point's
         learned row (load_learned), whose fit gives the first gains."""
+        self.sp_now, self.check_why, self.phase_now = sp, '', '%g mbar reach' % sp
         self.calc('%g mbar' % sp)        # a heading line: the setpoint alone
         if prior:
-            self.calc('Learned %s: KP %.2f TI %.2f, Ku %s, Pu %s s%s%s' % (
+            self.decide('Learned %s: KP %.2f TI %.2f, Ku %s, Pu %s s%s%s' % (
                 prior.get('when') or 'earlier', prior['kp'], prior['ti_min'],
                 '--' if prior.get('Ku') is None else '%.3f' % prior['Ku'],
                 '--' if prior.get('Pu_s') is None else '%.1f' % prior['Pu_s'],
@@ -1152,21 +1241,23 @@ class AutoTuner(Tuner):
             if ratio is None or 1 / LEARNED_AGREE <= ratio <= LEARNED_AGREE:
                 fit = {'K': prior['K'], 'L': prior['L_s'], 'tau': prior['tau_s']}
             else:
-                self.calc('Fresh: the new Ku is %.2f times the learned %.3f (more than %g x off: the plant has '
+                self.decide('Fresh: the new Ku is %.2f times the learned %.3f (more than %g x off: the plant has '
                           'changed), so the learned fit is not used' % (ratio, old, LEARNED_AGREE))
         if fit:
             kp, ti = rule_gains(fit, ku, pu)
             le = l_eff(fit, pu)
             ti_s = min(max(fit['tau'], TI_MIN_LEFF * le), 20.0 * le)
-            self.calc('First gains from the learned fit (K %.2f, L %g s, tau %g s): L_eff = max(L, Pu / 4) = max(%g, %.1f) '
+            self.decide('First gains from the learned fit (K %.2f, L %g s, tau %g s): L_eff = max(L, Pu / 4) = max(%g, %.1f) '
                       '= %.1f s; TI = min(max(tau, 2.5 L_eff), 20 L_eff) = min(max(%g, %.1f), %.0f) = %.0f s = %.2f min; '
                       'KP = min(TI / (5 K L_eff), Ku / 3) = min(%.0f / (5 x %.2f x %.1f), %.3f / 3) = %.2f %%/mbar' % (
                           fit['K'], fit['L'], fit['tau'], fit['L'], pu / 4, le, fit['tau'], TI_MIN_LEFF * le,
                           20 * le, ti_s, ti, ti_s, fit['K'], le, ku, kp))
             first = 'first gains from the learned fit'
+            self.check_why = 'the first gains from the learned fit'
         else:
             kp, ti = relay_gains(ku, pu)
-            self.calc('First gains, no fit yet: KP = Ku / %g = %.3f / %g = %.2f %%/mbar; TI = %g x Pu = %g x %.1f s = '
+            self.check_why = 'the first gains, KP = Ku / %g, TI = %g Pu' % (FIRST_DIV, FIRST_TI_PU)
+            self.decide('First gains, no fit yet: KP = Ku / %g = %.3f / %g = %.2f %%/mbar; TI = %g x Pu = %g x %.1f s = '
                       '%.0f s = %.2f min' % (FIRST_DIV, ku, FIRST_DIV, kp, FIRST_TI_PU, FIRST_TI_PU, pu,
                                              FIRST_TI_PU * pu, ti))
         self.say('%g mbar: KP %.2f TI %.2f for the first check' % (sp, kp, ti))
@@ -1195,7 +1286,7 @@ class AutoTuner(Tuner):
                         fig['backoff_pct'], fig['sag_s'], ', valve at an end' if fig['saturated'] else '')))
             if prev is not None:
                 if worse_check(fig, prev['fig']):
-                    self.calc('Undone: check %d is worse than check %d (overshoot %s against %s %%, %s against %s '
+                    self.decide('Undone: check %d is worse than check %d (overshoot %s against %s %%, %s against %s '
                               'reversals, 90 %% in %s against %s s), so KP %.2f TI %.2f stays and the refinements end' % (
                                   k, prev['k'], '--' if not fig else fig['overshoot_pct'], prev['fig']['overshoot_pct'],
                                   '--' if not fig else fig['reversals'], prev['fig']['reversals'],
@@ -1209,20 +1300,21 @@ class AutoTuner(Tuner):
             act = refine_rule(fig, kp, ti, ku, pu, fit)
             if act['kind'] == 'pass':
                 if fig:
-                    self.calc('Rule: the check passes with KP %.2f TI %.2f (overshoot %.1f %%, limit %g; %d reversals, '
+                    self.decide('Rule: the check passes with KP %.2f TI %.2f (overshoot %.1f %%, limit %g; %d reversals, '
                               'limit %d; no tail, not slow)' % (kp, ti, fig['overshoot_pct'], OVERSHOOT_MAX,
                                                                   fig['reversals'], REVERSALS_MAX))
                 break
             if act['kind'] == 'limit':
-                self.calc('Rule: %s: at its limit, so the check passes with KP %.2f TI %.2f' % (act['why'], kp, ti))
+                self.decide('Rule: %s: at its limit, so the check passes with KP %.2f TI %.2f' % (act['why'], kp, ti))
                 end_note = act['note']
                 break
             if refines >= MAX_REFINES:
-                self.calc('Not applied: %s, but at most %d refinements at one setpoint' % (act['why'], MAX_REFINES))
+                self.decide('Not applied: %s, but at most %d refinements at one setpoint' % (act['why'], MAX_REFINES))
                 end_note = 'still %s after %d refinements' % (act['why'], MAX_REFINES)
                 break
-            self.calc('Rule: %s, so %s x %.2f: KP %.2f -> %.2f, TI %.2f -> %.2f' % (
+            self.decide('Rule: %s, so %s x %.2f: KP %.2f -> %.2f, TI %.2f -> %.2f' % (
                 act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f'], kp, act['kp'], ti, act['ti']))
+            self.check_why = 'rule: %s, %s x %.2f' % (act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f'])
             self.say('%g mbar: %s, %s x %.2f' % (sp, act['why'], 'KP' if act['kind'] == 'kp' else 'TI', act['f']))
             prev = {'kp': kp, 'ti': ti, 'fig': fig, 'k': k}
             kp, ti = act['kp'], act['ti']
@@ -1230,7 +1322,7 @@ class AutoTuner(Tuner):
             steps.append('%s x%.2f' % ('KP' if act['kind'] == 'kp' else 'TI', act['f']))
         trims = self.cuts + steps
         self.calc('Result at %g mbar: KP %.2f, TI %.2f min%s' % (sp, kp, ti, ' (changed ' + ', '.join(trims) + ')'
-                                                                 if trims else ''))
+                                                                 if trims else ''), 'result')
         self.now('')
         notes = []
         if end_note:

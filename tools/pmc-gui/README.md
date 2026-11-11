@@ -4,7 +4,7 @@
 
 ## The page
 
-Screenshots on the simulator (GUI build 425, firmware 0.16.9): [Live, during an autotune](screens/live-autotune-running.png) and [Gains, after it](screens/gains-autotune-done.png).
+Screenshots on the simulator (GUI build 425, firmware 0.16.9): [Live, during an autotune](screens/live-autotune-running.png) and [Gains, after it](screens/gains-autotune-done.png) and [its log card](screens/gains-autotune-log.png).
 
 - **Top bar**, on every tab: the GUI's build (commits on its branch, the commit, the commit time; "edited" when its files differ from that commit) and the board's firmware version, the tabs, then three status lights and the board's mode. The build line is printed in the console window at start too.
   - Board: connected, or why there is no link.
@@ -38,7 +38,9 @@ The tabs:
 
     A setpoint that cannot be reached, gives no usable oscillation, or where the board leaves AUTO (a warning) is skipped; a fault ends the run. 15 to 35 minutes a setpoint (the longer with refinements), so 2 to 4 hours for eight. While it runs the PID table is Off and set 1 holds the gains under test (`PID SET`); at the end set 1, the PID table, the setpoint and the mode are put back as found.
 
-    The Working card at the top of the Gains tab shows the sums as they are done, under a heading for each setpoint: x0, the noise and switch band, each relay cycle, Ku and Pu with the numbers that went in, the first gains, each check step with its figures, the fit after each check and the rule it triggered, any watchdog cut, and the result. A line above it shows the stage running now (time so far, pressure, watchdog count) and, in AUTO, the valve split into its KP and TI parts. The same lines go to `working.txt` in the run folder. Under the PID table, each set's working is written out.
+    The Working card at the top of the Gains tab shows the sums as they are done, under a heading for each setpoint: x0, the noise and switch band, each relay cycle, Ku and Pu with the numbers that went in, the first gains, each check step with its figures, the fit after each check and the rule it triggered, any watchdog cut, and the result. A line above it shows the stage running now (time so far, pressure, watchdog count) and, in AUTO, the valve split into its KP and TI parts. Under the PID table, each set's working is written out.
+
+    The Log card under it lists, newest first, every decision (learned or fresh, the first gains, each rule and why, an undone refinement, a watchdog cut, a relay step change, a skipped setpoint, the result), every change the autotune makes to KP, TI and KD on the board (old -> new, and why), and the setpoint, mode and valve commands it sends, each with the KP, TI and KD in force after it. Download log saves the run's `autotune_log.csv`, which has the same rows plus every calculation in the Working card.
 
     The results fill in as each setpoint finishes: per setpoint Ku, Pu, the relay step, KP, TI, the fit, t63 and t90, the back-off, the sag and the check (with any changes), and the three PID table sets. Each set takes the lowest KP and the geometric mean of the TIs of the setpoints in its band (below B1, B1 to B2, above B2; 6 and 14 mbar with hysteresis 10 % unless changed). A band with no setpoint measured keeps the board's set. Write to board sends `PIDS SET 1` to `3` and `SCHED SET PV,<B1>,<B2>,<H>`, which turns the PID table on; nothing is written before that. The relay sees the valve as it is at that setpoint, needle stiction included.
 - **Board**: the board's identity, Reset faults and OK warning, the event log (`EVNT?`), the board clock set to the PC's time (`TIME SET`), and a command line for any text-port command.
@@ -55,8 +57,9 @@ Everything is written as it happens, each row flushed to disk, in `pmc-logs` in 
 - One folder per autotune, `autotune_<date>_<time>`:
   - `samples.csv`: the samples while it ran, as in the logger.
   - `messages.txt`: every message it gave, with the time.
+  - `autotune_log.csv`, the autotune's log: one row per calculation, decision, gain change and command, as it happens. Columns: `time` (PC), `t_s` (seconds since the start, board time), `setpoint_mbar` (the setpoint being tuned), `stage` (as marked on the chart), `kind` (`start`, `calc`, `decision`, `gains`, `command`, `result`, `end`), `kp`, `ti_min`, `kd` (on the board after the row: the autotune always sets KD 0), `change` (on a `gains` row, what changed, for example `KP 0.64 -> 0.45`) and `text` (the line itself, and for a command or a change of gains, why). The `start` row has the settings and what it found on the board; the `end` row the outcome and the gains the board has after the put back. Write to board adds a row per set to the last run's log.
   - `results.csv`: one row per setpoint (Ku, Pu, relay step and swing, KP, TI, the changes, the fit K, L and tau, the check's overshoot, reversals, t63, t90, back-off and sag).
-  - `sets.csv`, the three PID table sets; `write-to-board.txt`, the lines Write to board sends, to paste into PuTTY if wanted; `working.txt`, the Working card's lines with the PC time; `relay_<mbar>mbar.csv` and `check_<mbar>mbar_<n>_up.csv` / `_back.csv`, each relay test's and check step's samples. A check that a refinement replaced (or that was undone) is deleted, so only the check each result came from is kept (the session log still has every sample).
+  - `sets.csv`, the three PID table sets; `write-to-board.txt`, the lines Write to board sends, to paste into PuTTY if wanted; `relay_<mbar>mbar.csv` and `check_<mbar>mbar_<n>_up.csv` / `_back.csv`, each relay test's and check step's samples. A check that a refinement replaced (or that was undone) is deleted, so only the check each result came from is kept (the session log still has every sample).
   - `autotune-learned.csv` beside the run folders: the learned gains and fit per setpoint (above).
 
 So an autotune that is stopped, stalls, loses the link or is cut short by closing the GUI keeps everything up to there. The run bar says which step it ended in and what it was doing.
