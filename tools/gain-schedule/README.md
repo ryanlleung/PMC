@@ -16,7 +16,7 @@ Pressure here is a rough stand-in for helium flow: it is measured and tuned as p
 
 The setpoints run in the order given. Not benched yet.
 
-1. **Reach.** AUTO at the setpoint with safe gains (the point's learned gains if it has any) until the minute's mean is on it and level. The valve position it holds at is x0.
+1. **Reach.** AUTO at the setpoint with safe gains (the point's learned gains if it has any) until it holds: the minute's mean within 5 % of the setpoint, the last 30 s within 2.5 % and within 1.25 % of the 30 s before. The valve position it holds at is x0. (Before 11 Nov the 5 % alone counted, and the bench called 24 mbar held at 23.07 and 48 at 45.85 while still rising.)
 2. **Relay test** (Astrom and Hagglund), in MANUAL: the valve at x0 + d while the pressure is below the setpoint and x0 - d while it is above, so the loop oscillates by itself. The oscillation gives the ultimate gain Ku (the KP at which AUTO would oscillate) and its period Pu. d grows when nothing crosses and shrinks when the swing is too big.
 3. **First gains.** With a learned fit of the response for this setpoint (K, L, tau, below):
 
@@ -51,8 +51,11 @@ The setpoints run in the order given. Not benched yet.
      | 4 | slow: no overshoot, back-off 10 % or less, t90 over 8 x (L_eff + tau) | TI x 0.8 |
      | 5 | otherwise | the check passes |
 
-     Rules 3 and 4 never take TI under 2.5 L_eff (in minutes) or the integral gain KP / (60 TI) over 1 / (4 K L_eff); at that limit the check passes with the note "as fast as the cryostat allows". KP is never raised, and never over Ku / 3. At most 4 refinements per setpoint. A refinement that makes the check worse (it oscillates, goes 15 % further over the overshoot or reversal limit, or takes 1.5 times as long to reach 90 %) is undone and ends the refinements, and the earlier gains stand. After each check the fit is redone and the newest accepted fit is kept.
-5. **Watchdog.** Whenever AUTO runs (reaching, holding, the checks), four swings in a row, each over 30 % of the setpoint, cut KP at once (x 0.5, or x 0.25 when the swing is larger than the setpoint) and AUTO carries on with the lower gain.
+     Rules 3 and 4 never take TI under 2.5 L_eff (in minutes) or the integral gain KP / (60 TI) over 1 / (4 K L_eff); at that limit the check passes with the note "as fast as the cryostat allows". Rules 1 to 4 never raise KP, and never take it over Ku / 3.
+   - **Gains from the check as it ran** (`model_step`, `model_gains`; added 11 Nov after the bench run left KP low and TI long). When rule 1 or 2 does not apply, the check is fitted as it ran (`fit_closed_loop`, as for the predicted line below) and, if that fit is within 15 % of the step RMS, KP and TI are searched on three models of it: the fit with its dead time made L_eff; the same with K 1.3 times lower; and K 1.3 times higher with the dead time 4 s longer. The search keeps the gains with the shortest worst settle over the three models, both steps, with no model over 5 % overshoot or 2 reversals. KP runs from Ku / 2 down (never over a KP that rule 1 or 2 cut at this setpoint); TI from its floor (2.5 L_eff, and the integral cap above) up to 3 min. The gains are used, in place of rule 3 or 4 or a pass, when they settle in 0.75 times the check's settle or less (any time, if the check did not settle) and KP or TI differs by more than 15 %. This is the only place KP can go up. It counts as a refinement (the trims say `fit KP .. TI ..`), and is undone like the rules if the next check is worse; a check after it that overshoots cuts KP by rule 2 as usual.
+   - At most 4 refinements per setpoint. A refinement that makes the check worse (it oscillates, goes 15 % further over the overshoot or reversal limit, or takes 1.5 times as long to reach 90 %) is undone and ends the refinements, and the earlier gains stand. After each check the fit is redone and the newest accepted fit is kept.
+5. **Out of reach.** A check step up ends when the valve is over 90 % for 30 s with the pressure short of the band, or when it runs out of time short of the band with the pressure up less than the band in its last 60 s and the valve opened 15 % or more since the step. The setpoint goes back to the point and the point is skipped, so it is left out of the sets (11 Nov bench: at 48 mbar the pressure stopped at 54.5 mbar with the valve at 98 %, short of 57.6, and five checks ran out of time and cut TI).
+6. **Watchdog.** Whenever AUTO runs (reaching, holding, the checks), four swings in a row, each over 30 % of the setpoint, cut KP at once (x 0.5, or x 0.25 when the swing is larger than the setpoint) and AUTO carries on with the lower gain.
 
 ## The three sets
 
@@ -77,5 +80,5 @@ Each setpoint's result is kept in `autotune-learned.csv` in the GUI's log folder
 ## Tests
 
 ```
-python test_pmc_autotune.py       # fit, first-gains rule, refine rules, sets, relay, watchdog and the whole sequence on a valve model (seconds)
+python test_pmc_autotune.py       # fit, first-gains rule, refine rules, gains from the check as it ran, out of reach, sets, relay, watchdog and the whole sequence on a valve model (seconds)
 ```
