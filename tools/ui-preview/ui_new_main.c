@@ -443,7 +443,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "motor-speed")) tap(95, 72);
     if (!strcmp(st, "motor-steps")) { tap(301, 128); ui_service(); }   // 100 steps instead of Hold to run
     if (!strcmp(st, "motor-coils") || !strcmp(st, "motor-ask")) tap(149, 72);
-    if (!strcmp(st, "motor-switch")) { tap(203, 72); tap(120, 128); }   // Switch tab, Pass 5 to 25 % on
+    if (!strcmp(st, "motor-switch")) { tap(203, 72); tap(120, 128); }   // Switch tab, Pass 5 to 50 % on
     if (!strcmp(st, "motor-ask")) { v_cal = true; tap(120, 184); }   // Coil order while homed: asks
     if (!strcmp(st, "overon")) { fake_override = true; tap(415, 184); }   // Menu, override armed
     if (!strcmp(st, "menu")) MENU();

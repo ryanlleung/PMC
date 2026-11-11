@@ -665,20 +665,20 @@ let parkedFlash;
     after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
 }
 { // Switch pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): Motor override >
-  // Switch turns it on; between 5 and 25 % (10 to 20 % until 0.16.8) the pressed switch neither stops closing nor
-  // raises W-4; below 5 % it stops as always.
-  const s = homed(load()); s.cmd('VALV SET 15', 60000);
+  // Switch turns it on; between 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11) the pressed switch
+  // neither stops closing nor raises W-4; below 5 % it stops as always.
+  const s = homed(load()); s.cmd('VALV SET 40', 150000);
   s.tap(415, 184); s.tap(240, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position > Motor override > Open
-  s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 25 % on
+  s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 50 % on
   shot(s, 'motor-switch');
-  const on = /Switch passed between 5 and 25 % open: on/.test(events(s, 5));
-  s.set(7, 1); s.run(1000);                            // the switch reads pressed at 15 %
+  const on = /Switch passed between 5 and 50 % open: on/.test(events(s, 5));
+  s.set(7, 1); s.run(1000);                            // the switch reads pressed at 40 %
   const a1 = s.cmd('ALRM?');
-  s.cmd('VALV SET 6', 30000);
+  s.cmd('VALV SET 6', 90000);
   const at6 = s.cmd('VALV?'), a6 = s.cmd('ALRM?');
   s.cmd('VALV SET 2', 30000);
   const at5 = s.cmd('VALV?'), ev = events(s, 5);
-  check('pass band: no W-4 at 15 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALRM NONE\r\n' &&
+  check('pass band: no W-4 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALRM NONE\r\n' &&
     /VALV 6\.0/.test(at6) && a6 === 'ALRM NONE\r\n' && /VALV (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
     [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
 }

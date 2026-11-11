@@ -26,11 +26,11 @@
  *          Open with another finger (Close then goes past the switch)
  *   Speed  Run, Start and Accel [-] value [+], and the time for a full open or close
  *   Coils  Mode WAVE/FULL/HALF, Hold torque, Coils off, Coil order, Direction
- *   Switch Pass 5 to 25 % (on/off) and the switch now (0.16.5, Ryan 9 Nov):
+ *   Switch Pass 5 to 50 % (on/off) and the switch now (0.16.5, Ryan 9 Nov):
  *          the valve binds about 13 % and the force switch trips there;
- *          while on and homed, between 5 and 25 % open the switch does not
- *          stop closing (valve.h; 10 to 20 % until 0.16.8). Off at every
- *          power-up.
+ *          while on and homed, between 5 and 50 % open the switch does not
+ *          stop closing (valve.h; 10 to 20 % until 0.16.8, 5 to 25 % until
+ *          0.16.11). Off at every power-up.
  * Coil order, Direction and Set zero ask first while the valve is homed.
  * The strip reads the motor state and the limit line (a latched fault, the
  * limit override or a message over it, as on every screen).
