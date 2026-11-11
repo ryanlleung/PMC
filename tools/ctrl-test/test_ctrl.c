@@ -60,7 +60,7 @@ static bool request_move(int32_t target)
 #define SW_MAX 32
 static int sw_n, sw_from[SW_MAX], sw_to[SW_MAX];
 static float sw_pv[SW_MAX];
-static long sw_jump[SW_MAX], sw_kick[SW_MAX], sw_int[SW_MAX];
+static long sw_jump[SW_MAX], sw_kick[SW_MAX], sw_int[SW_MAX], sw_kpe[SW_MAX];
 
 static void ctrl_tick(void)
 {
@@ -77,7 +77,16 @@ static void ctrl_tick(void)
         sw_pv[sw_n] = in.pv;
         sw_kick[sw_n] = lroundf(dkp * e);
         const ctrl_pid_t g = ctrl_set_gains(&K, C.set);
-        sw_int[sw_n] = lroundf(g.ti > 0 ? g.kp / 100.0f * (float)K.pos_max / (60.0f * g.ti) * e : 0);   // this step's integral
+        // This step's integral, and the new KP x the change in the error
+        // since the last step (a setpoint step's kick, 0.16.13).
+        const float kpn = g.kp / 100.0f * (float)K.pos_max;
+        // The integral is skipped while the valve still travels to the last
+        // command (travel anti-windup), so either is right.
+        const float lo = K.outmin / 100.0f * (float)K.pos_max;
+        const float kick = (float)before.pos_cmd + kpn * (e - (float)K.kdir * before.e_last);
+        const float want = kick + (g.ti > 0 ? kpn / (60.0f * g.ti) * e : 0);
+        sw_int[sw_n] = lroundf((want < lo ? lo : want > (float)K.pos_max ? (float)K.pos_max : want) - (float)before.pos_cmd);
+        sw_kpe[sw_n] = lroundf((kick < lo ? lo : kick > (float)K.pos_max ? (float)K.pos_max : kick) - (float)before.pos_cmd);
         sw_jump[sw_n++] = (long)(C.pos_cmd - before.pos_cmd);
     }
     if (r == CTRL_RUN) {
@@ -463,10 +472,11 @@ int main(int argc, char **argv)
             const float b = sw_from[i] + sw_to[i] == 3 ? K.b1 : K.b2;
             if (i < n_up)
                 where &= sw_to[i] > sw_from[i] && sw_pv[i] > b * 1.1f;
-            const long extra = labs(sw_jump[i]) - labs(sw_int[i]);   // past this step's integral
+            const long e1 = labs(sw_jump[i] - sw_int[i]), e2 = labs(sw_jump[i] - sw_kpe[i]);
+            const long extra = e1 < e2 ? e1 : e2;   // off the kick, with or without this step's integral
             worst = extra > worst ? extra : worst;
-            printf("     set %d to %d at %.3f mB: command %+ld steps, this step's integral %+ld (%+ld more without the re-base)\n",
-                   sw_from[i], sw_to[i], sw_pv[i], sw_jump[i], sw_int[i], sw_kick[i]);
+            printf("     set %d to %d at %.3f mB: command %+ld steps, the kick %+ld, with this step's integral %+ld (%+ld more without "
+                   "the re-base)\n", sw_from[i], sw_to[i], sw_pv[i], sw_jump[i], sw_kpe[i], sw_int[i], sw_kick[i]);
         }
         smooth_ = worst <= 2;
         for (int i = 0; i + 1 < n_up; i++)
@@ -477,7 +487,8 @@ int main(int argc, char **argv)
         CHECK(set0 == 1 && order && back && where, "schedule PV: set 1 at 5 mB, 1>2>3 going to 10 each past its boundary by "
               "the hysteresis; back to 5, 3>1 at once at %.2f mB (the lower of pressure and setpoint) (%d changes)",
               sw_n > n_up ? sw_pv[n_up] : 0.0f, sw_n);
-        CHECK(smooth_, "schedule PV: each change bumpless, the command moves by the step's integral alone (%ld steps over)", worst);
+        CHECK(smooth_, "schedule PV: each change bumpless, the command moves by the step's integral and the new KP x the "
+              "error's change since the last step (%ld steps off)", worst);
         CHECK(fault == CTRL_RUN && mode == AUTO && up.t_band > 0 && down.t_band > 0 && fabs(down.end - 5) <= K.band,
               "schedule PV: settles at 10 and back at 5 mB, no trip (end %.3f)", down.end);
         K = kk;
@@ -515,6 +526,44 @@ int main(int argc, char **argv)
         CHECK(start_down == 1 && start_at == 3 && step_down == 2 && step_up == 1 && up_7 == 2,
               "set from the lower of pressure and setpoint: start PV 20 SP 4 set %d, PV 20 SP 20 set %d; SP 20 to 8 set %d at "
               "once; SP 4 to 20 set %d until the pressure passes 6.6 (set %d at 7)", start_down, start_at, step_down, step_up, up_7);
+    }
+    // A setpoint step that changes the set keeps its kick (0.16.13): SP 16
+    // to 12 with the pressure at 16 goes from set 3 to set 2 and the
+    // command steps by set 2's KP x 4 mB at once, as SP 12 to 8 within set 2
+    // does. Before, the re-base took the kick away (bench 11 Nov: 16 to 12
+    // moved the valve 0.01 % where 0.56 % was due).
+    {
+        ctrl_tune_t k = K;
+        k.sched = CTRL_SCHED_PV;
+        k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
+        k.set23[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
+        k.set23[1] = (ctrl_pid_t){ 0.30f, 0.25f, 0 };
+        k.db = k.db_close = 1;
+        const float per = 0.14f / 100.0f * (float)k.pos_max;   // set 2's KP, steps per mB
+        long kick[2];
+        int sets[2][2];
+        const float sps[2][2] = { { 16, 12 }, { 12, 8 } };
+        for (int f = 0; f < 2; f++) {
+            ctrl_t c;
+            ctrl_init(&c);
+            c.pv_tau = 0;
+            ctrl_set_sp(&c, sps[f][0], FS, 0);
+            ctrl_start(&c, &k, 0, sps[f][0], 30000);
+            ctrl_in_t in = { .t_ms = 1000, .pv = sps[f][0], .pos = 30000, .fs = FS };
+            ctrl_step(&c, &k, &in);
+            sets[f][0] = c.set;
+            const int32_t before = c.pos_cmd;
+            ctrl_set_sp(&c, sps[f][1], FS, 2000);
+            in.t_ms = 2000;
+            ctrl_step(&c, &k, &in);
+            sets[f][1] = c.set;
+            kick[f] = (long)(c.pos_cmd - before);
+        }
+        const long want = lroundf(-4 * per * (1 + 1 / (60 * 1.5f)));   // the kick and this step's integral
+        CHECK(sets[0][0] == 3 && sets[0][1] == 2 && sets[1][0] == 2 && sets[1][1] == 2 && labs(kick[0] - want) <= 3 &&
+              labs(kick[1] - want) <= 3,
+              "setpoint step that changes the set keeps its kick: SP 16 to 12 (set %d to %d) %+ld steps, SP 12 to 8 (set %d to "
+              "%d) %+ld, set 2's KP x 4 mB and one step's integral %+ld", sets[0][0], sets[0][1], kick[0], sets[1][0], sets[1][1], kick[1], want);
     }
     // The reversal hold scales with KP (0.16.9): 0.2 mB of error at the set's
     // KP, at most 0.10 % of travel. The same 59-step turn round is sent at

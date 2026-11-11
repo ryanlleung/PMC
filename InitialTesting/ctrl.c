@@ -98,6 +98,7 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
     c->kdir_used = k->kdir;
     c->pv_f = pv;
     c->last_dir = 0;
+    c->e_last = c->sp - pv;
 }
 
 bool ctrl_set_sp(ctrl_t *c, float sp, float fs, uint32_t t_ms)
@@ -150,13 +151,20 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     const float d = -kd * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
     c->prev_pv = pf;
     if (kp != c->kp_used || kd != c->kd_used || k->kdir != c->kdir_used) {
-        // Tuning or PID set changed in AUTO: keep the output where it is, as
-        // on entry, rather than stepping by the change in KP x e (or in D).
-        c->i = (float)c->pos_cmd - kp * e - d;
+        // Tuning or PID set changed in AUTO: keep the output where it was at
+        // the last step's error, as on entry, rather than stepping by the
+        // change in KP x e (or in D). The last step's error, not this one's:
+        // a setpoint step that also changes the set (the lower of pressure
+        // and setpoint picks it) keeps its proportional kick, the new KP x
+        // the step, as one within a set does (0.16.13; before, the re-base
+        // took the kick away and the step ran on the integral alone). The
+        // last error is kept without KDIR, so a KDIR change stays bumpless.
+        c->i = (float)c->pos_cmd - kp * (float)k->kdir * c->e_last - d;
         c->kp_used = kp;
         c->kd_used = kd;
         c->kdir_used = k->kdir;
     }
+    c->e_last = c->sp - pf;
     float i_new = c->i + ki * e * CTRL_TS_S;
     const float raw = kp * e + i_new + d;
     const float lo = k->outmin / 100.0f * pos_max;   // AUTO min

@@ -148,6 +148,7 @@ typedef struct {
     float rev_pct;     // CTRL_REV_PCT from ctrl_init, the most the hold is; 0 off
     int set;           // PID set in use, 1 to 3 (0 before AUTO first starts)
     float kd_used;     // derivative of the last step: a change re-bases too
+    float e_last;      // setpoint less pressure at the last step (before a setpoint change), mbar, no KDIR: the re-base keeps the output there (0.16.13)
 } ctrl_t;
 
 void ctrl_init(ctrl_t *c);
