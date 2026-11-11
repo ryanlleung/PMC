@@ -151,6 +151,8 @@ typedef struct {
     int set;           // PID set in use, 1 to 4 (0 before AUTO first starts)
     float kd_used;     // derivative of the last step: a change re-bases too
     float e_last;      // setpoint less pressure at the last step (before a setpoint change), mbar, no KDIR: the re-base keeps the output there (0.16.13)
+    float sp_used;     // the setpoint the integral is based on: a change moves the integral by KP x the change, so P acts on the pressure only (0.16.15)
+    bool sp_kick;      // P on setpoint and pressure, as before 0.16.15: false from ctrl_init; true only in the host test's reference runs
 } ctrl_t;
 
 void ctrl_init(ctrl_t *c);

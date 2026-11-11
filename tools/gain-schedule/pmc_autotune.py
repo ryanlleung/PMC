@@ -173,6 +173,7 @@ LEARNED_NUM = ('sp_mbar', 'kp', 'ti_min', 'Ku', 'Pu_s', 'd_pct', 'a_mbar', 'valv
 LEARNED_AGREE = 2.0            # learned Ku within this factor of the new relay's: use its fit
 MAX_CUTS = 6                   # most KP cuts by the watchdog while reaching or holding one point
 PRED_SLEW = 0.4               # the valve's speed in the predicted line, % a second (bench 0.28 to 0.62)
+PI_KICK = False               # the board's PI kicks by KP x a setpoint step (firmware before 0.16.15); the GUI sets it from *IDN?
 PRED_K_GRID = [0.25 * 1.25 ** i for i in range(25)]   # process gain for the predicted line's fit, 0.25 to 53 mbar/%
 PRED_SHARE_MAX = 0.5          # ...used when its RMS error is under this share of the step
 LOG_FILE = 'autotune_log.csv'  # in the run's folder
@@ -389,21 +390,25 @@ def fit_response(ps, xs):
             'ok': r2 >= R2_MIN and k > 0 and moved > MOVE_MIN}
 
 
-def predict_leg(fit, kp, ti, p_start, x_start, sp_from, sp_to, n, lo=0.0):
+def predict_leg(fit, kp, ti, p_start, x_start, sp_from, sp_to, n, lo=0.0, kick=None):
     """The predicted answer to a setpoint step in AUTO, one sample a second
     for n s: [(t, p, x)]. The plant is the fit (p = c + K x lag_tau(valve(t -
     L)), drift left out), starting steady at p_start with the valve at
     x_start; the controller is the board's PI in position form (ctrl.c: KP x
     error + the integral, KP / (60 TI) x error a second, no integration past
     100 % or AUTO min, the integral set so the first output is the valve in
-    force), the valve following at PRED_SLEW % a second. Left out: the
-    deadbands, the reversal hold and the needle's stick, so the real valve
+    force; from 0.16.15 the proportional part acts on the pressure only, so
+    the setpoint step moves the integral and the output does not jump; kick
+    True, or PI_KICK when None, is the PI before that, which jumped by KP x
+    the step), the valve following at PRED_SLEW % a second. Left out: the
+    deadbands, the reversal hold and the needle's play, so the real valve
     moves in fewer, larger steps."""
     K, L, tau = fit['K'], int(fit['L']), fit['tau']
     a = 1.0 - math.exp(-1.0 / tau)
     c = p_start - K * x_start
     ki = kp / (60.0 * ti) if ti > 0 else 0.0
-    i = x_start - kp * (sp_from - p_start)
+    kick = PI_KICK if kick is None else kick
+    i = x_start - kp * ((sp_from if kick else sp_to) - p_start)
     hist = [x_start] * (L + 1)          # the valve, a ring: hist[j] is L s ago
     j = 0
     y, x, p, out = x_start, x_start, p_start, []

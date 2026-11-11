@@ -78,12 +78,13 @@ static void ctrl_tick(void)
         sw_kick[sw_n] = lroundf(dkp * e);
         const ctrl_pid_t g = ctrl_set_gains(&K, C.set);
         // This step's integral, and the new KP x the change in the error
-        // since the last step (a setpoint step's kick, 0.16.13).
+        // since the last step, less KP x any setpoint change (P on the
+        // pressure only, 0.16.15).
         const float kpn = g.kp / 100.0f * (float)K.pos_max;
         // The integral is skipped while the valve still travels to the last
         // command (travel anti-windup), so either is right.
         const float lo = K.outmin / 100.0f * (float)K.pos_max;
-        const float kick = (float)before.pos_cmd + kpn * (e - (float)K.kdir * before.e_last);
+        const float kick = (float)before.pos_cmd + kpn * (e - (float)K.kdir * before.e_last - (float)K.kdir * (C.sp - before.sp_used));
         const float want = kick + (g.ti > 0 ? kpn / (60.0f * g.ti) * e : 0);
         sw_int[sw_n] = lroundf((want < lo ? lo : want > (float)K.pos_max ? (float)K.pos_max : want) - (float)before.pos_cmd);
         sw_kpe[sw_n] = lroundf((kick < lo ? lo : kick > (float)K.pos_max ? (float)K.pos_max : kick) - (float)before.pos_cmd);
@@ -104,14 +105,14 @@ static void ctrl_tick(void)
     }
 }
 
-typedef struct { double t_band, over, under, end, step; bool in_band; } met_t;
+typedef struct { double t_band, over, under, end, step, tail; bool in_band; } met_t;
 
 // Runs s seconds; the simulator's met(): first time in band, then the
 // largest excursions either side after it.
 static met_t run(double s, float sp)
 {
-    met_t m = { -1, -1e9, 1e9, 0, -1e9, false };
-    long n = lround(s / MODEL_DT);
+    met_t m = { -1, -1e9, 1e9, 0, -1e9, 0, false };
+    long n = lround(s / MODEL_DT), nt = 0;
     for (long i = 0; i < n; i++) {
         if (model_tick())
             ctrl_tick();
@@ -123,11 +124,13 @@ static met_t run(double s, float sp)
                 if (e < m.under) m.under = e;
                 if (M.t - m.t_band <= 200 && e > m.step) m.step = e;   // overshoot of the step itself
             }
+            if ((double)(n - i) * MODEL_DT <= 60) { m.tail += M.pv; nt++; }   // the last 60 s
             if (verbose)
                 printf("%8.1f pv %8.3f sp %5.1f pos %6ld mode %d fault %d\n", M.t, M.pv, sp, (long)M.pos, mode, fault);
         }
     }
     m.end = M.pv;
+    m.tail = nt ? m.tail / nt : M.pv;
     return m;
 }
 
@@ -146,7 +149,10 @@ static void fresh(void)
 {
     model_init();
     ctrl_init(&C);
-    if (!smooth) C.pv_tau = C.rev_pct = 0;
+    if (!smooth) {
+        C.pv_tau = C.rev_pct = 0;
+        C.sp_kick = true;   // the reference's PI kicks on a setpoint step (P on setpoint and pressure)
+    }
     mode = MANUAL;
     fault = CTRL_RUN;
     w02 = false;
@@ -237,7 +243,9 @@ int main(int argc, char **argv)
     CHECK(fault == CTRL_F06 && mode == MANUAL && !M.moving, "helium off: F-6 after %.0f s, MANUAL, valve idle", fault_t - t0);
 
     // The same targets as the firmware runs, with the reversal hold (and the
-    // pressure filter if on, 0.12.12): in band no later than 60 s after the reference.
+    // pressure filter if on, 0.12.12) and P on the pressure only (0.16.15): in
+    // band no later than 60 s after the reference, and the last 60 s within
+    // the band on average (one sample wanders 0.1 mB with the hold).
     {
         fresh();
         set_sp(5);
@@ -249,12 +257,12 @@ int main(int argc, char **argv)
         for (int i = 0; i < 7; i++) {
             set_sp(sp[i]);
             met_t m = run(len[i], sp[i]);
-            printf("     with the hold, target %.1f: in band at %.0f s (reference %.0f), then %+.3f / %+.3f mB (reference %+.3f / %+.3f), end %.3f\n",
-                   sp[i], m.t_band, ref[i]->t_band, m.over, m.under, ref[i]->over, ref[i]->under, m.end);
-            ok &= m.t_band > 0 && m.t_band <= ref[i]->t_band + 60 && fabs(m.end - sp[i]) <= K.band &&
+            printf("     with the hold, target %.1f: in band at %.0f s (reference %.0f), then %+.3f / %+.3f mB (reference %+.3f / %+.3f), end %.3f, last 60 s %.3f\n",
+                   sp[i], m.t_band, ref[i]->t_band, m.over, m.under, ref[i]->over, ref[i]->under, m.end, m.tail);
+            ok &= m.t_band > 0 && m.t_band <= ref[i]->t_band + 60 && fabs(m.tail - sp[i]) <= K.band &&
                   fault == CTRL_RUN && mode == AUTO && (i || m.step <= 0.1);
         }
-        CHECK(ok, "with the hold: targets 5, 4.5, 10, 5, 7, 3, 5 settle within 60 s of the reference, no trip");
+        CHECK(ok, "with the hold, no kick: targets 5, 4.5, 10, 5, 7, 3, 5 settle within 60 s of the reference, no trip");
     }
     // Settled at 5 mbar, 10 minutes: how often the motor turns round.
     {
@@ -551,11 +559,11 @@ int main(int argc, char **argv)
               "set from the lower of pressure and setpoint: start PV 20 SP 4 set %d, PV 20 SP 20 set %d; SP 20 to 8 set %d at "
               "once; SP 4 to 20 set %d until the pressure passes 6.6 (set %d at 7)", start_down, start_at, step_down, step_up, up_7);
     }
-    // A setpoint step that changes the set keeps its kick (0.16.13): SP 16
-    // to 12 with the pressure at 16 goes from set 3 to set 2 and the
-    // command steps by set 2's KP x 4 mB at once, as SP 12 to 8 within set 2
-    // does. Before, the re-base took the kick away (bench 11 Nov: 16 to 12
-    // moved the valve 0.01 % where 0.56 % was due).
+    // No kick on a setpoint step (0.16.15): P acts on the pressure only, so
+    // SP 16 to 12 with the pressure at 16 (set 3 to set 2) and SP 12 to 8
+    // within set 2 each move the command by one step's integral at set 2's
+    // gains, not by KP x 4 mB. (0.16.13 to 0.16.14 kicked by KP x the step,
+    // and the bounce as the kick was given back is what Ryan did not want.)
     {
         ctrl_tune_t k = K;
         k.sched = CTRL_SCHED_PV;
@@ -583,11 +591,12 @@ int main(int argc, char **argv)
             sets[f][1] = c.set;
             kick[f] = (long)(c.pos_cmd - before);
         }
-        const long want = lroundf(-4 * per * (1 + 1 / (60 * 1.5f)));   // the kick and this step's integral
-        CHECK(sets[0][0] == 3 && sets[0][1] == 2 && sets[1][0] == 2 && sets[1][1] == 2 && labs(kick[0] - want) <= 3 &&
-              labs(kick[1] - want) <= 3,
-              "setpoint step that changes the set keeps its kick: SP 16 to 12 (set %d to %d) %+ld steps, SP 12 to 8 (set %d to "
-              "%d) %+ld, set 2's KP x 4 mB and one step's integral %+ld", sets[0][0], sets[0][1], kick[0], sets[1][0], sets[1][1], kick[1], want);
+        const long want = lroundf(-4 * per / (60 * 1.5f));   // this step's integral alone
+        CHECK(sets[0][0] == 3 && sets[0][1] == 2 && sets[1][0] == 2 && sets[1][1] == 2 && labs(kick[0] - want) <= 1 &&
+              labs(kick[1] - want) <= 1,
+              "setpoint step, no kick (P on the pressure only): SP 16 to 12 (set %d to %d) %+ld steps, SP 12 to 8 (set %d to "
+              "%d) %+ld, one step's integral at set 2's gains %+ld (the kick was %+ld)", sets[0][0], sets[0][1], kick[0],
+              sets[1][0], sets[1][1], kick[1], want, lroundf(-4 * per));
     }
     // The reversal hold scales with KP (0.16.9): 0.2 mB of error at the set's
     // KP, at most 0.10 % of travel. The same 59-step turn round is sent at

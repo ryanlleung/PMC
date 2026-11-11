@@ -598,7 +598,10 @@ class Prediction(unittest.TestCase):
         self.assertAlmostEqual(rows[0][1], 8.0, places=6)          # dead time: nothing moves at first
         self.assertAlmostEqual(rows[-1][1], 9.6, places=2)
         self.assertAlmostEqual(rows[-1][2], 4.8, places=2)         # 1.6 mbar at 2 mbar/% = 0.8 % more valve
-        self.assertAlmostEqual(rows[0][2], 4.0 + at.PRED_SLEW, places=6)   # the proportional kick, at the slew
+        self.assertAlmostEqual(rows[0][2], 4.0 + 0.3 / (60 * 0.5) * 1.6, places=6)   # no kick (0.16.15): one second's integral
+        old = at.predict_leg(f, 0.3, 0.5, 8.0, 4.0, 8.0, 9.6, 600, kick=True)
+        self.assertAlmostEqual(old[0][2], 4.0 + at.PRED_SLEW, places=6)   # before 0.16.15: the proportional kick, at the slew
+        self.assertAlmostEqual(old[-1][1], 9.6, places=2)
 
     def test_the_valve_follows_at_the_slew_and_stays_in_range(self):
         f = {'K': 2.0, 'L': 0, 'tau': 4}

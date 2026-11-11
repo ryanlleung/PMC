@@ -108,6 +108,7 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
     c->pv_f = pv;
     c->last_dir = 0;
     c->e_last = c->sp - pv;
+    c->sp_used = c->sp;
 }
 
 bool ctrl_set_sp(ctrl_t *c, float sp, float fs, uint32_t t_ms)
@@ -162,16 +163,27 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     if (kp != c->kp_used || kd != c->kd_used || k->kdir != c->kdir_used) {
         // Tuning or PID set changed in AUTO: keep the output where it was at
         // the last step's error, as on entry, rather than stepping by the
-        // change in KP x e (or in D). The last step's error, not this one's:
-        // a setpoint step that also changes the set (the lower of pressure
-        // and setpoint picks it) keeps its proportional kick, the new KP x
-        // the step, as one within a set does (0.16.13; before, the re-base
-        // took the kick away and the step ran on the integral alone). The
-        // last error is kept without KDIR, so a KDIR change stays bumpless.
+        // change in KP x e (or in D). The last step's error, not this one's,
+        // so a setpoint step that also changes the set (the lower of pressure
+        // and setpoint picks it) is handled below like one within a set
+        // (0.16.13). The last error is kept without KDIR, so a KDIR change
+        // stays bumpless.
         c->i = (float)c->pos_cmd - kp * (float)k->kdir * c->e_last - d;
         c->kp_used = kp;
         c->kd_used = kd;
         c->kdir_used = k->kdir;
+    }
+    // The proportional part acts on the pressure only (0.16.15, Ryan 12 Nov):
+    // a setpoint change moves the integral by KP x the change the other way,
+    // so the output does not jump with the setpoint. The integral alone then
+    // takes the valve to the new setpoint, and the pressure comes in from
+    // one side. Before, the valve jumped by KP x the step and gave most of
+    // it back as the pressure arrived: a bounce on the way in (simulator,
+    // 16 to 12 mbar on set 3, 11 Nov).
+    if (c->sp != c->sp_used) {
+        if (!c->sp_kick)
+            c->i -= kp * (float)k->kdir * (c->sp - c->sp_used);
+        c->sp_used = c->sp;
     }
     c->e_last = c->sp - pf;
     float i_new = c->i + ki * e * CTRL_TS_S;

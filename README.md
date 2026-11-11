@@ -92,7 +92,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | `limit.c` | Limit switch input: a trip counts at once, the release is debounced (20 ms) |
 | `stepper3.c` | Step sequences (wave, full, half), ramps, absolute moves with retarget, the limit stop, motion timeout |
 | `valve.c` | Modes (NOT HOMED, HOMING, MANUAL, AUTO, SHUTDOWN, OFF), homing, Shut down, % position, STOP, fault latches, the event log (100 kept), runs AUTO |
-| `ctrl.c` | AUTO control step: PID, gain schedule (four sets from 0.16.14), anti-windup, deadbands, response monitor and settling checks (no hardware calls; `tools/ctrl-test` runs it on a PC) |
+| `ctrl.c` | AUTO control step: PID with KP on the pressure only (no setpoint kick, 0.16.15), gain schedule (four sets from 0.16.14), anti-windup, deadbands, response monitor and settling checks (no hardware calls; `tools/ctrl-test` runs it on a PC) |
 | `valvepos.c` | Saves the step count at standstill and every 2 s while moving, so a restart can offer it |
 | `cfg.c` | Settings record in serial flash, two sectors in turn, CRC32, read back before it counts |
 | `trend.c` | Trend rings in RAM: 600 one-second samples and 360 ten-second means, on fixed one-second slots |

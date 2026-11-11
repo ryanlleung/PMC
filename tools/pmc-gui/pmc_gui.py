@@ -75,6 +75,7 @@ LS_INPUT = re.compile(r'^[A-D][1-5]?$')
 OLD_FIRMWARE = (0, 16, 9)   # the reversal hold scales with KP from this version
 NAMES_FIRMWARE = (0, 16, 12)   # the text port names are whole words from this version (PRESSURE?, not PRES?)
 TABLE_FIRMWARE = (0, 16, 14)   # four PID sets and SCHED SET with B3 from this version
+NOKICK_FIRMWARE = (0, 16, 15)   # P on the pressure only from this version (no kick on a setpoint step)
 GUI_BUILD = ''              # set by main(): gui_build()
 
 
@@ -490,6 +491,8 @@ class Board:
             raise ConnectionError('board firmware %s has the old command names: flash %s or later' % (
                 fw[0].strip(), '.'.join(map(str, NAMES_FIRMWARE))))
         self.fw_ver = ver
+        # The autotune's predicted line and its gains follow the board's PI.
+        pmc_autotune.PI_KICK = bool(ver) and ver < NOKICK_FIRMWARE
         self.state['link'] = 'connected'
 
     def line(self):
