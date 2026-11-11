@@ -1406,7 +1406,7 @@ class AutoTuner(Tuner):
         self.leg_rows = rows
         if gone:
             self.calc('Check step %g -> %g mbar out of reach: %s' % (p0, p1, gone))
-            self.send('PRES SP %.1f' % sp, 'check step out of reach, back to %g mbar' % sp)
+            self.send('SETPOINT %.1f' % sp, 'check step out of reach, back to %g mbar' % sp)
             raise RuntimeError('the check step to %g mbar is out of reach (%s), so %g mbar is left out of the sets' % (
                 p1, gone, sp))
         if p_s is not None and x_s is not None and g and g[0] is not None:
