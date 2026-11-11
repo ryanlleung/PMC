@@ -984,6 +984,45 @@ class OutOfReach(unittest.TestCase):
         self.assertIn('up less than', msg)
 
 
+class SetpointSteps(unittest.TestCase):
+    """The setpoint step test (Ryan, 11 Nov: 8 to 48, back to 2, back to 8 mbar)."""
+
+    def test_8_48_2_8(self):
+        curve = lambda v: 0.67 + 60 * (1 - math.exp(-max(v, 0) / 25))   # noqa: E731
+        plant = Plant(curve=curve, L=2.0, tau=8.0, noise=0.01)
+        b = FakeBoard(plant)
+        b.sets[0] = [1.0, 0.30, 0.0]
+        b.advance(200)
+        d = tempfile.mkdtemp()
+        t = at.StepTest(b, Clock(b), None, d)
+        t.say = lambda m: None
+        got, done = [], []
+        t.result = got.append
+        t.step_done = lambda i, note: done.append((i, note))
+        out = t.run([8, 48, 2, 8])
+        self.assertEqual(out, got)
+        self.assertEqual([(r['from_mbar'], r['to_mbar']) for r in out], [(8, 48), (48, 2), (2, 8)])
+        self.assertEqual([i for i, _ in done], [0, 1, 2, 3])
+        for r in out:
+            self.assertIsNotNone(r['settle_s'], r)
+            self.assertAlmostEqual(r['p_end_mbar'], r['to_mbar'], delta=at.step_band(r['to_mbar']))
+            self.assertEqual((r['set'], r['kp'], r['ti_min']), (1, 1.0, 0.3))
+        self.assertEqual(b.mode, 'AUTO')
+        self.assertEqual(b.sp, 8.0)
+        self.assertTrue(os.path.exists(os.path.join(d, 'step_2_48_to_2mbar.csv')))
+        self.assertFalse(any(x.startswith(('PID SET', 'PIDS SET', 'SCHED SET')) for x in b.log))   # the board's gains
+
+    def test_ends_when_the_board_leaves_auto(self):
+        plant = Plant(K=2.0, L=2.0, tau=8.0, noise=0.01)
+        b = FakeBoard(plant)
+        b.advance(200)
+        t = at.StepTest(b, Clock(b), None, None)
+        t.say = lambda m: None
+        t.step_now = lambda i, label, most: setattr(b, 'mode', 'MANUAL') if i == 1 else None
+        with self.assertRaises(RuntimeError):
+            t.run([4, 6])
+
+
 class Files(unittest.TestCase):
     def test_only_the_check_a_result_came_from_is_kept(self):
         d = tempfile.mkdtemp()

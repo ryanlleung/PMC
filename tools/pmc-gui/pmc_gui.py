@@ -63,6 +63,7 @@ BOARD_PORT = 8888
 LS_PORT = 7777
 HISTORY = 4 * 3600          # samples kept for the page (1 a second): 4 hours
 AUTO_GUESS_S = 1500         # an autotune setpoint, until one has finished
+STEP_GUESS_S = 300          # a setpoint step, until one has finished
 RIDE_S = 120                # an autotune run waits this long for the link
 GAP_S = 60                  # no sample for this long: noted in the event log
 COLS = ['t_s', 'sp_mbar', 'p_mbar', 'valve_pct', 'mode', 'alarm', 'stage']
@@ -399,6 +400,35 @@ class GuiAutoTuner(pmc_autotune.AutoTuner):
                                                   ', ' + alarm if alarm and alarm != 'NONE' else '')
 
 
+class GuiStepTest(pmc_autotune.StepTest):
+    """pmc_autotune.StepTest that shows its steps on the run bar and its
+    figures on the Gains tab."""
+
+    def say(self, msg):
+        self.board.note('step test: ' + msg)
+
+    def step_now(self, i, label, most):
+        b = self.board
+        b.step(i, 'now')
+        b.stage(label, 'step test: ' + b.prog['steps'][i]['label'] if b.prog else 'step test', most)
+
+    def step_done(self, i, note):
+        self.board.step(i, 'done', note)
+        self.say('%s: %s' % (self.board.prog['steps'][i]['label'] if self.board.prog else 'step %d' % i, note))
+
+    def result(self, r):
+        b = self.board
+        b.result('results.csv', r)
+        with b.lock:
+            if b.st is not None:
+                b.st['rows'] = b.st['rows'] + [r]
+
+    def now(self, text):
+        with self.board.lock:
+            if self.board.st is not None:
+                self.board.st['now'] = text
+
+
 class Board:
     """One connection, owned by one thread: it polls once a second and runs
     the lines the page and the tuner hand it through a queue in between."""
@@ -424,6 +454,7 @@ class Board:
         self.phase = ''           # the stage column of every sample
         self.run_dir, self.run_files, self.run_log = None, {}, None
         self.at = None            # the last autotune: its rows, the three sets, written or not
+        self.st = None            # the last setpoint step test: its steps' figures
         self.preds, self.preds_v = [], 0   # predicted lines (GuiAutoTuner.predicted), sent when they change
 
     def now(self):
@@ -697,9 +728,10 @@ class Board:
         cur = P['steps'][i] if i is not None else None
         in_step = t - cur['t0'] if cur and cur['t0'] is not None else 0.0
         # About how long is left: what each finished setpoint took, or a guess until one has.
-        pts = P['steps'][:-1]      # not its last step, the sets
+        steps_test = P['kind'] == 'steptest'
+        pts = P['steps'][1:] if steps_test else P['steps'][:-1]   # not the step test's first hold, the autotune's sets
         took = [x['t1'] - x['t0'] for x in pts if x['state'] == 'done' and x['t0'] is not None]
-        per = sum(took) / len(took) if took else AUTO_GUESS_S
+        per = sum(took) / len(took) if took else STEP_GUESS_S if steps_test else AUTO_GUESS_S
         todo = sum(1 for x in pts if x['state'] == 'todo')
         left, how = max(per - in_step, 60) + per * todo, 'about'
         wait = None
@@ -778,6 +810,68 @@ class Board:
                        'written': '', 'running': True, 'calc': [], 'calc_now': '', 'sets_calc': []}
         threading.Thread(target=self.autotune_job, args=(a,), daemon=True).start()
         return ''
+
+    # Setpoint step test (pmc_autotune.StepTest) ------------------------------
+    def start_steptest(self, sps, most_min):
+        """AUTO through the setpoints in the order typed, each step until it
+        holds, with the board's own gains and PID table (Ryan, 11 Nov)."""
+        if self.busy():
+            return 'a test is already running'
+        sps = [round(x, 1) for x in sps]
+        if len(sps) < 2 or any(x <= 0 for x in sps) or any(a == b for a, b in zip(sps, sps[1:])):
+            return 'give two or more setpoints above 0, each different from the one before'
+        if not 1 <= most_min <= 120:
+            return 'the most per step must be 1 to 120 min'
+        r = self.raw('SETPOINT?;PRESSURE?;VALVE?;ALARM?')
+        if r.startswith('LINK '):
+            return r
+        parts = (r.split(';') + [''] * 4)[:4]
+        if parts[1] == 'PRESSURE NONE':
+            return 'no pressure reading'
+        if parts[2] == 'VALVE NONE':
+            return 'the valve is not homed: home it on the screen first'
+        if 'F-' in parts[3]:
+            return 'reset the fault first (Board tab): ' + parts[3][6:]
+        r = self.send('SETPOINT %.1f' % sps[0])     # ERR 211 when Remote control is Off
+        if r:
+            return r
+        most = int(most_min * 60)
+        self.job, self.stop_job, self.abort = 'steptest', False, False
+        labels = ['Hold %g mbar' % sps[0]] + ['%g -> %g mbar' % (a, b) for a, b in zip(sps, sps[1:])]
+        self.begin('steptest', 'Setpoint step test', labels,
+                   '%s mbar, each step until it holds within %g %% of the setpoint (%g mbar at least) for %d s, '
+                   'or %d min at most; the board\'s own gains and PID table' % (
+                       ' -> '.join('%g' % x for x in sps), pmc_autotune.STEP_BAND_PCT, pmc_autotune.STEP_BAND_MIN,
+                       pmc_autotune.SETTLED_S, most // 60))
+        with self.lock:
+            self.st = {'sps': sps, 'rows': [], 'now': '', 'running': True, 'dir': self.run_dir}
+        threading.Thread(target=self.steptest_job, args=(sps, most), daemon=True).start()
+        return ''
+
+    def steptest_job(self, sps, most):
+        t = GuiStepTest(ViaBoard(self), pmc_autotune.Clock(self.speed), None, self.run_dir)
+        t.board = self
+        outcome = 'done'
+        try:
+            t.run(sps, most)
+        except Stopped:
+            outcome = 'ended by STOP' if self.abort else 'stopped'
+        except (RuntimeError, Refused, ConnectionError, ValueError) as e:
+            outcome = 'ended: %s' % e
+        finally:
+            self.stop_job = False
+            if outcome != 'done' and self.prog:
+                with self.lock:
+                    self.where(self.prog)
+            # Stop test puts the setpoint back to the first one; STOP leaves everything.
+            if outcome == 'stopped':
+                r = self.send('SETPOINT %.1f' % sps[0])
+                outcome += '; setpoint back to %g mbar%s' % (sps[0], ' (' + r + ')' if r else '')
+            with self.lock:
+                if self.st is not None:
+                    self.st['running'], self.st['now'] = False, ''
+            self.end(outcome)
+            self.job = None
 
     def at_rows(self, rows, a):
         """The results so far: the sets, and the files that hold them."""
@@ -979,7 +1073,8 @@ class Board:
             out = {'link': self.state['link'], 'idn': self.state['idn'], 'pid': self.state['pid'], 'build': GUI_BUILD,
                    'board_sched': self.state.get('board_sched'), 'pid_set': self.state.get('pid_set'),
                    'log': self.state['log'], 'rows': rows, 'prog': self.prog_view(), 'last_prog': self.last_prog,
-                   'logger': self.logger.view(), 'ls': ls, 'autotune': self.at, 'learned': learned,
+                   'logger': self.logger.view(), 'ls': ls, 'autotune': self.at, 'steptest': self.st,
+                   'learned': learned,
                    'preds_v': self.preds_v}
             if pv != self.preds_v:
                 out['preds'] = list(self.preds)
@@ -1073,6 +1168,9 @@ def make_handler(board):
                                              float(q.get('b2', pmc_autotune.B2)), int(float(q.get('h', pmc_autotune.HYST))),
                                              float(q.get('kp0', 0.10)), float(q.get('ti0', 0.40)),
                                              str(q.get('start', 'learned')))
+                elif p == '/api/steptest':
+                    r = board.start_steptest([float(x) for x in str(q['sps']).replace(',', ' ').split()],
+                                             float(q.get('most_min', pmc_autotune.STEP_MOST_S / 60)))
                 elif p == '/api/autotune/write':
                     r = board.write_sets()
                 elif p == '/api/log':

@@ -63,6 +63,10 @@ The PID table sets come from the setpoints in each band: below B1, B1 to B2, abo
 
 While it runs the PID table is Off and set 1 carries the gains under test; at the end set 1, the PID table, the setpoint and the mode are put back as found.
 
+## Setpoint step test
+
+`StepTest` (the GUI's Setpoint step test card; Ryan, 11 Nov: "a step test with going from 8 to 48 and back to 2 and back to 8 mb", through the autotune's setpoints) runs AUTO through a list of setpoints, 8 12 16 24 48 24 16 12 8 4 2 4 8 mbar by default, with the board's own gains and PID table: only the setpoint is changed. It holds the first setpoint until the pressure is within 5 % of it (0.1 mbar at least) for 60 s (10 min at most), then steps to each next one, each until it holds the same way or `most` (20 min). Each step's figures are `step_figures` with that band, plus the PID set and the KP and TI in force at the end of the step (`PID?`, `PIDS?`), the overshoot in mbar, and the pressure and valve at the start and end.
+
 ## The log
 
 Each run writes `autotune_log.csv` in its folder as it goes (`log_row`, `LOG_COLS`): one row per calculation (the Working card's lines), decision (learned or fresh, first gains, each rule, an undone refinement, a watchdog cut, a relay step change, the result), change of gains on the board (`PID SET`, with old -> new and why) and command (setpoint, mode, valve). Every row carries the KP, TI and KD on the board after it. The GUI adds the start (settings and what it found), a skipped setpoint, the put back, the end with the gains read back from the board, and Write to board.
@@ -80,5 +84,5 @@ Each setpoint's result is kept in `autotune-learned.csv` in the GUI's log folder
 ## Tests
 
 ```
-python test_pmc_autotune.py       # fit, first-gains rule, refine rules, gains from the check as it ran, out of reach, sets, relay, watchdog and the whole sequence on a valve model (seconds)
+python test_pmc_autotune.py       # fit, first-gains rule, refine rules, gains from the check as it ran, out of reach, sets, relay, watchdog, the step test and the whole sequence on a valve model (seconds)
 ```

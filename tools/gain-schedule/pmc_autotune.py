@@ -1702,6 +1702,134 @@ class AutoTuner(Tuner):
                 'tau_s': fit['tau'] if fit else None, 'note': '; '.join(notes)}
 
 
+# Setpoint step test (Ryan, 11 Nov: "a step test with going from 8 to 48
+# and back to 2 and back to 8 mb"): the board's own gains and PID table,
+# nothing changed on it but the setpoint.
+STEP_SPS = [8, 12, 16, 24, 48, 24, 16, 12, 8, 4, 2, 4, 8]   # through the autotune's setpoints (Ryan: "not just 8 to 48 directly")
+STEP_MOST_S = 1200             # the most one step is recorded, s
+STEP_BAND_PCT = 5.0            # settled: within this % of the new setpoint...
+STEP_BAND_MIN = 0.1            # ...or this, mbar, if wider, for SETTLED_S
+STEP_FIRST_MAX_S = 600         # the most it waits for the first setpoint to hold
+
+
+def step_band(sp):
+    """The settling band of a step to sp, mbar."""
+    return max(STEP_BAND_PCT / 100.0 * sp, STEP_BAND_MIN)
+
+
+class StepTest(Tuner):
+    """AUTO at the first setpoint until it holds, then a step to each next
+    one in turn, each until the pressure holds within step_band for
+    SETTLED_S or `most` s. The gains are the board's own (the PID table
+    picks the set); only the setpoint is changed. Each step's samples go to
+    step_<n>_<from>_to_<to>mbar.csv and its figures (step_figures, with the
+    PID set and gains in force) to result()."""
+
+    def step_now(self, i, label, most):
+        """Step i (0 = the first setpoint's hold) starts."""
+
+    def step_done(self, i, note):
+        """Step i ended."""
+
+    def result(self, r):
+        """A step's figures."""
+
+    def now(self, text):
+        """The line that changes while a step runs."""
+
+    def gains(self):
+        """(set in use or None, KP, TI) on the board now."""
+        kp = ti = st = None
+        try:
+            g = self.link.ask('PID?')[0]
+            kp, ti = (float(x) for x in g[4:].split(',')[:2])
+        except (Refused, ValueError):
+            pass
+        try:
+            st = int(self.link.ask('PIDS?')[0][5:].split(',')[0])
+        except (Refused, ValueError, IndexError):
+            pass
+        return st, kp, ti
+
+    def run(self, sps, most=STEP_MOST_S):
+        sp0 = sps[0]
+        band = step_band(sp0)
+        self.step_now(0, 'AUTO at %g mbar, waiting for it to hold within %.2f mbar for %d s' % (
+            sp0, band, SETTLED_S), STEP_FIRST_MAX_S)
+        self.link.do('SETPOINT %.1f' % sp0)
+        if self.sample()[2] != 'AUTO':
+            self.link.do('MODE AUTO')
+        since = [None]
+
+        def held(rows):
+            t, p, m = rows[-1][0], rows[-1][1], rows[-1][3]
+            if m != 'AUTO':
+                raise RuntimeError('the board left AUTO (now %s)' % (m or 'no mode'))
+            since[0] = (since[0] if since[0] is not None else t) if abs(p - sp0) <= band else None
+            self.now('AUTO at %g mbar, %.0f s: pressure %.3f mbar, %s' % (
+                sp0, t, p, 'within %.2f mbar for %.0f of %d s' % (band, t - since[0], SETTLED_S)
+                if since[0] is not None else 'outside %.2f mbar' % band))
+            return since[0] is not None and t - since[0] >= SETTLED_S
+        rows = self.samples(STEP_FIRST_MAX_S, held)
+        ok = bool(rows) and held(rows)
+        self.step_done(0, 'held %d s' % SETTLED_S if ok else 'not held in %d min, stepped anyway' %
+                       (STEP_FIRST_MAX_S // 60))
+        out = []
+        for i, (a, b) in enumerate(zip(sps, sps[1:]), 1):
+            out.append(self.step(i, a, b, most))
+        return out
+
+    def step(self, i, a, b, most):
+        band = step_band(b)
+        self.step_now(i, 'setpoint %g -> %g mbar, waiting for it to hold within %.2f mbar for %d s' % (
+            a, b, band, SETTLED_S), most)
+        p_s, x_s, _ = self.sample()
+        self.link.do('SETPOINT %.1f' % b)
+        t0, n, rows, since = self.clock.now(), 0, [], None
+        while True:
+            n += 1
+            self.clock.wait_until(t0 + n)
+            p, x, m = self.sample()
+            if m != 'AUTO':
+                raise RuntimeError('the board left AUTO (now %s)' % (m or 'no mode'))
+            t = self.clock.now() - t0
+            rows.append((t, p, x))
+            if p is not None:
+                since = (since if since is not None else t) if abs(p - b) <= band else None
+                self.now('Step %g -> %g mbar, %.0f s: pressure %.3f mbar, valve %s %%, %s' % (
+                    a, b, t, p, '--' if x is None else '%.2f' % x,
+                    'within %.2f mbar for %.0f of %d s' % (band, t - since, SETTLED_S) if since is not None
+                    else 'outside %.2f mbar' % band))
+            if (since is not None and t - since >= SETTLED_S) or t >= most:
+                break
+        if self.log_dir:
+            with open(os.path.join(self.log_dir, 'step_%d_%g_to_%gmbar.csv' % (i, a, b)), 'w', newline='') as f:
+                w = csv.writer(f)
+                w.writerow(['t_s', 'p_mbar', 'valve_pct', 'from_mbar', 'to_mbar'])
+                for r in rows:
+                    w.writerow(['%.1f' % r[0], '' if r[1] is None else '%.3f' % r[1],
+                                '' if r[2] is None else '%.2f' % r[2], a, b])
+        fig = step_figures(rows, a, b, band) or {}
+        st, kp, ti = self.gains()
+        xs = [r[2] for r in rows if r[2] is not None]
+        over = fig.get('overshoot_pct')
+        r = {'step': i, 'from_mbar': a, 'to_mbar': b, 'set': st, 'kp': kp, 'ti_min': ti, 'band_mbar': round(band, 3),
+             't63_s': fig.get('t63_s'), 't90_s': fig.get('t90_s'), 'overshoot_pct': over,
+             'overshoot_mbar': None if over is None else round(over / 100 * abs(b - a), 3),
+             'settle_s': None if fig.get('settle_s') is None else round(fig['settle_s']),
+             'reversals': fig.get('reversals'), 'backoff_pct': fig.get('backoff_pct'), 'sag_s': fig.get('sag_s'),
+             'p_start_mbar': None if p_s is None else round(p_s, 3),
+             'p_end_mbar': next((round(r[1], 3) for r in reversed(rows) if r[1] is not None), None),
+             'valve_start_pct': None if x_s is None else round(x_s, 2), 'valve_end_pct': xs[-1] if xs else None,
+             'valve_max_pct': max(xs) if xs else None, 'valve_min_pct': min(xs) if xs else None}
+        self.result(r)
+        self.step_done(i, '%s, overshoot %s mbar, 90 %% in %s' % (
+            'settled in %d s' % r['settle_s'] if r['settle_s'] is not None else 'not settled in %d min' % (most // 60),
+            '--' if r['overshoot_mbar'] is None else '%.2f' % r['overshoot_mbar'],
+            '--' if r['t90_s'] is None else '%d s' % r['t90_s']))
+        return r
+
+
 def learned_key(sp):
     return '%g' % float(sp)
 
