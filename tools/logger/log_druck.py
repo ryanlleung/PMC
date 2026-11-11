@@ -6,7 +6,7 @@
     python log_druck.py 192.168.1.23 -o run1.csv
 
 Writes druck_YYYYMMDD_HHMMSS.csv unless -o is given. Stop with Ctrl+C.
-Ethernet: TCP port 8888 (give host:port for another). Needs firmware 0.16.10
+Ethernet: TCP port 8888 (give host:port for another). Needs firmware 0.16.12
 or later: the command names are whole words from there (PRESSURE?, not PRES?).
 The board takes one connection at a time; a new one replaces the old, and
 the logger then reconnects on its own. USB: close the NECTO UART Terminal
@@ -49,12 +49,12 @@ class Link:
         self.port.dtr = True    # baud and DTR are ignored over TCP
         idn = self.ask("*IDN?")
         if not idn.startswith("MercShore,iPC,"):
-            raise ConnectionError(f"not an mm4 with firmware 0.16.10 or later (*IDN? gave {idn!r})")
-        # The command names are whole words from 0.16.10 (PRESSURE?, not PRES?).
+            raise ConnectionError(f"not an mm4 with firmware 0.16.12 or later (*IDN? gave {idn!r})")
+        # The command names are whole words from 0.16.12 (PRESSURE?, not PRES?).
         version = tuple(int(n) for n in re.findall(r"\d+", idn.split(",")[-1])[:3])
-        if version < (0, 16, 10):
+        if version < (0, 16, 12):
             raise ConnectionError(f"firmware {idn.split(',')[-1]} has the old command names: "
-                                  "flash 0.16.10 or later, or use the logger from that firmware's commit")
+                                  "flash 0.16.12 or later, or use the logger from that firmware's commit")
         print(idn)
         # Board clock from the PC's local time; the TIME? query makes one reply line.
         print(self.ask(time.strftime("TIME SET %Y-%m-%d %H:%M:%S;TIME?")))

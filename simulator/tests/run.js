@@ -361,7 +361,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const errs = [['NO SUCH', 100], ['SETPOINT x', 101], ['SETPOINT 2000', 102], ['X'.repeat(97), 103], ['MODE?;EVENT? 2', 104],
     ['EVENT? 0', 102], ['VALVE SET 101', 102], ['VALVE SET', 101], ['MODE', 101], ['TIME SET 2026-13-01 00:00:00', 101],
     ['PRESSURE? 5', 100], ['pressure?', 100], ['SETPOINT', 101], ['SETPOINTS 5', 100], ['EVENT?5', 100],
-    // 0.16.10: the four-letter names to 0.16.9 are not taken any more.
+    // 0.16.12: the four-letter names to 0.16.11 are not taken any more.
     ['PRES?', 100], ['PRES SP 5', 100], ['PRES SP?', 100], ['VALV?', 100], ['VALV SET 5', 100], ['ALRM?', 100], ['ALRM OK', 100],
     ['EVNT?', 100], ['BARO?', 100], ['NETW?', 100]];
   const wrong = errs.map(([c, n]) => [c, n, one(c)]).filter(([c, n, r]) => !new RegExp('(^|;)ERR ' + n + ' [A-Z][^;\\r\\n]*\\r\\n$').test(r))
@@ -668,20 +668,20 @@ let parkedFlash;
     after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
 }
 { // Switch pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): Motor override >
-  // Switch turns it on; between 5 and 25 % (10 to 20 % until 0.16.8) the pressed switch neither stops closing nor
-  // raises W-4; below 5 % it stops as always.
-  const s = homed(load()); s.cmd('VALVE SET 15', 60000);
+  // Switch turns it on; between 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11) the pressed switch
+  // neither stops closing nor raises W-4; below 5 % it stops as always.
+  const s = homed(load()); s.cmd('VALVE SET 40', 150000);
   s.tap(415, 184); s.tap(240, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position > Motor override > Open
-  s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 25 % on
+  s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 50 % on
   shot(s, 'motor-switch');
-  const on = /Switch passed between 5 and 25 % open: on/.test(events(s, 5));
-  s.set(7, 1); s.run(1000);                            // the switch reads pressed at 15 %
+  const on = /Switch passed between 5 and 50 % open: on/.test(events(s, 5));
+  s.set(7, 1); s.run(1000);                            // the switch reads pressed at 40 %
   const a1 = s.cmd('ALARM?');
-  s.cmd('VALVE SET 6', 30000);
+  s.cmd('VALVE SET 6', 90000);
   const at6 = s.cmd('VALVE?'), a6 = s.cmd('ALARM?');
   s.cmd('VALVE SET 2', 30000);
   const at5 = s.cmd('VALVE?'), ev = events(s, 5);
-  check('pass band: no W-4 at 15 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
+  check('pass band: no W-4 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
     /VALVE 6\.0/.test(at6) && a6 === 'ALARM NONE\r\n' && /VALVE (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
     [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
 }

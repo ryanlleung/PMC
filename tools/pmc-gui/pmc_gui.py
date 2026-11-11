@@ -72,7 +72,7 @@ PREDS_KEPT = 8              # the check steps' predicted lines kept for the char
 LS_NAMES = {'A': 'Heat exchanger', 'D': 'Cold head'}
 LS_INPUT = re.compile(r'^[A-D][1-5]?$')
 OLD_FIRMWARE = (0, 16, 9)   # the reversal hold scales with KP from this version
-NAMES_FIRMWARE = (0, 16, 10)   # the text port names are whole words from this version (PRESSURE?, not PRES?)
+NAMES_FIRMWARE = (0, 16, 12)   # the text port names are whole words from this version (PRESSURE?, not PRES?)
 GUI_BUILD = ''              # set by main(): gui_build()
 
 

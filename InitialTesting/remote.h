@@ -14,7 +14,7 @@
  *   ALARM?  EVENT? [n]  NETWORK?  TIME?  *IDN?
  *   PID?  PID SET  PIDS?  PIDS SET  SCHED?  SCHED SET (the gains, 0.15.8)
  *
- * The names are whole words from 0.16.10. To 0.16.9 every first word had
+ * The names are whole words from 0.16.12. To 0.16.11 every first word had
  * four letters (PRES, PRES SP, VALV, ALRM, EVNT, BARO, NETW); those are no
  * longer taken.
  *

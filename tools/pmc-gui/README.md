@@ -2,7 +2,7 @@
 
 `pmc_gui.py` is a small web server on a PC that talks to the board's text port (TCP 8888), and to a Lake Shore 336 (TCP 7777) when one is given, and serves one page to a browser. It holds the board's one connection, so every tool for the running board is on that page.
 
-It needs firmware 0.16.10 or later: the text port names are whole words from there (`PRESSURE?`, `SETPOINT`, `VALVE SET`). With an older board the Board light says so and nothing is sent; flash the board, or use the GUI from that firmware's commit.
+It needs firmware 0.16.12 or later: the text port names are whole words from there (`PRESSURE?`, `SETPOINT`, `VALVE SET`). With an older board the Board light says so and nothing is sent; flash the board, or use the GUI from that firmware's commit.
 
 ## The page
 

@@ -9,7 +9,7 @@ Pressure here is a rough stand-in for helium flow: it is measured and tuned as p
 ## Needs
 
 - Python 3.8 or later, standard library only. Nothing is installed with pip. On a Windows PC without admin rights, the "Windows embeddable package" zip from python.org runs after unzipping.
-- Firmware 0.16.10 or later (the text port names are whole words from there: `PRESSURE?`, `SETPOINT`, `VALVE SET`), and Menu > System > Remote control On.
+- Firmware 0.16.12 or later (the text port names are whole words from there: `PRESSURE?`, `SETPOINT`, `VALVE SET`), and Menu > System > Remote control On.
 - The board takes one text-port connection at a time, and a new one replaces the old: close PuTTY and the logger first.
 
 ## The procedure, per setpoint

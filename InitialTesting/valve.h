@@ -76,9 +76,11 @@ int32_t valve_pos_max(void);
 // closing nor raises W-1, W-4 or F-4. Motor override > Switch. RAM only, off
 // at power-up. 10 to 20 % until 0.16.8 (Ryan 10 Nov: the switch was still
 // pressed at 10 % closing from 13.5 % and W-4 ended AUTO there; "Just
-// extend it to go as low as 5% and 25% high").
+// extend it to go as low as 5% and 25% high"); 5 to 25 % until 0.16.11
+// (Ryan 11 Nov, PR #43: "expand the limit ignoring to 50 percent so 5 to
+// 50 %").
 #define VALVE_BAND_LO_PCT 5
-#define VALVE_BAND_HI_PCT 25
+#define VALVE_BAND_HI_PCT 50
 bool valve_limit_band(void);
 void valve_limit_band_set(bool on);
 int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
