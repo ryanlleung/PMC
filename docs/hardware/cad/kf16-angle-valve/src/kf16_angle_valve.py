@@ -5,7 +5,8 @@ listing's dimension table and drawing. The other sizes are read off the listing
 photo, scaled from the 30 mm flange, and are ESTIMATED.
 
 Origin: where the two port axes meet. Axial port faces -Z, side port faces +X,
-actuator up +Z, pilot on the -X face of the cylinder with its fittings facing -Y.
+actuator up +Z, pilot on the -X face of the cylinder with its fittings facing -Y,
+coil on top of the pilot with its DIN plug facing +Y (back) and the cable gland down.
 
     python3 kf16_angle_valve.py OUTDIR
 """
@@ -31,14 +32,15 @@ CYL_Z0, CYL_Z1 = 45.0, 92.0        # square compact air cylinder
 CYL_W = 40.0
 BOSS_D = 22.0
 # pilot (5-port solenoid valve) on the -X face of the cylinder, coil on top
-PIL_X0, PIL_X1 = -CYL_W / 2 - 18.0, -CYL_W / 2
+PIL_X0, PIL_X1 = -CYL_W / 2 - 22.0, -CYL_W / 2
 PIL_Y = 11.0                       # half depth
 PIL_Z0, PIL_Z1 = 48.0, 97.0
 SOL_Z1 = 115.0                     # black solenoid tube section
 COIL_Z0, COIL_Z1 = 115.0, 143.0    # black coil, 28 x 28
-COIL_W = 28.0
-COIL_XC = -20.0
-PLUG_D = 18.0                      # DIN plug, on the coil +X face, gland pointing down
+COIL_W = 24.0
+COIL_XC = (PIL_X0 + PIL_X1) / 2    # coil on top of the pilot stack, same centre (drawing)
+PLUG_D = 18.0                      # DIN plug on the coil's +Y face (to the back, hidden behind the coil in the
+                                   # drawing's front view), cable gland pointing down (photo)
 CABLE_D = 6.0
 
 
@@ -100,18 +102,18 @@ def build():
     parts["boss"] = (W(cyl((0, 0, CYL_Z1), BOSS_D, 2.0)), "alu_d")
     # pilot valve, solenoid tube section, coil, nut cap
     parts["pilot_body"] = (W(box(PIL_X0, PIL_X1, -PIL_Y, PIL_Y, PIL_Z0, PIL_Z1)).edges("|Z").fillet(1.0), "alu_d")
-    parts["solenoid"] = (W(box(PIL_X0, PIL_X1 + 2, -PIL_Y, PIL_Y, PIL_Z1, SOL_Z1)).edges("|Z").fillet(1.5), "black")
+    parts["solenoid"] = (W(box(PIL_X0, PIL_X1, -PIL_Y, PIL_Y, PIL_Z1, SOL_Z1)).edges("|Z").fillet(1.5), "black")
     parts["coil"] = (W(box(COIL_XC - COIL_W / 2, COIL_XC + COIL_W / 2, -COIL_W / 2, COIL_W / 2, COIL_Z0, COIL_Z1)).edges("|Z").fillet(2.0), "black")
     parts["coil_cap"] = (W(cyl((COIL_XC, 0, COIL_Z1), 10.0, H - A - COIL_Z1)), "black2")
-    px0 = COIL_XC + COIL_W / 2
-    parts["plug"] = (W(box(px0, px0 + PLUG_D, -COIL_W / 2 + 1, COIL_W / 2 - 1, COIL_Z0 + 1, COIL_Z1 - 1)).edges("|X").fillet(2.0), "black2")
-    gx = px0 + PLUG_D / 2
-    parts["gland"] = (W(cyl((gx, 0, COIL_Z0 + 1), 11.0, 9.0, (0, 0, -1))), "black2")
+    py0 = COIL_W / 2
+    parts["plug"] = (W(box(COIL_XC - COIL_W / 2 + 1, COIL_XC + COIL_W / 2 - 1, py0, py0 + PLUG_D, COIL_Z0 + 1, COIL_Z1 - 1)).edges("|Y").fillet(2.0), "black2")
+    gy = py0 + PLUG_D / 2
+    parts["gland"] = (W(cyl((COIL_XC, gy, COIL_Z0 + 1), 11.0, 9.0, (0, 0, -1))), "black2")
     g0 = COIL_Z0 - 8
-    # cable runs out over the cylinder top (boss top at z 94) and drops beside it on the +X side
-    path = cq.Workplane().spline([(gx, 0, g0), (gx + 7, 2, 100), (gx + 25, 6, 100), (gx + 45, 10, 80)],
-                                 tangents=[(0, 0, -1), (0.4, 0.1, -1)], includeCurrent=False)
-    parts["cable"] = (cq.Workplane(cq.Plane(origin=(gx, 0, g0), xDir=(1, 0, 0), normal=(0, 0, -1))).circle(CABLE_D / 2).sweep(path), "cable")
+    # cable drops from the gland and leads away to the back, clear of the cylinder (y <= 20) and plate
+    path = cq.Workplane().spline([(COIL_XC, gy, g0), (COIL_XC, gy + 4, g0 - 15), (COIL_XC - 2, gy + 20, g0 - 40)],
+                                 tangents=[(0, 0, -1), (0, 0.6, -1)], includeCurrent=False)
+    parts["cable"] = (cq.Workplane(cq.Plane(origin=(COIL_XC, gy, g0), xDir=(1, 0, 0), normal=(0, 0, -1))).circle(CABLE_D / 2).sweep(path), "cable")
     # front (-Y) face of the pilot: two brass silencers and the 6 mm push-in air inlet between them
     xc = (PIL_X0 + PIL_X1) / 2
     for z in (62.0, 80.0):

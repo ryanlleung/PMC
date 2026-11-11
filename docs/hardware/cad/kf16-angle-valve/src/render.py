@@ -42,5 +42,5 @@ def shot(direction, fn, zoom=1.15, up=(0, 0, 1), size=(1100, 1300)):
 
 
 shot((1.0, -1.4, 0.7), "kf16-angle-valve-iso.png")
-shot((-1.2, 1.0, 0.5), "kf16-angle-valve-iso-back.png")
+shot((-1.0, 1.3, 0.5), "kf16-angle-valve-iso-back.png")
 shot((0, -1, 0), "kf16-angle-valve-front.png", zoom=1.1)

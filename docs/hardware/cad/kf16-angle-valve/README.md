@@ -1,6 +1,6 @@
 # KF16 right-angle pneumatic valve with 24 V solenoid pilot (GDQ-J16/KF)
 
-11/11/26. A CadQuery model of the "L type 24 B" option of the AliExpress listing (item 1005012966628004): a GDQ-J16/KF right-angle pneumatic vacuum valve, B version (solenoid pilot fitted), 24 V DC coil. Rev 2 follows the listing's dimension table, drawing and photo.
+11/11/26. A CadQuery model of the "L type 24 B" option of the AliExpress listing (item 1005012966628004): a GDQ-J16/KF right-angle pneumatic vacuum valve, B version (solenoid pilot fitted), 24 V DC coil. Rev 3 follows the listing's dimension table, drawing and photo. Rev 3 turns the DIN plug to the back (+Y), as in the drawing's front view and the photo, and centres the coil on the pilot stack.
 
 ## How it works
 - The black block with the cable is the coil of the solenoid pilot valve, with a DIN plug on its side held by one centre screw.
@@ -24,9 +24,11 @@
 | Body | 28 dia, top 57 above the axial face | photo, ESTIMATED |
 | Bonnet collar stack with label band | 48 dia, 28 tall incl. 44 square plate | photo, ESTIMATED |
 | Square compact cylinder | 40 x 40, 47 tall, 22 dia boss on top | photo, ESTIMATED |
-| Pilot valve | 18 x 22 on the cylinder's -X face, black solenoid section above it | photo, ESTIMATED |
-| Coil, DIN plug | 28 x 28 x 28; plug 18 deep on the coil's +X side, gland down | photo, ESTIMATED |
+| Pilot valve | 22 x 22 stack on the cylinder's -X face, black solenoid section above it | drawing layout, photo sizes, ESTIMATED |
+| Coil, DIN plug | 24 x 24 x 28 on top of the pilot stack; plug 18 deep on the coil's back (+Y) face, gland and cable down | drawing (plug hidden behind the coil in the front view) and photo, ESTIMATED |
 | Air in | 6 mm push-in between two brass silencers, facing -Y | photo, ESTIMATED |
+
+Checked in the model: H 190.0, A 40.0 on both ports, flange OD 30.0, phi B 17.2 x 2.5 clear, rim 3.0 at the OD, no clashes between parts. The listing drawing is one drawing for DN10 to DN50 and is not to scale for DN16 (scaled to A = 40 it gives H about 173 and a 43 mm body), so the table sizes and the photo are used, not drawing proportions. The two fittings on the right of the cylinder in the drawing are not on the 24 V photo and are not modelled (probably the magnetic switch option).
 
 The photo sizes are scaled from the 30 mm flange and could be a few mm out. The pilot's side and the fitting direction follow the photo: if your valve has the pilot on another face, rotate those parts about Z.
 
