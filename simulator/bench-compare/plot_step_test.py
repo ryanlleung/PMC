@@ -1,14 +1,16 @@
 # Each step of a GUI step test session CSV, one panel per step: the bench
 # against simulator runs of the same steps.
-#   python3 plot_step_test.py out.png bench.csv "label=sim.csv" ...
+#   python3 plot_step_test.py out.png bench.csv "label=sim.csv" ... [--title="..."]
 import csv, sys
 import numpy as np
 import matplotlib; matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 # usage: plot_steps.py out.png bench.csv [label=sim.csv ...]
-out=sys.argv[1]
 TITLE='Setpoint step test 11 Nov 17:26, each step: bench against the simulator. Grey band 5 % of the setpoint; valve % and heat exchanger K (red) below'
+for a in [a for a in sys.argv if a.startswith('--title=')]:
+    TITLE=a[8:]; sys.argv.remove(a)
+out=sys.argv[1]
 def load(path):
     rows=list(csv.DictReader(open(path)))
     def f(x):

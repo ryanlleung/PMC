@@ -1723,8 +1723,10 @@ STEP_FIRST_MAX_S = 600         # the most it waits for the first setpoint to hol
 # Four sets from firmware 0.16.14 (Ryan, 11 Nov "Yes fourth set", after the
 # 17:26 step test stalled at 8 to 16 mbar on set 2): 10 to 14 mbar gets a
 # set of its own, 0.50/1.00 (bench model thread, fitted to the 17:26 log),
-# and the old set 3 moves to set 4; B1, B2, B3 6, 10, 14 mbar.
-STEP_SETS = [(0.06, 0.70, 0.0), (0.14, 1.50, 0.0), (0.50, 1.00, 0.0), (0.30, 0.25, 0.0)]
+# and the old set 3 moves to set 4; B1, B2, B3 6, 10, 14 mbar. Set 2 is
+# 0.08/0.80 (the model thread's under 10 mbar set): with 0.14/1.50 the
+# simulator's 12 to 8 mbar step still ended 0.55 mbar high after 6 min.
+STEP_SETS = [(0.06, 0.70, 0.0), (0.08, 0.80, 0.0), (0.50, 1.00, 0.0), (0.30, 0.25, 0.0)]
 STEP_B1, STEP_B2, STEP_B3, STEP_H = 6.0, 10.0, 14.0, 10
 
 
