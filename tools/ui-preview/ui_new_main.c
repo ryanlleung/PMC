@@ -410,7 +410,7 @@ int main(int argc, char **argv)
         // The motor screen first (review, 16 Oct: it stayed built and a
         // settings keypad after it ran the heap out), opened as its Open
         // button does, from Valve position.
-        MENU(); M_VPOS(); ui_service(); run(300);               // Valve position, Motor override
+        MENU(); M_VSET(); ui_service(); run(300);               // Motor settings, Motor override (0.16.17)
         BACK(); run(300);
         HOME();
         tap(415, 72); BACK();                                   // PID tile: PID tuning
@@ -437,7 +437,7 @@ int main(int argc, char **argv)
     }
 
     if (!strcmp(st, "stop")) tap(415, 240);
-    if (!strncmp(st, "motor", 5)) { MENU(); M_VPOS(); ui_service(); }   // Valve position > Motor override
+    if (!strncmp(st, "motor", 5)) { MENU(); M_VSET(); ui_service(); }   // Motor settings > Override > Motor override
     if (!strcmp(st, "motor-held")) { extern bool fake_busy; fake_override = true; fake_busy = true; }   // Limit override held
     if (!strcmp(st, "motor-moving")) { extern bool fake_busy; fake_busy = true; ui_service(); }   // a move running
     if (!strcmp(st, "motor-speed")) tap(95, 72);

@@ -1014,6 +1014,7 @@ class SetpointSteps(unittest.TestCase):
         self.assertEqual([i for i, _ in done], [0, 1, 2, 3])
         for r in out:
             self.assertIsNotNone(r['settle_s'], r)
+            self.assertIsNotNone(r['held_from_s'], r)      # each step ended on the hold, not on `most`
             self.assertAlmostEqual(r['p_end_mbar'], r['to_mbar'], delta=at.step_band(r['to_mbar']))
             self.assertEqual((r['set'], r['kp'], r['ti_min']), (1, 1.0, 0.3))
         self.assertEqual(b.mode, 'AUTO')
@@ -1035,6 +1036,60 @@ class SetpointSteps(unittest.TestCase):
         t.step_now = lambda i, label, most: setattr(b, 'mode', 'MANUAL') if i == 1 else None
         with self.assertRaises(RuntimeError):
             t.run([4, 6])
+
+
+class StepHold(unittest.TestCase):
+    """Ryan, 12 Nov: "only go to next step if staying within +-0.1 mb for 3
+    minutes", judged on the 10 s mean."""
+
+    def test_held_after_3_min_inside(self):
+        h = at.Hold(8.0)
+        got = [h.feed(t, 8.0 + (0.12 if t % 2 else -0.12)) for t in range(400)]   # readings 0.12 out, mean inside
+        self.assertFalse(any(got[:at.STEP_MEAN_S - 1 + 180]))
+        self.assertTrue(got[at.STEP_MEAN_S - 1 + 180])
+
+    def test_a_mean_outside_starts_the_3_min_again(self):
+        h = at.Hold(8.0)
+        for t in range(150):
+            self.assertFalse(h.feed(t, 8.05))
+        for t in range(150, 160):
+            h.feed(t, 8.3)                    # the 10 s mean leaves 0.1 mbar
+        self.assertIsNone(h.since)
+        got = [h.feed(t, 8.05) for t in range(160, 400)]
+        self.assertFalse(any(got[:150]))
+        self.assertTrue(any(got))
+
+    def test_no_reading_does_not_count(self):
+        h = at.Hold(8.0, 0.1, 5)
+        self.assertFalse(h.feed(0, None))
+        self.assertEqual(h.last, [])
+
+    def test_a_step_waits_for_the_hold_after_the_5_pct_band(self):
+        plant = Plant(K=2.0, L=2.0, tau=8.0, noise=0.01)
+        b = FakeBoard(plant)
+        b.sets[0] = [1.0, 0.30, 0.0]
+        b.advance(200)
+        t = at.StepTest(b, Clock(b), None, None)
+        t.say = lambda m: None
+        r = t.run([8, 10], hold_mbar=0.1, hold_s=180)[0]
+        self.assertIsNotNone(r['held_from_s'])
+        self.assertLess(r['settle_s'], r['held_from_s'] + 180)
+
+
+class RandomSetpoints(unittest.TestCase):
+    def test_in_range_and_apart(self):
+        sps = at.random_sps(50, 2, 24, seed=1)
+        self.assertEqual(len(sps), 50)
+        self.assertTrue(all(2.0 <= x <= 24.0 and round(x, 1) == x for x in sps))
+        self.assertTrue(all(abs(b - a) >= at.STEP_RANDOM_MIN_STEP for a, b in zip(sps, sps[1:])))
+
+    def test_the_same_seed_gives_the_same_list(self):
+        self.assertEqual(at.random_sps(10, 4, 16, seed=7), at.random_sps(10, 4, 16, seed=7))
+
+    def test_bad_inputs(self):
+        for n, lo, hi in ((1, 2, 24), (101, 2, 24), (5, 0, 24), (5, 24, 2), (5, 8, 8.5)):
+            with self.assertRaises(ValueError):
+                at.random_sps(n, lo, hi)
 
 
 class Files(unittest.TestCase):

@@ -867,23 +867,30 @@ typedef struct {
     int n;
     const char *note;
     bool tall;                // the keys as three tall cards (PID tuning's PID tab)
+    bool over;                // no keys: the Open Motor override button (Motor settings' Override tab)
 } tab_t;
 
 // Motor settings (Valve setup to 0.16.1, Valve settings to 0.16.15, Ryan 12 Nov
 // "change valve settings to motor settings"; Ryan 9 Nov: "the functionality
 // between valve position and valve setup is a bit confusing"): the valve's
-// saved numbers, drafts until Save settings, nothing here moves the valve.
-// What acts on the valve now (Home valve, Set position, Motor override) is
-// on Valve position. The first tab is Travel, not Valve, so the page is not
-// "Valve > Valve".
-#define VALVE_SET_NOTE "Saved numbers; nothing here moves the valve. To home it or set its position, Valve position."
-static const tab_t valve_tabs[3] = {
+// saved numbers, drafts until Save settings; Travel, Homing and Drive move
+// nothing. Motor override, which drives the motor by steps, opens from the
+// fourth tab, Override (0.16.17, Ryan 12 Nov: "it doesnt feel right to be in
+// valve position"; the side column and the strip have no room for it). Home
+// valve and Set position are on Valve position. The first tab is Travel, not
+// Valve, so the page is not "Valve > Valve".
+#define VALVE_SET_NOTE "Saved numbers; Travel, Homing and Drive move nothing. The Override tab opens Motor override, which drives the motor by steps. To home the valve or set its position, Valve position."
+static const tab_t valve_tabs[4] = {
     // The deadbands (0.15.15: opening and closing) are the valve's: from
     // the 5 Nov bench, the needle sticks opening at low openings.
     { "Travel", { CFG_POSMAX, CFG_REVERSE, CFG_DB, CFG_DBC }, 4, VALVE_SET_NOTE },
     { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4,
       "What Home valve (Valve position) does with the switch. " VALVE_SET_NOTE },
     { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved only with the valve stopped." },
+    { "Override", { 0 }, 0,
+      "Motor override drives the motor by steps, past the valve's checks: Move (step size, Close, Open, Zero, "
+      "Limit override), Speed, Coils (step mode, hold, coil order, direction) and Switch (pass 5 to 50 %). "
+      "For commissioning and a stuck limit switch. It asks first; Back returns here.", false, true },
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
 // name on their own tab, the rest of AUTO's settings on the other. From
@@ -930,7 +937,7 @@ static struct {
     const tab_t *tabs;
     int ntabs, tab;
     ecard_t f[6];
-    lv_obj_t *seg, *segb[3];
+    lv_obj_t *seg, *segb[4];
     lv_obj_t *scr;
     int set;                                   // the PID set the PID tab shows, 1 to 4
     bool sets;                                 // the PID tab shows the set row (schedule on)
@@ -946,6 +953,7 @@ static cfg_key_t pg_key(const tab_t *t, int i)
 static void segs_draw(lv_obj_t *const *b, int n, int on);
 static void pg_fields(void);
 static void pg_refresh(void);
+static void motor_cb(lv_event_t *e);
 
 static void set_cb(lv_event_t *e)
 {
@@ -1060,6 +1068,17 @@ static void pg_fields(void)
             ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, cap, field_event, (void *)(intptr_t)k);
         }
     }
+    // Motor settings' Override tab (0.16.17): the button across both
+    // columns, set apart by a dark outline, and what it opens under it.
+    if (t->over) {
+        lv_obj_t *b = ui_btn(pg.scr, C2X[0], RY[y0], 343, RH, UI_SECONDARY, "Open Motor override", motor_cb, NULL);
+        lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, 0);
+        lv_obj_set_style_border_width(b, 2, 0);
+        lv_obj_set_style_border_color(b, UI_WARN, 0);
+        pg.f[0].card = b;
+        pg.f[1].card = ui_label(pg.scr, C2X[0] + 4, RY[y0 + 1] + 4, 335, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT,
+                                "Steps the motor past the valve's checks:\njog, speeds, coils, switch pass band.");
+    }
     // Two columns; five fields (the PID table tab, 0.16.14) as two over
     // three, the three short-captioned.
     for (int i = 0; i < t->n && !t->tall; i++) {
@@ -1145,7 +1164,38 @@ static void pg_refresh(void)
     side_refresh();
 }
 
-static void valve_set_build(lv_obj_t *scr) { pg_build(scr, "Motor settings", valve_tabs, 3); }
+// Motor override (Settings to 0.14.13, Valve position to 0.16.16, Motor
+// settings > Override from 0.16.17): set apart from the saved numbers by a
+// dark outline, and asked first. Limit override is on it since 0.11.33.
+// Back from it reopens Motor settings on the Override tab.
+static int valve_back_tab = -1;
+
+static void motor_go(void)
+{
+    valve_back_tab = pg.tab;
+    ui_service();
+}
+
+static void motor_cb(lv_event_t *e)
+{
+    (void)e;
+    if (stepper3_busy()) {
+        ui_msg("Wait for the valve to stop");
+        return;
+    }
+    ui_confirm("Open Motor override? Drives the motor by steps.", "Open", motor_go);
+}
+
+static void valve_set_build(lv_obj_t *scr)
+{
+    pg_build(scr, "Motor settings", valve_tabs, 4);
+    if (valve_back_tab > 0) {
+        pg.tab = valve_back_tab;
+        seg_draw();
+        pg_fields();
+    }
+    valve_back_tab = -1;
+}
 static void tune_build(lv_obj_t *scr) { pg_build(scr, "PID tuning", tune_tabs, 3); }
 
 const ui_screen_t ui_scr_valve_set = { "Motor settings", valve_set_build, pg_refresh, NULL };

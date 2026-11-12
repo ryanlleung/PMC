@@ -12,7 +12,8 @@
 #include "lv_port_indev.h"
 
 /*
- * Valve position > Motor override (Settings > Motor override to 0.14.13;
+ * Motor settings > Override > Motor override (from 0.16.17; Valve position to 0.16.16;
+ * Settings > Motor override to 0.14.13;
  * 0.11.32: option B, Ryan 22 Oct; three tabs
  * since 0.11.33, Ryan 23 Oct). A framework screen: the standard header,
  * status strip and STOP; every MOT setting and move from the touchscreen,

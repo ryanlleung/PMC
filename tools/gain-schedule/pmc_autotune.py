@@ -80,6 +80,7 @@ import csv
 import math
 import os
 import socket
+import random
 import time
 
 TCP_PORT = 8888
@@ -1720,7 +1721,22 @@ STEP_SPS = [8, 12, 16, 24, 48, 24, 16, 12, 8, 4, 2, 4, 8]   # through the autotu
 STEP_MOST_S = 1200             # the most one step is recorded, s
 STEP_BAND_PCT = 5.0            # settled: within this % of the new setpoint...
 STEP_BAND_MIN = 0.1            # ...or this, mbar, if wider, for SETTLED_S
-STEP_FIRST_MAX_S = 600         # the most it waits for the first setpoint to hold
+STEP_FIRST_MAX_S = 600         # the most it waits for the first setpoint to hold (at least `most`)
+# When a step ends (Ryan, 12 Nov: "only go to next step if staying within
+# +-0.1 mb for 3 minutes"): the pressure within STEP_HOLD_MBAR of the
+# setpoint for STEP_HOLD_S, or `most`. Judged on the mean of the last
+# STEP_MEAN_S readings: the reading's own noise is 0.15 mbar at 48 mbar and
+# 0.06 to 0.08 at 2 to 4 mbar (12 Nov bench), so single readings would
+# never stay inside 0.1 mbar for 3 min there.
+STEP_HOLD_MBAR = 0.1
+STEP_HOLD_S = 180
+STEP_MEAN_S = 10
+# Random setpoints for a response test (Ryan, 12 Nov: "generate random
+# setpoint between a chosen range"): STEP_RANDOM_N of them, 0.1 mbar apart
+# at least STEP_RANDOM_MIN_STEP from the one before.
+STEP_RANDOM_N = 10
+STEP_RANDOM_LO, STEP_RANDOM_HI = 2.0, 24.0
+STEP_RANDOM_MIN_STEP = 1.0
 # The PID table the step test writes first unless told not to (Ryan, 11 Nov:
 # "initialise to the kp ti kd values that you came up with for 6 and 14 mbar
 # boundaries"): sets 1 and 2 from the 10 Nov proposal, set 3 from the 11 Nov
@@ -1747,17 +1763,64 @@ def table_lines(sets, b1, b2, b3, h):
 
 
 def step_band(sp):
-    """The settling band of a step to sp, mbar."""
+    """The settling band of a step to sp, mbar (the figures' settle_s)."""
     return max(STEP_BAND_PCT / 100.0 * sp, STEP_BAND_MIN)
+
+
+def random_sps(n, lo, hi, min_step=STEP_RANDOM_MIN_STEP, seed=None):
+    """n setpoints between lo and hi mbar (0.1 mbar steps), each at least
+    min_step from the one before, for a response test."""
+    lo, hi = round(float(lo), 1), round(float(hi), 1)
+    n = int(n)
+    if not 2 <= n <= 100:
+        raise ValueError('give 2 to 100 setpoints')
+    if not 0 < lo < hi:
+        raise ValueError('the range must be above 0, low below high')
+    if min_step > hi - lo:
+        raise ValueError('the range must be wider than %g mbar' % min_step)
+    rnd = random.Random(seed)
+    out = []
+    while len(out) < n:
+        x = round(rnd.uniform(lo, hi), 1)
+        if not out or abs(x - out[-1]) >= min_step:
+            out.append(x)
+    return out
+
+
+class Hold:
+    """Is the pressure holding at sp? Within `mbar` of it, on the mean of
+    the last STEP_MEAN_S readings, for `s` seconds."""
+
+    def __init__(self, sp, mbar=STEP_HOLD_MBAR, s=STEP_HOLD_S):
+        self.sp, self.mbar, self.s = sp, mbar, s
+        self.last, self.since = [], None
+
+    def feed(self, t, p):
+        """The reading p at t s; True once it has held."""
+        if p is None:
+            return False
+        self.last = (self.last + [p])[-STEP_MEAN_S:]
+        self.mean = sum(self.last) / len(self.last)
+        inside = len(self.last) == STEP_MEAN_S and abs(self.mean - self.sp) <= self.mbar
+        self.since = (self.since if self.since is not None else t) if inside else None
+        return self.since is not None and t - self.since >= self.s
+
+    def text(self, t):
+        if self.since is not None:
+            return 'within %.2f mbar for %.0f of %d s (%d s mean %.3f)' % (self.mbar, t - self.since, self.s,
+                                                                         STEP_MEAN_S, self.mean)
+        return 'outside %.2f mbar' % self.mbar + ('' if len(self.last) < STEP_MEAN_S else
+                                                  ' (%d s mean %.3f)' % (STEP_MEAN_S, self.mean))
 
 
 class StepTest(Tuner):
     """AUTO at the first setpoint until it holds, then a step to each next
-    one in turn, each until the pressure holds within step_band for
-    SETTLED_S or `most` s. The gains are the board's own (the PID table
-    picks the set); only the setpoint is changed. Each step's samples go to
-    step_<n>_<from>_to_<to>mbar.csv and its figures (step_figures, with the
-    PID set and gains in force) to result()."""
+    one in turn, each until the pressure holds (Hold: within hold_mbar of
+    the setpoint for hold_s, on the STEP_MEAN_S mean) or `most` s. The gains
+    are the board's own (the PID table picks the set); only the setpoint is
+    changed. Each step's samples go to step_<n>_<from>_to_<to>mbar.csv and
+    its figures (step_figures, with the PID set and gains in force) to
+    result()."""
 
     def step_now(self, i, label, most):
         """Step i (0 = the first setpoint's hold) starts."""
@@ -1785,29 +1848,30 @@ class StepTest(Tuner):
             pass
         return st, kp, ti
 
-    def run(self, sps, most=STEP_MOST_S):
+    def run(self, sps, most=STEP_MOST_S, hold_mbar=STEP_HOLD_MBAR, hold_s=STEP_HOLD_S):
+        self.hold_mbar, self.hold_s = hold_mbar, hold_s
         sp0 = sps[0]
-        band = step_band(sp0)
+        first = max(STEP_FIRST_MAX_S, most)
         self.step_now(0, 'AUTO at %g mbar, waiting for it to hold within %.2f mbar for %d s' % (
-            sp0, band, SETTLED_S), STEP_FIRST_MAX_S)
+            sp0, hold_mbar, hold_s), first)
         self.link.do('SETPOINT %.1f' % sp0)
         if self.sample()[2] != 'AUTO':
             self.link.do('MODE AUTO')
-        since = [None]
+        h = Hold(sp0, hold_mbar, hold_s)
+        state = {'n': 0, 'ok': False}
 
         def held(rows):
             t, p, m = rows[-1][0], rows[-1][1], rows[-1][3]
             if m != 'AUTO':
                 raise RuntimeError('the board left AUTO (now %s)' % (m or 'no mode'))
-            since[0] = (since[0] if since[0] is not None else t) if abs(p - sp0) <= band else None
-            self.now('AUTO at %g mbar, %.0f s: pressure %.3f mbar, %s' % (
-                sp0, t, p, 'within %.2f mbar for %.0f of %d s' % (band, t - since[0], SETTLED_S)
-                if since[0] is not None else 'outside %.2f mbar' % band))
-            return since[0] is not None and t - since[0] >= SETTLED_S
-        rows = self.samples(STEP_FIRST_MAX_S, held)
+            if len(rows) > state['n']:     # each sample once
+                state['n'] = len(rows)
+                state['ok'] = h.feed(t, p)
+            self.now('AUTO at %g mbar, %.0f s: pressure %.3f mbar, %s' % (sp0, t, p, h.text(t)))
+            return state['ok']
+        rows = self.samples(first, held)
         ok = bool(rows) and held(rows)
-        self.step_done(0, 'held %d s' % SETTLED_S if ok else 'not held in %d min, stepped anyway' %
-                       (STEP_FIRST_MAX_S // 60))
+        self.step_done(0, 'held %d s' % hold_s if ok else 'not held in %d min, stepped anyway' % (first // 60))
         out = []
         for i, (a, b) in enumerate(zip(sps, sps[1:]), 1):
             out.append(self.step(i, a, b, most))
@@ -1815,11 +1879,12 @@ class StepTest(Tuner):
 
     def step(self, i, a, b, most):
         band = step_band(b)
+        hold_mbar, hold_s = getattr(self, 'hold_mbar', STEP_HOLD_MBAR), getattr(self, 'hold_s', STEP_HOLD_S)
         self.step_now(i, 'setpoint %g -> %g mbar, waiting for it to hold within %.2f mbar for %d s' % (
-            a, b, band, SETTLED_S), most)
+            a, b, hold_mbar, hold_s), most)
         p_s, x_s, _ = self.sample()
         self.link.do('SETPOINT %.1f' % b)
-        t0, n, rows, since = self.clock.now(), 0, [], None
+        t0, n, rows, h, held = self.clock.now(), 0, [], Hold(b, hold_mbar, hold_s), False
         while True:
             n += 1
             self.clock.wait_until(t0 + n)
@@ -1829,12 +1894,10 @@ class StepTest(Tuner):
             t = self.clock.now() - t0
             rows.append((t, p, x))
             if p is not None:
-                since = (since if since is not None else t) if abs(p - b) <= band else None
+                held = h.feed(t, p)
                 self.now('Step %g -> %g mbar, %.0f s: pressure %.3f mbar, valve %s %%, %s' % (
-                    a, b, t, p, '--' if x is None else '%.2f' % x,
-                    'within %.2f mbar for %.0f of %d s' % (band, t - since, SETTLED_S) if since is not None
-                    else 'outside %.2f mbar' % band))
-            if (since is not None and t - since >= SETTLED_S) or t >= most:
+                    a, b, t, p, '--' if x is None else '%.2f' % x, h.text(t)))
+            if held or t >= most:
                 break
         if self.log_dir:
             with open(os.path.join(self.log_dir, 'step_%d_%g_to_%gmbar.csv' % (i, a, b)), 'w', newline='') as f:
@@ -1848,6 +1911,7 @@ class StepTest(Tuner):
         xs = [r[2] for r in rows if r[2] is not None]
         over = fig.get('overshoot_pct')
         r = {'step': i, 'from_mbar': a, 'to_mbar': b, 'set': st, 'kp': kp, 'ti_min': ti, 'band_mbar': round(band, 3),
+             'held_from_s': round(h.since) if held else None,
              't63_s': fig.get('t63_s'), 't90_s': fig.get('t90_s'), 'overshoot_pct': over,
              'overshoot_mbar': None if over is None else round(over / 100 * abs(b - a), 3),
              'settle_s': None if fig.get('settle_s') is None else round(fig['settle_s']),
@@ -1857,8 +1921,11 @@ class StepTest(Tuner):
              'valve_start_pct': None if x_s is None else round(x_s, 2), 'valve_end_pct': xs[-1] if xs else None,
              'valve_max_pct': max(xs) if xs else None, 'valve_min_pct': min(xs) if xs else None}
         self.result(r)
-        self.step_done(i, '%s, overshoot %s mbar, 90 %% in %s' % (
-            'settled in %d s' % r['settle_s'] if r['settle_s'] is not None else 'not settled in %d min' % (most // 60),
+        self.step_done(i, '%s, %s, overshoot %s mbar, 90 %% in %s' % (
+            'held within %.2f mbar from %d s' % (hold_mbar, r['held_from_s']) if held
+            else 'not held within %.2f mbar in %d min' % (hold_mbar, most // 60),
+            'settled into %.2f mbar in %d s' % (band, r['settle_s']) if r['settle_s'] is not None
+            else 'not settled into %.2f mbar' % band,
             '--' if r['overshoot_mbar'] is None else '%.2f' % r['overshoot_mbar'],
             '--' if r['t90_s'] is None else '%d s' % r['t90_s']))
         return r

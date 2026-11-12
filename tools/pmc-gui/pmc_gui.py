@@ -827,9 +827,12 @@ class Board:
         return ''
 
     # Setpoint step test (pmc_autotune.StepTest) ------------------------------
-    def start_steptest(self, sps, most_min, table=None):
+    def start_steptest(self, sps, most_min, table=None, hold_mbar=pmc_autotune.STEP_HOLD_MBAR,
+                       hold_min=pmc_autotune.STEP_HOLD_S / 60):
         """AUTO through the setpoints in the order typed, each step until it
-        holds, with the board's gains and PID table (Ryan, 11 Nov). table:
+        holds (the 10 s mean within hold_mbar of the setpoint for hold_min,
+        Ryan 12 Nov) or most_min, with the board's gains and PID table
+        (Ryan, 11 Nov). table:
         {'sets': [[kp, ti, kd]] x 4, 'b1', 'b2', 'b3', 'h'} (four sets from
         0.16.14; b3 0: the first three) is written to the board first; None
         leaves the board's as they are."""
@@ -840,6 +843,10 @@ class Board:
             return 'give two or more setpoints above 0, each different from the one before'
         if not 1 <= most_min <= 120:
             return 'the most per step must be 1 to 120 min'
+        if not 0.01 <= hold_mbar <= 5:
+            return 'hold within 0.01 to 5 mbar'
+        if not 0.5 <= hold_min < most_min:
+            return 'the hold must be 0.5 min or more, and shorter than the most per step'
         lines = []
         if table:
             sets = [[float(v) for v in x] for x in table['sets']]
@@ -883,26 +890,26 @@ class Board:
                 return 'this firmware has no PID table (0.15.15 or later)'
             if r:
                 return '%s: %s' % (line, r)
-        most = int(most_min * 60)
+        most, hold_s = int(most_min * 60), int(round(hold_min * 60))
         self.job, self.stop_job, self.abort = 'steptest', False, False
         labels = ['Hold %g mbar' % sps[0]] + ['%g -> %g mbar' % (a, b) for a, b in zip(sps, sps[1:])]
         self.begin('steptest', 'Setpoint step test', labels,
-                   '%s mbar, each step until it holds within %g %% of the setpoint (%g mbar at least) for %d s, '
-                   'or %d min at most; %s' % (
-                       ' -> '.join('%g' % x for x in sps), pmc_autotune.STEP_BAND_PCT, pmc_autotune.STEP_BAND_MIN,
-                       pmc_autotune.SETTLED_S, most // 60,
+                   '%s mbar, each step until the %d s mean holds within %g mbar of the setpoint for %g min, '
+                   'or %g min at most; %s' % (
+                       ' -> '.join('%g' % x for x in sps), pmc_autotune.STEP_MEAN_S, hold_mbar, hold_s / 60.0,
+                       most / 60.0,
                        'PID table written first: ' + '; '.join(lines) if lines else 'the board\'s own gains and PID table'))
         with self.lock:
             self.st = {'sps': sps, 'rows': [], 'now': '', 'running': True, 'dir': self.run_dir, 'written': lines}
-        threading.Thread(target=self.steptest_job, args=(sps, most), daemon=True).start()
+        threading.Thread(target=self.steptest_job, args=(sps, most, hold_mbar, hold_s), daemon=True).start()
         return ''
 
-    def steptest_job(self, sps, most):
+    def steptest_job(self, sps, most, hold_mbar=pmc_autotune.STEP_HOLD_MBAR, hold_s=pmc_autotune.STEP_HOLD_S):
         t = GuiStepTest(ViaBoard(self), pmc_autotune.Clock(self.speed), None, self.run_dir)
         t.board = self
         outcome = 'done'
         try:
-            t.run(sps, most)
+            t.run(sps, most, hold_mbar, hold_s)
         except Stopped:
             outcome = 'ended by STOP' if self.abort else 'stopped'
         except (RuntimeError, Refused, ConnectionError, ValueError) as e:
@@ -1224,7 +1231,17 @@ def make_handler(board):
                 elif p == '/api/steptest':
                     r = board.start_steptest([float(x) for x in str(q['sps']).replace(',', ' ').split()],
                                              float(q.get('most_min', pmc_autotune.STEP_MOST_S / 60)),
-                                             q.get('table'))
+                                             q.get('table'),
+                                             float(q.get('hold_mbar', pmc_autotune.STEP_HOLD_MBAR)),
+                                             float(q.get('hold_min', pmc_autotune.STEP_HOLD_S / 60)))
+                elif p == '/api/steptest/random':
+                    try:
+                        out['sps'] = pmc_autotune.random_sps(int(float(q.get('n', pmc_autotune.STEP_RANDOM_N))),
+                                                             float(q.get('lo', pmc_autotune.STEP_RANDOM_LO)),
+                                                             float(q.get('hi', pmc_autotune.STEP_RANDOM_HI)))
+                        r = ''
+                    except ValueError as e:
+                        r = str(e)
                 elif p == '/api/autotune/write':
                     r = board.write_sets()
                 elif p == '/api/log':

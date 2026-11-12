@@ -1328,7 +1328,7 @@ void ui_home(void)
     frame_refresh();
 }
 
-// Valve position > Motor override, a framework screen since 0.11.32.
+// Motor settings > Override > Motor override (Valve position until 0.16.16), a framework screen since 0.11.32.
 void ui_service(void)
 {
     ui_open(&ui_scr_motor);

@@ -190,7 +190,7 @@
       <div class="card">
         <h2>Step test: each step</h2>
         <div class="est" id="sNow"></div>
-        <div style="overflow-x:auto"><table><thead><tr><th>Step, mbar</th><th title="The PID set the board's PID table had in use at the end of the step, and its gains">Set: KP, TI</th><th title="Seconds to cover 63 % and 90 % of the step">63 % / 90 %, s</th><th title="Beyond the new setpoint, mbar and % of the step">Overshoot</th><th title="Within the band (5 % of the setpoint, 0.1 mbar at least) for 60 s">Settled, s</th><th>Reversals</th><th title="The largest retreat of the valve from its furthest point before 90 %, % of its move">Back-off, %</th><th>Valve, %</th></tr></thead><tbody id="sRows"></tbody></table></div>
+        <div style="overflow-x:auto"><table><thead><tr><th>Step, mbar</th><th title="The PID set the board's PID table had in use at the end of the step, and its gains">Set: KP, TI</th><th title="Seconds to cover 63 % and 90 % of the step">63 % / 90 %, s</th><th title="Beyond the new setpoint, mbar and % of the step">Overshoot</th><th title="Within the band (5 % of the setpoint, 0.1 mbar at least) for 60 s">Settled, s</th><th title="When the 10 s mean came within the hold band and stayed there for the hold time, which ended the step">Held from, s</th><th>Reversals</th><th title="The largest retreat of the valve from its furthest point before 90 %, % of its move">Back-off, %</th><th>Valve, %</th></tr></thead><tbody id="sRows"></tbody></table></div>
       </div>
     </div>
     <div class="tab col" data-tab="board">
@@ -263,6 +263,8 @@
       <div class="card" data-kind="steptest">
         <h2>Setpoint step test<span class="badge">Running</span></h2>
         <div class="row"><label class="w">Setpoints</label><input id="sSps" type="text" class="wide" value="8 12 16 24 48 24 16 12 8 4 2 4 8"><label>mbar</label></div>
+        <div class="row"><label class="w">Random</label><input id="sRn" type="number" step="1" min="2" max="100" value="10" style="width:48px"><label>setpoints from</label><input id="sRlo" type="number" step="0.5" value="2" style="width:56px"><label>to</label><input id="sRhi" type="number" step="0.5" value="24" style="width:56px"><label>mbar</label><button onclick="fillRandom(this)">Fill setpoints</button></div>
+        <div class="row"><label class="w">Next step</label><label>when within</label><input id="sHoldMb" type="number" step="0.05" min="0.01" max="5" value="0.1" style="width:56px"><label>mbar for</label><input id="sHoldMin" type="number" step="0.5" min="0.5" max="60" value="3" style="width:48px"><label>min</label></div>
         <div class="row"><label class="w">Each step</label><input id="sMost" type="number" step="1" min="1" max="120" value="20" style="width:60px"><label>min at most</label></div>
         <div class="row"><label class="w">PID table</label><select id="sTable"><option value="write" selected>Write these first</option><option value="leave">Leave the board's</option></select></div>
         <div id="sTableBox">
@@ -276,7 +278,7 @@
         </div>
         <div class="est" id="sEst"></div>
         <div class="row"><button class="primary run" onclick="startSteps(this)">Run step test</button><button class="stopbtn" onclick="stopTest(this)">Stop step test</button></div>
-        <div class="hint">Write these first sends the four sets and the PID table on the pressure (<code>PIDS SET</code>, <code>SCHED SET PV</code>) before the run, and they stay on the board after it; it needs firmware 0.16.14 or later. KP in % per mbar, TI in min. Set 1 below B1, set 2 to B2, set 3 to B3, set 4 above; B3 0 writes the first three sets only. The values: sets 1 and 2 from the 10 Nov model, set 3 (10 to 14 mbar) from the bench model fitted to the 11 Nov 17:26 step test, set 4 from the 11 Nov bench autotune; not benched as a table. Leave the board's runs with whatever the board has. Then AUTO through the setpoints in the order typed: nothing else is changed on the board but the setpoint. First AUTO at the first setpoint until it holds (10 min at most), then each step until the pressure holds within 5 % of the new setpoint (0.1 mbar at least) for 1 min, or the time above. Each step's figures show on the left as it ends: the PID set in use and its gains, the time to 63 % and 90 % of the step, overshoot, settling time, reversals and valve back-off. Its folder has every sample, each step's samples and results.csv. Stop step test puts the setpoint back to the first one; STOP leaves everything where it is.</div>
+        <div class="hint">Write these first sends the four sets and the PID table on the pressure (<code>PIDS SET</code>, <code>SCHED SET PV</code>) before the run, and they stay on the board after it; it needs firmware 0.16.14 or later. KP in % per mbar, TI in min. Set 1 below B1, set 2 to B2, set 3 to B3, set 4 above; B3 0 writes the first three sets only. The values: the table the 12 Nov bench step tests ran (firmware 0.16.15). Leave the board's runs with whatever the board has. Then AUTO through the setpoints in the order typed: nothing else is changed on the board but the setpoint. First AUTO at the first setpoint until it holds (10 min, or the time above if longer, at most), then each step until it holds, or the time above. Holds: the mean of the last 10 readings stays within the mbar above of the setpoint for the minutes above (0.1 mbar for 3 min unless changed). The mean, not each reading, because a single reading's noise is 0.06 to 0.08 mbar at 2 to 4 mbar and up to 0.15 mbar at 48 mbar, so single readings would seldom stay within 0.1 mbar for 3 min there. Fill setpoints puts that many random setpoints between the two pressures in the Setpoints box (0.1 mbar steps, each at least 1 mbar from the one before); edit them before Run if you like. Each step's figures show on the left as it ends: the PID set in use and its gains, the time to 63 % and 90 % of the step, overshoot, settling time (5 % band), when the hold began, reversals and valve back-off. Its folder has every sample, each step's samples and results.csv. Stop step test puts the setpoint back to the first one; STOP leaves everything where it is.</div>
       </div>
     </div>
 
@@ -377,9 +379,13 @@ async function post(url, body, btn, what, okText) {
 const cmd = (line, btn) => post('/api/cmd', { line }, btn, line).then(j => j.reply);
 const stopAll = btn => post('/api/stop', {}, btn, 'STOP', 'valve stopped');
 const stopTest = btn => post('/api/test/stop', {}, btn, 'Stop test', 'stopping');
-const startSteps = btn => post('/api/steptest', { sps: val('sSps'), most_min: +val('sMost'),
+const startSteps = btn => post('/api/steptest', { sps: val('sSps'), most_min: +val('sMost'), hold_mbar: +val('sHoldMb'), hold_min: +val('sHoldMin'),
   table: val('sTable') === 'write' ? { sets: [1, 2, 3, 4].map(n => ['kp', 'ti', 'kd'].map(k => +val('s' + n + k))), b1: +val('sB1'), b2: +val('sB2'), b3: +val('sB3'), h: +val('sH') } : null },
   btn, 'Step test', 'started');
+async function fillRandom(btn) {
+  const j = await post('/api/steptest/random', { n: +val('sRn'), lo: +val('sRlo'), hi: +val('sRhi') }, btn, 'Random setpoints', 'filled');
+  if (j && j.sps) { $('sSps').value = j.sps.join(' '); estimates(); }
+}
 document.addEventListener('change', e => { if (e.target.id === 'sTable') $('sTableBox').style.display = val('sTable') === 'write' ? '' : 'none'; });
 function setPid(btn) {
   const kd = val('kd');
@@ -426,9 +432,10 @@ function estimates() {
   const ka = val('aSps').split(/[\s,]+/).filter(x => +x > 0).length;
   $('aEst').textContent = ka ? `${ka} setpoint${ka > 1 ? 's' : ''}: about ${fmtDur(ka * 900)} to ${fmtDur(ka * 2100)} (15 to 35 min each, the longer with refinements).` : 'Give at least one setpoint.';
   const ks = val('sSps').split(/[\s,]+/).filter(x => +x > 0).length - 1;
-  $('sEst').textContent = ks > 0 ? `${ks} step${ks > 1 ? 's' : ''}: about ${fmtDur(ks * 180)} to ${fmtDur(ks * 600)} (3 to 10 min each), ${fmtDur(600 + ks * 60 * +val('sMost'))} at most.` : 'Give two or more setpoints.';
+  const hold = 60 * (+val('sHoldMin') || 0), most = 60 * (+val('sMost') || 0);
+  $('sEst').textContent = ks > 0 ? `${ks} step${ks > 1 ? 's' : ''}: about ${fmtDur(ks * (90 + hold))} to ${fmtDur(ks * (560 + hold))} (the 12 Nov bench took 1.5 to 9 min to settle, then the hold), ${fmtDur(Math.max(600, most) + ks * most)} at most.` : 'Give two or more setpoints.';
 }
-document.querySelectorAll('#aSps, #sSps, #sMost').forEach(e => e.addEventListener('input', estimates));
+document.querySelectorAll('#aSps, #sSps, #sMost, #sHoldMin').forEach(e => e.addEventListener('input', estimates));
 estimates();
 
 const ICON = { done: '✓', now: '▶', todo: '○', failed: '✗', stopped: '■' };
@@ -558,8 +565,8 @@ async function refresh() {
   $('sRows').innerHTML = ST && ST.rows.length ? ST.rows.map(m => `<tr><td>${m.from_mbar} → ${m.to_mbar}</td>` +
     `<td>${m.set == null ? '' : m.set + ': '}${dash(m.kp, 2)}, ${dash(m.ti_min, 2)}</td><td>${dash(m.t63_s, 0)} / ${dash(m.t90_s, 0)}</td>` +
     `<td>${m.overshoot_mbar == null ? '--' : m.overshoot_mbar.toFixed(2) + ' mbar, ' + m.overshoot_pct + ' %'}</td>` +
-    `<td>${m.settle_s == null ? 'not settled' : m.settle_s}</td><td>${dash(m.reversals, 0)}</td><td>${dash(m.backoff_pct, 0)}</td>` +
-    `<td>${dash(m.valve_start_pct, 1)} → ${dash(m.valve_end_pct, 1)} (${dash(m.valve_min_pct, 1)} to ${dash(m.valve_max_pct, 1)})</td></tr>`).join('') : none(8);
+    `<td>${m.settle_s == null ? 'not settled' : m.settle_s}</td><td>${m.held_from_s == null ? 'not held' : m.held_from_s}</td><td>${dash(m.reversals, 0)}</td><td>${dash(m.backoff_pct, 0)}</td>` +
+    `<td>${dash(m.valve_start_pct, 1)} → ${dash(m.valve_end_pct, 1)} (${dash(m.valve_min_pct, 1)} to ${dash(m.valve_max_pct, 1)})</td></tr>`).join('') : none(9);
   $('sNow').textContent = ST && ST.running && ST.now ? 'Now: ' + ST.now : '';
   const range = n => !A ? '' : n === 1 ? 'below ' + A.b1 : n === 2 ? A.b1 + ' to ' + A.b2 :
     !A.b3 ? 'above ' + A.b2 : n === 3 ? A.b2 + ' to ' + A.b3 : 'above ' + A.b3;

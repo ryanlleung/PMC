@@ -118,6 +118,14 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
     s.setting(31) + ' ' + s.setting(CFG.DBC) + ' ' + s.setting(CFG.B3));
   check('setpoint limit is the 15 psia range', s.cmd('SETPOINT 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('SETPOINT 1035'));
   menu(); s.tap(386, 184); check('old Settings slot opens Review and save', screen() === 'Review and save', screen());
+  // Motor override moved from Valve position to Motor settings' fourth tab, Override (0.16.17, Ryan 12 Nov: "it
+  // doesnt feel right to be in valve position"): asked first, and Back returns to Motor settings on that tab.
+  menu(); s.tap(84, 128); s.tap(305, 72); shot(s, 'motor-settings-override'); s.tap(180, 128);
+  const asked = s.popup(); s.tap(318, 147); const opened = screen();
+  s.tap(66, 20); const back = screen(); s.tap(180, 128); const again = s.popup(); s.tap(160, 147);
+  check('Motor override: on Motor settings > Override, asked first, Back to that tab',
+    asked && opened === 'Motor override' && back === 'Motor settings' && again && screen() === 'Motor settings',
+    [asked, opened, back, again, screen()].join());
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
   const s = homed(load());
@@ -306,7 +314,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  s.tap(415, 184); s.tap(240, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position (middle from 0.16.3) > Motor override > Open
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128); s.tap(318, 147);   // Menu > Motor settings > Override tab (0.16.17) > Open Motor override > Open
   s.set(7, 1); s.run(500);                                              // switch stuck pressed
   s.tap(186, 184, 1000);
   const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
@@ -691,7 +699,7 @@ let parkedFlash;
   // Switch turns it on; between 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11) the pressed switch
   // neither stops closing nor raises W-4; below 5 % it stops as always.
   const s = homed(load()); s.cmd('VALVE SET 40', 150000);
-  s.tap(415, 184); s.tap(240, 128); s.tap(415, 184); s.tap(318, 147);   // Menu > Valve position > Motor override > Open
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128); s.tap(318, 147);   // Menu > Motor settings > Override > Open Motor override > Open
   s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 50 % on
   shot(s, 'motor-switch');
   const on = /Switch passed between 5 and 50 % open: on/.test(events(s, 5));

@@ -16,7 +16,7 @@
  * Diagnostics. The closed-switch question is in ui.c, on every screen.
  * The Valve page (hold Close or Open, 1 % and 5 % steps, Fully close and
  * Fully open) was removed in 0.14.21 (Ryan, 4 Nov): Go to on Home moves
- * the valve, Motor override moves it by steps.
+ * the valve, Motor override (Motor settings > Override) moves it by steps.
  * ------------------------------------------------------------------------ */
 
 static void reset_cb(lv_event_t *e)
@@ -38,10 +38,10 @@ static void right(lv_obj_t *l)
 /* --------------------------------------------------------------------------
  * Valve position: what is done to the valve now, from the Menu's valve
  * tile (0.16.2, Ryan 9 Nov: "the functionality between valve position and
- * valve setup is a bit confusing"). Home valve, the three ways to set the
- * position, and Motor override act on the valve; the numbers they use
- * (travel, direction, back-off, return, speeds) are drafts on Valve
- * settings, and nothing here changes a saved setting.
+ * valve setup is a bit confusing"). Home valve and the three ways to set
+ * the position act on the valve; the numbers they use (travel, direction,
+ * back-off, return, speeds) are drafts on Motor settings, with Motor
+ * override (0.16.17), and nothing here changes a saved setting.
  * ------------------------------------------------------------------------ */
 static struct {
     lv_obj_t *state, *state_cap, *turns, *start, *closed, *enter, *saved;
@@ -58,7 +58,7 @@ static const char *const calib_help =
     "Set as 0 %, Set as other %, Use last saved: set the reference without moving; "
     "not verified against the switch. Use last saved: the position saved at power loss, "
     "offered until the valve moves or is homed.\n\n"
-    "Motor override: the motor by steps, past the valve's checks (engineering).\n\n"
+    "Motor override (drives the motor by steps) is on Motor settings > Override.\n\n"
     "F-3 switch not found, F-4 switch stuck: check switch and wiring, reset, home again.";
 
 static void start_cb(lv_event_t *e)
@@ -105,19 +105,8 @@ static void timer_deleted(lv_event_t *e)
     lv_timer_delete(lv_event_get_user_data(e));
 }
 
-// Motor override (Settings to 0.14.13; on the valve page it acts on in the
-// common HMI template). Limit override is on it since 0.11.33.
-static void motor_go(void) { ui_service(); }
-
-static void motor_cb(lv_event_t *e)
-{
-    (void)e;
-    if (stepper3_busy()) {
-        ui_msg("Wait for the valve to stop");
-        return;
-    }
-    ui_confirm("Open Motor override? Drives the motor by steps.", "Open", motor_go);
-}
+// Motor override was here from 0.14.13 to 0.16.16; it is on Motor settings >
+// Override from 0.16.17 (Ryan 12 Nov: "it doesnt feel right to be in valve position").
 
 static void calib_build(lv_obj_t *scr)
 {
@@ -132,12 +121,7 @@ static void calib_build(lv_obj_t *scr)
     cp.closed = ui_btn(scr, 10, 104, 226, 48, UI_SECONDARY, "Set as 0 %", setpos_cb, (void *)(intptr_t)0);
     cp.start = ui_btn(scr, 244, 104, 226, 48, UI_PRIMARY, "Home valve", start_cb, NULL);
     cp.enter = ui_btn(scr, 10, 160, 226, 48, UI_SECONDARY, "Set as other %", setpos_cb, (void *)(intptr_t)1);
-    cp.saved = ui_btn(scr, 244, 160, 109, 48, UI_SECONDARY, "Use last\nsaved", setpos_cb, (void *)(intptr_t)2);
-    // Motor override apart from the position commands: a dark outline.
-    lv_obj_t *m = ui_btn(scr, 361, 160, 109, 48, UI_SECONDARY, "Motor\noverride", motor_cb, NULL);
-    lv_obj_set_style_border_side(m, LV_BORDER_SIDE_FULL, 0);
-    lv_obj_set_style_border_width(m, 2, 0);
-    lv_obj_set_style_border_color(m, UI_WARN, 0);
+    cp.saved = ui_btn(scr, 244, 160, 226, 48, UI_SECONDARY, "Use last saved", setpos_cb, (void *)(intptr_t)2);
 }
 
 // Motor turns from closed at 10 Hz (Ryan, 24 Oct: turns read more

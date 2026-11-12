@@ -17,7 +17,8 @@
  * Home is kept; other screens are created on open and deleted on leave.
  * A keypad or confirm dialog covers 0,40 480x232 except the STOP slot.
  *
- * Valve position > Motor override (motor_screen.c) is a framework screen too.
+ * Motor settings > Override > Motor override (motor_screen.c; on Valve position to
+ * 0.16.16) is a framework screen too.
  */
 
 LV_FONT_DECLARE(ui_font_12)
@@ -103,7 +104,7 @@ bool ui_showing(const ui_screen_t *s);   // that screen is up
 const char *ui_screen_title(void);       // the screen up (the simulator's tests)
 void ui_home(void);            // back to Home (deletes the screen left)
 void ui_back(void);            // as the header Back
-void ui_service(void);         // Valve position > Motor override (motor_screen.c)
+void ui_service(void);         // Motor settings > Override > Motor override (motor_screen.c)
 
 // Status strip. A message shows for 5 s with an OK, over the screen's own
 // line; refusals use it. The strip's action button is Home's.
