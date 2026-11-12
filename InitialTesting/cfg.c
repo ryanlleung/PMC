@@ -97,7 +97,7 @@ static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", 
 static const int32_t tune_def[T_N] = { 400, 25, 0, 8, 1, 10, 0,
                                        400, 25, 0, 400, 25, 0, 0, 60, 100, 15, 8,
                                        400, 25, 0, 140 };
-static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 10,   0,
+static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 0,    0,
                                        1,     0,     0,     1,     0,     0,     0, 1,     1,     0,  0,
                                        1,     0,     0,     0 };
 static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
@@ -106,7 +106,8 @@ static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
 static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10, 0,
                              400, 25, 0, 400, 25, 0, 0, 60, 100, 15, 8,
                              400, 25, 0, 140 };
-// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar, 0.01 % per mbar/s;
+// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar (the band
+// from 0, 0.10 before 0.16.16, Ryan 12 Nov), 0.01 % per mbar/s;
 // sets 2 to 4 as set 1; PID table 0 Off, 2 on the pressure (1, the setpoint,
 // removed in 0.15.20; loads as Off); B1 to B3
 // 0.1 mbar (B3 0: no set 4, three sets); hysteresis % of the boundary;

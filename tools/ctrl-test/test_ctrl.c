@@ -299,6 +299,22 @@ int main(int argc, char **argv)
     run(2000, 5);
     CHECK(fault == CTRL_RUN && w02 && mode == MANUAL, "pump off: no fault, W-2 to MANUAL (t %.0f s)", M.t - t0);
 
+    // A setpoint band of 0 (0.16.16, Ryan 12 Nov): In band and Stable never
+    // show, but a steady hold is not ended by W-2, which still judges
+    // against CTRL_TCONV_BAND.
+    {
+        const ctrl_tune_t kk = K;
+        K.band = 0;
+        fresh();
+        set_sp(5);
+        to_auto();
+        run(CTRL_TCONV_S + 1200, 5);
+        const ctrl_reg_t reg = ctrl_regulation(&C, &K, ms(), true, 5.04f);
+        CHECK(fault == CTRL_RUN && !w02 && mode == AUTO && reg == CTRL_REG_REGULATING,
+              "band 0: %.0f min in AUTO at 5 mB, no W-2, reads Regulating (%d)", (CTRL_TCONV_S + 1200) / 60.0, (int)reg);
+        K = kk;
+    }
+
     // Slipping drive at 5 mB, then a step in target.
     fresh();
     set_sp(5);

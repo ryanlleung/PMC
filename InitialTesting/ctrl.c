@@ -265,8 +265,11 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     // pressure under the band for minutes, and it tripped there. A KDIR the
     // wrong way round still ends AUTO by W-2 (CTRL_TCONV_S).
 
-    // W-2 convergence timeout.
-    if (fabsf(c->sp - pv) <= k->band)
+    // W-2 convergence timeout. The setpoint band can be 0 (0.16.16, Ryan
+    // 12 Nov): In band and Stable then never show, but W-2 still judges
+    // against 0.10 mbar, the old least band, or a steady hold would end AUTO
+    // after CTRL_TCONV_S for not reading the setpoint exactly.
+    if (fabsf(c->sp - pv) <= fmaxf(k->band, CTRL_TCONV_BAND))
         c->conv_ms = in->t_ms;
     else if (since(in->t_ms, c->conv_ms) > CTRL_TCONV_S * 1000u)
         return CTRL_W02;

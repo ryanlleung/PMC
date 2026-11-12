@@ -707,6 +707,8 @@ static void test_kd(void)
     const char *why;
     cfg_range(CFG_KD, &lo, &hi);
     CHECK(lo == 0 && hi == 10000 && cfg_tune(CFG_KD) == 0);
+    cfg_range(CFG_BAND, &lo, &hi);   // the setpoint band from 0 (0.16.16, Ryan 12 Nov)
+    CHECK(lo == 0 && hi == 1000);
     v[CFG_KD] = 150; set[CFG_KD] = true;
     v[CFG_KP] = 40; set[CFG_KP] = true;
     CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_KD) == 150);

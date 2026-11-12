@@ -466,5 +466,5 @@ EXPORT(sim_shutdown) int sim_shutdown(int close) { const char *w = NULL; return 
 EXPORT(sim_turn_on) int sim_turn_on(void) { const char *w = NULL; return hook(valve_turn_on(&w), w); }
 EXPORT(sim_override) int sim_override(void) { return stepper3_override(); }
 EXPORT(sim_popup) int sim_popup(void) { return ui_overlay_open(); }   // a popup (keypad, question, list, Help) is open
-// The title of the screen up ("Menu", "Valve settings"), for the Menu tests (0.16.2).
+// The title of the screen up ("Menu", "Motor settings"), for the Menu tests (0.16.2).
 EXPORT(sim_screen) const char *sim_screen(void) { return ui_screen_title(); }

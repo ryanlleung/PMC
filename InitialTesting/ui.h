@@ -197,7 +197,7 @@ lv_obj_t *ui_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
 // Valve position, Events, Diagnostics (ui_valve.c).
 extern const ui_screen_t ui_scr_calib, ui_scr_faults, ui_scr_diag;
 // The settings pages, all on the Menu from 0.16.2 (no Settings page, no
-// Choose sensor): System and its two pages, Valve settings, PID tuning,
+// Choose sensor): System and its two pages, Motor settings, PID tuning,
 // Review and save, Calibrate sensor (ui_settings.c).
 extern const ui_screen_t ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
                          ui_scr_sensor_cal;

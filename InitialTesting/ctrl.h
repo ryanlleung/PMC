@@ -41,7 +41,8 @@
  *     windows with no response. A window with the valve pinned fully open,
  *     or at AUTO min, while the loop asks for more is judged too. A
  *     wrong-way change counts as a response (no fault since 0.11.20).
- *   - W-2: outside the target band for CTRL_TCONV s; AUTO ends, MANUAL, valve idle.
+ *   - W-2: outside the target band (CTRL_TCONV_BAND at least) for CTRL_TCONV s;
+ *     AUTO ends, MANUAL, valve idle.
  *   - W-6 (0.11.45 to 0.15.10, pinned at the wrong end for 60 s) is removed:
  *     it tripped at low pressure, where the valve rightly rests near closed
  *     (Ryan 5 Nov). A KDIR the wrong way round ends AUTO by W-2.
@@ -67,6 +68,7 @@
 #define CTRL_DPMIN      0.05f   // smallest pressure change that counts, mbar
 #define CTRL_CHECKMIN   1000    // smallest lagged move that is judged, steps
 #define CTRL_TCONV_S    1800    // W-2 after this long outside the band, s
+#define CTRL_TCONV_BAND 0.10f   // W-2's band is never narrower than this, mbar (a band of 0 is allowed from 0.16.16)
 #define CTRL_LEAD_MAX   3000    // travel anti-windup, steps
 #define CTRL_TLAG_S     40      // process lag for the response monitor, s
 #define CTRL_STABLE_S   60      // in band this long reads Stable, s

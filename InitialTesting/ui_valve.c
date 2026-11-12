@@ -52,9 +52,9 @@ static struct {
  * position. */
 static const char *const calib_help =
     "This page acts on the valve now. Its saved numbers (travel, direction, homing distances and speeds) "
-    "are on Valve settings.\n\n"
+    "are on Motor settings.\n\n"
     "Home valve: fast close to the switch, back-off, slow close, Return off the switch = 0 % "
-    "(Valve settings > Homing). Seated reads about -0.6 %. STOP cancels.\n\n"
+    "(Motor settings > Homing). Seated reads about -0.6 %. STOP cancels.\n\n"
     "Set as 0 %, Set as other %, Use last saved: set the reference without moving; "
     "not verified against the switch. Use last saved: the position saved at power loss, "
     "offered until the valve moves or is homed.\n\n"

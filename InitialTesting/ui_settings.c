@@ -17,7 +17,7 @@
 /* --------------------------------------------------------------------------
  * The settings pages (stage 6, simulator v63), each on the Menu from 0.16.2
  * (Ryan 9 Nov: "remove the settings page and put everything in the menu"):
- * System (with Cryostat name and IP address), Valve settings, PID tuning,
+ * System (with Cryostat name and IP address), Motor settings, PID tuning,
  * Review and save, and Calibrate sensor. The Settings page of navigation
  * tiles (0.15.9 to 0.16.1) and Choose sensor (one sensor per board, Ryan 9
  * Nov: "a new one will be recalibrated anyway") are gone.
@@ -139,7 +139,7 @@ static const field_t F[CFG_N] = {
     [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "Lowest opening AUTO commands" },
     [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO opening moves accumulate to this, then go in one step (needle stiction)" },
     [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "Process direction; normally opening raises the pressure" },
-    [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "In-band tolerance about the setpoint" },
+    [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "In-band tolerance about the setpoint; 0 = none (In band and Stable then never show)" },
     [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
     // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD);
     // set 4 and boundary 3 from 0.16.14.
@@ -859,7 +859,7 @@ static void na_refresh(void)
 const ui_screen_t ui_scr_netaddr = { "IP address", na_build, na_refresh, NULL };
 
 /* --------------------------------------------------------------------------
- * Valve settings (three tabs) and PID tuning (three)
+ * Motor settings (three tabs) and PID tuning (three)
  * ------------------------------------------------------------------------ */
 typedef struct {
     const char *label;
@@ -869,7 +869,8 @@ typedef struct {
     bool tall;                // the keys as three tall cards (PID tuning's PID tab)
 } tab_t;
 
-// Valve settings (Valve setup to 0.16.1; Ryan 9 Nov: "the functionality
+// Motor settings (Valve setup to 0.16.1, Valve settings to 0.16.15, Ryan 12 Nov
+// "change valve settings to motor settings"; Ryan 9 Nov: "the functionality
 // between valve position and valve setup is a bit confusing"): the valve's
 // saved numbers, drafts until Save settings, nothing here moves the valve.
 // What acts on the valve now (Home valve, Set position, Motor override) is
@@ -1144,10 +1145,10 @@ static void pg_refresh(void)
     side_refresh();
 }
 
-static void valve_set_build(lv_obj_t *scr) { pg_build(scr, "Valve settings", valve_tabs, 3); }
+static void valve_set_build(lv_obj_t *scr) { pg_build(scr, "Motor settings", valve_tabs, 3); }
 static void tune_build(lv_obj_t *scr) { pg_build(scr, "PID tuning", tune_tabs, 3); }
 
-const ui_screen_t ui_scr_valve_set = { "Valve settings", valve_set_build, pg_refresh, NULL };
+const ui_screen_t ui_scr_valve_set = { "Motor settings", valve_set_build, pg_refresh, NULL };
 const ui_screen_t ui_scr_tune = { "PID tuning", tune_build, pg_refresh, NULL };
 
 /* --------------------------------------------------------------------------

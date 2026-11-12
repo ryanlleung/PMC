@@ -766,7 +766,7 @@ const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
  * everything in the menu. remove the labels on the menu. show some icons
  * for each button"). Every page is one tap away:
  *   Trend           Events          PID tuning
- *   Valve settings  Valve position  Pressure setup
+ *   Motor settings  Valve position  Pressure setup
  *   System          Diagnostics     Review and save
  * Valve position and PID tuning swapped places in 0.16.3 (Ryan 9 Nov, PR #43:
  * "swap location of valve position and pid tuning"): the two valve tiles
@@ -793,7 +793,7 @@ static const menu_item_t menu_items[9] = {
     { "Trend", UI_ICON_TREND, &ui_scr_trend },
     { "Events", LV_SYMBOL_LIST, &ui_scr_faults },
     { "PID tuning", LV_SYMBOL_LOOP, &ui_scr_tune },            // the loop, as the status line shows AUTO
-    { "Valve settings", LV_SYMBOL_EDIT, &ui_scr_valve_set },   // travel, homing, drive: saved numbers (the pencil, as a draft's)
+    { "Motor settings", LV_SYMBOL_EDIT, &ui_scr_valve_set },   // travel, homing, drive: saved numbers (the pencil, as a draft's)
     { "Valve position", UI_ICON_VALVE, &ui_scr_calib },        // home, set the position, the motor: the valve now
     { "Pressure setup", UI_ICON_TARGET, &ui_scr_sensor_cal },   // Calibrate sensor
     { "System", LV_SYMBOL_SETTINGS, &ui_scr_namenet },

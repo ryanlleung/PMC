@@ -631,7 +631,7 @@ void valve_task(void)
     running = true;
     evt_dump_task();
     seq_check();
-    // The pass band in counts from 0 %, again each pass (Valve settings can
+    // The pass band in counts from 0 %, again each pass (Motor settings can
     // change the travel); not while not homed or homing: the count is not
     // the valve's then.
     stepper3_limit_band(band_req && calibrated && mode != VALVE_CALIBRATING && mode != VALVE_OFF,

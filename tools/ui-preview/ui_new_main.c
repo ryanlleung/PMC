@@ -9,7 +9,7 @@
  *          | valve | valvenc | limithit | calpage | faults | detail | diag | help
  * Menu (0.16.2): three columns of 148 at x 10, 166, 322 (centres 84, 240,
  * 396), rows y 48, 104, 160 (centres 72, 128, 184): Trend, Events, PID
- * tuning / Valve settings, Valve position, Pressure setup / System,
+ * tuning / Motor settings, Valve position, Pressure setup / System,
  * Diagnostics, Review and save (Valve position and PID tuning swapped in
  * 0.16.3).
  */
@@ -419,7 +419,7 @@ int main(int argc, char **argv)
         MENU(); M_CAL(); HOME();                                // Calibrate sensor
         MENU(); M_SYS();                                        // System
         tap(298, 184); BACK(); HOME();                          //   Diagnostics (0.15.19)
-        MENU(); M_VSET(); BACK();                               // Valve settings (0.16.2: on the Menu)
+        MENU(); M_VSET(); BACK();                               // Motor settings (0.16.2: on the Menu; Valve settings to 0.16.15)
         MENU(); M_TUNE(); BACK();                               // PID tuning
         MENU(); M_DIAG(); BACK();                               // Diagnostics
         MENU(); M_REVIEW(); BACK();                             // Review and save

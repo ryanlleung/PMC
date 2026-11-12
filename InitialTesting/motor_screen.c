@@ -480,7 +480,7 @@ static lv_obj_t *btn(lv_obj_t *p, int32_t x, int32_t y, int32_t w, const char *t
     return b;
 }
 
-// Segmented choice as the Valve settings tabs: grey track, the chosen segment
+// Segmented choice as the Motor settings tabs: grey track, the chosen segment
 // raised white (seg_show).
 // first > 0 makes the first segment that wide, the rest share what is left.
 static void seg(lv_obj_t *p, int32_t x, int32_t y, int32_t w, int n, const char *const *labels,

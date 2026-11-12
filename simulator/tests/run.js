@@ -98,7 +98,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   menu();
   check('Menu opens', screen() === 'Menu', screen());
   shot(s, 'menu');
-  const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'PID tuning'], [84, 128, 'Valve settings'],
+  const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'PID tuning'], [84, 128, 'Motor settings'],
     [240, 128, 'Valve position'], [396, 128, 'Calibrate sensor'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
     [396, 184, 'Review and save']];
   const wrong = tiles.map(([x, y, t]) => { menu(); s.tap(x, y); return [t, screen()]; })
