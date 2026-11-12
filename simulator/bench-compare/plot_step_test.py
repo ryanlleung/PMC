@@ -1,6 +1,6 @@
 # Each step of a GUI step test session CSV, one panel per step: the bench
 # against simulator runs of the same steps.
-#   python3 plot_step_test.py out.png bench.csv "label=sim.csv" ... [--title="..."]
+#   python3 plot_step_test.py out.png bench.csv "label=sim.csv" ... [--title="..."] [--bench="label"]
 import csv, sys
 import numpy as np
 import matplotlib; matplotlib.use('Agg')
@@ -8,8 +8,11 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 # usage: plot_steps.py out.png bench.csv [label=sim.csv ...]
 TITLE='Setpoint step test 11 Nov 17:26, each step: bench against the simulator. Grey band 5 % of the setpoint; valve % and heat exchanger K (red) below'
+BLABEL='bench 17:26'
 for a in [a for a in sys.argv if a.startswith('--title=')]:
     TITLE=a[8:]; sys.argv.remove(a)
+for a in [a for a in sys.argv if a.startswith('--bench=')]:
+    BLABEL=a[8:]; sys.argv.remove(a)
 out=sys.argv[1]
 def load(path):
     rows=list(csv.DictReader(open(path)))
@@ -59,7 +62,7 @@ for n,name in enumerate(names):
     band=max(0.05*sp1,0.1)
     axp.axhspan(sp1-band,sp1+band,color='0.9')
     axp.axhline(sp1,color='k',lw=0.8,ls='--')
-    axp.plot(tt,bench['p'][a-30:b],color=cols[0],lw=1.6,label='bench 17:26')
+    axp.plot(tt,bench['p'][a-30:b],color=cols[0],lw=1.6,label=BLABEL)
     axv.plot(tt,bench['v'][a-30:b],color=cols[0],lw=1.4)
     ax2=axv.twinx(); ax2.plot(tt,bench['hx'][a-30:b],color='#c0392b',lw=1,alpha=0.8); ax2.tick_params(axis='y',colors='#c0392b',labelsize=8)
     if c==2: ax2.set_ylabel('HX, K',color='#c0392b',fontsize=9)

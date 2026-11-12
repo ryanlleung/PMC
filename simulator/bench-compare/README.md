@@ -26,12 +26,13 @@ python3 plot_bench.py replay.csv out.png "title" [--log] [--from S] [--to S] [--
 | `1112-hx-feedforward-refit.png` | Exploration, not in the firmware: 0.16.15 on the refitted simulator (draft PR #49) with the heat exchanger reading fed forward to the PI. Each second the integral moves the valve by (valve % - 2.3 %) x (G(T before) / G(T now) - 1), with G the refit's pressure factor for the heat exchanger (1.33 at 1.8 K, 1.00 at 3.5 K, 0.76 at 6.5 K, 0.63 from 8 K), so (valve - crack) x G stays the same as the heat exchanger wets or dries. Against no feedforward and the same held below 5 K; pressure, valve and heat exchanger K for each step |
 | `1112-hx-feedforward-old-model.png` | The same three on the simulator as in this branch (bench.c before PR #49), whose heat exchanger factor is exp(-(T - 4 K) / 10 K): weaker above 6 K than the table the feedforward uses |
 | `1112-hx-feedforward-sensitivity.png` | The feedforward on the refitted simulator with its gain x0.5 and x1.5, and with 2.8 % for the crack opening in the feedforward (the refit valve starts to pass at about 2.3 %) |
+| `1112-step-test-bench.png` | The GUI step test on the bench, 12 Nov 13:52: firmware 0.16.15 (no kick on a setpoint change, checked: under 0.05 % of valve in the first 3 s of each step under 14 mbar) with 0.06/0.70 \| 0.12/0.83 \| 0.80/0.94 \| 0.30/0.25, B 6/10/14 (checked from the valve's integral rate against the error: 0.061/0.71, 0.122/0.83, 0.84/0.96). Each step's pressure, valve and heat exchanger |
 
 For a GUI step test, `step_figures.py` works out each step's figures from the session CSV (rise 10 to 90 %, settling into 5 % of the setpoint, overshoot, end error over the last 30 s, the valve's kick in the first 3 s), and `plot_step_test.py` puts each step of the bench and of simulator runs of the same steps side by side:
 
 ```
 python3 step_figures.py pmc_session_<date>_<time>.csv figures.json
-python3 plot_step_test.py out.png pmc_session_<date>_<time>.csv "sim=pmc_<sim run>.csv" [--title="..."]
+python3 plot_step_test.py out.png pmc_session_<date>_<time>.csv "sim=pmc_<sim run>.csv" [--title="..."] [--bench="bench 12 Nov 13:52"]
 ```
 
 The session logs themselves are not in the repository.
