@@ -879,6 +879,11 @@ typedef struct {
 // valve position"; the side column and the strip have no room for it). Home
 // valve and Set position are on Valve position. The first tab is Travel, not
 // Valve, so the page is not "Valve > Valve".
+// The switch pass band's edges as text (valve.h).
+#define BAND_STR_(x) #x
+#define BAND_STR(x) BAND_STR_(x)
+#define BAND_LO BAND_STR(VALVE_BAND_LO_PCT)
+#define BAND_HI BAND_STR(VALVE_BAND_HI_PCT)
 #define VALVE_SET_NOTE "Saved numbers; Travel, Homing and Drive move nothing. The Override tab opens Motor override, which drives the motor by steps. To home the valve or set its position, Valve position."
 static const tab_t valve_tabs[4] = {
     // The deadbands (0.15.15: opening and closing) are the valve's: from
@@ -888,9 +893,13 @@ static const tab_t valve_tabs[4] = {
       "What Home valve (Valve position) does with the switch. " VALVE_SET_NOTE },
     { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved only with the valve stopped." },
     { "Override", { 0 }, 0,
-      "Motor override drives the motor by steps, past the valve's checks: Move (step size, Close, Open, Zero, "
-      "Limit override), Speed, Coils (step mode, hold, coil order, direction) and Switch (pass 5 to 50 %). "
-      "For commissioning and a stuck limit switch. It asks first; Back returns here.", false, true },
+      "Open Motor override: drives the motor by steps, past the valve's checks: Move (step size, Close, Open, "
+      "Zero, Limit override), Speed and Coils (step mode, hold, coil order, direction). For commissioning and a "
+      "stuck limit switch. It asks first; Back returns here.\n\n"
+      "Switch pass " BAND_LO " to " BAND_HI " %: while on and the valve homed, between " BAND_LO " and " BAND_HI
+      " % open the limit switch does not stop closing and raises no W-1, W-4 or F-4, for a valve that binds there "
+      "and trips the switch off the seat. Below " BAND_LO " % it stops as always. Live at once; off again after a "
+      "restart.", false, true },
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
 // name on their own tab, the rest of AUTO's settings on the other. From
@@ -942,6 +951,7 @@ static struct {
     int set;                                   // the PID set the PID tab shows, 1 to 4
     bool sets;                                 // the PID tab shows the set row (schedule on)
     lv_obj_t *sel, *selb[4], *selr[4], *seld[4];   // the set row: track, segments, range lines, in-use dots
+    lv_obj_t *band_sw, *band_text;             // Motor settings' Override tab: the switch pass toggle
 } pg;
 
 // The key a tab shows in place i: on the PID tab, the set picked.
@@ -954,6 +964,7 @@ static void segs_draw(lv_obj_t *const *b, int n, int on);
 static void pg_fields(void);
 static void pg_refresh(void);
 static void motor_cb(lv_event_t *e);
+static void band_cb(lv_event_t *e);
 
 static void set_cb(lv_event_t *e)
 {
@@ -1047,6 +1058,7 @@ static void pg_fields(void)
         lv_obj_delete(pg.sel);
         pg.sel = NULL;
     }
+    pg.band_sw = pg.band_text = NULL;          // went with their card
     const tab_t *t = &pg.tabs[pg.tab];
     int y0 = pg.ntabs > 1 ? 1 : 0;
     char cap[40];
@@ -1069,15 +1081,29 @@ static void pg_fields(void)
         }
     }
     // Motor settings' Override tab (0.16.17): the button across both
-    // columns, set apart by a dark outline, and what it opens under it.
+    // columns, set apart by a dark outline; under it the switch pass band
+    // toggle (0.16.19, Ryan 12 Nov: "make switch override a toggle on the
+    // override screen in motor settings page"; the Switch tab of Motor
+    // override from 0.16.5). A press anywhere on the card turns it on or
+    // off, live at once, as Remote control on System.
     if (t->over) {
         lv_obj_t *b = ui_btn(pg.scr, C2X[0], RY[y0], 343, RH, UI_SECONDARY, "Open Motor override", motor_cb, NULL);
         lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, 0);
         lv_obj_set_style_border_width(b, 2, 0);
         lv_obj_set_style_border_color(b, UI_WARN, 0);
         pg.f[0].card = b;
-        pg.f[1].card = ui_label(pg.scr, C2X[0] + 4, RY[y0 + 1] + 4, 335, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT,
-                                "Steps the motor past the valve's checks:\njog, speeds, coils, switch pass band.");
+        lv_obj_t *c = pg.f[1].card = ui_card(pg.scr, C2X[0], RY[y0 + 1], 343, RH);
+        lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(c, band_cb, LV_EVENT_PRESSED, NULL);
+        ui_label(c, 12, 6, 260, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Switch pass " BAND_LO " to " BAND_HI " %");
+        pg.band_text = ui_label(c, 12, 26, 260, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
+        lv_obj_t *sw = pg.band_sw = lv_switch_create(c);
+        lv_obj_set_size(sw, 52, 28);
+        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -12, 0);
+        lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);   // the card takes the press
+        lv_obj_set_style_bg_color(sw, lv_color_hex(0xC3CDD7), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
+        lv_obj_set_style_anim_duration(sw, 0, 0);
     }
     // Two columns; five fields (the PID table tab, 0.16.14) as two over
     // three, the three short-captioned.
@@ -1161,6 +1187,14 @@ static void pg_refresh(void)
         field_update(&pg.f[i], pg_key(t, i));
     if (pg.sel)
         sel_refresh();
+    if (pg.band_sw) {
+        bool band = valve_limit_band();
+        if (lv_obj_has_state(pg.band_sw, LV_STATE_CHECKED) != band)
+            lv_obj_set_state(pg.band_sw, LV_STATE_CHECKED, band);
+        ui_set_text(pg.band_text, !band ? "Off: the switch stops closing"
+                                  : valve_calibrated() ? "On: not a stop between " BAND_LO " and " BAND_HI " %"
+                                                       : "On, once the valve is homed");
+    }
     side_refresh();
 }
 
@@ -1169,6 +1203,13 @@ static void pg_refresh(void)
 // dark outline, and asked first. Limit override is on it since 0.11.33.
 // Back from it reopens Motor settings on the Override tab.
 static int valve_back_tab = -1;
+
+static void band_cb(lv_event_t *e)
+{
+    (void)e;
+    valve_limit_band_set(!valve_limit_band());
+    pg_refresh();
+}
 
 static void motor_go(void)
 {

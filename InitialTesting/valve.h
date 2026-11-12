@@ -73,7 +73,7 @@ int32_t valve_pos_max(void);
 // Pass band (0.16.5, Ryan 9 Nov: the valve binds about 13 % and the force
 // switch trips there, off the seat): while on and homed, between
 // VALVE_BAND_LO_PCT and VALVE_BAND_HI_PCT open the switch neither stops
-// closing nor raises W-1, W-4 or F-4. Motor override > Switch. RAM only, off
+// closing nor raises W-1, W-4 or F-4. Motor settings > Override > Switch pass (0.16.19). RAM only, off
 // at power-up. 10 to 20 % until 0.16.8 (Ryan 10 Nov: the switch was still
 // pressed at 10 % closing from 13.5 % and W-4 ended AUTO there; "Just
 // extend it to go as low as 5% and 25% high"); 5 to 25 % until 0.16.11

@@ -28,8 +28,8 @@
  *   HOMING     Valve: the Go to box, greyed, "----".
  * A yellow edge round the Valve tile while the limit switch is pressed
  * (0.16.4; a "Limit" tag beside the caption in 0.16.1-0.16.3); a valve
- * fault's red edge wins. While the switch pass band is on (0.16.5, Motor
- * override > Switch), 5 to 50 % (10 to 20 % until 0.16.8, 5 to 25 % until
+ * fault's red edge wins. While the switch pass band is on (0.16.5; Motor
+ * settings > Override > Switch pass from 0.16.19), 5 to 50 % (10 to 20 % until 0.16.8, 5 to 25 % until
  * 0.16.11) is yellow on the valve bar.
  * The strip shows the status line, with the 5 min pressure sparkline on its
  * right as on the operator screens (ui.c, Ryan 21 Oct). A tap on the
@@ -662,7 +662,7 @@ static void home_fast(void)
     // limit"; a yellow "Limit" tag beside the caption in 0.16.1-0.16.3).
     bool lim = stepper3_limit_pressed();   // passed in the pass band or not
     edge_set(&vt, vt_fault || lim, vt_fault ? UI_FAULT : UI_YELLOW);
-    // The pass band on the valve bar while it is on (Motor override > Switch).
+    // The pass band on the valve bar while it is on (Motor settings > Override > Switch pass).
     bool band = valve_limit_band();
     if (band != vt.band) {
         vt.band = band;

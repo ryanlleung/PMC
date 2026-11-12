@@ -191,7 +191,7 @@ static bool sw_far_said;  // W-4 raised for this occurrence
 // it"; to 0.16.3 two 1 s reads, so up to 2 s after Home's limit edge).
 // Long enough that one glitch on the wire does not end AUTO.
 #define SW_FAR_MS 200
-// Pass band (0.16.5, Ryan 9 Nov): asked for on Motor override > Switch; in
+// Pass band (0.16.5, Ryan 9 Nov): asked for on Motor settings > Override > Switch pass (Motor override > Switch to 0.16.18); in
 // force (stepper3_limit_band) only while homed. RAM only, off at power-up.
 // Its edges are VALVE_BAND_LO_PCT and VALVE_BAND_HI_PCT (valve.h).
 #define BAND_LO_PCT VALVE_BAND_LO_PCT

@@ -700,14 +700,16 @@ let parkedFlash;
   check('limit pressed: yellow edge on the Valve tile, W-4 within 0.3 s', before === 0xFFFF && edge === 0xF606 && /W-4/.test(al) &&
     after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
 }
-{ // Switch pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): Motor override >
-  // Switch turns it on; between 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11) the pressed switch
-  // neither stops closing nor raises W-4; below 5 % it stops as always.
+{ // Switch pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): a toggle on
+  // Motor settings > Override (0.16.19; Motor override > Switch to 0.16.18); between 5 and 50 % (10 to 20 % until
+  // 0.16.8, 5 to 25 % until 0.16.11) the pressed switch neither stops closing nor raises W-4; below 5 % it stops.
   const s = homed(load()); s.cmd('VALVE SET 40', 150000);
-  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128); s.tap(318, 147);   // Menu > Motor settings > Override > Open Motor override > Open
-  s.tap(203, 72); s.tap(120, 128);                     // Switch tab, Pass 5 to 50 % on
-  shot(s, 'motor-switch');
-  const on = /Switch passed between 5 and 50 % open: on/.test(events(s, 5));
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 184);   // Menu > Motor settings > Override, Switch pass on
+  shot(s, 'override-switch');
+  const on1 = /Switch passed between 5 and 50 % open: on/.test(events(s, 1));
+  s.tap(180, 184); const off = /Switch passed between 5 and 50 % open: off/.test(events(s, 1));   // a second press: off
+  s.tap(180, 184);                                                                                 // and on again
+  const on = on1 && off && /Switch passed between 5 and 50 % open: on/.test(events(s, 1));
   s.set(7, 1); s.run(1000);                            // the switch reads pressed at 40 %
   const a1 = s.cmd('ALARM?');
   s.cmd('VALVE SET 6', 90000);

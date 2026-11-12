@@ -28,7 +28,7 @@ gcc $CFLAGS -DREAL_CAL -o "$OUT/ui_new" "$HERE/ui_new_main.c" "$HERE/fake_hw.c" 
 for s in splash notcal manual calib moving nodruck stop neg menu keypad confirm setpos \
          valve valvenc limithit calpage calpage2 calhelp calset handset bootpick hot faults detail diag help help3 back bootask bootmove \
          set-valve set-valve2 set-valve3 set-valvepos \
-         set-tune set-tunekp set-tunedraft set-saveask set-saved set-review set-load motor motor-speed motor-coils motor-switch motor-ask motor-held motor-moving motor-steps set-name set-named set-net set-remote set-netaddr set-netaddr2 set-netused \
+         set-tune set-tunekp set-tunedraft set-saveask set-saved set-review set-load motor motor-speed motor-coils set-override motor-ask motor-held motor-moving motor-steps set-name set-named set-net set-remote set-netaddr set-netaddr2 set-netused \
          overon calsensor calvac trend trend1h trend1m notrend \
          auto autosched autostable autoreg autofirst autoask autosp automan autovalve paused warn4 warn5 f16 trendauto \
          shutask shutclose shutleave shutting off; do
