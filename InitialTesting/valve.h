@@ -70,19 +70,18 @@ bool valve_calibrated(void);
 typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
-// Pass band (0.16.5, Ryan 9 Nov: the valve binds about 13 % and the force
-// switch trips there, off the seat): while on and homed, between
-// VALVE_BAND_LO_PCT and VALVE_BAND_HI_PCT open the switch neither stops
-// closing nor raises W-1, W-4 or F-4. Motor settings > Override > Switch pass (0.16.19). RAM only, off
-// at power-up. 10 to 20 % until 0.16.8 (Ryan 10 Nov: the switch was still
-// pressed at 10 % closing from 13.5 % and W-4 ended AUTO there; "Just
-// extend it to go as low as 5% and 25% high"); 5 to 25 % until 0.16.11
-// (Ryan 11 Nov, PR #43: "expand the limit ignoring to 50 percent so 5 to
-// 50 %").
-#define VALVE_BAND_LO_PCT 5
-#define VALVE_BAND_HI_PCT 50
+// Pass band, "Ignore switch" on screen from 0.16.21 (0.16.5, Ryan 9 Nov:
+// the valve binds about 13 % and the force switch trips there, off the
+// seat): while on and homed, between valve_pass_lo() and valve_pass_hi() %
+// open the switch neither stops closing nor raises W-1, W-4 or F-4. Motor
+// settings > Override (0.16.19). RAM only, off at power-up. The edges are
+// saved settings from 0.16.21 (Ryan 12 Nov: "make the boundary editable";
+// CFG_PASS_LO and CFG_PASS_HI, factory 5 and 50). Fixed before: 10 to 20 %
+// until 0.16.8, 5 to 25 % until 0.16.11, then 5 to 50 %.
 bool valve_limit_band(void);
 void valve_limit_band_set(bool on);
+int valve_pass_lo(void);         // % open
+int valve_pass_hi(void);
 int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
 bool valve_fault_latched(void);
 bool valve_motion_blocked(void); // a latched fault that stops the motor (not F-1, F-2)

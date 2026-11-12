@@ -189,6 +189,8 @@ int32_t valve_pos_max(void) { return v_set[0]; }
 static bool v_band;
 bool valve_limit_band(void) { return v_band; }
 void valve_limit_band_set(bool on) { v_band = on; }
+int valve_pass_lo(void) { return (int)cfg_tune(CFG_PASS_LO); }
+int valve_pass_hi(void) { return (int)cfg_tune(CFG_PASS_HI); }
 void valve_uncalibrate(const char *why) { (void)why; v_cal = false; v_mode = VALVE_NOT_CAL; }
 void valve_event(const char *tag, const char *fmt, ...) { (void)tag; (void)fmt; }
 static bool vp_offer, vp_moving;
@@ -500,10 +502,11 @@ int main(int argc, char **argv)
     }
     if (!strcmp(st, "set-netused")) tap(298, 184);
     if (!strncmp(st, "set-valve", 9)) M_VSET();
-    if (!strcmp(st, "set-override")) { M_VSET(); tap(305, 72); tap(180, 184); }   // Override tab, Switch pass on (0.16.19)
-    if (!strcmp(st, "set-valve2")) tap(182, 72);
-    if (!strcmp(st, "set-valve3")) tap(294, 72);
-    if (!strcmp(st, "set-valvepos")) tap(94, 128);
+    // Motor settings tabs from 0.16.21: Drive, Travel, Homing, Override.
+    if (!strcmp(st, "set-override")) { M_VSET(); tap(305, 72); tap(180, 128); }   // Override tab, Ignore switch on
+    if (!strcmp(st, "set-valve2") || !strcmp(st, "set-valvepos")) tap(138, 72);   // Travel
+    if (!strcmp(st, "set-valve3")) tap(221, 72);                                   // Homing
+    if (!strcmp(st, "set-valvepos")) tap(94, 128);                                 // 100 % travel
     if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) M_TUNE();
     if (!strcmp(st, "set-tunetable")) tap(180, 72);   // PID table tab, always on (0.16.20)
     if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") ||

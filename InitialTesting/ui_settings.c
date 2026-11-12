@@ -158,6 +158,9 @@ static const field_t F[CFG_N] = {
     [CFG_TI4]     = { "Set 4 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD4]     = { "Set 4 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
     [CFG_B3]      = { "Boundary 3", "mB", 1, K_NUM, "Set 3 / set 4 switch point; 0 = no set 4 (three sets)" },
+    // Ignore switch edges (0.16.21; "From, %" and "To, %" on their cards).
+    [CFG_PASS_LO] = { "Ignore from", "%", 0, K_NUM, "Lower edge; below it the switch stops closing" },
+    [CFG_PASS_HI] = { "Ignore to", "%", 0, K_NUM, "Upper edge; above it the switch works as always" },
 };
 
 static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
@@ -857,7 +860,7 @@ typedef struct {
     int n;
     const char *note;
     bool tall;                // the keys as three tall cards (PID tuning's PID tab)
-    bool over;                // no keys: the Open Motor override button (Motor settings' Override tab)
+    bool over;                // the Ignore switch toggle, its two edges and the Motor override button (Override tab)
     bool brow;                // the first key alone, then B1, B2 and B3 short in a row (PID table tab)
 } tab_t;
 
@@ -868,29 +871,27 @@ typedef struct {
 // nothing. Motor override, which drives the motor by steps, opens from the
 // fourth tab, Override (0.16.17, Ryan 12 Nov: "it doesnt feel right to be in
 // valve position"; the side column and the strip have no room for it). Home
-// valve and Set position are on Valve position. The first tab is Travel, not
-// Valve, so the page is not "Valve > Valve".
-// The switch pass band's edges as text (valve.h).
-#define BAND_STR_(x) #x
-#define BAND_STR(x) BAND_STR_(x)
-#define BAND_LO BAND_STR(VALVE_BAND_LO_PCT)
-#define BAND_HI BAND_STR(VALVE_BAND_HI_PCT)
-#define VALVE_SET_NOTE "Saved numbers; Travel, Homing and Drive move nothing. The Override tab opens Motor override, which drives the motor by steps. To home the valve or set its position, Valve position."
+// valve and Set position are on Valve position.
+// Drive is the first tab from 0.16.21 (Ryan 12 Nov: "put drive in the
+// first tab"). The Override tab's Ignore switch wording is from 0.16.21
+// (Ryan 12 Nov: the description was unclear; "Switch pass" to 0.16.20), and
+// its edges are saved settings (Ryan: "make the boundary editable").
+#define VALVE_SET_NOTE "Saved numbers; Drive, Travel and Homing move nothing. The Override tab has Ignore switch and opens Motor override, which drives the motor by steps. To home the valve or set its position, Valve position."
 static const tab_t valve_tabs[4] = {
+    { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved only with the valve stopped." },
     // The deadbands (0.15.15: opening and closing) are the valve's: from
     // the 5 Nov bench, the needle sticks opening at low openings.
     { "Travel", { CFG_POSMAX, CFG_REVERSE, CFG_DB, CFG_DBC }, 4, VALVE_SET_NOTE },
     { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4,
       "What Home valve (Valve position) does with the switch. " VALVE_SET_NOTE },
-    { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved only with the valve stopped." },
-    { "Override", { 0 }, 0,
-      "Open Motor override: drives the motor by steps, past the valve's checks: Move (step size, Close, Open, "
-      "Zero, Limit override), Speed and Coils (step mode, hold, coil order, direction). For commissioning and a "
-      "stuck limit switch. It asks first; Back returns here.\n\n"
-      "Switch pass " BAND_LO " to " BAND_HI " %: while on and the valve homed, between " BAND_LO " and " BAND_HI
-      " % open the limit switch does not stop closing and raises no W-1, W-4 or F-4, for a valve that binds there "
-      "and trips the switch off the seat. Below " BAND_LO " % it stops as always. Live at once; off again after a "
-      "restart.", false, true },
+    { "Override", { CFG_PASS_LO, CFG_PASS_HI }, 2,
+      "Ignore switch: use this when the valve binds part way while closing and the limit switch trips before the "
+      "needle is on its seat. While it is On and the valve is homed, the limit switch is ignored between the From "
+      "and To edges (% open). It does not stop closing there and raises no W-1, W-4 or F-4. Below From and above "
+      "To the switch works as always, so the valve still stops on its seat. A tap takes effect at once. It is Off "
+      "after every restart. From and To are saved settings: edit, then Save settings. From must be below To.\n\n"
+      "Motor override drives the motor by steps, past the valve's checks, for commissioning and a stuck limit "
+      "switch. It asks first; Back returns here.", false, true },
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
 // name on their own tab, the rest of AUTO's settings on the other. From
@@ -922,7 +923,7 @@ static struct {
     int set;                                   // the PID set the PID tab shows, 1 to 4
     bool sets;                                 // the PID tab shows the set row (schedule on)
     lv_obj_t *sel, *selb[4], *selr[4], *seld[4];   // the set row: track, segments, range lines, in-use dots
-    lv_obj_t *band_sw, *band_text;             // Motor settings' Override tab: the switch pass toggle
+    lv_obj_t *band_sw, *band_title, *band_text;   // Motor settings' Override tab: the Ignore switch toggle
 } pg;
 
 // The key a tab shows in place i: on the PID tab, the set picked.
@@ -1027,7 +1028,7 @@ static void pg_fields(void)
         lv_obj_delete(pg.sel);
         pg.sel = NULL;
     }
-    pg.band_sw = pg.band_text = NULL;          // went with their card
+    pg.band_sw = pg.band_title = pg.band_text = NULL;   // went with their card
     const tab_t *t = &pg.tabs[pg.tab];
     int y0 = pg.ntabs > 1 ? 1 : 0;
     char cap[40];
@@ -1044,22 +1045,20 @@ static void pg_fields(void)
             ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, cap, field_event, (void *)(intptr_t)k);
         }
     }
-    // Motor settings' Override tab (0.16.17): the button across both
-    // columns, set apart by a dark outline; under it the switch pass band
-    // toggle (0.16.19, Ryan 12 Nov: "make switch override a toggle on the
+    // Motor settings' Override tab: the Ignore switch toggle across both
+    // columns (0.16.19, Ryan 12 Nov: "make switch override a toggle on the
     // override screen in motor settings page"; the Switch tab of Motor
-    // override from 0.16.5). A press anywhere on the card turns it on or
-    // off, live at once, as Remote control on System.
+    // override from 0.16.5), its edges From and To under it (0.16.21), then
+    // the Motor override button (0.16.17), set apart by a dark outline. A
+    // press anywhere on the toggle card turns it on or off, live at once, as
+    // Remote control on System. The button and the toggle card go in the
+    // spare f[] slots so a tab change deletes them.
     if (t->over) {
-        lv_obj_t *b = ui_btn(pg.scr, C2X[0], RY[y0], 343, RH, UI_SECONDARY, "Open Motor override", motor_cb, NULL);
-        lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, 0);
-        lv_obj_set_style_border_width(b, 2, 0);
-        lv_obj_set_style_border_color(b, UI_WARN, 0);
-        pg.f[0].card = b;
-        lv_obj_t *c = pg.f[1].card = ui_card(pg.scr, C2X[0], RY[y0 + 1], 343, RH);
+        static const char *const en[2] = { "From, %", "To, %" };
+        lv_obj_t *c = pg.f[2].card = ui_card(pg.scr, C2X[0], RY[y0], 343, RH);
         lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(c, band_cb, LV_EVENT_PRESSED, NULL);
-        ui_label(c, 12, 6, 260, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Switch pass " BAND_LO " to " BAND_HI " %");
+        pg.band_title = ui_label(c, 12, 6, 260, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
         pg.band_text = ui_label(c, 12, 26, 260, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
         lv_obj_t *sw = pg.band_sw = lv_switch_create(c);
         lv_obj_set_size(sw, 52, 28);
@@ -1068,10 +1067,18 @@ static void pg_fields(void)
         lv_obj_set_style_bg_color(sw, lv_color_hex(0xC3CDD7), LV_PART_MAIN);
         lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
         lv_obj_set_style_anim_duration(sw, 0, 0);
+        for (int i = 0; i < 2; i++)
+            ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, en[i], field_event,
+                       (void *)(intptr_t)t->keys[i]);
+        lv_obj_t *b = pg.f[3].card = ui_btn(pg.scr, 244, RY[y0 + 1], 109, RH, UI_SECONDARY, "Motor\noverride",
+                                            motor_cb, NULL);
+        lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, 0);
+        lv_obj_set_style_border_width(b, 2, 0);
+        lv_obj_set_style_border_color(b, UI_WARN, 0);
     }
     // Two columns; the PID table tab (brow) the hysteresis alone, then B1,
     // B2 and B3 short-captioned in a row.
-    for (int i = 0; i < t->n && !t->tall; i++) {
+    for (int i = 0; i < t->n && !t->tall && !t->over; i++) {
         if (t->brow && i >= 1) {
             static const char *const bn[3] = { "B1, mB", "B2, mB", "B3, mB" };
             ecard_make(&pg.f[i], pg.scr, 10 + (i - 1) * 117, RY[y0 + 1], 109, bn[i - 1],
@@ -1111,7 +1118,7 @@ static void seg_cb(lv_event_t *e)
 
 static const char *pg_help(void)
 {
-    static char buf[900];
+    static char buf[1100];
     const tab_t *t = &pg.tabs[pg.tab];
     cfg_key_t keys[6];
     for (int i = 0; i < t->n; i++)
@@ -1151,9 +1158,13 @@ static void pg_refresh(void)
         bool band = valve_limit_band();
         if (lv_obj_has_state(pg.band_sw, LV_STATE_CHECKED) != band)
             lv_obj_set_state(pg.band_sw, LV_STATE_CHECKED, band);
-        ui_set_text(pg.band_text, !band ? "Off: the switch stops closing"
-                                  : valve_calibrated() ? "On: not a stop between " BAND_LO " and " BAND_HI " %"
-                                                       : "On, once the valve is homed");
+        // Wording by Fable (Ryan 12 Nov: "ask fable for a better description").
+        char t1[40], t2[48];
+        lv_snprintf(t1, sizeof t1, "Ignore switch %d to %d %%", valve_pass_lo(), valve_pass_hi());
+        lv_snprintf(t2, sizeof t2, "On: closing still stops below %d %%", valve_pass_lo());
+        ui_set_text(pg.band_title, t1);
+        ui_set_text(pg.band_text, !band ? "Off: limit switch always stops closing"
+                                  : valve_calibrated() ? t2 : "On: no effect until valve is homed");
     }
     side_refresh();
 }

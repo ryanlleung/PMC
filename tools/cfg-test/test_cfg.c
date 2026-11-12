@@ -184,12 +184,26 @@ static uint32_t crc32(const void *data, size_t len)
     return ~c;
 }
 
-// A version 9 record (0.16.14) in buf made a version 8 one: tune[18..21],
+// A version 10 record (0.16.21) in buf made a version 9 one: tune[22..23],
+// the Ignore switch edges, taken out (after the 16-byte header, mot[7],
+// valve[7] and tune[0..21]). Returns the version 9 size; the CRC is left for
+// the caller.
+static uint32_t as_v9(uint8_t *buf, uint32_t size10)
+{
+    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 22 * 4, nine = 9, size9 = size10 - 2 * 4;
+    memmove(buf + at, buf + at + 2 * 4, size10 - at - 2 * 4);
+    memcpy(buf + 4, &nine, 4);
+    memcpy(buf + 8, &size9, 4);
+    return size9;
+}
+
+// A version 10 record in buf made a version 8 one: as_v9, then tune[18..21],
 // PID set 4 and boundary 3, taken out (after the 16-byte header, mot[7],
 // valve[7] and tune[0..17]). Returns the version 8 size; the CRC is left
 // for the caller.
-static uint32_t as_v8(uint8_t *buf, uint32_t size9)
+static uint32_t as_v8(uint8_t *buf, uint32_t size10)
 {
+    const uint32_t size9 = as_v9(buf, size10);
     const uint32_t at = 16 + 7 * 4 + 7 * 4 + 18 * 4, eight = 8, size8 = size9 - 4 * 4;
     memmove(buf + at, buf + at + 4 * 4, size9 - at - 4 * 4);
     memcpy(buf + 4, &eight, 4);
@@ -306,10 +320,10 @@ static void corrupt_newest(void)
         flash[0x7FD000 + sl * 0x1000 + 12] ^= 0x5A;   // the rev: the CRC no longer matches
 }
 
-// nsens in a version 9 record: after the header, mot[7], valve[7], tune[22].
-#define REC_NSENS_AT (16 + 7 * 4 + 7 * 4 + 22 * 4)
+// nsens in a version 10 record: after the header, mot[7], valve[7], tune[24].
+#define REC_NSENS_AT (16 + 7 * 4 + 7 * 4 + 24 * 4)
 
-// Makes the version 9 record at addr one with three sensors, as 0.9.0 to
+// Makes the version 10 record at addr one with three sensors, as 0.9.0 to
 // 0.16.1 could save: the one it holds (slot 0), then s/n 1234567 at 30 psi
 // and s/n 7654321 at 15 psi, both uncalibrated, with slot active in use.
 static void three_sensors(uint32_t addr, uint32_t active)
@@ -371,7 +385,7 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_PREVIOUS, &rev, &at) && rev == 5);
     uint32_t ver;
     memcpy(&ver, flash + 0x7FE004, 4);
-    CHECK(ver == 9);   // the save went to B, the v1 record in A is kept
+    CHECK(ver == 10);   // the save went to B, the v1 record in A is kept
     memcpy(&ver, flash + 0x7FD004, 4);
     CHECK(ver == 1);
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
@@ -437,7 +451,7 @@ static void test_cfg(void)
         memcpy(&nsens, flash + 0x7FD000 + REC_NSENS_AT, 4);
         memcpy(&active, flash + 0x7FD000 + REC_NSENS_AT + 4, 4);
         memcpy(&ver, flash + 0x7FD004, 4);
-        CHECK(ver == 9 && nsens == 1 && active == 0);   // written as one sensor, rev 7 in A
+        CHECK(ver == 10 && nsens == 1 && active == 0);   // written as one sensor, rev 7 in A
     }
     // The same record with the bench Druck (s/n 5880156, calibrated) in use,
     // as the previous save: loading it brings that cal.
@@ -548,7 +562,7 @@ static void test_name(void)
             memcpy(&r3, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             uint32_t v3;
             memcpy(&v3, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (v3 == 9 && r3 >= a3) { a3 = r3; sl = i; }
+            if (v3 == 10 && r3 >= a3) { a3 = r3; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size4, flash + base + 8, 4);
@@ -609,7 +623,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 9 && r >= a4) { a4 = r; sl = i; }
+            if (ver == 10 && r >= a4) { a4 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, three = 3;
         memcpy(&size4, flash + base + 8, 4);
@@ -649,7 +663,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 9 && r >= a5) { a5 = r; sl = i; }
+            if (ver == 10 && r >= a5) { a5 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, four = 4;
         memcpy(&size5, flash + base + 8, 4);
@@ -686,7 +700,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 9 && r >= a6) { a6 = r; sl = i; }
+            if (ver == 10 && r >= a6) { a6 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size6, flash + base + 8, 4);
@@ -728,7 +742,7 @@ static void test_kd(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 9 && r >= a7) { a7 = r; sl = i; }
+            if (ver == 10 && r >= a7) { a7 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size7, flash + base + 8, 4);
@@ -808,7 +822,7 @@ static void test_sched(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 9 && r >= a8) { a8 = r; sl = i; }
+            if (ver == 10 && r >= a8) { a8 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size8, flash + base + 8, 4);
@@ -842,7 +856,7 @@ static void test_sched(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 9 && r >= a8) { a8 = r; sl = i; }
+            if (ver == 10 && r >= a8) { a8 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size8, flash + base + 8, 4);
@@ -904,7 +918,7 @@ static void test_set4(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 9 && r >= a9) { a9 = r; sl = i; }
+            if (ver == 10 && r >= a9) { a9 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size9, flash + base + 8, 4);
@@ -923,7 +937,7 @@ static void test_set4(void)
         CHECK(cfg_tune(CFG_KP4) == 50 && cfg_tune(CFG_TI4) == 100 && cfg_tune(CFG_KD4) == cfg_tune(CFG_KD3));
         CHECK(cfg_tune(CFG_B3) == 0 && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_HYST) == 10);
         CHECK(cfg_unsaved() == 0);
-        // The next save writes version 9.
+        // The next save writes version 10.
         CHECK(cfg_save());
         uint32_t ver = 0;
         for (int i = 0; i < 2; i++) {
@@ -932,7 +946,63 @@ static void test_set4(void)
             memcpy(&vv, flash + 0x7FD000 + i * 0x1000 + 4, 4);
             if (r == a9 + 1) ver = vv;
         }
-        CHECK(ver == 9);
+        CHECK(ver == 10);
+    }
+}
+
+// Ignore switch edges (0.16.21, version 10, Ryan 12 Nov "make the boundary
+// editable"): saved settings, From 1 to 99 and To 2 to 100 % open, From
+// below To; a version 9 record loads them at 5 and 50, the band before.
+static void test_pass(void)
+{
+    int32_t v[CFG_N] = { 0 }, lo, hi;
+    bool set[CFG_N] = { false };
+    const char *why;
+    reboot();
+    CHECK(cfg_tune(CFG_PASS_LO) == 5 && cfg_tune(CFG_PASS_HI) == 50);
+    cfg_range(CFG_PASS_LO, &lo, &hi);
+    CHECK(lo == 1 && hi == 99);
+    cfg_range(CFG_PASS_HI, &lo, &hi);
+    CHECK(lo == 2 && hi == 100);
+    v[CFG_PASS_LO] = 10; set[CFG_PASS_LO] = true;
+    v[CFG_PASS_HI] = 30; set[CFG_PASS_HI] = true;
+    CHECK(cfg_save_with(v, set, &why));
+    reboot();
+    CHECK(cfg_tune(CFG_PASS_LO) == 10 && cfg_tune(CFG_PASS_HI) == 30 && cfg_unsaved() == 0);
+    // From at or above To: refused, nothing changes.
+    memset(set, 0, sizeof set);
+    v[CFG_PASS_LO] = 30; set[CFG_PASS_LO] = true;
+    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "From must be below To"));
+    CHECK(cfg_tune(CFG_PASS_LO) == 10);
+    v[CFG_PASS_LO] = 0;
+    CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 10);   // out of range
+    // As version 9: the rest kept, the edges 5 and 50.
+    {
+        uint32_t size10, a10 = 0;
+        int sl = 0;
+        for (int i = 0; i < 2; i++) {
+            uint32_t r, ver;
+            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+            if (ver == 10 && r >= a10) { a10 = r; sl = i; }
+        }
+        uint32_t base = 0x7FD000 + sl * 0x1000;
+        memcpy(&size10, flash + base + 8, 4);
+        static uint8_t buf[4096];
+        memcpy(buf, flash + base, size10);
+        int32_t b3;
+        memcpy(&b3, buf + 16 + 7 * 4 + 7 * 4 + 21 * 4, 4);
+        uint32_t size9 = as_v9(buf, size10);
+        uint32_t c = crc32(buf, size9 - 4);
+        memcpy(buf + size9 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size9);
+        reboot();
+        uint32_t rev;
+        const char *at;
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a10);
+        CHECK(cfg_tune(CFG_PASS_LO) == 5 && cfg_tune(CFG_PASS_HI) == 50 && cfg_tune(CFG_B3) == b3);
+        CHECK(cfg_unsaved() == 0);
     }
 }
 
@@ -1260,6 +1330,7 @@ int main(int argc, char **argv)
     test_kd();
     test_sched();
     test_set4();
+    test_pass();
     test_valvepos();
     test_trend();
     test_auto();

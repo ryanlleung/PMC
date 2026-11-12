@@ -117,6 +117,9 @@ typedef enum {
     // A fourth PID set (0.16.14, record version 9): set 4 from boundary 3.
     CFG_KP4, CFG_TI4, CFG_KD4,
     CFG_B3,        // boundary set 3 / set 4, 0.1 mbar
+    // Ignore switch (the pass band, valve.h) edges (0.16.21, record version
+    // 10), % open: From below To.
+    CFG_PASS_LO, CFG_PASS_HI,
     CFG_N          // (CFG_SENSOR, the sensor in use, went in 0.16.2: one sensor per board)
 } cfg_key_t;
 
@@ -130,7 +133,7 @@ int cfg_unsaved_other(char *buf, size_t n);
 bool cfg_value(cfg_from_t from, cfg_key_t k, int32_t *v);
 bool cfg_rev(cfg_from_t from, uint32_t *rev, const char **saved_at);
 void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi);
-#define CFG_TUNE_LAST CFG_B3
+#define CFG_TUNE_LAST CFG_PASS_HI
 int32_t cfg_tune(cfg_key_t k);   // live tuning value
 // The key of PID set 1 to 4's KP (which 0), TI (1) or KD (2).
 cfg_key_t cfg_pid_key(int set, int which);

@@ -122,16 +122,19 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(240, 128); shot(s, 'valve-position'); s.tap(66, 20);
   s.tap(84, 128); shot(s, 'valve-settings'); s.tap(66, 20);
   // Choose sensor is gone (one sensor per board): no CFG_SENSOR key (27 to 0.16.13; set 4's KP from 0.16.14, the
-  // keys end at 31), the sensor range is the 15 psia Druck's, and the old Settings slot now opens Review and save.
-  check('no sensor-in-use setting', s.setting(31) === -2147483648 && s.setting(CFG.DBC) === 8 && s.setting(CFG.B3) === 140,
-    s.setting(31) + ' ' + s.setting(CFG.DBC) + ' ' + s.setting(CFG.B3));
+  // Ignore switch edges 31 and 32 from 0.16.21, the keys end at 33), the sensor range is the 15 psia Druck's, and
+  // the old Settings slot now opens Review and save.
+  check('no sensor-in-use setting', s.setting(33) === -2147483648 && s.setting(CFG.DBC) === 8 && s.setting(CFG.B3) === 140 &&
+    s.setting(CFG.PASS_LO) === 5 && s.setting(CFG.PASS_HI) === 50,
+    [33, CFG.DBC, CFG.B3, CFG.PASS_LO, CFG.PASS_HI].map(k => s.setting(k)).join(' '));
   check('setpoint limit is the 15 psia range', s.cmd('SETPOINT 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('SETPOINT 1035'));
   menu(); s.tap(386, 184); check('old Settings slot opens Review and save', screen() === 'Review and save', screen());
   // Motor override moved from Valve position to Motor settings' fourth tab, Override (0.16.17, Ryan 12 Nov: "it
   // doesnt feel right to be in valve position"): asked first, and Back returns to Motor settings on that tab.
-  menu(); s.tap(84, 128); s.tap(305, 72); shot(s, 'motor-settings-override'); s.tap(180, 128);
+  // Its button is at the right of the second row from 0.16.21 (the Ignore switch toggle and edges before it).
+  menu(); s.tap(84, 128); s.tap(305, 72); shot(s, 'motor-settings-override'); s.tap(298, 184);
   const asked = s.popup(); s.tap(318, 147); const opened = screen();
-  s.tap(66, 20); const back = screen(); s.tap(180, 128); const again = s.popup(); s.tap(160, 147);
+  s.tap(66, 20); const back = screen(); s.tap(298, 184); const again = s.popup(); s.tap(160, 147);
   check('Motor override: on Motor settings > Override, asked first, Back to that tab',
     asked && opened === 'Motor override' && back === 'Motor settings' && again && screen() === 'Motor settings',
     [asked, opened, back, again, screen()].join());
@@ -323,7 +326,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 { // Limit override is a two-finger deadman (0.13.7): held alone it does nothing; held, a second
   // finger on Close closes past a pressed switch, on Open opens; either finger lifting stops it.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
-  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128); s.tap(318, 147);   // Menu > Motor settings > Override tab (0.16.17) > Open Motor override > Open
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(298, 184); s.tap(318, 147);   // Menu > Motor settings > Override tab (0.16.17) > Motor override > Open
   s.set(7, 1); s.run(500);                                              // switch stuck pressed
   s.tap(186, 184, 1000);
   const c0 = s.get(30), blocked = c0 === 0;                             // Close alone refused
@@ -706,16 +709,18 @@ let parkedFlash;
   check('limit pressed: yellow edge on the Valve tile, W-4 within 0.3 s', before === 0xFFFF && edge === 0xF606 && /W-4/.test(al) &&
     after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
 }
-{ // Switch pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): a toggle on
-  // Motor settings > Override (0.16.19; Motor override > Switch to 0.16.18); between 5 and 50 % (10 to 20 % until
-  // 0.16.8, 5 to 25 % until 0.16.11) the pressed switch neither stops closing nor raises W-4; below 5 % it stops.
+{ // Ignore switch, the pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): a
+  // toggle on Motor settings > Override (0.16.19; Motor override > Switch to 0.16.18; "Switch pass" to 0.16.20);
+  // between From and To, 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11), the pressed switch neither
+  // stops closing nor raises W-4; below From it stops.
   const s = homed(load()); s.cmd('VALVE SET 40', 150000);
-  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 184);   // Menu > Motor settings > Override, Switch pass on
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128);   // Menu > Motor settings > Override, Ignore switch on
   shot(s, 'override-switch');
-  const on1 = /Switch passed between 5 and 50 % open: on/.test(events(s, 1));
-  s.tap(180, 184); const off = /Switch passed between 5 and 50 % open: off/.test(events(s, 1));   // a second press: off
-  s.tap(180, 184);                                                                                 // and on again
-  const on = on1 && off && /Switch passed between 5 and 50 % open: on/.test(events(s, 1));
+  const ev1 = events(s, 1), on1 = /Limit switch ignored from 5 to 50 % open: on/.test(ev1);
+  s.tap(180, 128); const off = /Limit switch ignored from 5 to 50 % open: off/.test(events(s, 1));   // a second press: off
+  s.tap(180, 128);                                                                                    // and on again
+  const on = on1 && off && /Limit switch ignored from 5 to 50 % open: on/.test(events(s, 1));
+  check('Ignore switch: on, off and on again from the toggle', on, ev1.trim());
   s.set(7, 1); s.run(1000);                            // the switch reads pressed at 40 %
   const a1 = s.cmd('ALARM?');
   s.cmd('VALVE SET 6', 90000);
@@ -725,6 +730,27 @@ let parkedFlash;
   check('pass band: no W-4 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
     /VALVE 6\.0/.test(at6) && a6 === 'ALARM NONE\r\n' && /VALVE (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
     [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
+}
+{ // The Ignore switch edges are saved settings (0.16.21, Ryan 12 Nov: "make the boundary editable"): From 10 from
+  // its card's keypad and Save settings, and closing past the pressed switch then stops at 10 %. From at or above
+  // To is refused and nothing is saved.
+  const s = homed(load()); s.cmd('VALVE SET 40', 150000);
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128);   // Menu > Motor settings > Override, Ignore switch on
+  s.tap(65, 184); s.tap(40, 239); s.tap(230, 183); s.tap(320, 212);   // From: 1 0, Set
+  shot(s, 'override-from-draft');
+  s.tap(415, 128); s.tap(319, 138);                                    // Save settings, Save
+  const saved = s.setting(CFG.PASS_LO);
+  s.set(7, 1); s.run(1000);                                            // the switch reads pressed at 40 %
+  s.cmd('VALVE SET 2', 120000);
+  const at = s.cmd('VALVE?'), ev = events(s, 5);
+  s.set(7, 0); s.run(1000);
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72);
+  s.tap(65, 184); s.tap(170, 183); s.tap(230, 183); s.tap(320, 212);  // From: 6 0, above To 50
+  s.tap(415, 128); s.tap(319, 138);
+  const kept = s.setting(CFG.PASS_LO);
+  check('Ignore switch: From saved as 10 stops closing at 10 %; From over To refused', saved === 10 &&
+    /VALVE (9\.9|10\.0)/.test(at) && /W-1/.test(ev) && kept === 10,
+    [saved, at.trim(), kept, ev.slice(-200)].join(' | '));
 }
 { // The bench cryostat (the page's flow line, fitted to the bench logs): AUTO holds 16 mbar with
   // bench gains, a relay there cycles at about the bench's period, and opening sticks at low openings.

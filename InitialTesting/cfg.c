@@ -23,6 +23,10 @@
  * 0 % below the seat). The slot stays so records keep their layout; it is
  * written 0, and a saved value is dropped when read (an event says so).
  *
+ * Version 10 (0.16.21) adds the Ignore switch edges (From and To, % open)
+ * at the end of tune[]; older records load them at 5 and 50 %, the fixed
+ * band before.
+ *
  * Version 9 (0.16.14) adds PID set 4 and boundary 3 at the end of tune[].
  * Boundary 3 at 0 means no set 4 (three sets, as before). Version 8 records
  * load with set 4 as set 3 and boundary 3 at 0, so AUTO runs on their three
@@ -68,7 +72,7 @@
 #define CFG_ADDR_A   0x7FD000UL
 #define CFG_ADDR_B   0x7FE000UL
 #define CFG_MAGIC    0x47464350UL   // "PCFG"
-#define CFG_VERSION  9
+#define CFG_VERSION  10
 #define OLD_VALVE_N  6       // valve[] in records before version 6
 #define REC_SENS_MAX 4       // sensor slots in the record (one in use from 0.16.2)
 
@@ -81,17 +85,20 @@ static const char *const mot_name[M_N] = { "RATE", "START", "ACCEL", "MODE", "HO
 // then PID sets 2 and 3, the gain schedule and the closing deadband
 // (0.15.15, Ryan 5 Nov; version 7 records have the first seven, V7_TUNE_N),
 // then PID set 4 and boundary 3 (0.16.14, Ryan 11 Nov "Yes fourth set";
-// version 8 records have the first eighteen, V8_TUNE_N).
+// version 8 records have the first eighteen, V8_TUNE_N), then the Ignore
+// switch edges (0.16.21, Ryan 12 Nov "make the boundary editable"; version 9
+// records have the first 22, V9_TUNE_N).
 // KP, TI and KD are set 1; DB is the opening deadband.
 enum { T_KP, T_TI, T_OUTMIN, T_DB, T_KDIR, T_BAND, T_KD,
        T_KP2, T_TI2, T_KD2, T_KP3, T_TI3, T_KD3, T_SCHED, T_B1, T_B2, T_HYST, T_DBC,
-       T_KP4, T_TI4, T_KD4, T_B3, T_N };
+       T_KP4, T_TI4, T_KD4, T_B3, T_PLO, T_PHI, T_N };
 #define OLD_TUNE_N  6        // tune[] in records before version 7
 #define V7_TUNE_N   7        // tune[] in version 7 records
 #define V8_TUNE_N   18       // tune[] in version 8 records
+#define V9_TUNE_N   22       // tune[] in version 9 records
 static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", "BAND", "KD",
                                             "KP2", "TI2", "KD2", "KP3", "TI3", "KD3", "SCHED", "B1", "B2", "HYST", "DBC",
-                                            "KP4", "TI4", "KD4", "B3" };
+                                            "KP4", "TI4", "KD4", "B3", "PASSLO", "PASSHI" };
 // Factory (0.16.18, Ryan 12 Nov: "set factory pid settings to boundary at 6
 // 10 14. kp ti kd values, 0.06, 0.6, 0; 0.12 0.82 0; 0.8 0.94 0, 0.4 0.25
 // 0"): the PID table On by the pressure, B1 6, B2 10, B3 14 mbar, 15 %
@@ -100,23 +107,24 @@ static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", 
 // KP 4.00 TI 0.25 in every set, the table Off (B2 was 20 to 0.16.13).
 static const int32_t tune_def[T_N] = { 6, 60, 0, 8, 1, 10, 0,
                                        12, 82, 0, 80, 94, 0, 2, 60, 100, 15, 8,
-                                       40, 25, 0, 140 };
+                                       40, 25, 0, 140, 5, 50 };
 static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 0,    0,
                                        1,     0,     0,     1,     0,     0,     2, 1,     1,     0,  0,
-                                       1,     0,     0,     0 };
+                                       1,     0,     0,     0,     1,  2 };
 static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
                                        10000, 10000, 10000, 10000, 10000, 10000, 2, 10000, 10000, 40, 2000,
-                                       10000, 10000, 10000, 10000 };
+                                       10000, 10000, 10000, 10000, 99, 100 };
 static int32_t tune[T_N] = { 6, 60, 0, 8, 1, 10, 0,
                              12, 82, 0, 80, 94, 0, 2, 60, 100, 15, 8,
-                             40, 25, 0, 140 };
+                             40, 25, 0, 140, 5, 50 };
 // Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar (the band
 // from 0, 0.10 before 0.16.16, Ryan 12 Nov), 0.01 % per mbar/s;
 // sets 2 to 4 as set 1; PID table 2, on the pressure, always (0.16.20, Ryan
 // 12 Nov: "remove the set 1 pid value function. always has pid table"; 0 Off
 // to 0.16.19 and 1, the setpoint, to 0.15.19 load as 2); B1 to B3
 // 0.1 mbar (B3 0: no set 4, three sets); hysteresis % of the boundary;
-// closing deadband steps.
+// closing deadband steps; Ignore switch From 1 to 99 and To 2 to 100 %
+// open, From below To (5 and 50, the band fixed to 0.16.20).
 
 typedef struct {
     uint32_t serial;
@@ -142,6 +150,22 @@ typedef struct {
     uint32_t remote;             // Remote control: 0 Off, 1 On (version 5)
     uint32_t crc;
 } cfg_rec_t;
+
+// Version 9 (0.16.14 to 0.16.20), read only: version 10 without the Ignore
+// switch edges.
+typedef struct {
+    uint32_t magic, version, size, rev;
+    int32_t mot[M_N];
+    int32_t valve[VALVE_N_SETTINGS];
+    int32_t tune[V9_TUNE_N];
+    uint32_t nsens, active;
+    cfg_sens_t sens[REC_SENS_MAX];
+    char saved_at[20];
+    char name[CFG_NAME_LEN + 4];
+    uint32_t net_ip, net_mask;
+    uint32_t remote;
+    uint32_t crc;
+} cfg_rec_v9_t;
 
 // Version 8 (0.15.15 to 0.16.13), read only: version 9 with the first
 // eighteen tuning values (three PID sets).
@@ -376,6 +400,12 @@ static const char *bounds_why(const int32_t *t)
     return NULL;
 }
 
+// Ignore switch: From below To.
+static const char *pass_why(const int32_t *t)
+{
+    return t[T_PLO] < t[T_PHI] ? NULL : "Ignore switch: From must be below To";
+}
+
 // NULL if every value can be applied, else the first that cannot.
 static const char *values_why(const cfg_rec_t *r)
 {
@@ -401,6 +431,8 @@ static const char *values_why(const cfg_rec_t *r)
             return tune_name[i];
     if (bounds_why(r->tune))
         return bounds_why(r->tune)[1] == '3' ? "B3" : "B2";
+    if (pass_why(r->tune))
+        return "PASSHI";
     if (r->nsens < 1 || r->nsens > REC_SENS_MAX || r->active >= r->nsens)
         return "SENSOR";
     if (!cfg_name_ok(r->name))
@@ -480,6 +512,18 @@ static void from_old(const void *v, size_t tune_at, int ntune, size_t crc_at, bo
     r->size = sizeof *r;
 }
 
+// Version 9 (four PID sets): all kept; the Ignore switch edges are set
+// after (read_slot).
+static void from_v9(const cfg_rec_v9_t *o, cfg_rec_t *r)
+{
+    memset(r, 0, sizeof *r);
+    memcpy(r, o, offsetof(cfg_rec_v9_t, tune));                    // header, mot, valve
+    memcpy(r->tune, o->tune, sizeof o->tune);
+    memcpy(&r->nsens, &o->nsens, offsetof(cfg_rec_v9_t, crc) - offsetof(cfg_rec_v9_t, nsens));
+    r->version = CFG_VERSION;
+    r->size = sizeof *r;
+}
+
 // Version 8 (three PID sets): its tuning kept, set 4 = set 3 and B3 0 (no
 // set 4), so it runs as before until B3 is set (0.16.14).
 static void from_v8(const cfg_rec_v8_t *o, cfg_rec_t *r)
@@ -504,6 +548,9 @@ _Static_assert(offsetof(cfg_rec_v6_t, crc) - offsetof(cfg_rec_v6_t, tune) - OLD_
 _Static_assert(offsetof(cfg_rec_v7_t, crc) - offsetof(cfg_rec_v7_t, tune) - V7_TUNE_N * 4 ==
                offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v7 is v9 from nsens on");
 _Static_assert(offsetof(cfg_rec_v8_t, tune) == offsetof(cfg_rec_t, tune), "v8 has the whole valve[]");
+_Static_assert(offsetof(cfg_rec_v9_t, tune) == offsetof(cfg_rec_t, tune), "v9 has the whole valve[]");
+_Static_assert(offsetof(cfg_rec_v9_t, crc) - offsetof(cfg_rec_v9_t, nsens) ==
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v9 is v10 from nsens on");
 _Static_assert(offsetof(cfg_rec_v8_t, crc) - offsetof(cfg_rec_v8_t, nsens) ==
                offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v8 is v9 from nsens on");
 _Static_assert(offsetof(cfg_rec_v5_t, crc) - offsetof(cfg_rec_v5_t, tune) ==
@@ -523,6 +570,7 @@ static const char *read_slot(int i)
         cfg_rec_v6_t v6;
         cfg_rec_v7_t v7;
         cfg_rec_v8_t v8;
+        cfg_rec_v9_t v9;
     } old;
     cfg_rec_t *r = &slot[i];
     extflash_read(slot_addr[i], r, sizeof *r);
@@ -570,6 +618,11 @@ static const char *read_slot(int i)
         if (old.v8.crc != crc32_ieee(&old.v8, offsetof(cfg_rec_v8_t, crc)))
             return "CRC mismatch";
         from_v8(&old.v8, r);
+    } else if (r->magic == CFG_MAGIC && r->version == 9 && r->size == sizeof old.v9) {
+        memcpy(&old.v9, r, sizeof old.v9);
+        if (old.v9.crc != crc32_ieee(&old.v9, offsetof(cfg_rec_v9_t, crc)))
+            return "CRC mismatch";
+        from_v9(&old.v9, r);
     } else if (r->magic != CFG_MAGIC || r->version != CFG_VERSION || r->size != sizeof *r) {
         return "not a settings record of this version";
     } else if (r->crc != rec_crc(r)) {
@@ -583,6 +636,11 @@ static const char *read_slot(int i)
     // have every set equal to set 1 (from_old), so they run as before.
     if (r->tune[T_SCHED] != 2)
         r->tune[T_SCHED] = 2;
+    // Before version 10 the Ignore switch band was fixed at 5 to 50 %.
+    if (slot_ver[i] < 10) {
+        r->tune[T_PLO] = tune_def[T_PLO];
+        r->tune[T_PHI] = tune_def[T_PHI];
+    }
     if (values_why(r))
         return "value out of range";
     return NULL;
@@ -934,7 +992,8 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
 }
 _Static_assert(CFG_KP + T_N - 1 == CFG_TUNE_LAST, "tuning keys in tune[] order");
 _Static_assert(CFG_KD - CFG_KP == T_KD && CFG_KP2 - CFG_KP == T_KP2 && CFG_SCHED - CFG_KP == T_SCHED &&
-               CFG_DBC - CFG_KP == T_DBC && CFG_KP4 - CFG_KP == T_KP4 && CFG_B3 - CFG_KP == T_B3,
+               CFG_DBC - CFG_KP == T_DBC && CFG_KP4 - CFG_KP == T_KP4 && CFG_B3 - CFG_KP == T_B3 &&
+               CFG_PASS_LO - CFG_KP == T_PLO && CFG_PASS_HI - CFG_KP == T_PHI,
                "tuning keys in tune[] order");
 
 int32_t cfg_tune(cfg_key_t k)
@@ -973,6 +1032,7 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     }
     if (cand.mot[M_START] > cand.mot[M_RATE]) { *why = "Start speed must not exceed Run speed"; return false; }
     if ((*why = bounds_why(cand.tune)) != NULL) return false;
+    if ((*why = pass_why(cand.tune)) != NULL) return false;
     if (values_why(&cand)) { *why = "a value is out of range, nothing saved"; return false; }
     if (!tune_only && (*why = mode_why(&cand)) != NULL) return false;
     // Written first, then put in use: a failed write changes nothing, so

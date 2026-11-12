@@ -83,5 +83,6 @@ function load(file) {
 const CFG = { POSMAX: 0, REVERSE: 1, BACKOFF: 2, RETURN: 3, FHOME: 4, FCREEP: 5, RATE: 6, START: 7, ACCEL: 8,
   KP: 9, TI: 10, OUTMIN: 11, DB: 12, KDIR: 13, BAND: 14, KD: 15,
   KP2: 16, TI2: 17, KD2: 18, KP3: 19, TI3: 20, KD3: 21, SCHED: 22, B1: 23, B2: 24, HYST: 25, DBC: 26,
-  KP4: 27, TI4: 28, KD4: 29, B3: 30 };   // SENSOR (27) went in 0.16.2; set 4 and B3 from 0.16.14, 31 = CFG_N
+  KP4: 27, TI4: 28, KD4: 29, B3: 30, PASS_LO: 31, PASS_HI: 32 };   // SENSOR (27) went in 0.16.2; set 4 and B3 from
+// 0.16.14; the Ignore switch edges from 0.16.21, 33 = CFG_N
 module.exports = { load, CFG };

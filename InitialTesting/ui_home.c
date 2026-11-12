@@ -56,7 +56,7 @@ typedef struct {
     lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev, *sp_cap;
     int32_t fill;             // bar fill to here, px; -1 no value (no marker)
     bool log;                 // pressure: decade lines; valve: 0/50/100
-    bool band;                // valve: the switch pass band (5 to 50 %) marked yellow on the track
+    int band;                 // valve: the Ignore switch band marked yellow on the track, lo * 1000 + hi, 0 = off
 } tile_t;
 
 static tile_t pt, vt;
@@ -152,8 +152,8 @@ static void bar_draw(lv_event_t *e)
     // The switch pass band (0.16.5), over the track and fill: where the
     // switch does not stop closing.
     if (t->band) {
-        lv_area_t b = { a.x1 + (BAR_W - 1) * VALVE_BAND_LO_PCT / 100, y1,
-                        a.x1 + (BAR_W - 1) * VALVE_BAND_HI_PCT / 100, y2 };
+        lv_area_t b = { a.x1 + (BAR_W - 1) * (t->band / 1000) / 100, y1,
+                        a.x1 + (BAR_W - 1) * (t->band % 1000) / 100, y2 };
         r.bg_color = UI_YELLOW;
         lv_draw_rect(layer, &r, &b);
     }
@@ -662,8 +662,8 @@ static void home_fast(void)
     // limit"; a yellow "Limit" tag beside the caption in 0.16.1-0.16.3).
     bool lim = stepper3_limit_pressed();   // passed in the pass band or not
     edge_set(&vt, vt_fault || lim, vt_fault ? UI_FAULT : UI_YELLOW);
-    // The pass band on the valve bar while it is on (Motor settings > Override > Switch pass).
-    bool band = valve_limit_band();
+    // The pass band on the valve bar while it is on (Motor settings > Override > Ignore switch).
+    int band = valve_limit_band() ? valve_pass_lo() * 1000 + valve_pass_hi() : 0;
     if (band != vt.band) {
         vt.band = band;
         lv_obj_invalidate(vt.bar);

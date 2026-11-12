@@ -445,12 +445,6 @@ static void two_delete(lv_event_t *e)
 
 static void tab_show(void);
 
-// The pass band's edges as text, for the strip.
-#define BAND_STR_(x) #x
-#define BAND_STR(x) BAND_STR_(x)
-#define BAND_LO BAND_STR(VALVE_BAND_LO_PCT)
-#define BAND_HI BAND_STR(VALVE_BAND_HI_PCT)
-
 static void tab_event(lv_event_t *e)
 {
     tab_sel = (int)event_arg(e);
@@ -721,15 +715,18 @@ static void motor_refresh(void)
                    : stepper3_energised() ? "Idle, coils on" : "Idle, coils off";
     limit_state_t lim = limit_state();
     const char *ls;
+    char lb[48];
     bool warn = false;
     if (!stepper3_limit_fitted())
         ls = lim == LIMIT_CLOSED ? "Switch released, stop off" : lim == LIMIT_OPEN ? "Switch pressed, stop off"
                                                                                    : "Switch not read yet";
     else if (lim == LIMIT_CLOSED)
         ls = "Switch released, closing allowed";
-    else if (lim == LIMIT_OPEN && stepper3_limit_ignored())
-        ls = "Switch pressed, passed (" BAND_LO " to " BAND_HI " %)";
-    else {
+    else if (lim == LIMIT_OPEN && stepper3_limit_ignored()) {
+        // Ignore switch on, in its band (Motor settings > Override).
+        lv_snprintf(lb, sizeof lb, "Switch pressed, ignored (%d to %d %%)", valve_pass_lo(), valve_pass_hi());
+        ls = lb;
+    } else {
         ls = lim == LIMIT_OPEN ? "Switch pressed, closing blocked" : "Switch not read yet, closing blocked";
         warn = true;
     }

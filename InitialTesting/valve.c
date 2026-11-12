@@ -191,11 +191,10 @@ static bool sw_far_said;  // W-4 raised for this occurrence
 // it"; to 0.16.3 two 1 s reads, so up to 2 s after Home's limit edge).
 // Long enough that one glitch on the wire does not end AUTO.
 #define SW_FAR_MS 200
-// Pass band (0.16.5, Ryan 9 Nov): asked for on Motor settings > Override > Switch pass (Motor override > Switch to 0.16.18); in
-// force (stepper3_limit_band) only while homed. RAM only, off at power-up.
-// Its edges are VALVE_BAND_LO_PCT and VALVE_BAND_HI_PCT (valve.h).
-#define BAND_LO_PCT VALVE_BAND_LO_PCT
-#define BAND_HI_PCT VALVE_BAND_HI_PCT
+// Pass band (0.16.5, Ryan 9 Nov): asked for on Motor settings > Override
+// > Ignore switch (Motor override > Switch to 0.16.18); in force
+// (stepper3_limit_band) only while homed. RAM only, off at power-up. Its
+// edges are saved settings from 0.16.21 (valve_pass_lo, valve_pass_hi).
 static bool band_req;
 static int over_n;        // W-5: consecutive reads above the sensor range in AUTO
 
@@ -635,7 +634,7 @@ void valve_task(void)
     // change the travel); not while not homed or homing: the count is not
     // the valve's then.
     stepper3_limit_band(band_req && calibrated && mode != VALVE_CALIBRATING && mode != VALVE_OFF,
-                        pm() * BAND_LO_PCT / 100, pm() * BAND_HI_PCT / 100);
+                        pm() * valve_pass_lo() / 100, pm() * valve_pass_hi() / 100);
     far_check();
     if (hold_on && !stepper3_busy())
         hold_on = false;   // the held move has ended (released, the switch, its end)
@@ -1028,14 +1027,16 @@ valve_ref_t valve_reference(void) { return calibrated ? ref_how : VALVE_REF_NONE
 int32_t valve_pos_max(void)     { return pm(); }   // in motor counts
 
 bool valve_limit_band(void) { return band_req; }
+int valve_pass_lo(void)      { return (int)cfg_tune(CFG_PASS_LO); }
+int valve_pass_hi(void)      { return (int)cfg_tune(CFG_PASS_HI); }
 
 void valve_limit_band_set(bool on)
 {
     if (on == band_req)
         return;
     band_req = on;
-    valve_event("LIM", on ? "Switch passed between %d and %d %% open: on (screen)"
-                          : "Switch passed between %d and %d %% open: off (screen)", BAND_LO_PCT, BAND_HI_PCT);
+    valve_event("LIM", on ? "Limit switch ignored from %d to %d %% open: on (screen)"
+                          : "Limit switch ignored from %d to %d %% open: off (screen)", valve_pass_lo(), valve_pass_hi());
 }
 int32_t valve_pct10(void)       { return pct10_of(stepper3_position()); }
 bool valve_fault_latched(void)  { return any_latched(); }
