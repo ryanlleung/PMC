@@ -1750,8 +1750,10 @@ STEP_RANDOM_MIN_STEP = 1.0
 # From 0.16.15 (KP on the pressure only, Ryan 12 Nov "give me the pid table
 # then"): each set is gains the bench has run at that pressure: set 2
 # 0.12/0.83 (8 mbar, 10 Nov), set 3 0.80/0.94 (12 mbar, 9 and 10 Nov),
-# sets 1 and 4 as in the 11 Nov 17:26 step test.
-STEP_SETS = [(0.06, 0.70, 0.0), (0.12, 0.83, 0.0), (0.80, 0.94, 0.0), (0.30, 0.25, 0.0)]
+# sets 1 and 4 as in the 11 Nov 17:26 step test. From 0.16.18 the board's
+# factory table (Ryan, 12 Nov: "set factory pid settings to boundary at 6 10
+# 14. kp ti kd values, 0.06, 0.6, 0; 0.12 0.82 0; 0.8 0.94 0, 0.4 0.25 0").
+STEP_SETS = [(0.06, 0.60, 0.0), (0.12, 0.82, 0.0), (0.80, 0.94, 0.0), (0.40, 0.25, 0.0)]
 STEP_B1, STEP_B2, STEP_B3, STEP_H = 6.0, 10.0, 14.0, 10
 
 

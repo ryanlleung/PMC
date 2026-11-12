@@ -332,6 +332,21 @@ static bool p_range(float *lo, float *hi)
     return any;
 }
 
+// The least pressure span the sparkline and Trend show (0.16.18, Ryan 12 Nov:
+// "set a limit to the trend and sparkline for pressure so that small
+// fluctuations around a setpoint doesn look huge"): 20 % of the highest
+// pressure or target shown, 1 mbar at least. A hold at 8 mbar wandering
+// 0.1 mbar either side then fills about an eighth of the height; a step
+// still fills it.
+#define P_SPAN_MIN   1.0f
+#define P_SPAN_FRAC  0.20f
+
+static float p_span_min(float lo, float hi)
+{
+    float m = (fabsf(lo) > fabsf(hi) ? fabsf(lo) : fabsf(hi)) * P_SPAN_FRAC;
+    return m > P_SPAN_MIN ? m : P_SPAN_MIN;
+}
+
 /* --------------------------------------------------------------------------
  * Home sparklines
  * ------------------------------------------------------------------------ */
@@ -361,11 +376,13 @@ static void spark_draw(lv_event_t *e)
     if (lo > 0 && hi / lo > 10) {
         s.log = true;
     } else {
-        // At least max(1 mbar, 10 x target band) tall, so a steady hold looks steady.
+        // At least p_span_min (20 % of the pressure, 1 mbar; 0.16.18) or
+        // 10 x the target band tall, so a steady hold looks steady.
         int32_t band = 10;
         cfg_value(CFG_FROM_LIVE, CFG_BAND, &band);
         float min = (float)band / 10.0f;   // 10 x band, band in 0.01 mbar
-        if (min < 1) min = 1;
+        float pmin = p_span_min(lo, hi);
+        if (min < pmin) min = pmin;
         if (hi - lo < min) {
             float c = (lo + hi) / 2;
             lo = c - min / 2;
@@ -433,11 +450,13 @@ static void trend_draw(lv_event_t *e)
     int n = (int)(x1 - x0) / 2 + 1;   // a point every 2 px
 
     // Pressure axis: rounded step giving 3 to 5 intervals, never below 0
-    // unless a reading is (calibration drift reads a little negative).
+    // unless a reading is (calibration drift reads a little negative). At
+    // least p_span_min tall (0.5 mbar to 0.16.17).
     float lo = 0, hi = 10;
     pts_build(win, n);
     bool any = p_range(&lo, &hi);
-    float span = hi - lo < 0.5f ? 0.5f : hi - lo, mid = (hi + lo) / 2;
+    float pmin = p_span_min(lo, hi);
+    float span = hi - lo < pmin ? pmin : hi - lo, mid = (hi + lo) / 2;
     float raw_lo = lo;
     lo = mid - span * 0.6f;
     hi = mid + span * 0.6f;

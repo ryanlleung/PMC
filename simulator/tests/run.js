@@ -16,6 +16,10 @@ function check(name, ok, detail) {
 }
 // The last n events, newest last.
 const events = (s, n = 100) => s.cmd('EVENT? ' + n, 2000);
+// The physics plant has far more gain than the bench (0.8 to 12.5 mbar over 20 to 100 % open): tests of other
+// things in AUTO on it run one PID, KP 4.00 TI 0.25, the factory to 0.16.17. The factory from 0.16.18 is the
+// bench table (PID table On, 6/10/14 mbar, 0.06/0.60, 0.12/0.82, 0.80/0.94, 0.40/0.25).
+function oldGains(s) { s.cmd('SCHED SET OFF,6,10,14,15;PID SET 4,0.25,0', 1000); return s; }
 function homed(s) {
   s.boot(); s.set(5, 40000); s.run(2000);
   s.home();
@@ -129,6 +133,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
   const s = homed(load());
+  s.cmd('SCHED SET OFF,6,10,14,15', 1000);   // the PID tab as three tall cards (the PID table is On from the factory, 0.16.18)
   shot(s, 'home-pid');
   s.tap(415, 72); shot(s, 'pid-tuning');
   s.tap(298, 156); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // KD 1.5, Set
@@ -140,8 +145,8 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'pid-tuning-sets');
   s.tap(221, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // Set 3, KP 1.5, Set
   s.tap(415, 128); s.tap(319, 138);
-  check('Set 3 KP saves from the set row', s.setting(CFG.KP3) === 150 && s.setting(CFG.KP) === 400 && s.setting(CFG.KP2) === 400 &&
-    s.setting(CFG.KP4) === 400, [s.setting(CFG.KP), s.setting(CFG.KP2), s.setting(CFG.KP3), s.setting(CFG.KP4)].join());
+  check('Set 3 KP saves from the set row', s.setting(CFG.KP3) === 150 && s.setting(CFG.KP) === 6 && s.setting(CFG.KP2) === 12 &&
+    s.setting(CFG.KP4) === 40, [s.setting(CFG.KP), s.setting(CFG.KP2), s.setting(CFG.KP3), s.setting(CFG.KP4)].join());
   shot(s, 'pid-tuning-set3');
   s.tap(304, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(320, 212);   // Set 4, KP 1., Set
   s.tap(415, 128); s.tap(319, 138);
@@ -178,7 +183,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'popup-pick');
   s.tap(415, 200);                                                  // the dimmed page (Discard changes under it)
   check('pick list: stays on a tap on its caption, closes on the dimmed page; nothing picked',
-    pa && pb && !s.popup() && s.setting(CFG.SCHED) === 0, [pa, pb, s.popup(), s.setting(CFG.SCHED)].join());
+    pa && pb && !s.popup() && s.setting(CFG.SCHED) === 2, [pa, pb, s.popup(), s.setting(CFG.SCHED)].join());
   s.tap(415, 72); const ha = s.popup();                             // Help
   s.tap(100, 240); const hb = !s.popup();                           // the greyed strip under it
   check('Help: closes on a tap on the greyed strip', ha && hb, [ha, hb].join());
@@ -241,7 +246,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('F-4 limit stuck', /F-4/.test(out), out.slice(-600));
 }
 { // AUTO at 5 mbar settles.
-  const s = homed(load());
+  const s = oldGains(homed(load()));
   s.cmd('SETPOINT 5'); s.cmd('MODE AUTO');
   s.run(400000);
   const d = s.cmd('PRESSURE?;SETPOINT?;MODE?;VALVE?;ALARM?');
@@ -270,7 +275,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('unpowered motor stays still while the step count advances', s.get(5) === needle && s.get(30) !== count);
 }
 { // F-6: the needle slips in AUTO, so the pressure does not follow.
-  const s = homed(load());
+  const s = oldGains(homed(load()));
   s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
   s.set(6, 0); s.cmd('SETPOINT 8');
   s.run(600000);
@@ -284,7 +289,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('fault detail Reset fault works', s.cmd('ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
 }
 { // W-2: the rotary pump stops in AUTO; the pressure never comes back into band.
-  const s = homed(load());
+  const s = oldGains(homed(load()));
   s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
   s.set(4, 0);
   s.run(1900000);
@@ -424,11 +429,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(357, 128);
   check('switch Off again: refused', s.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
-    s.cmd('PID?') === 'PID 4.00,0.25,0.00\r\n', s.cmd('PID?'));
+    s.cmd('PID?') === 'PID 0.06,0.60,0.00\r\n', s.cmd('PID?'));
   check('switch Off: PIDS SET and SCHED SET refused, PIDS? and SCHED? answer',
     s.cmd('PIDS SET 2,3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('SCHED SET PV,6,10,14,15') === 'ERR 211 Read only over the network\r\n' &&
-    s.cmd('PIDS?;SCHED?') === 'PIDS 1,4.00,0.25,0.00,4.00,0.25,0.00,4.00,0.25,0.00,4.00,0.25,0.00;SCHED OFF,6.0,10.0,14.0,15\r\n',
+    s.cmd('PIDS?;SCHED?') === 'PIDS 1,0.06,0.60,0.00,0.12,0.82,0.00,0.80,0.94,0.00,0.40,0.25,0.00;SCHED PV,6.0,10.0,14.0,15\r\n',
     s.cmd('PIDS?;SCHED?'));
 }
 { // Homing return: its own setting, the step 4 move off the switch; 0 % is there.
@@ -591,7 +596,7 @@ let parkedFlash;
 { // PID? and PID SET (0.15.8): the PID tab's Save over the text port, also in AUTO.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
-  check('PID? defaults', one('PID?') === 'PID 4.00,0.25,0.00\r\n', one('PID?'));
+  check('PID? defaults', one('PID?') === 'PID 0.06,0.60,0.00\r\n', one('PID?'));
   check('PID SET kp,ti silent, PID? confirms', one('PID SET 3.5,0.5') === '' && one('PID?') === 'PID 3.50,0.50,0.00\r\n', one('PID?'));
   check('PID SET kp,ti,kd', one('PID SET 3.5, 0.5, 1.25;PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
   check('PID SET saves the settings', s.setting(CFG.KP) === 350 && s.setting(CFG.TI) === 50 && s.setting(CFG.KD) === 125,
@@ -612,12 +617,12 @@ let parkedFlash;
   // PID? and PID SET on the set in use, and AUTO switching sets on the pressure with hysteresis.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
-  check('PIDS? defaults: four sets as set 1', one('PIDS?') === 'PIDS 1,4.00,0.25,0.00,4.00,0.25,0.00,4.00,0.25,0.00,4.00,0.25,0.00\r\n',
+  check('PIDS? defaults: the bench table (0.16.18)', one('PIDS?') === 'PIDS 1,0.06,0.60,0.00,0.12,0.82,0.00,0.80,0.94,0.00,0.40,0.25,0.00\r\n',
     one('PIDS?'));
-  check('SCHED? defaults: Off, 6, 10 and 14 mbar, 15 %', one('SCHED?') === 'SCHED OFF,6.0,10.0,14.0,15\r\n', one('SCHED?'));
+  check('SCHED? defaults: on the pressure, 6, 10 and 14 mbar, 15 %', one('SCHED?') === 'SCHED PV,6.0,10.0,14.0,15\r\n', one('SCHED?'));
   check('PIDS SET silent, PIDS? confirms', one('PIDS SET 2,5,0.3') === '' && one('PIDS SET 3, 6, 0.35, 0.5') === '' &&
     one('PIDS SET 4,7,0.4') === '' &&
-    one('PIDS?') === 'PIDS 1,4.00,0.25,0.00,5.00,0.30,0.00,6.00,0.35,0.50,7.00,0.40,0.00\r\n', one('PIDS?'));
+    one('PIDS?') === 'PIDS 1,0.06,0.60,0.00,5.00,0.30,0.00,6.00,0.35,0.50,7.00,0.40,0.00\r\n', one('PIDS?'));
   check('PIDS SET saves the settings', s.setting(CFG.KP2) === 500 && s.setting(CFG.TI2) === 30 && s.setting(CFG.KD3) === 50 &&
     s.setting(CFG.KP4) === 700 && s.setting(CFG.TI4) === 40, [s.setting(CFG.KP2), s.setting(CFG.TI2), s.setting(CFG.KD3),
     s.setting(CFG.KP4), s.setting(CFG.TI4)].join());
@@ -634,7 +639,7 @@ let parkedFlash;
     one('SCHED SET PV,6,10,11,15') === 'ERR 102 B3 must be above B2, by more than the hysteresis either side, or 0 for three sets\r\n',
     one('SCHED SET PV,20,6,30,15') + one('SCHED SET PV,6,10,11,15'));
   check('refusals change nothing', one('SCHED?;PIDS?') ===
-    'SCHED OFF,6.0,10.0,14.0,15;PIDS 1,4.00,0.25,0.00,5.00,0.30,0.00,6.00,0.35,0.50,7.00,0.40,0.00\r\n', one('SCHED?;PIDS?'));
+    'SCHED PV,6.0,10.0,14.0,15;PIDS 1,0.06,0.60,0.00,5.00,0.30,0.00,6.00,0.35,0.50,7.00,0.40,0.00\r\n', one('SCHED?;PIDS?'));
   check('SCHED SET PV, B3 0: three sets', one('SCHED SET PV,6,20,0,15') === '' && one('SCHED?') === 'SCHED PV,6.0,20.0,0.0,15\r\n' &&
     s.setting(CFG.SCHED) === 2 && s.setting(CFG.B1) === 60 && s.setting(CFG.B2) === 200 && s.setting(CFG.B3) === 0, one('SCHED?'));
   // The sim plant runs about 0.8 to 12.5 mbar (20 to 100 % open), so the
@@ -748,7 +753,7 @@ let parkedFlash;
   const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
   const reach = kp => {
     const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
-    s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT 10'); s.cmd('MODE AUTO'); s.run(1800000);
+    s.cmd('SCHED SET OFF,6,10,14,15'); s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT 10'); s.cmd('MODE AUTO'); s.run(1800000);
     s.cmd('PID SET ' + kp.toFixed(2) + ',0.42,0'); s.cmd('SETPOINT 1');
     let low = false, swings = 0;   // times it came back up from under 1.5 to over 3.5 mbar
     for (let t = 0; t < 120; t++) {

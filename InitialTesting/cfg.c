@@ -91,21 +91,24 @@ enum { T_KP, T_TI, T_OUTMIN, T_DB, T_KDIR, T_BAND, T_KD,
 static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", "BAND", "KD",
                                             "KP2", "TI2", "KD2", "KP3", "TI3", "KD3", "SCHED", "B1", "B2", "HYST", "DBC",
                                             "KP4", "TI4", "KD4", "B3" };
-// Factory: one PID (sets 2 to 4 the same) and the schedule Off, so a new
-// board runs as before; B1 6, B2 10 and B3 14 mbar with 15 % hysteresis are
-// ready for when it is turned on (B2 was 20 to 0.16.13).
-static const int32_t tune_def[T_N] = { 400, 25, 0, 8, 1, 10, 0,
-                                       400, 25, 0, 400, 25, 0, 0, 60, 100, 15, 8,
-                                       400, 25, 0, 140 };
+// Factory (0.16.18, Ryan 12 Nov: "set factory pid settings to boundary at 6
+// 10 14. kp ti kd values, 0.06, 0.6, 0; 0.12 0.82 0; 0.8 0.94 0, 0.4 0.25
+// 0"): the PID table On by the pressure, B1 6, B2 10, B3 14 mbar, 15 %
+// hysteresis; set 1 KP 0.06 TI 0.60, set 2 0.12/0.82, set 3 0.80/0.94, set
+// 4 0.40/0.25, KD 0 (the bench step tests of 12 Nov). To 0.16.17: one PID,
+// KP 4.00 TI 0.25 in every set, the table Off (B2 was 20 to 0.16.13).
+static const int32_t tune_def[T_N] = { 6, 60, 0, 8, 1, 10, 0,
+                                       12, 82, 0, 80, 94, 0, 2, 60, 100, 15, 8,
+                                       40, 25, 0, 140 };
 static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 0,    0,
                                        1,     0,     0,     1,     0,     0,     0, 1,     1,     0,  0,
                                        1,     0,     0,     0 };
 static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
                                        10000, 10000, 10000, 10000, 10000, 10000, 2, 10000, 10000, 40, 2000,
                                        10000, 10000, 10000, 10000 };
-static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10, 0,
-                             400, 25, 0, 400, 25, 0, 0, 60, 100, 15, 8,
-                             400, 25, 0, 140 };
+static int32_t tune[T_N] = { 6, 60, 0, 8, 1, 10, 0,
+                             12, 82, 0, 80, 94, 0, 2, 60, 100, 15, 8,
+                             40, 25, 0, 140 };
 // Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar (the band
 // from 0, 0.10 before 0.16.16, Ryan 12 Nov), 0.01 % per mbar/s;
 // sets 2 to 4 as set 1; PID table 0 Off, 2 on the pressure (1, the setpoint,

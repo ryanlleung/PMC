@@ -360,7 +360,7 @@ static void test_cfg(void)
     CHECK(cfg_sensor_range_mmbar() == 1034214 && strncmp(cal_id(), "5880156 bench", 13) == 0);
     CHECK(cal_saved() && !cal_is_default());
     CHECK(!cfg_value(CFG_FROM_LIVE, (cfg_key_t)CFG_N, &v[0]) && !cfg_value(CFG_FROM_LIVE, (cfg_key_t)-1, &v[0]));   // CFG_SENSOR, gone in 0.16.2
-    CHECK(val(CFG_FROM_LIVE, CFG_KP) == 400 && val(CFG_FROM_LIVE, CFG_BAND) == 10);
+    CHECK(val(CFG_FROM_LIVE, CFG_KP) == 6 && val(CFG_FROM_LIVE, CFG_BAND) == 10);   // the factory's (KP 0.06 from 0.16.18)
     CHECK(cfg_unsaved() == 0);
 
     // Save from the screens: gain 2.50, run speed 500.
@@ -452,7 +452,14 @@ static void test_cfg(void)
 
     // Factory defaults keep the sensor's calibration.
     CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why));
-    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 400 && !cal_is_default());
+    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && !cal_is_default());
+    // The factory PID table (0.16.18, Ryan 12 Nov): On by the pressure, B 6/10/14 mbar, 15 %; sets 0.06/0.60,
+    // 0.12/0.82, 0.80/0.94, 0.40/0.25, KD 0.
+    CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140 &&
+          cfg_tune(CFG_HYST) == 15);
+    CHECK(cfg_tune(CFG_TI) == 60 && cfg_tune(CFG_KD) == 0 && cfg_tune(CFG_KP2) == 12 && cfg_tune(CFG_TI2) == 82 &&
+          cfg_tune(CFG_KP3) == 80 && cfg_tune(CFG_TI3) == 94 && cfg_tune(CFG_KP4) == 40 && cfg_tune(CFG_TI4) == 25 &&
+          cfg_tune(CFG_KD2) == 0 && cfg_tune(CFG_KD3) == 0 && cfg_tune(CFG_KD4) == 0);
     CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
 
     // A latched fault locks the step mode: a load that would change it is

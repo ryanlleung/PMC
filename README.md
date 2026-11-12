@@ -200,7 +200,7 @@ The command names are whole words from firmware 0.16.12. To 0.16.11 every first 
 | `EVENT? [<n>]` | `EVENT <n>`, then n lines `<age s>,<tag>,<text>`, newest first; default 1, at most 100 |
 | `NETWORK?` | `NETWORK STATIC,<address>,<mask>,<MAC>`; `NETWORK NONE` in the USB build |
 | `TIME?` | `TIME 2026-10-27 11:05:00` or `TIME NONE` |
-| `PID?` | `PID 4.00,0.25,0.00`: KP, TI, KD of the PID set in use |
+| `PID?` | `PID 0.12,0.82,0.00`: KP, TI, KD of the PID set in use (factory set 2, at 6 to 10 mbar) |
 | `PIDS?` | `PIDS 2,0.06,0.70,0.00,0.14,1.50,0.00,0.50,1.00,0.00,0.30,0.25,0.00`: the set in use (in AUTO the one the schedule has switched to, else the one AUTO would start with), then KP, TI, KD of sets 1 to 4 |
 | `SCHED?` | `SCHED PV,6.0,10.0,14.0,10`: the PID table (`OFF` or `PV`), B1, B2, B3 in mbar, H in % |
 | `*IDN?` | `MercShore,iPC,<chip id>,<version>` |
