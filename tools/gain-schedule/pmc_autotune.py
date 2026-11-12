@@ -61,9 +61,10 @@ that point starts fresh. Fresh ignores the file (its results still go in
 it). With no learned file yet, it is built from the results.csv of the
 earlier autotune runs in the same log folder (newest per setpoint).
 
-While it runs, the PID table is Off and set 1 carries the gains under test
-(PID SET); at the end set 1, the PID table, the setpoint and the mode are put
-back as found. Writing the sets to the board (PIDS SET, SCHED SET PV) is a
+While it runs, the gains under test go in every PID set (PIDS SET 1 to 4),
+so the set the PID table has in use never matters (the table is always on
+from firmware 0.16.20); at the end the sets, the setpoint and the mode are
+put back as found. Writing the sets to the board (PIDS SET, SCHED SET PV) is a
 separate step, after the results have been looked at.
 
 The log (Ryan, 11 Nov: "a logger for the autotune, with the decisions and
@@ -1040,6 +1041,7 @@ class AutoTuner(Tuner):
 
     series = []     # (pressure, valve) of the check just run, one a second, for the fit
     held_rows = []  # the samples of the last hold(), for the same
+    n_sets = 0      # the board's PID sets (found()): the gains under test go in each; 0, PID SET
 
     def stage(self, text, phase=None, most=None):
         if phase:
@@ -1134,8 +1136,13 @@ class AutoTuner(Tuner):
     def pid(self, kp, ti, why=''):
         if self.sample()[2] != 'AUTO':
             self.still()
-        cmd = 'PID SET %.2f,%.2f,0' % (kp, ti)
-        self.link.do(cmd)
+        if self.n_sets:   # every set, so the set in use never matters (one line each: 96 characters at most)
+            for n in range(1, self.n_sets + 1):
+                self.link.do('PIDS SET %d,%.2f,%.2f,0' % (n, kp, ti))
+            cmd = 'PIDS SET 1-%d,%.2f,%.2f,0' % (self.n_sets, kp, ti)
+        else:
+            cmd = 'PID SET %.2f,%.2f,0' % (kp, ti)
+            self.link.do(cmd)
         self.set_gains([kp, ti, 0.0], cmd, why)
 
     def calm(self, sp, kp, ti, w):
@@ -2014,17 +2021,16 @@ def next_d(sp, ku, first):
 
 
 def found(link):
-    """What to put back: setpoint, mode, valve, the PID table and set 1."""
+    """What to put back: setpoint, mode, valve and the PID sets."""
     sp = value(link.ask('SETPOINT?')[0], 'SETPOINT')
     p, x, mode = link.ask('PRESSURE?;VALVE?;MODE?')
-    out = {'sp': sp, 'mode': mode.partition(' ')[2], 'valve': value(x, 'VALVE'), 'sched': None, 'set1': None}
+    out = {'sp': sp, 'mode': mode.partition(' ')[2], 'valve': value(x, 'VALVE'), 'sched': None, 'sets': None}
     pid = link.ask('PID?')[0]
     out['pid'] = [float(v) for v in pid[4:].split(',')]
     try:
         s = link.ask('SCHED?')[0]
         out['sched'] = s[6:]
         g = link.ask('PIDS?')[0][5:].split(',')
-        out['set1'] = [float(v) for v in g[1:4]]
         out['sets'] = [[float(v) for v in g[1 + 3 * k:4 + 3 * k]] for k in range((len(g) - 1) // 3)]
     except Refused:
         pass                     # firmware before 0.15.15: one set
@@ -2034,9 +2040,8 @@ def found(link):
 def put_back_lines(f, x_last=None):
     """The lines that put the board back as found (each tried on its own)."""
     out = []
-    if f.get('sched') is not None:
-        out.append('PIDS SET 1,%.2f,%.2f,%.2f' % tuple(f['set1']))
-        out.append('SCHED SET ' + f['sched'])
+    if f.get('sets'):
+        out += ['PIDS SET %d,%.2f,%.2f,%.2f' % ((n,) + tuple(g)) for n, g in enumerate(f['sets'], 1)]
     elif f.get('pid'):
         out.append('PID SET %.2f,%.2f,%.2f' % tuple(f['pid']))
     if f.get('sp') is not None:
@@ -2048,10 +2053,3 @@ def put_back_lines(f, x_last=None):
         if f.get('valve') is not None:
             out.append('VALVE SET %.1f' % f['valve'])
     return out
-
-
-def pid_table_off(link, f):
-    """The PID table Off (set 1 in use, so PID SET writes set 1)."""
-    if f.get('sched') and not f['sched'].startswith('OFF'):
-        link.do('SCHED SET OFF,' + f['sched'].split(',', 1)[1])
-

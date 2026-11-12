@@ -65,7 +65,7 @@ static void tune_reset(void)
 {
     static const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KD, CFG_KP2, CFG_TI2, CFG_KD2, CFG_KP3, CFG_TI3, CFG_KD3,
                                    CFG_KP4, CFG_TI4, CFG_KD4, CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
-    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 400, 25, 0, 0, 60, 100, 140, 15 };
+    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 400, 25, 0, 2, 60, 100, 140, 15 };
     for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
         tune[k[i]] = v[i];
 }
@@ -81,7 +81,7 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
     *lo = 0;
     *hi = 10000;
     if (k == CFG_KP || k == CFG_KP2 || k == CFG_KP3 || k == CFG_KP4 || k == CFG_B1 || k == CFG_B2) *lo = 1;
-    if (k == CFG_SCHED) *hi = 2;
+    if (k == CFG_SCHED) *lo = *hi = 2;   // the PID table always on (0.16.20)
     if (k == CFG_HYST) *hi = 40;
 }
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
@@ -216,7 +216,7 @@ static void tests(void)
     // version 3 (0.16.14): set 4's gains (51-56) and B3 (57-58).
     pid_set_now = 4;
     REQ(0x03, 0, 0, 0, 59);
-    CHECK(rlen == 9 + 118 && r16(26) == 4 && r16(27) == 0 && fabsf(rf(28) - 6.0f) < 1e-5f &&
+    CHECK(rlen == 9 + 118 && r16(26) == 4 && r16(27) == 2 && fabsf(rf(28) - 6.0f) < 1e-5f &&
           fabsf(rf(30) - 10.0f) < 1e-5f && r16(32) == 15);
     CHECK(fabsf(rf(33) - 4.0f) < 1e-5f && fabsf(rf(35) - 0.25f) < 1e-5f && rf(37) == 0.0f &&
           fabsf(rf(45) - 4.0f) < 1e-5f && fabsf(rf(49) - 0.0f) < 1e-5f);
@@ -295,14 +295,14 @@ static void tests(void)
         f32(11.5f, b3 + 6); req(sizeof b3, b3);      CHECK(is_ex(0x10, MODBUS_EX_REFUSED) && tune[CFG_B3] == 160);
         CHECK(strstr(last_event, "B3 must be above B2") != NULL);
         f32(0.0f, b3 + 6); req(sizeof b3, b3);       CHECK(rlen == 12 && tune[CFG_B3] == 0);
-        // Out of range, a type past 2 or 1 (the setpoint, removed), half a float, the read-only set register, B2 under B1.
+        // Out of range, a type past 2, 1 (the setpoint, removed) or 0 (Off, removed), half a float, the read-only set register, B2 under B1.
         uint8_t k0[] = { 0x10, 0, 33, 0, 2, 4, 0, 0, 0, 0 };
         f32(0.0f, k0 + 6); req(sizeof k0, k0);       CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_KP] == 400);
         f32(NAN, k0 + 6); req(sizeof k0, k0);        CHECK(is_ex(0x10, MODBUS_EX_VALUE));
         REQ(0x10, 0, 27, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);
         REQ(0x10, 0, 32, 0, 1, 2, 0, 41);            CHECK(is_ex(0x10, MODBUS_EX_VALUE));
         REQ(0x10, 0, 27, 0, 1, 2, 0, 1);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);   // 1, the setpoint, removed in 0.15.20
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 0);             CHECK(rlen == 12 && tune[CFG_SCHED] == 0);
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 0);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);   // 0, Off, removed in 0.16.20
         REQ(0x10, 0, 28, 0, 1, 2, 0x40, 0xD0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 26, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 29, 0, 2, 4, 0, 0, 0, 0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));   // the second half of B1
@@ -344,7 +344,7 @@ static void tests(void)
     REQ(0x03, 0, 3, 0, 1);    CHECK(((r16(0) >> 8) & 1) == 1);
 #else
     CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && !sp_set);
-    REQ(0x10, 0, 27, 0, 1, 2, 0, 2);   CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && tune[CFG_SCHED] == 0);
+    REQ(0x10, 0, 27, 0, 1, 2, 0, 2);   CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && tune[CFG_SCHED] == 2);
     REQ(0x05, 0, 0, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && mode == VALVE_MANUAL);
     REQ(0x05, 0, 1, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && stops == 0);
     // Outside the map is still an address error, not a write refusal.

@@ -976,10 +976,10 @@ class Board:
                       'learned gains' if a.learned else 'fresh', f['sp'], f['mode'],
                       ', '.join('%.2f' % x for x in f['pid']), f['sched'] or 'not in this firmware',
                       (self.state.get('idn') or '').split(',')[-1].strip() or '--', GUI_BUILD or '--'))
-            pmc_autotune.pid_table_off(link, f)
-            if f.get('sched') and not f['sched'].startswith('OFF'):
-                t.log('command', 'SCHED SET OFF,%s: the PID table Off while the autotune runs, so set 1 carries '
-                      'the gains under test' % f['sched'].split(',', 1)[1])
+            t.n_sets = len(f.get('sets') or [])
+            if t.n_sets:
+                t.log('decision', 'The gains under test go in all %d PID sets (PIDS SET 1 to %d), so the set the PID '
+                      'table has in use never matters; the %d sets are put back at the end' % ((t.n_sets,) * 3))
             fw = (self.state.get('idn') or '').split(',')[3:4]
             ver = tuple(int(x) for x in re.findall(r'\d+', fw[0])[:3]) if fw else None
             if ver and ver < OLD_FIRMWARE:

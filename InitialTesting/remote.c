@@ -216,7 +216,7 @@ static bool query(const char *c)
     } else if (strcmp(c, "*IDN?") == 0) {
         idn_query();
     } else if (strcmp(c, "PID?") == 0) {
-        // The set in use (0.15.15; set 1 with the schedule Off, as before).
+        // The set in use (0.15.15; the PID table always on from 0.16.20).
         char kp[16], ti[16];
         const int n = valve_pid_set();
         reply("PID %s,%s,%s", fixed_fmt(kp, sizeof kp, cfg_tune(cfg_pid_key(n, 0)), 2),
@@ -320,12 +320,13 @@ static void pid_set(const char *c, bool pick)
         refuse_why(why);
 }
 
-// SCHED SET <OFF|PV>,<b1>,<b2>,<b3>,<h> (0.15.15; SP removed in 0.15.20; b3, the
-// boundary to set 4, from 0.16.14): the PID table, as the PID tuning PID
-// table tab's Save. Boundaries in mbar (1 dp), hysteresis %.
+// SCHED SET PV,<b1>,<b2>,<b3>,<h> (0.15.15; SP removed in 0.15.20; b3, the
+// boundary to set 4, from 0.16.14; OFF refused from 0.16.20, the PID table
+// always on, Ryan 12 Nov): the PID table, as the PID tuning PID table tab's
+// Save. Boundaries in mbar (1 dp), hysteresis %.
 static void sched_set(const char *c)
 {
-    static const char *const form = "Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<b3>,<h>";
+    static const char *const form = "Expected: SCHED SET PV,<b1>,<b2>,<b3>,<h>";
     static const cfg_key_t key[5] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
     static const char *const nm[5] = { "", "B1", "B2", "B3", "H" };
     static const int dec[5] = { 0, 1, 1, 1, 0 };
@@ -349,8 +350,11 @@ static void sched_set(const char *c)
             char *q = p + strlen(p);
             while (q > p && q[-1] == ' ')
                 *--q = '\0';
-            if (strcmp(p, "OFF") == 0) x = CTRL_SCHED_OFF;
-            else if (strcmp(p, "PV") == 0) x = CTRL_SCHED_PV;
+            if (strcmp(p, "OFF") == 0) {
+                refuse(102, "The PID table is always on: give PV");
+                return;
+            }
+            if (strcmp(p, "PV") == 0) x = CTRL_SCHED_PV;
             else {
                 refuse(101, form);
                 return;

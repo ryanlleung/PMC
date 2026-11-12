@@ -149,7 +149,7 @@ static const field_t F[CFG_N] = {
     [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
-    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Off: set 1 only. On: set by the lower of pressure and setpoint" },
+    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Always on: set by the lower of pressure and setpoint" },
     [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
     [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },
@@ -315,12 +315,6 @@ static void ed_toggle_ok(void)
     set_draft(ed_key, ed_key == CFG_REVERSE ? !shown(ed_key) : shown(ed_key) > 0 ? -1 : 1);
 }
 
-static void sched_pick(int i)
-{
-    if (i == 0 || i == 1)
-        set_draft(CFG_SCHED, i ? CTRL_SCHED_PV : CTRL_SCHED_OFF);
-}
-
 static void edit(cfg_key_t k)
 {
     static char t[160], cap[40], now[24], sv[24];
@@ -344,10 +338,6 @@ static void edit(cfg_key_t k)
         else
             lv_snprintf(t, sizeof t, "Set to %s?", shown(k) > 0 ? "Opening lowers pressure" : "Opening raises pressure");
         ui_confirm(t, "Change", ed_toggle_ok);
-    } else if (F[k].kind == K_SCHED) {
-        // Off or on the pressure (the setpoint removed in 0.15.20, Ryan 6 Nov).
-        static const char *const items[2] = { "Off, set 1 always", "On, set by the pressure" };
-        ui_pick("PID table", items, 2, shown(k) == CTRL_SCHED_PV ? 1 : 0, sched_pick);
     } else {
         int32_t lo, hi, s;
         cfg_range(k, &lo, &hi);
@@ -868,6 +858,7 @@ typedef struct {
     const char *note;
     bool tall;                // the keys as three tall cards (PID tuning's PID tab)
     bool over;                // no keys: the Open Motor override button (Motor settings' Override tab)
+    bool brow;                // the first key alone, then B1, B2 and B3 short in a row (PID table tab)
 } tab_t;
 
 // Motor settings (Valve setup to 0.16.1, Valve settings to 0.16.15, Ryan 12 Nov
@@ -906,41 +897,21 @@ static const tab_t valve_tabs[4] = {
 // 0.15.15 (Ryan 5 Nov, "build like industry ones"): three PID sets, the
 // PID tab showing one at a time (the keys here are set 1's; the set row
 // picks), and the gain schedule on its own tab. From 0.16.14 (Ryan 11 Nov,
-// "Yes fourth set"): four sets and a third boundary; the PID table tab has
-// the two switches on its first row and the three boundaries under them.
+// "Yes fourth set"): four sets and a third boundary. From 0.16.20 (Ryan 12
+// Nov: "remove the set 1 pid value function. always has pid table") the
+// table is always on: no Off/On switch, so the PID tab always shows the set
+// row, and the PID table tab has the hysteresis on its first row and the
+// three boundaries under it.
 static const tab_t tune_tabs[3] = {
     { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3,
-      "PID table on: four sets, tap one to edit; dot = set in use. PID table off: set 1 only. "
-      "Applied at the next control step; Save to keep.", true },
-    { "PID table", { CFG_SCHED, CFG_HYST, CFG_B1, CFG_B2, CFG_B3 }, 5,
-      "Set 1 below B1, set 2 to B2, set 3 to B3, set 4 above B3 (B3 0: three sets). Set changes are bumpless. "
-      "Applied at the next control step; Save to keep." },
+      "Four sets, tap one to edit; dot = set in use. Applied at the next control step; Save to keep.", true },
+    { "PID table", { CFG_HYST, CFG_B1, CFG_B2, CFG_B3 }, 4,
+      "Always on. Set 1 below B1, set 2 to B2, set 3 to B3, set 4 above B3 (B3 0: three sets), by the lower of the "
+      "pressure and the setpoint. Set changes are bumpless. Applied at the next control step; Save to keep.",
+      false, false, true },
     { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
       "Applied at the next control step; Save to keep." },
 };
-
-// Tall card for KP, TI and KD: the name 26 px, what it is and its unit
-// 12 px, the value 26 px, the chevron; the draft edge as an editable card.
-static void tcard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, cfg_key_t k, int i)
-{
-    static const char *const what[3] = { "Gain", "Integral time", "Derivative" };
-    static const char *const name[3] = { "KP", "TI", "KD" };
-    e->card = ui_card(scr, x, y, 109, 104);
-    lv_obj_add_flag(e->card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_border_width(e->card, 1, 0);
-    lv_obj_set_style_border_color(e->card, UI_TICK, 0);
-    lv_obj_set_style_bg_color(e->card, UI_TRACK, LV_STATE_PRESSED);
-    lv_obj_add_event_cb(e->card, field_event, LV_EVENT_CLICKED, (void *)(intptr_t)k);
-    ui_label(e->card, 12, 6, 85, &ui_font_26, UI_TEXT, LV_TEXT_ALIGN_LEFT, name[i]);
-    ui_label(e->card, 12, 36, 85, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, what[i]);
-    ui_label(e->card, 12, 50, 85, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, F[k].unit);
-    e->v = ui_label(e->card, 12, 69, 72, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
-    ui_label(e->card, 109 - 22, 73, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
-    e->edge = ui_card(e->card, -1, 5, 3, 94);
-    lv_obj_set_style_radius(e->edge, 0, 0);
-    lv_obj_set_style_border_width(e->edge, 0, 0);
-    lv_obj_set_style_bg_opa(e->edge, LV_OPA_TRANSP, 0);
-}
 
 static struct {
     const tab_t *tabs;
@@ -1034,9 +1005,7 @@ static void sel_refresh(void)
         lv_snprintf(t[2], sizeof t[2], "> %s", b[1]);
         lv_snprintf(t[3], sizeof t[3], "Not used");
     }
-    // The dot only while the schedule in use is on (a draft schedule
-    // picks nothing yet).
-    const int use = live(CFG_SCHED) != CTRL_SCHED_OFF ? valve_pid_set() : 0;
+    const int use = valve_pid_set();
     for (int i = 0; i < 4; i++) {
         ui_set_text(pg.selr[i], t[i]);
         if ((i + 1 == use) == lv_obj_has_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN)) {
@@ -1062,15 +1031,10 @@ static void pg_fields(void)
     const tab_t *t = &pg.tabs[pg.tab];
     int y0 = pg.ntabs > 1 ? 1 : 0;
     char cap[40];
-    // The PID tab: with the schedule Off, set 1 as three tall cards (as
-    // before 0.15.15); with it on (or a draft turning it on), the set row
-    // and the set picked as three cards under it.
-    pg.sets = t->tall && shown(CFG_SCHED) != CTRL_SCHED_OFF;
-    if (t->tall && !pg.sets) {
-        pg.set = 1;
-        for (int i = 0; i < t->n; i++)
-            tcard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0], pg_key(t, i), i);
-    }
+    // The PID tab: the set row and the set picked as three cards under it
+    // (the PID table always on from 0.16.20; set 1 as three tall cards with
+    // it Off to 0.16.19).
+    pg.sets = t->tall;
     if (pg.sets) {
         static const char *const nm[3] = { "KP", "TI", "KD" };
         sel_make();
@@ -1105,12 +1069,12 @@ static void pg_fields(void)
         lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
         lv_obj_set_style_anim_duration(sw, 0, 0);
     }
-    // Two columns; five fields (the PID table tab, 0.16.14) as two over
-    // three, the three short-captioned.
+    // Two columns; the PID table tab (brow) the hysteresis alone, then B1,
+    // B2 and B3 short-captioned in a row.
     for (int i = 0; i < t->n && !t->tall; i++) {
-        if (t->n == 5 && i >= 2) {
+        if (t->brow && i >= 1) {
             static const char *const bn[3] = { "B1, mB", "B2, mB", "B3, mB" };
-            ecard_make(&pg.f[i], pg.scr, 10 + (i - 2) * 117, RY[y0 + 1], 109, bn[i - 2],
+            ecard_make(&pg.f[i], pg.scr, 10 + (i - 1) * 117, RY[y0 + 1], 109, bn[i - 1],
                        field_event, (void *)(intptr_t)t->keys[i]);
             continue;
         }
@@ -1161,7 +1125,7 @@ static void pg_build(lv_obj_t *scr, const char *title, const tab_t *tabs, int n)
     pg.scr = scr;
     pg.tabs = tabs;
     pg.ntabs = n;
-    pg.set = live(CFG_SCHED) != CTRL_SCHED_OFF ? valve_pid_set() : 1;   // the PID tab opens on the set in use
+    pg.set = valve_pid_set();   // the PID tab opens on the set in use
     if (n > 1) {
         // Segmented choice: a grey track, the page shown as a raised white segment.
         pg.seg = segs_make(scr, RY[0], n, pg.segb, seg_cb, 0);
@@ -1179,10 +1143,6 @@ static void pg_build(lv_obj_t *scr, const char *title, const tab_t *tabs, int n)
 static void pg_refresh(void)
 {
     const tab_t *t = &pg.tabs[pg.tab];
-    // The schedule turned on or off (a draft, Discard, or the network): the
-    // PID tab changes form.
-    if (t->tall && pg.sets != (shown(CFG_SCHED) != CTRL_SCHED_OFF))
-        pg_fields();
     for (int i = 0; i < t->n; i++)
         field_update(&pg.f[i], pg_key(t, i));
     if (pg.sel)

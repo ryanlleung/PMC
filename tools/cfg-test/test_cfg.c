@@ -753,8 +753,8 @@ static void test_kd(void)
 
 // Gain schedule (0.15.15, version 8): PID sets 2 and 3, the schedule and
 // the closing deadband are saved settings; a version 7 record loads with
-// sets 2 and 3 as set 1, the schedule Off and the closing deadband as the
-// deadband, so AUTO runs as it did.
+// sets 2 and 3 as set 1, the schedule on (Off to 0.16.19; with every set
+// the same AUTO runs as it did) and the closing deadband as the deadband.
 static void test_sched(void)
 {
     int32_t v[CFG_N] = { 0 }, lo, hi;
@@ -762,7 +762,7 @@ static void test_sched(void)
     const char *why;
     CHECK(cfg_pid_key(1, 0) == CFG_KP && cfg_pid_key(2, 1) == CFG_TI2 && cfg_pid_key(3, 2) == CFG_KD3);
     cfg_range(CFG_SCHED, &lo, &hi);
-    CHECK(lo == 0 && hi == 2);
+    CHECK(lo == 2 && hi == 2);   // always on the pressure from 0.16.20
     cfg_range(CFG_HYST, &lo, &hi);
     CHECK(lo == 0 && hi == 40);
     // Boundaries too close for the hysteresis: refused, nothing changes.
@@ -785,17 +785,19 @@ static void test_sched(void)
     bool all = true;
     for (int i = 0; i < 13; i++) all &= cfg_tune(k[i]) == x[i];
     CHECK(all && cfg_unsaved() == 0);
-    // In AUTO the schedule is tuning too: taken without leaving AUTO.
+    // In AUTO the PID table is tuning too: taken without leaving AUTO. Off
+    // (0) is refused from 0.16.20 (Ryan 12 Nov: "always has pid table").
     v_auto = true;
     memset(set, 0, sizeof set);
     v[CFG_SCHED] = 0; set[CFG_SCHED] = true;
     v[CFG_KP3] = 150; set[CFG_KP3] = true;
-    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_KP3) == 150);
+    CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 120);
     v[CFG_SCHED] = 2;
-    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2);
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150);
     v_auto = false;
     // 1, the setpoint schedule (0.15.15 to 0.15.19), removed in 0.15.20:
-    // refused on save; a saved record holding it loads with the PID table Off.
+    // refused on save; a saved record holding it, or 0 (Off, to 0.16.19),
+    // loads with the PID table on the pressure and the sets as saved.
     memset(set, 0, sizeof set);
     v[CFG_SCHED] = 1; set[CFG_SCHED] = true;
     CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2);
@@ -821,7 +823,16 @@ static void test_sched(void)
         uint32_t rev;
         const char *at;
         CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
-        CHECK(cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
+        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
+        uint32_t off = 0;                                       // the same with 0, Off
+        memcpy(buf + 16 + 7 * 4 + 7 * 4 + 13 * 4, &off, 4);
+        c = crc32(buf, size8 - 4);
+        memcpy(buf + size8 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size8);
+        reboot();
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
+        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
     }
     // The same record as version 7.
     {
@@ -849,8 +860,8 @@ static void test_sched(void)
         CHECK(cfg_tune(CFG_KP) == 10 && cfg_tune(CFG_TI) == 40 && cfg_tune(CFG_DB) == 200);
         CHECK(cfg_tune(CFG_KP2) == 10 && cfg_tune(CFG_TI2) == 40 && cfg_tune(CFG_KP3) == 10 && cfg_tune(CFG_TI3) == 40 &&
               cfg_tune(CFG_KD2) == cfg_tune(CFG_KD) && cfg_tune(CFG_KD3) == cfg_tune(CFG_KD));
-        CHECK(cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_HYST) == 15 &&
-              cfg_tune(CFG_DBC) == 200);
+        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_HYST) == 15 &&
+              cfg_tune(CFG_DBC) == 200);   // on, every set set 1's: as it ran
         CHECK(cfg_tune(CFG_KP4) == 10 && cfg_tune(CFG_TI4) == 40 && cfg_tune(CFG_KD4) == cfg_tune(CFG_KD) &&
               cfg_tune(CFG_B3) == 140);
         CHECK(cfg_unsaved() == 0);

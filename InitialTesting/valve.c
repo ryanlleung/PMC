@@ -678,7 +678,7 @@ static ctrl_tune_t tune_now(void)
 
 // The PID set in use: in AUTO the one the schedule has switched to; else
 // the one AUTO would start with now (the lower of the pressure and the
-// setpoint, as ctrl_start; 1 with the schedule Off).
+// setpoint, as ctrl_start; the schedule is always on from 0.16.20).
 int valve_pid_set(void)
 {
     ctrl_tune_t k = tune_now();

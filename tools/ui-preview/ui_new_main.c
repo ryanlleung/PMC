@@ -505,6 +505,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-valve3")) tap(294, 72);
     if (!strcmp(st, "set-valvepos")) tap(94, 128);
     if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) M_TUNE();
+    if (!strcmp(st, "set-tunetable")) tap(180, 72);   // PID table tab, always on (0.16.20)
     if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") ||
         !strcmp(st, "set-saved")) { tap(94, 72); tap(181, 240); tap(251, 240); tap(111, 184); }
     if (!strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(321, 184);

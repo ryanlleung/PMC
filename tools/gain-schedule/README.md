@@ -61,7 +61,7 @@ The setpoints run in the order given. Not benched yet.
 
 The PID table sets come from the setpoints in each band: below B1, B1 to B2, B2 to B3, above B3 (four sets, firmware 0.16.14; B3 0 gives three, set 3 above B2). B1 is 6 mbar, B2 10, B3 14 and the hysteresis 10 % unless changed. For each band KP is the lowest KP of the setpoints in it, so no setpoint gets more KP than it was tuned for, and TI is the geometric mean of their TIs. KD is 0. A band with no setpoint keeps the board's set. Write to board in the GUI sends `PIDS SET 1` to `4` and `SCHED SET PV,<B1>,<B2>,<B3>,<H>` (firmware 0.16.14 or later); nothing is written before that.
 
-While it runs the PID table is Off and set 1 carries the gains under test; at the end set 1, the PID table, the setpoint and the mode are put back as found.
+While it runs the gains under test go in every PID set (`PIDS SET` 1 to 4, `PID SET` on firmware before 0.15.15), so the set the PID table has in use never matters (the table is always on from firmware 0.16.20); at the end the sets, the setpoint and the mode are put back as found.
 
 ## Setpoint step test
 

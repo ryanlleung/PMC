@@ -236,7 +236,7 @@ static uint8_t write_sched(uint16_t addr, uint16_t n, const uint16_t *v)
             x = v[i];
         }
         cfg_range(key, &lo, &hi);
-        if (x < lo || x > hi || (key == CFG_SCHED && x == 1))   // 1, the setpoint, removed in 0.15.20
+        if (x < lo || x > hi)   // the schedule register takes 2 only: 1, the setpoint, removed in 0.15.20, 0, Off, in 0.16.20
             return MODBUS_EX_VALUE;
         val[key] = x;
         on[key] = true;

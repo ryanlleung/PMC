@@ -109,7 +109,7 @@ typedef enum {
     // are PID set 1 (low pressure), these sets 2 (middle) and 3 (high).
     CFG_KP2, CFG_TI2, CFG_KD2,
     CFG_KP3, CFG_TI3, CFG_KD3,
-    CFG_SCHED,     // 0 Off (set 1 always), 1 on the setpoint, 2 on the pressure
+    CFG_SCHED,     // 2, on the pressure, only (0.16.20; 0 Off and 1 on the setpoint load as 2)
     CFG_B1,        // boundary set 1 / set 2, 0.1 mbar
     CFG_B2,        // boundary set 2 / set 3, 0.1 mbar
     CFG_HYST,      // hysteresis on the pressure, % of the boundary

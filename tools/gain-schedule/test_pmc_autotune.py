@@ -362,10 +362,11 @@ class Rules(unittest.TestCase):
 
     def test_put_back(self):
         f = {'sp': 8.0, 'mode': 'AUTO', 'valve': 4.2, 'pid': [0.1, 0.4, 0.0], 'sched': 'PV,6.0,10.0,14.0,15',
-             'set1': [0.1, 0.4, 0.0]}
-        self.assertEqual(at.put_back_lines(f), ['PIDS SET 1,0.10,0.40,0.00', 'SCHED SET PV,6.0,10.0,14.0,15',
+             'sets': [[0.06, 0.6, 0.0], [0.1, 0.4, 0.0], [0.8, 0.94, 0.0], [0.4, 0.25, 0.0]]}
+        self.assertEqual(at.put_back_lines(f), ['PIDS SET 1,0.06,0.60,0.00', 'PIDS SET 2,0.10,0.40,0.00',
+                                                'PIDS SET 3,0.80,0.94,0.00', 'PIDS SET 4,0.40,0.25,0.00',
                                                 'SETPOINT 8.0', 'MODE AUTO'])
-        f.update(mode='MANUAL', sched=None)
+        f.update(mode='MANUAL', sched=None, sets=None)
         self.assertEqual(at.put_back_lines(f), ['PID SET 0.10,0.40,0.00', 'SETPOINT 8.0', 'MODE MANUAL',
                                                 'VALVE SET 4.2'])
 
@@ -411,16 +412,25 @@ class Watchdog(unittest.TestCase):
 
 class FakeBoard:
     """The text port on the model: the firmware's PI (1 s, clamp anti-windup,
-    bumpless), PID set 1 to 3 and the PID table, as pmc_autotune.Link."""
+    bumpless), PID set 1 to 4 and the PID table, as pmc_autotune.Link. The
+    table Off (firmware before 0.16.20) unless given, so set 1 is in use."""
 
-    def __init__(self, plant, sched=True):
+    def __init__(self, plant, sched=True, table='OFF,6.0,10.0,14.0,15'):
         self.P, self.sched = plant, sched
         self.mode, self.sp = 'MANUAL', 5.0
         self.sets = [[4.0, 0.25, 0.0], [4.0, 0.25, 0.0], [4.0, 0.25, 0.0], [4.0, 0.25, 0.0]]
-        self.table = 'OFF,6.0,10.0,14.0,15'
+        self.table = table
         self.i = 0.0
         self.t_loop = 0.0
         self.log = []
+
+    def use(self):
+        """The set in use, from 0: by the lower of pressure and setpoint with
+        the table on (PV; no hysteresis here), else set 1."""
+        if not self.table.startswith('PV'):
+            return 0
+        x = min(self.P.x, self.sp)
+        return sum(1 for v in self.table.split(',')[1:4] if 0 < float(v) <= x)
 
     # the board's own time: the plant runs and AUTO steps once a second
     def advance(self, t):
@@ -428,7 +438,7 @@ class FakeBoard:
             self.t_loop += 1.0
             self.P.run_to(self.t_loop)
             if self.mode == 'AUTO':
-                kp, ti, _ = self.sets[0]
+                kp, ti, _ = self.sets[self.use()]
                 e = self.sp - self.P.p()
                 self.i += kp / (60 * ti) * e
                 u = kp * e + self.i
@@ -468,11 +478,12 @@ class FakeBoard:
         if c == 'MODE?':
             return 'MODE ' + self.mode
         if c == 'PID?':
-            return 'PID %.2f,%.2f,%.2f' % tuple(self.sets[0])
+            return 'PID %.2f,%.2f,%.2f' % tuple(self.sets[self.use()])
         if c == 'SCHED?':
             return 'SCHED ' + self.table if self.sched else 'ERR 100 Unknown command'
         if c == 'PIDS?':
-            return ('PIDS 1,' + ','.join('%.2f' % v for s in self.sets for v in s)) if self.sched else 'ERR 100'
+            return ('PIDS %d,' % (self.use() + 1) + ','.join('%.2f' % v for s in self.sets for v in s)
+                    if self.sched else 'ERR 100')
         if c.startswith('SETPOINT '):
             self.sp = float(c[8:])
             return None
@@ -480,7 +491,7 @@ class FakeBoard:
             if self.mode == 'MANUAL' and abs(P.cmd - P.v) > 1e-6:
                 return 'ERR 212 Wait for the valve to stop'
             if self.mode != 'AUTO':
-                self.i = P.v - self.sets[0][0] * (self.sp - P.p())
+                self.i = P.v - self.sets[self.use()][0] * (self.sp - P.p())
             self.mode = 'AUTO'
             return None
         if c == 'MODE MANUAL':
@@ -497,12 +508,15 @@ class FakeBoard:
                 return 'ERR 212 wait for the valve to stop'
             v = [float(x) for x in c[8:].split(',')]
             e = self.sp - P.p()
-            self.i += (self.sets[0][0] - v[0]) * e      # bumpless
-            self.sets[0][:len(v)] = v
+            self.i += (self.sets[self.use()][0] - v[0]) * e      # bumpless
+            self.sets[self.use()][:len(v)] = v
             return None
         if c.startswith('PIDS SET '):
             v = c[9:].split(',')
-            self.sets[int(v[0]) - 1][:len(v) - 1] = [float(x) for x in v[1:]]
+            n = int(v[0]) - 1
+            if n == self.use():
+                self.i += (self.sets[n][0] - float(v[1])) * (self.sp - P.p())   # bumpless
+            self.sets[n][:len(v) - 1] = [float(x) for x in v[1:]]
             return None
         if c.startswith('SCHED SET '):
             self.table = c[10:]
@@ -530,13 +544,17 @@ class Sequence(unittest.TestCase):
         # Gain falls with pressure, as on the cryostat: 4 mbar/% low, 1 high.
         curve = lambda v: 0.67 + 30 * (1 - math.exp(-max(v, 0) / 12))   # noqa: E731
         plant = Plant(curve=curve, L=2.0, tau=8.0, noise=0.01)
-        b = FakeBoard(plant)
+        # The PID table always on (0.16.20), a different set each band.
+        b = FakeBoard(plant, table='PV,6.0,10.0,14.0,15')
+        table = [[0.06, 0.6, 0.0], [0.12, 0.82, 0.0], [0.8, 0.94, 0.0], [0.4, 0.25, 0.0]]
+        b.sets = [list(g) for g in table]
         b.advance(200)
         f = at.found(b)
-        self.assertEqual(f['sched'], 'OFF,6.0,10.0,14.0,15')
+        self.assertEqual((f['sched'], f['sets']), ('PV,6.0,10.0,14.0,15', table))
         a = SimpleNamespace(div=4.0, ti_pu=2.0, trims=2, d=0.4)
         d = tempfile.mkdtemp()
         t = at.AutoTuner(b, Clock(b), a, d)
+        t.n_sets = len(f['sets'])
         t.say = lambda m: None
         rows, ku, gains = [], None, (0.30, 0.40)
         for sp in [4, 12]:
@@ -554,9 +572,17 @@ class Sequence(unittest.TestCase):
         for sp in (4, 12):   # only the check each result came from is kept
             ups = [n for n in os.listdir(d) if n.startswith('check_%gmbar_' % sp) and n.endswith('_up.csv')]
             self.assertEqual(len(ups), 1, ups)
+        # Every gain change went in all four sets, so the set in use never mattered.
+        sets_sent = [x.split(';')[0] for x in b.log if x.startswith('PIDS SET ')]
+        self.assertTrue(sets_sent and len(sets_sent) % 4 == 0)
+        for k in range(0, len(sets_sent), 4):
+            self.assertEqual([x[:11] for x in sets_sent[k:k + 4]], ['PIDS SET %d,' % n for n in (1, 2, 3, 4)])
+            self.assertEqual(len({x[11:] for x in sets_sent[k:k + 4]}), 1, sets_sent[k:k + 4])
+        self.assertFalse(any(x.startswith(('PID SET', 'SCHED SET')) for x in b.log))   # the table left as it was
+        run_log = list(b.log)
         for line in at.put_back_lines(f):
             b.do(line)
-        self.assertEqual((b.mode, b.sets[0], b.table), ('MANUAL', [4.0, 0.25, 0.0], 'OFF,6.0,10.0,14.0,15'))
+        self.assertEqual((b.mode, b.sets, b.table), ('MANUAL', table, 'PV,6.0,10.0,14.0,15'))
 
         # The log (Ryan, 11 Nov): every calculation, decision, gain change and
         # command, each with the gains on the board after it.
@@ -569,16 +595,16 @@ class Sequence(unittest.TestCase):
         self.assertEqual(len([r for r in rows if r['kind'] == 'result']), 2)
         first = next(r for r in rows if r['kind'] == 'gains')
         self.assertEqual(first['change'], 'KP -- -> 0.30, TI -- -> 0.40, KD -- -> 0.00')
-        self.assertTrue(first['text'].startswith('PID SET 0.30,0.40,0: reach 4 mbar'), first['text'])
+        self.assertTrue(first['text'].startswith('PIDS SET 1-4,0.30,0.40,0: reach 4 mbar'), first['text'])
         self.assertEqual(first['stage'], '4 mbar reach')
         self.assertEqual(next(r for r in rows if r['text'].startswith('MODE MANUAL'))['stage'], '4 mbar noise')
         self.assertTrue(all(r['stage'] for r in rows), [r for r in rows if not r['stage']][:2])
         for r in rows:
             if r['kind'] == 'gains':     # the KP and TI columns are the new gains, the change says from what
-                self.assertTrue(r['text'].startswith('PID SET %s,%s,0' % (r['kp'], r['ti_min'])), r)
+                self.assertTrue(r['text'].startswith('PIDS SET 1-4,%s,%s,0' % (r['kp'], r['ti_min'])), r)
                 self.assertIn('-> ' + r['kp'], r['change'] if 'KP' in r['change'] else '-> ' + r['kp'])
         # The board's own record of what was set matches the log's.
-        sent = [x.split(';')[0] for x in b.log if x.startswith('PID SET ')]
+        sent = ['PIDS SET 1-4,' + x.split(';')[0][11:] for x in run_log if x.startswith('PIDS SET 1,')]
         self.assertEqual([r['text'].split(':')[0] for r in rows if r['kind'] == 'gains'],
                          [x for i, x in enumerate(sent) if i == 0 or x != sent[i - 1]])
         # The first gains for each point are a decision, and their check runs with them.

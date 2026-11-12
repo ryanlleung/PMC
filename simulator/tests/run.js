@@ -19,7 +19,12 @@ const events = (s, n = 100) => s.cmd('EVENT? ' + n, 2000);
 // The physics plant has far more gain than the bench (0.8 to 12.5 mbar over 20 to 100 % open): tests of other
 // things in AUTO on it run one PID, KP 4.00 TI 0.25, the factory to 0.16.17. The factory from 0.16.18 is the
 // bench table (PID table On, 6/10/14 mbar, 0.06/0.60, 0.12/0.82, 0.80/0.94, 0.40/0.25).
-function oldGains(s) { s.cmd('SCHED SET OFF,6,10,14,15;PID SET 4,0.25,0', 1000); return s; }
+// The PID table is always on (0.16.20): one PID means every set the same.
+function allSets(s, kp, ti, kd = 0) {
+  for (let n = 1; n <= 4; n++) s.cmd('PIDS SET ' + n + ',' + kp + ',' + ti + ',' + kd, 1000);
+  return s;
+}
+function oldGains(s) { return allSets(s, 4, 0.25); }
 function homed(s) {
   s.boot(); s.set(5, 40000); s.run(2000);
   s.home();
@@ -133,10 +138,9 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
 }
 { // PID tile opens PID tuning; KD is a saved setting from its keypad.
   const s = homed(load());
-  s.cmd('SCHED SET OFF,6,10,14,15', 1000);   // the PID tab as three tall cards (the PID table is On from the factory, 0.16.18)
   shot(s, 'home-pid');
   s.tap(415, 72); shot(s, 'pid-tuning');
-  s.tap(298, 156); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // KD 1.5, Set
+  s.tap(298, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // set 1's KD (the set row), 1.5, Set
   s.tap(415, 128); s.tap(319, 138);   // Save settings, then Save in the question
   check('KD saves from the PID tuning page', s.setting(CFG.KD) === 150, 'KD ' + s.setting(CFG.KD));
   // Gain schedule on (0.15.15): the PID tab shows the set row; Set 3's KP from its card. Four sets from 0.16.14:
@@ -682,10 +686,12 @@ let parkedFlash;
     up[2][0] === 3 && up[2][1] === 4 && up[2][2] >= 8.8 && up[2][2] < 9.8, JSON.stringify(up));
   shot(s, 'gain-schedule');
   // The setpoint schedule is gone (0.15.20, Ryan 6 Nov): SP is refused, the table stays on the pressure.
-  check('SCHED SET SP refused', one('SCHED SET SP,3,6,8,10') === 'ERR 101 Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<b3>,<h>\r\n' &&
+  check('SCHED SET SP refused', one('SCHED SET SP,3,6,8,10') === 'ERR 101 Expected: SCHED SET PV,<b1>,<b2>,<b3>,<h>\r\n' &&
     one('SCHED?') === 'SCHED PV,3.0,6.0,8.0,10\r\n', one('SCHED SET SP,3,6,8,10') + one('SCHED?'));
-  check('SCHED SET OFF: set 1', one('SCHED SET OFF,6,10,14,15') === '' && (s.run(3000), /^PIDS 1,/.test(one('PIDS?'))) &&
-    one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('PIDS?;PID?'));
+  // The PID table is always on (0.16.20, Ryan 12 Nov: "remove the set 1 pid value function. always has pid table").
+  check('SCHED SET OFF refused, the table stays on', one('SCHED SET OFF,6,10,14,15') ===
+    'ERR 102 The PID table is always on: give PV\r\n' && one('SCHED?') === 'SCHED PV,3.0,6.0,8.0,10\r\n',
+    one('SCHED SET OFF,6,10,14,15') + one('SCHED?'));
 }
 { // The limit switch pressed away from the seat (0.16.4, Ryan PR #43): a yellow edge round Home's Valve tile at
   // once (the "Limit" tag of 0.16.1 gone) and W-4 within 0.3 s (two 1 s reads to 0.16.3); released, the edge goes.
@@ -724,7 +730,7 @@ let parkedFlash;
   // bench gains, a relay there cycles at about the bench's period, and opening sticks at low openings.
   const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
   const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
-  s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT 16'); s.cmd('MODE AUTO');
+  allSets(s, 0.40, 0.75); s.cmd('SETPOINT 16'); s.cmd('MODE AUTO');
   s.run(540000);
   // Held: no swing over the last minute of 10 min. It may still creep a
   // little as the heat exchanger settles (the knee), as on the bench.
@@ -755,8 +761,8 @@ let parkedFlash;
   const num = r => parseFloat((r.match(/-?[\d.]+/) || ['NaN'])[0]);
   const reach = kp => {
     const s = load(); s.boot(undefined, { plant: 0 }); s.set(5, 40000); s.run(2000); s.home();
-    s.cmd('SCHED SET OFF,6,10,14,15'); s.cmd('PID SET 0.40,0.75,0'); s.cmd('SETPOINT 10'); s.cmd('MODE AUTO'); s.run(1800000);
-    s.cmd('PID SET ' + kp.toFixed(2) + ',0.42,0'); s.cmd('SETPOINT 1');
+    allSets(s, 0.40, 0.75); s.cmd('SETPOINT 10'); s.cmd('MODE AUTO'); s.run(1800000);
+    allSets(s, kp.toFixed(2), 0.42); s.cmd('SETPOINT 1');
     let low = false, swings = 0;   // times it came back up from under 1.5 to over 3.5 mbar
     for (let t = 0; t < 120; t++) {
       s.run(1000); const p = num(s.cmd('PRESSURE?', 20));

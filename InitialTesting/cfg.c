@@ -30,8 +30,9 @@
  *
  * Version 8 (0.15.15) adds PID sets 2 and 3, the gain schedule (type, B1,
  * B2, hysteresis) and the closing deadband at the end of tune[]. Older
- * records load with sets 2 and 3 as set 1, the schedule Off and the closing
- * deadband as the deadband, so AUTO runs as it did until they are changed.
+ * records load with sets 2 and 3 as set 1, the schedule Off (on from
+ * 0.16.20, with every set as set 1, so AUTO still runs as it did) and the
+ * closing deadband as the deadband.
  *
  * Version 7 (0.14.21) adds KD at the end of tune[]; older records load KD 0.
  *
@@ -101,7 +102,7 @@ static const int32_t tune_def[T_N] = { 6, 60, 0, 8, 1, 10, 0,
                                        12, 82, 0, 80, 94, 0, 2, 60, 100, 15, 8,
                                        40, 25, 0, 140 };
 static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 0,    0,
-                                       1,     0,     0,     1,     0,     0,     0, 1,     1,     0,  0,
+                                       1,     0,     0,     1,     0,     0,     2, 1,     1,     0,  0,
                                        1,     0,     0,     0 };
 static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
                                        10000, 10000, 10000, 10000, 10000, 10000, 2, 10000, 10000, 40, 2000,
@@ -111,8 +112,9 @@ static int32_t tune[T_N] = { 6, 60, 0, 8, 1, 10, 0,
                              40, 25, 0, 140 };
 // Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar (the band
 // from 0, 0.10 before 0.16.16, Ryan 12 Nov), 0.01 % per mbar/s;
-// sets 2 to 4 as set 1; PID table 0 Off, 2 on the pressure (1, the setpoint,
-// removed in 0.15.20; loads as Off); B1 to B3
+// sets 2 to 4 as set 1; PID table 2, on the pressure, always (0.16.20, Ryan
+// 12 Nov: "remove the set 1 pid value function. always has pid table"; 0 Off
+// to 0.16.19 and 1, the setpoint, to 0.15.19 load as 2); B1 to B3
 // 0.1 mbar (B3 0: no set 4, three sets); hysteresis % of the boundary;
 // closing deadband steps.
 
@@ -395,8 +397,7 @@ static const char *values_why(const cfg_rec_t *r)
     if (valve_settings_check(r->valve))
         return valve_settings_check(r->valve);
     for (int i = 0; i < T_N; i++)
-        if (r->tune[i] < tune_lo[i] || r->tune[i] > tune_hi[i] || (i == T_KDIR && r->tune[i] == 0) ||
-            (i == T_SCHED && r->tune[i] == 1))
+        if (r->tune[i] < tune_lo[i] || r->tune[i] > tune_hi[i] || (i == T_KDIR && r->tune[i] == 0))
             return tune_name[i];
     if (bounds_why(r->tune))
         return bounds_why(r->tune)[1] == '3' ? "B3" : "B2";
@@ -444,8 +445,9 @@ static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
 // A version 2 to 7 record as version 9. They have the first ntune tuning
 // values (six to version 6: KD reads 0, the loop as it ran; seven in
 // version 7) and none of the fields after crc_at. The values added since
-// keep the loop as it ran: sets 2 to 4 as set 1, the schedule Off (B1 to B3
-// and H at their factory values), the closing deadband as the deadband.
+// keep the loop as it ran: sets 2 to 4 as set 1 (the PID table on, always
+// from 0.16.20; B1 to B3 and H at their factory values), the closing
+// deadband as the deadband.
 // Versions 2 to 5 also lack the return (valve[6]): it is their back-off, so
 // homing ends where it did. Fields they lack are 0 (the build's address),
 // except Remote control, On as the default; versions 5 to 7 have their own.
@@ -468,7 +470,7 @@ static void from_old(const void *v, size_t tune_at, int ntune, size_t crc_at, bo
     r->tune[T_KP4] = r->tune[T_KP];
     r->tune[T_TI4] = r->tune[T_TI];
     r->tune[T_KD4] = r->tune[T_KD];
-    r->tune[T_SCHED] = 0;
+    r->tune[T_SCHED] = 2;                                          // on, the sets all set 1: as it ran
     r->tune[T_B1] = tune_def[T_B1];
     r->tune[T_B2] = tune_def[T_B2];
     r->tune[T_B3] = tune_def[T_B3];
@@ -575,8 +577,12 @@ static const char *read_slot(int i)
     }
     slot_offset[i] = r->valve[5];   // the zero offset, removed in 0.13.31
     r->valve[5] = 0;
-    if (r->tune[T_SCHED] == 1)       // the setpoint schedule, removed in 0.15.20: Off
-        r->tune[T_SCHED] = 0;
+    // The PID table is always on from 0.16.20: Off (0, set 1 at every
+    // pressure) and the setpoint schedule (1, removed in 0.15.20) load as
+    // on the pressure, with the sets as saved. Records from before 0.15.15
+    // have every set equal to set 1 (from_old), so they run as before.
+    if (r->tune[T_SCHED] != 2)
+        r->tune[T_SCHED] = 2;
     if (values_why(r))
         return "value out of range";
     return NULL;
