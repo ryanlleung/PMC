@@ -20,23 +20,32 @@ int ctrl_pick_set(const ctrl_tune_t *k, int now, float x)
 {
     if (k->sched != CTRL_SCHED_PV)
         return 1;
+    // Four sets when boundary 3 is above boundary 2 (0.16.14), else three.
+    const int top = ctrl_sets(k);
     // With no set yet, straight from the boundaries.
-    if (now < 1 || now > 3)
-        return x < k->b1 ? 1 : x < k->b2 ? 2 : 3;
+    if (now < 1 || now > top)
+        return x < k->b1 ? 1 : x < k->b2 ? 2 : top == 3 || x < k->b3 ? 3 : 4;
     // On the pressure, a set holds until the pressure is past its boundary
-    // by the hysteresis; a large move can pass both in one step.
+    // by the hysteresis; a large move can pass several in one step.
     const float up = 1.0f + k->hyst, down = 1.0f - k->hyst;
     if (now == 1 && x > k->b1 * up) now = 2;
     if (now == 2 && x > k->b2 * up) now = 3;
+    if (now == 3 && top == 4 && x > k->b3 * up) now = 4;
+    if (now == 4 && x < k->b3 * down) now = 3;
     if (now == 3 && x < k->b2 * down) now = 2;
     if (now == 2 && x < k->b1 * down) now = 1;
     return now;
 }
 
+int ctrl_sets(const ctrl_tune_t *k)
+{
+    return k->b3 > k->b2 ? 4 : 3;
+}
+
 ctrl_pid_t ctrl_set_gains(const ctrl_tune_t *k, int set)
 {
-    if (set == 2 || set == 3)
-        return k->set23[set - 2];
+    if (set >= 2 && set <= 4)
+        return k->sets[set - 2];
     ctrl_pid_t g = { k->kp, k->ti, k->kd };
     return g;
 }
@@ -70,8 +79,8 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
     if (c->sp < 0 || c->sp > fs)    return "Setpoint outside the sensor range";
     if (pv > fs)                    return "Pressure above the sensor range";
     if (!k->kdir)                   return "Pressure response not set";
-    // Set 1 always; sets 2 and 3 when the schedule can pick them.
-    for (int s = 1; s <= (k->sched == CTRL_SCHED_OFF ? 1 : 3); s++) {
+    // Set 1 always; sets 2 to 4 when the schedule can pick them.
+    for (int s = 1; s <= (k->sched == CTRL_SCHED_OFF ? 1 : ctrl_sets(k)); s++) {
         const ctrl_pid_t g = ctrl_set_gains(k, s);
         if (!(g.kp > 0) || g.ti < 0)
             return "Tuning not set";
@@ -82,7 +91,7 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
 void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_t now_pos)
 {
     float e = (float)k->kdir * (c->sp - pv);
-    c->set = ctrl_pick_set(k, 0, pv);
+    c->set = ctrl_pick_set(k, 0, fminf(pv, c->sp));   // the lower of the two (0.16.9, ctrl.h)
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     c->i = (float)now_pos - steps_of(g.kp, k) * e;   // bumpless: first output is the position in force
     c->pos_cmd = c->last_sent = now_pos;
@@ -98,6 +107,8 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
     c->kdir_used = k->kdir;
     c->pv_f = pv;
     c->last_dir = 0;
+    c->e_last = c->sp - pv;
+    c->sp_used = c->sp;
 }
 
 bool ctrl_set_sp(ctrl_t *c, float sp, float fs, uint32_t t_ms)
@@ -144,19 +155,37 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->pv_f = pv;
     const float pf = c->pv_f;
     const float e = (float)k->kdir * (c->sp - pf);
-    c->set = ctrl_pick_set(k, c->set, pf);
+    c->set = ctrl_pick_set(k, c->set, fminf(pf, c->sp));   // the lower of the two (0.16.9, ctrl.h)
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     const float kp = steps_of(g.kp, k), ki = g.ti > 0 ? kp / (60.0f * g.ti) : 0, kd = steps_of(g.kd, k);
     const float d = -kd * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
     c->prev_pv = pf;
     if (kp != c->kp_used || kd != c->kd_used || k->kdir != c->kdir_used) {
-        // Tuning or PID set changed in AUTO: keep the output where it is, as
-        // on entry, rather than stepping by the change in KP x e (or in D).
-        c->i = (float)c->pos_cmd - kp * e - d;
+        // Tuning or PID set changed in AUTO: keep the output where it was at
+        // the last step's error, as on entry, rather than stepping by the
+        // change in KP x e (or in D). The last step's error, not this one's,
+        // so a setpoint step that also changes the set (the lower of pressure
+        // and setpoint picks it) is handled below like one within a set
+        // (0.16.13). The last error is kept without KDIR, so a KDIR change
+        // stays bumpless.
+        c->i = (float)c->pos_cmd - kp * (float)k->kdir * c->e_last - d;
         c->kp_used = kp;
         c->kd_used = kd;
         c->kdir_used = k->kdir;
     }
+    // The proportional part acts on the pressure only (0.16.15, Ryan 12 Nov):
+    // a setpoint change moves the integral by KP x the change the other way,
+    // so the output does not jump with the setpoint. The integral alone then
+    // takes the valve to the new setpoint, and the pressure comes in from
+    // one side. Before, the valve jumped by KP x the step and gave most of
+    // it back as the pressure arrived: a bounce on the way in (simulator,
+    // 16 to 12 mbar on set 3, 11 Nov).
+    if (c->sp != c->sp_used) {
+        if (!c->sp_kick)
+            c->i -= kp * (float)k->kdir * (c->sp - c->sp_used);
+        c->sp_used = c->sp;
+    }
+    c->e_last = c->sp - pf;
     float i_new = c->i + ki * e * CTRL_TS_S;
     const float raw = kp * e + i_new + d;
     const float lo = k->outmin / 100.0f * pos_max;   // AUTO min
@@ -186,10 +215,11 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     int32_t step = c->pos_cmd - c->last_sent;
     if (step >= db_open || step <= -db_close) {
         // Reversal hysteresis: turning round for less than this is lost in
-        // the drive's backlash and only makes the motor hunt.
+        // the drive's backlash and only makes the motor hunt. CTRL_REV_MBAR
+        // of error at this set's KP, at most rev_pct (0.16.9, ctrl.h).
         const int32_t to_go = c->pos_cmd - in->pos;
         const int way = to_go > 0 ? 1 : to_go < 0 ? -1 : 0;
-        const float rev = c->rev_pct / 100.0f * pos_max;
+        const float rev = fminf(c->rev_pct, CTRL_REV_MBAR * g.kp) / 100.0f * pos_max;
         if (way && !(c->last_dir && way != c->last_dir && fabsf((float)to_go) < rev)) {
             c->move = true;
             c->move_to = c->pos_cmd;
@@ -235,8 +265,11 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     // pressure under the band for minutes, and it tripped there. A KDIR the
     // wrong way round still ends AUTO by W-2 (CTRL_TCONV_S).
 
-    // W-2 convergence timeout.
-    if (fabsf(c->sp - pv) <= k->band)
+    // W-2 convergence timeout. The setpoint band can be 0 (0.16.16, Ryan
+    // 12 Nov): In band and Stable then never show, but W-2 still judges
+    // against 0.10 mbar, the old least band, or a steady hold would end AUTO
+    // after CTRL_TCONV_S for not reading the setpoint exactly.
+    if (fabsf(c->sp - pv) <= fmaxf(k->band, CTRL_TCONV_BAND))
         c->conv_ms = in->t_ms;
     else if (since(in->t_ms, c->conv_ms) > CTRL_TCONV_S * 1000u)
         return CTRL_W02;

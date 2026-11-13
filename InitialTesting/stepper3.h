@@ -120,8 +120,16 @@ stepper3_stop_t stepper3_last_stop(void);
 // it runs). False if none since power-up.
 bool stepper3_last_move(int32_t *from, uint32_t *ms);
 
-// Limit input state: true if fitted and the NC contact is open.
+// Limit input state: true if fitted and the NC contact is open, and it
+// stops closing now (not under the override or in the pass band).
 bool stepper3_limit_open(void);
+// The NC contact open (fitted), whatever the override or pass band.
+bool stepper3_limit_pressed(void);
+// Pass band (0.16.5): between the counts lo and hi the switch neither stops
+// closing nor trips the opening check. RAM only, off at reset.
+void stepper3_limit_band(bool on, int32_t lo, int32_t hi);
+// The band is on and the count is in it.
+bool stepper3_limit_ignored(void);
 // Closing override armed or in use (MOT OVERRIDE).
 bool stepper3_override(void);
 void stepper3_override_arm(void);

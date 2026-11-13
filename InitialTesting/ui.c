@@ -249,6 +249,7 @@ int32_t ui_pct_shown(int32_t milli)
  * ------------------------------------------------------------------------ */
 #define BTN_NAV   LV_OBJ_FLAG_USER_1    // on the button
 #define BTN_SMALL LV_OBJ_FLAG_USER_1    // on its state line
+#define BTN_ICON  LV_OBJ_FLAG_USER_4    // on the button: an icon over the label (ui_btn_icon, the Menu)
 
 static lv_obj_t *btn_small(lv_obj_t *b)
 {
@@ -260,6 +261,11 @@ static lv_obj_t *btn_small(lv_obj_t *b)
 static void btn_layout(lv_obj_t *b)
 {
     lv_obj_t *main = lv_obj_get_child(b, 0), *small = btn_small(b);
+    if (lv_obj_has_flag(b, BTN_ICON)) {
+        // The icon at the top, the label along the bottom (the Menu, 0.16.2).
+        lv_obj_align(main, LV_ALIGN_BOTTOM_MID, 0, -5);
+        return;
+    }
     bool two = small && !lv_obj_has_flag(small, LV_OBJ_FLAG_HIDDEN);
     bool nav = lv_obj_has_flag(b, BTN_NAV);
     lv_align_t al = nav ? LV_ALIGN_LEFT_MID : LV_ALIGN_CENTER;
@@ -572,21 +578,43 @@ void ui_btn_arrow(lv_obj_t *b, bool up)
     lv_obj_add_event_cb(o, arrow_draw, LV_EVENT_DRAW_MAIN, up ? (void *)1 : NULL);
 }
 
-// The status line's drawn icons, 16 x 16, in the label colour.
-typedef enum { SHAPE_VALVE, SHAPE_TARGET } shape_t;
-static shape_t shape;
+// The drawn icons, 16 x 16, in the object's text colour: the status line's
+// (the valve, the target) and the Menu's (those and the trend, 0.16.2).
+// Which one is the object's user data.
+typedef enum { SHAPE_VALVE, SHAPE_TARGET, SHAPE_TREND } shape_t;
+static shape_t shape;          // the strip's, to redraw it only on a change
 static lv_color_t shape_col;
 
 static void shape_draw(lv_event_t *e)
 {
     lv_layer_t *layer = lv_event_get_layer(e);
+    lv_obj_t *obj = lv_event_get_target_obj(e);
     lv_area_t a;
-    lv_obj_get_coords(lv_event_get_target_obj(e), &a);
+    lv_obj_get_coords(obj, &a);
     int32_t x = a.x1, y = a.y1;
+    shape_t which = (shape_t)(intptr_t)lv_obj_get_user_data(obj);
+    lv_color_t shape_col = lv_obj_get_style_text_color(obj, LV_PART_MAIN);
     lv_draw_rect_dsc_t r;
     lv_draw_rect_dsc_init(&r);
     r.bg_color = shape_col;
-    if (shape == SHAPE_VALVE) {
+    if (which == SHAPE_TREND) {
+        // A chart: axes along the left and bottom, the pressure line over them.
+        lv_area_t ax = { x, y, x, y + 15 };
+        lv_draw_rect(layer, &r, &ax);
+        lv_area_t ay = { x, y + 15, x + 15, y + 15 };
+        lv_draw_rect(layer, &r, &ay);
+        lv_draw_line_dsc_t d;
+        lv_draw_line_dsc_init(&d);
+        d.color = shape_col;
+        d.width = 2;
+        d.round_start = d.round_end = 1;
+        static const int8_t px[5] = { 3, 6, 9, 11, 15 }, py[5] = { 12, 7, 10, 5, 2 };
+        for (int i = 0; i < 4; i++) {
+            d.p1.x = x + px[i];     d.p1.y = y + py[i];
+            d.p2.x = x + px[i + 1]; d.p2.y = y + py[i + 1];
+            lv_draw_line(layer, &d);
+        }
+    } else if (which == SHAPE_VALVE) {
         // P&ID hand valve: two triangles tip to tip, stem and handle.
         lv_draw_triangle_dsc_t t;
         lv_draw_triangle_dsc_init(&t);
@@ -617,6 +645,37 @@ static void shape_draw(lv_event_t *e)
 }
 
 
+// Which drawn icon a UI_ICON_ string names, -1 for a font symbol.
+static int shape_of(const char *icon)
+{
+    return !icon ? -1 : strcmp(icon, UI_ICON_VALVE) == 0 ? SHAPE_VALVE
+         : strcmp(icon, UI_ICON_TARGET) == 0 ? SHAPE_TARGET
+         : strcmp(icon, UI_ICON_TREND) == 0 ? SHAPE_TREND : -1;
+}
+
+void ui_btn_icon(lv_obj_t *b, const char *icon)
+{
+    // The Menu's tiles (0.16.2, Ryan 9 Nov: "remove the labels on the menu,
+    // show some icons for each button"): the icon centred along the top, the
+    // label along the bottom, so every tile reads the same way.
+    int sh = shape_of(icon);
+    lv_obj_t *i;
+    if (sh >= 0) {
+        i = plain(b);
+        lv_obj_set_size(i, 16, 16);
+        lv_obj_set_user_data(i, (void *)(intptr_t)sh);
+        lv_obj_set_style_text_color(i, lv_obj_get_style_text_color(lv_obj_get_child(b, 0), 0), 0);
+        lv_obj_add_event_cb(i, shape_draw, LV_EVENT_DRAW_MAIN, NULL);
+    } else {
+        i = lv_label_create(b);
+        lv_obj_set_style_text_font(i, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(i, lv_obj_get_style_text_color(lv_obj_get_child(b, 0), 0), 0);
+        lv_label_set_text(i, icon);
+    }
+    lv_obj_add_flag(b, BTN_ICON);
+    lv_obj_align(i, LV_ALIGN_TOP_MID, 0, 5);
+    btn_layout(b);
+}
 
 static void comm_draw(lv_event_t *e)
 {
@@ -628,16 +687,18 @@ static void comm_draw(lv_event_t *e)
     lv_draw_rect_dsc_init(&r);
     lv_draw_triangle_dsc_t t;
     lv_draw_triangle_dsc_init(&t);
-    // In: an arrow down on the left. Out: an arrow up on the right.
+    // In: an arrow down on the left. Out: an arrow up on the right. Each
+    // 8 x 11 px from 0.16.26 (Ryan 13 Nov: "make the transmittion and
+    // receiving icon a bit smaller"; 10 x 16 before), centred on the header.
     r.bg_color = t.color = comm_on[0] ? lv_color_white() : COMM_IDLE;
-    lv_area_t s = { x + 8, y + 12, x + 10, y + 20 };
+    lv_area_t s = { x + 9, y + 15, x + 11, y + 20 };
     lv_draw_rect(layer, &r, &s);
-    t.p[0].x = x + 4;  t.p[0].y = y + 20; t.p[1].x = x + 14; t.p[1].y = y + 20; t.p[2].x = x + 9;  t.p[2].y = y + 27;
+    t.p[0].x = x + 6;  t.p[0].y = y + 20; t.p[1].x = x + 14; t.p[1].y = y + 20; t.p[2].x = x + 10; t.p[2].y = y + 25;
     lv_draw_triangle(layer, &t);
     r.bg_color = t.color = comm_on[1] ? lv_color_white() : COMM_IDLE;
-    lv_area_t u = { x + 20, y + 20, x + 22, y + 28 };
+    lv_area_t u = { x + 18, y + 20, x + 20, y + 25 };
     lv_draw_rect(layer, &r, &u);
-    t.p[0].x = x + 16; t.p[0].y = y + 20; t.p[1].x = x + 26; t.p[1].y = y + 20; t.p[2].x = x + 21; t.p[2].y = y + 13;
+    t.p[0].x = x + 15; t.p[0].y = y + 20; t.p[1].x = x + 23; t.p[1].y = y + 20; t.p[2].x = x + 19; t.p[2].y = y + 15;
     lv_draw_triangle(layer, &t);
 }
 
@@ -752,6 +813,7 @@ static void build_frame(void)
     // Drawn icons with no font glyph: the valve symbol and the target.
     strip_shape = plain(strip);
     lv_obj_set_size(strip_shape, 16, 16);
+    lv_obj_set_style_text_color(strip_shape, UI_MUTED, 0);
     lv_obj_add_event_cb(strip_shape, shape_draw, LV_EVENT_DRAW_MAIN, NULL);
     lv_obj_add_flag(strip_shape, LV_OBJ_FLAG_HIDDEN);
     // Centred on the text's middle, not on the strip (Ryan, 22 Oct: they sat high).
@@ -872,8 +934,7 @@ static void strip_draw(ui_strip_kind_t kind, const char *icon, const char *text,
         else
             icon = UI_ICON_VALVE;
     }
-    int sh = !icon ? -1 : strcmp(icon, UI_ICON_VALVE) == 0 ? SHAPE_VALVE
-           : strcmp(icon, UI_ICON_TARGET) == 0 ? SHAPE_TARGET : -1;
+    int sh = shape_of(icon);
     const char *glyph = icon && sh < 0 ? icon : LV_SYMBOL_WARNING;
     lv_color_t ic = dim ? dis_tx : kind == UI_STRIP_FAULT ? UI_FAULT
                   : kind >= UI_STRIP_WARN ? lv_color_white() : UI_MUTED;
@@ -882,6 +943,8 @@ static void strip_draw(ui_strip_kind_t kind, const char *icon, const char *text,
     if (sh >= 0 && (sh != (int)shape || !lv_color_eq(ic, shape_col))) {
         shape = (shape_t)sh;
         shape_col = ic;
+        lv_obj_set_user_data(strip_shape, (void *)(intptr_t)sh);
+        lv_obj_set_style_text_color(strip_shape, ic, 0);
         lv_obj_invalidate(strip_shape);
     }
     ui_set_text(strip_icon, glyph);
@@ -1037,7 +1100,7 @@ static void frame_refresh(void)
     static int32_t fit_right;
     static const char *fit_mode;
     static char fit_title[40];
-    // Home's title: "<cryostat> pressure controller" (Settings > Cryostat name).
+    // Home's title: "<cryostat> pressure controller" (System > Cryostat name).
     static char home_title[CFG_NAME_LEN + 24], fit_name[CFG_NAME_LEN + 1] = "\x01";
     bool renamed = strcmp(cfg_name(), fit_name) != 0;
     if (renamed) {
@@ -1154,10 +1217,33 @@ static void comm_tick(void)
         lv_obj_invalidate(comm_obj);
 }
 
+// A new fault, warning, limit question or mode redraws the strip (and asks
+// the question) at the next 100 ms tick, not the 0.5 s refresh (0.16.4,
+// Ryan PR #43: the warning "should update as quickly as the limit hitting
+// it", as the Valve tile's yellow edge does).
+static void valve_watch(void)
+{
+    static int nf = -1, mode = -1;
+    static bool lim;
+    static char w[80];
+    int32_t q;
+    bool l = valve_question(&q);
+    const char *v = valve_warning();
+    int f = valve_fault_count(), m = (int)valve_mode();
+    if (f != nf || m != mode || l != lim || strncmp(v ? v : "", w, sizeof w - 1)) {
+        nf = f;
+        mode = m;
+        lim = l;
+        lv_snprintf(w, sizeof w, "%s", v ? v : "");
+        frame_due = true;
+    }
+}
+
 static void fast_timer(lv_timer_t *t)
 {
     (void)t;
     comm_tick();
+    valve_watch();
     // STOP for any finger: a tap on STOP that LVGL does not follow (another
     // contact on the glass) stops the valve as the button does.
     // Shutting down, the STOP on the black screen; off, none.
@@ -1244,13 +1330,14 @@ void ui_home(void)
     frame_refresh();
 }
 
-// Settings > Motor override, a framework screen since 0.11.32.
+// Motor settings > Override > Motor override (Valve position until 0.16.16), a framework screen since 0.11.32.
 void ui_service(void)
 {
     ui_open(&ui_scr_motor);
 }
 
 bool ui_showing(const ui_screen_t *s) { return cur == s; }
+const char *ui_screen_title(void) { return cur->title; }
 
 /* --------------------------------------------------------------------------
  * Overlays: keypad and confirm, over 0,40 480x232 (STOP stays on top)
@@ -1766,6 +1853,11 @@ static void shut_ask(void)
     frame_refresh();
 }
 
+void ui_shutdown_ask(void)
+{
+    shut_ask();
+}
+
 // Text page over the screen (Help). Header Back closes it, or a tap on the
 // greyed strip (0.15.16). No dragging (a
 // drag redraws the card every frame and crowded Back): small Up and Down
@@ -1923,7 +2015,10 @@ static void question_check(void)
 #define SPL_BAR_X 130
 #define SPL_BAR_W 220
 #define OFF_TAP_MS 600
-#define OFF_GREY   lv_color_hex(0x4A5664)
+// Brighter from 0.16.0 (Ryan 6 Nov: "make the turned off screen brighter";
+// were 0x4A5664 and 0x6B7787, hard to see): still on black, still grey.
+#define OFF_GREY   lv_color_hex(0xA9B4C0)
+#define OFF_TEXT   lv_color_hex(0xD3D9E0)
 
 static lv_obj_t *splash_scr;
 
@@ -2002,7 +2097,7 @@ static void off_draw(lv_obj_t *s)
     lv_obj_set_style_bg_color(s, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(s, LV_OPA_COVER, 0);
     power_icon(s, 240, 112, 64, OFF_GREY);
-    ui_label(s, 0, 176, 480, &ui_font_16, lv_color_hex(0x6B7787), LV_TEXT_ALIGN_CENTER, "Double tap to turn on");
+    ui_label(s, 0, 176, 480, &ui_font_16, OFF_TEXT, LV_TEXT_ALIGN_CENTER, "Double tap to turn on");
 }
 
 void ui_splash(void)

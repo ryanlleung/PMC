@@ -60,7 +60,7 @@ static bool request_move(int32_t target)
 #define SW_MAX 32
 static int sw_n, sw_from[SW_MAX], sw_to[SW_MAX];
 static float sw_pv[SW_MAX];
-static long sw_jump[SW_MAX], sw_kick[SW_MAX], sw_int[SW_MAX];
+static long sw_jump[SW_MAX], sw_kick[SW_MAX], sw_int[SW_MAX], sw_kpe[SW_MAX];
 
 static void ctrl_tick(void)
 {
@@ -77,7 +77,17 @@ static void ctrl_tick(void)
         sw_pv[sw_n] = in.pv;
         sw_kick[sw_n] = lroundf(dkp * e);
         const ctrl_pid_t g = ctrl_set_gains(&K, C.set);
-        sw_int[sw_n] = lroundf(g.ti > 0 ? g.kp / 100.0f * (float)K.pos_max / (60.0f * g.ti) * e : 0);   // this step's integral
+        // This step's integral, and the new KP x the change in the error
+        // since the last step, less KP x any setpoint change (P on the
+        // pressure only, 0.16.15).
+        const float kpn = g.kp / 100.0f * (float)K.pos_max;
+        // The integral is skipped while the valve still travels to the last
+        // command (travel anti-windup), so either is right.
+        const float lo = K.outmin / 100.0f * (float)K.pos_max;
+        const float kick = (float)before.pos_cmd + kpn * (e - (float)K.kdir * before.e_last - (float)K.kdir * (C.sp - before.sp_used));
+        const float want = kick + (g.ti > 0 ? kpn / (60.0f * g.ti) * e : 0);
+        sw_int[sw_n] = lroundf((want < lo ? lo : want > (float)K.pos_max ? (float)K.pos_max : want) - (float)before.pos_cmd);
+        sw_kpe[sw_n] = lroundf((kick < lo ? lo : kick > (float)K.pos_max ? (float)K.pos_max : kick) - (float)before.pos_cmd);
         sw_jump[sw_n++] = (long)(C.pos_cmd - before.pos_cmd);
     }
     if (r == CTRL_RUN) {
@@ -95,14 +105,14 @@ static void ctrl_tick(void)
     }
 }
 
-typedef struct { double t_band, over, under, end, step; bool in_band; } met_t;
+typedef struct { double t_band, over, under, end, step, tail; bool in_band; } met_t;
 
 // Runs s seconds; the simulator's met(): first time in band, then the
 // largest excursions either side after it.
 static met_t run(double s, float sp)
 {
-    met_t m = { -1, -1e9, 1e9, 0, -1e9, false };
-    long n = lround(s / MODEL_DT);
+    met_t m = { -1, -1e9, 1e9, 0, -1e9, 0, false };
+    long n = lround(s / MODEL_DT), nt = 0;
     for (long i = 0; i < n; i++) {
         if (model_tick())
             ctrl_tick();
@@ -114,11 +124,13 @@ static met_t run(double s, float sp)
                 if (e < m.under) m.under = e;
                 if (M.t - m.t_band <= 200 && e > m.step) m.step = e;   // overshoot of the step itself
             }
+            if ((double)(n - i) * MODEL_DT <= 60) { m.tail += M.pv; nt++; }   // the last 60 s
             if (verbose)
                 printf("%8.1f pv %8.3f sp %5.1f pos %6ld mode %d fault %d\n", M.t, M.pv, sp, (long)M.pos, mode, fault);
         }
     }
     m.end = M.pv;
+    m.tail = nt ? m.tail / nt : M.pv;
     return m;
 }
 
@@ -137,7 +149,10 @@ static void fresh(void)
 {
     model_init();
     ctrl_init(&C);
-    if (!smooth) C.pv_tau = C.rev_pct = 0;
+    if (!smooth) {
+        C.pv_tau = C.rev_pct = 0;
+        C.sp_kick = true;   // the reference's PI kicks on a setpoint step (P on setpoint and pressure)
+    }
     mode = MANUAL;
     fault = CTRL_RUN;
     w02 = false;
@@ -228,7 +243,9 @@ int main(int argc, char **argv)
     CHECK(fault == CTRL_F06 && mode == MANUAL && !M.moving, "helium off: F-6 after %.0f s, MANUAL, valve idle", fault_t - t0);
 
     // The same targets as the firmware runs, with the reversal hold (and the
-    // pressure filter if on, 0.12.12): in band no later than 60 s after the reference.
+    // pressure filter if on, 0.12.12) and P on the pressure only (0.16.15): in
+    // band no later than 60 s after the reference, and the last 60 s within
+    // the band on average (one sample wanders 0.1 mB with the hold).
     {
         fresh();
         set_sp(5);
@@ -240,12 +257,12 @@ int main(int argc, char **argv)
         for (int i = 0; i < 7; i++) {
             set_sp(sp[i]);
             met_t m = run(len[i], sp[i]);
-            printf("     with the hold, target %.1f: in band at %.0f s (reference %.0f), then %+.3f / %+.3f mB (reference %+.3f / %+.3f), end %.3f\n",
-                   sp[i], m.t_band, ref[i]->t_band, m.over, m.under, ref[i]->over, ref[i]->under, m.end);
-            ok &= m.t_band > 0 && m.t_band <= ref[i]->t_band + 60 && fabs(m.end - sp[i]) <= K.band &&
+            printf("     with the hold, target %.1f: in band at %.0f s (reference %.0f), then %+.3f / %+.3f mB (reference %+.3f / %+.3f), end %.3f, last 60 s %.3f\n",
+                   sp[i], m.t_band, ref[i]->t_band, m.over, m.under, ref[i]->over, ref[i]->under, m.end, m.tail);
+            ok &= m.t_band > 0 && m.t_band <= ref[i]->t_band + 60 && fabs(m.tail - sp[i]) <= K.band &&
                   fault == CTRL_RUN && mode == AUTO && (i || m.step <= 0.1);
         }
-        CHECK(ok, "with the hold: targets 5, 4.5, 10, 5, 7, 3, 5 settle within 60 s of the reference, no trip");
+        CHECK(ok, "with the hold, no kick: targets 5, 4.5, 10, 5, 7, 3, 5 settle within 60 s of the reference, no trip");
     }
     // Settled at 5 mbar, 10 minutes: how often the motor turns round.
     {
@@ -281,6 +298,22 @@ int main(int argc, char **argv)
     t0 = M.t;
     run(2000, 5);
     CHECK(fault == CTRL_RUN && w02 && mode == MANUAL, "pump off: no fault, W-2 to MANUAL (t %.0f s)", M.t - t0);
+
+    // A setpoint band of 0 (0.16.16, Ryan 12 Nov): In band and Stable never
+    // show, but a steady hold is not ended by W-2, which still judges
+    // against CTRL_TCONV_BAND.
+    {
+        const ctrl_tune_t kk = K;
+        K.band = 0;
+        fresh();
+        set_sp(5);
+        to_auto();
+        run(CTRL_TCONV_S + 1200, 5);
+        const ctrl_reg_t reg = ctrl_regulation(&C, &K, ms(), true, 5.04f);
+        CHECK(fault == CTRL_RUN && !w02 && mode == AUTO && reg == CTRL_REG_REGULATING,
+              "band 0: %.0f min in AUTO at 5 mB, no W-2, reads Regulating (%d)", (CTRL_TCONV_S + 1200) / 60.0, (int)reg);
+        K = kk;
+    }
 
     // Slipping drive at 5 mB, then a step in target.
     fresh();
@@ -406,10 +439,34 @@ int main(int argc, char **argv)
                   ctrl_pick_set(&k, 1, 50) == 3 && ctrl_pick_set(&k, 3, 2) == 1;
         CHECK(off && sp && pv, "schedule: Off (and 1, the old SP) set 1; PV 1>2 past 9.2, 2>3 past 34.5, 3>2 under 25.5, "
               "2>1 under 6.8 mB, both at once on a large move");
-        k.set23[1].kp = 0;
+        k.sets[1].kp = 0;
         CHECK(!strcmp(ctrl_check(&C, &k, true, false, true, 5, FS), "Tuning not set"), "schedule on: a set with KP 0 refused");
         k.sched = CTRL_SCHED_OFF;
         CHECK(ctrl_check(&C, &k, true, false, true, 5, FS) == NULL, "schedule Off: sets 2 and 3 not checked");
+    }
+    // Four sets (0.16.14): boundary 3 above boundary 2 adds set 4; not above
+    // it (0, initialisers without it), three sets as before.
+    {
+        ctrl_tune_t k = K;
+        k.sched = CTRL_SCHED_PV;
+        k.b1 = 6; k.b2 = 10; k.b3 = 14; k.hyst = 0.1f;
+        for (int s = 0; s < 3; s++)
+            k.sets[s] = (ctrl_pid_t){ 0.5f, 1.0f, 0 };
+        // Up: 1>2 past 6.6, 2>3 past 11, 3>4 past 15.4. Down: 4>3 under 12.6, 3>2 under 9, 2>1 under 5.4.
+        const bool four = ctrl_sets(&k) == 4 &&
+            ctrl_pick_set(&k, 0, 5) == 1 && ctrl_pick_set(&k, 0, 8) == 2 && ctrl_pick_set(&k, 0, 12) == 3 &&
+            ctrl_pick_set(&k, 0, 20) == 4 &&
+            ctrl_pick_set(&k, 3, 15.3f) == 3 && ctrl_pick_set(&k, 3, 15.5f) == 4 &&
+            ctrl_pick_set(&k, 4, 12.7f) == 4 && ctrl_pick_set(&k, 4, 12.5f) == 3 &&
+            ctrl_pick_set(&k, 3, 9.1f) == 3 && ctrl_pick_set(&k, 3, 8.9f) == 2 &&
+            ctrl_pick_set(&k, 1, 50) == 4 && ctrl_pick_set(&k, 4, 2) == 1;
+        k.sets[2].kp = 0;
+        const bool check4 = ctrl_check(&C, &k, true, false, true, 5, FS) != NULL;
+        k.b3 = 0;
+        const bool three = ctrl_sets(&k) == 3 && ctrl_pick_set(&k, 0, 20) == 3 && ctrl_pick_set(&k, 3, 500) == 3 &&
+                           ctrl_check(&C, &k, true, false, true, 5, FS) == NULL;
+        CHECK(four && check4 && three, "four sets: 6, 10 and 14 mB with 10 %%: 1>2>3>4 past 6.6, 11 and 15.4, back under "
+              "12.6, 9 and 5.4, all at once on a large move; set 4 with KP 0 refused; boundary 3 0 keeps three sets");
     }
     // Schedule Off runs exactly as before, whatever sets 2 and 3 hold.
     {
@@ -419,8 +476,8 @@ int main(int argc, char **argv)
         for (int f = 0; f < 2; f++) {
             K = kk;
             if (f) {
-                K.set23[0] = (ctrl_pid_t){ 1.0f, 0.5f, 0 };
-                K.set23[1] = (ctrl_pid_t){ 9.0f, 0.1f, 0.5f };
+                K.sets[0] = (ctrl_pid_t){ 1.0f, 0.5f, 0 };
+                K.sets[1] = (ctrl_pid_t){ 9.0f, 0.1f, 0.5f };
                 K.b1 = 6; K.b2 = 8; K.hyst = 0.1f;
             }
             fresh();
@@ -436,14 +493,16 @@ int main(int argc, char **argv)
         CHECK(pv[0] == pv[1] && cmd[0] == cmd[1], "schedule Off: the same run with other sets 2 and 3 (%.4f mB, %ld steps)",
               pv[1], (long)cmd[1]);
     }
-    // Schedule on the pressure, 5 to 10 to 5 mB on the model: each set
-    // change past its boundary by the hysteresis, bumpless.
+    // Schedule on the pressure, 5 to 10 to 5 mB on the model: going up each
+    // set change past its boundary by the hysteresis; going down (0.16.9:
+    // the lower of pressure and setpoint) straight to the setpoint's set as
+    // the setpoint changes. Every change bumpless.
     {
         const ctrl_tune_t kk = K;
         K.sched = CTRL_SCHED_PV;
         K.b1 = 6; K.b2 = 8.5f; K.hyst = 0.1f;   // up past 6.6 and 9.35, down under 7.65 and 5.4
-        K.set23[0] = (ctrl_pid_t){ 3.0f, 0.25f, 0 };
-        K.set23[1] = (ctrl_pid_t){ 2.0f, 0.30f, 0 };
+        K.sets[0] = (ctrl_pid_t){ 3.0f, 0.25f, 0 };
+        K.sets[1] = (ctrl_pid_t){ 2.0f, 0.30f, 0 };
         fresh();
         set_sp(5);
         to_auto();
@@ -459,24 +518,126 @@ int main(int argc, char **argv)
         long worst = 0;
         for (int i = 0; i < sw_n; i++) {
             const float b = sw_from[i] + sw_to[i] == 3 ? K.b1 : K.b2;
-            where &= sw_to[i] > sw_from[i] ? sw_pv[i] > b * 1.1f : sw_pv[i] < b * 0.9f;
-            const long extra = labs(sw_jump[i]) - labs(sw_int[i]);   // past this step's integral
+            if (i < n_up)
+                where &= sw_to[i] > sw_from[i] && sw_pv[i] > b * 1.1f;
+            const long e1 = labs(sw_jump[i] - sw_int[i]), e2 = labs(sw_jump[i] - sw_kpe[i]);
+            const long extra = e1 < e2 ? e1 : e2;   // off the kick, with or without this step's integral
             worst = extra > worst ? extra : worst;
-            printf("     set %d to %d at %.3f mB: command %+ld steps, this step's integral %+ld (%+ld more without the re-base)\n",
-                   sw_from[i], sw_to[i], sw_pv[i], sw_jump[i], sw_int[i], sw_kick[i]);
+            printf("     set %d to %d at %.3f mB: command %+ld steps, the kick %+ld, with this step's integral %+ld (%+ld more without "
+                   "the re-base)\n", sw_from[i], sw_to[i], sw_pv[i], sw_jump[i], sw_kpe[i], sw_int[i], sw_kick[i]);
         }
         smooth_ = worst <= 2;
         for (int i = 0; i + 1 < n_up; i++)
             order |= sw_from[i] == 1 && sw_to[i] == 2 && sw_from[i + 1] == 2 && sw_to[i + 1] == 3;
-        bool back = false;
-        for (int i = n_up; i + 1 < sw_n; i++)
-            back |= sw_from[i] == 3 && sw_to[i] == 2 && sw_from[i + 1] == 2 && sw_to[i + 1] == 1;
-        CHECK(set0 == 1 && order && back && where, "schedule PV: set 1 at 5 mB, 1>2>3 going to 10, 3>2>1 back to 5, each past "
-              "its boundary by the hysteresis (%d changes)", sw_n);
-        CHECK(smooth_, "schedule PV: each change bumpless, the command moves by the step's integral alone (%ld steps over)", worst);
+        // Down: one change, 3 to 1, on the first step after the setpoint
+        // went to 5, with the pressure still near 10.
+        const bool back = sw_n == n_up + 1 && sw_from[n_up] == 3 && sw_to[n_up] == 1 && sw_pv[n_up] > K.b2 * 1.1f;
+        CHECK(set0 == 1 && order && back && where, "schedule PV: set 1 at 5 mB, 1>2>3 going to 10 each past its boundary by "
+              "the hysteresis; back to 5, 3>1 at once at %.2f mB (the lower of pressure and setpoint) (%d changes)",
+              sw_n > n_up ? sw_pv[n_up] : 0.0f, sw_n);
+        CHECK(smooth_, "schedule PV: each change bumpless, the command moves by the step's integral and the new KP x the "
+              "error's change since the last step (%ld steps off)", worst);
         CHECK(fault == CTRL_RUN && mode == AUTO && up.t_band > 0 && down.t_band > 0 && fabs(down.end - 5) <= K.band,
               "schedule PV: settles at 10 and back at 5 mB, no trip (end %.3f)", down.end);
         K = kk;
+    }
+    // The set from the lower of pressure and setpoint (0.16.9): going up the
+    // pressure's set, as before; going down the setpoint's at once, from
+    // AUTO's start too.
+    {
+        ctrl_tune_t k = K;
+        k.sched = CTRL_SCHED_PV;
+        k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
+        k.sets[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
+        k.sets[1] = (ctrl_pid_t){ 0.20f, 0.25f, 0 };
+        ctrl_t c;
+        ctrl_init(&c);
+        ctrl_set_sp(&c, 4, FS, 0);
+        ctrl_start(&c, &k, 0, 20, 30000);
+        const int start_down = c.set;                       // PV 20, SP 4: set 1
+        ctrl_set_sp(&c, 20, FS, 0);
+        ctrl_start(&c, &k, 0, 20, 30000);
+        const int start_at = c.set;                         // PV 20, SP 20: set 3
+        ctrl_set_sp(&c, 8, FS, 1000);
+        ctrl_in_t in = { .t_ms = 1000, .pv = 20, .pos = 30000, .fs = FS };
+        ctrl_step(&c, &k, &in);
+        const int step_down = c.set;                        // SP 8 under PV 20: set 2 at once
+        ctrl_set_sp(&c, 4, FS, 2000);
+        ctrl_start(&c, &k, 2000, 4, 30000);
+        ctrl_set_sp(&c, 20, FS, 3000);
+        in.t_ms = 3000; in.pv = 4;
+        ctrl_step(&c, &k, &in);
+        const int step_up = c.set;                          // SP 20 over PV 4: still set 1
+        in.t_ms = 4000; in.pv = 7;
+        ctrl_step(&c, &k, &in);
+        const int up_7 = c.set;                             // PV 7 past 6.6: set 2
+        CHECK(start_down == 1 && start_at == 3 && step_down == 2 && step_up == 1 && up_7 == 2,
+              "set from the lower of pressure and setpoint: start PV 20 SP 4 set %d, PV 20 SP 20 set %d; SP 20 to 8 set %d at "
+              "once; SP 4 to 20 set %d until the pressure passes 6.6 (set %d at 7)", start_down, start_at, step_down, step_up, up_7);
+    }
+    // No kick on a setpoint step (0.16.15): P acts on the pressure only, so
+    // SP 16 to 12 with the pressure at 16 (set 3 to set 2) and SP 12 to 8
+    // within set 2 each move the command by one step's integral at set 2's
+    // gains, not by KP x 4 mB. (0.16.13 to 0.16.14 kicked by KP x the step,
+    // and the bounce as the kick was given back is what Ryan did not want.)
+    {
+        ctrl_tune_t k = K;
+        k.sched = CTRL_SCHED_PV;
+        k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
+        k.sets[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
+        k.sets[1] = (ctrl_pid_t){ 0.30f, 0.25f, 0 };
+        k.db = k.db_close = 1;
+        const float per = 0.14f / 100.0f * (float)k.pos_max;   // set 2's KP, steps per mB
+        long kick[2];
+        int sets[2][2];
+        const float sps[2][2] = { { 16, 12 }, { 12, 8 } };
+        for (int f = 0; f < 2; f++) {
+            ctrl_t c;
+            ctrl_init(&c);
+            c.pv_tau = 0;
+            ctrl_set_sp(&c, sps[f][0], FS, 0);
+            ctrl_start(&c, &k, 0, sps[f][0], 30000);
+            ctrl_in_t in = { .t_ms = 1000, .pv = sps[f][0], .pos = 30000, .fs = FS };
+            ctrl_step(&c, &k, &in);
+            sets[f][0] = c.set;
+            const int32_t before = c.pos_cmd;
+            ctrl_set_sp(&c, sps[f][1], FS, 2000);
+            in.t_ms = 2000;
+            ctrl_step(&c, &k, &in);
+            sets[f][1] = c.set;
+            kick[f] = (long)(c.pos_cmd - before);
+        }
+        const long want = lroundf(-4 * per / (60 * 1.5f));   // this step's integral alone
+        CHECK(sets[0][0] == 3 && sets[0][1] == 2 && sets[1][0] == 2 && sets[1][1] == 2 && labs(kick[0] - want) <= 1 &&
+              labs(kick[1] - want) <= 1,
+              "setpoint step, no kick (P on the pressure only): SP 16 to 12 (set %d to %d) %+ld steps, SP 12 to 8 (set %d to "
+              "%d) %+ld, one step's integral at set 2's gains %+ld (the kick was %+ld)", sets[0][0], sets[0][1], kick[0],
+              sets[1][0], sets[1][1], kick[1], want, lroundf(-4 * per));
+    }
+    // The reversal hold scales with KP (0.16.9): 0.2 mB of error at the set's
+    // KP, at most 0.10 % of travel. The same 59-step turn round is sent at
+    // KP 0.06 (hold 0.012 %, 12 steps) and held at KP 4 (0.10 %, 99 steps).
+    {
+        long sent[2];
+        const float kps[2] = { 0.06f, 4.0f };
+        for (int f = 0; f < 2; f++) {
+            ctrl_tune_t k = K;
+            k.kp = kps[f];
+            k.ti = 0;                                       // P alone: the command is KP x e from the start
+            k.db = k.db_close = 1;
+            ctrl_t c;
+            ctrl_init(&c);
+            c.pv_tau = 0;
+            ctrl_set_sp(&c, 5, FS, 0);
+            ctrl_start(&c, &k, 0, 5, 30000);
+            c.last_dir = 1;                                 // the last move sent was opening
+            const float mbar_per_step = 100.0f / (k.kp * (float)k.pos_max);
+            ctrl_in_t in = { .t_ms = 1000, .pv = 5 + 59.0f * mbar_per_step, .pos = 30000, .fs = FS };
+            ctrl_step(&c, &k, &in);
+            sent[f] = c.move ? (long)(c.move_to - 30000) : 0;
+        }
+        CHECK(sent[0] == -59 && sent[1] == 0, "reversal hold with KP: a 59-step closing turn round sent at KP 0.06 (%ld), "
+              "held at KP 4 (%ld)", sent[0], sent[1]);
     }
     // Deadbands (0.15.15): opening moves wait for DB open, closing ones for DB close.
     {

@@ -82,7 +82,7 @@ typedef struct {
 static event_t events[EVT_N];
 static uint32_t evt_count;     // total logged since boot
 
-#define EVT_LINE 128   // link room wanted before an EVNT? line goes out (and its size)
+#define EVT_LINE 128   // link room wanted before an EVENT? line goes out (and its size)
 static struct {
     bool active;
     uint32_t next, end, since;
@@ -184,8 +184,18 @@ static bool is_auto(void) { return mode == VALVE_AUTO; }
 // The warning that ended AUTO or needs a look (W-2, W-4, W-5; W-6 removed in 0.15.11), shown on
 // the status strip until OK, the next Start AUTO or homing.
 static char warn[72];
-static int sw_far_n;      // W-4: consecutive 1 s reads with the switch pressed away from the seat
+static uint32_t sw_far_ms; // W-4: when the switch was first read pressed away from the seat, 0 = not
 static bool sw_far_said;  // W-4 raised for this occurrence
+// W-4 once the switch has read pressed away from the seat this long (0.16.4,
+// Ryan PR #43: the warning "should update as quickly as the limit hitting
+// it"; to 0.16.3 two 1 s reads, so up to 2 s after Home's limit edge).
+// Long enough that one glitch on the wire does not end AUTO.
+#define SW_FAR_MS 200
+// Pass band (0.16.5, Ryan 9 Nov): asked for on Motor settings > Override
+// > Disable switch (Ignore switch in 0.16.21; Motor override > Switch to 0.16.18); in force
+// (stepper3_limit_band) only while homed. RAM only, off at power-up. Its
+// edges are saved settings from 0.16.21 (valve_pass_lo, valve_pass_hi).
+static bool band_req;
 static int over_n;        // W-5: consecutive reads above the sensor range in AUTO
 
 // Shut down (valve.h): the move to 0 % running, and where it started.
@@ -448,6 +458,7 @@ static void limit_hit(void)
  * rules; valvepos.c keeps the count while OFF.
  * ------------------------------------------------------------------------ */
 static void seq_check(void);
+static void far_check(void);
 
 static void go_off(void)
 {
@@ -619,6 +630,12 @@ void valve_task(void)
     running = true;
     evt_dump_task();
     seq_check();
+    // The pass band in counts from 0 %, again each pass (Motor settings can
+    // change the travel); not while not homed or homing: the count is not
+    // the valve's then.
+    stepper3_limit_band(band_req && calibrated && mode != VALVE_CALIBRATING && mode != VALVE_OFF,
+                        pm() * valve_pass_lo() / 100, pm() * valve_pass_hi() / 100);
+    far_check();
     if (hold_on && !stepper3_busy())
         hold_on = false;   // the held move has ended (released, the switch, its end)
     if (mode == VALVE_CALIBRATING && cal_settling && lv_tick_elaps(cal_settle_from) >= SETTLE_MS)
@@ -642,40 +659,38 @@ static ctrl_tune_t tune_now(void)
     k.kd = (float)cfg_tune(CFG_KD) / 100.0f;
     k.pos_max = pm();
     k.steps = stepper3_scale();
-    // Sets 2 and 3, the schedule (0.1 mbar boundaries, % hysteresis) and
+    // Sets 2 to 4, the schedule (0.1 mbar boundaries, % hysteresis) and
     // the closing deadband (0 = none: one step).
-    for (int s = 2; s <= 3; s++) {
-        k.set23[s - 2].kp = (float)cfg_tune(cfg_pid_key(s, 0)) / 100.0f;
-        k.set23[s - 2].ti = (float)cfg_tune(cfg_pid_key(s, 1)) / 100.0f;
-        k.set23[s - 2].kd = (float)cfg_tune(cfg_pid_key(s, 2)) / 100.0f;
+    for (int s = 2; s <= 4; s++) {
+        k.sets[s - 2].kp = (float)cfg_tune(cfg_pid_key(s, 0)) / 100.0f;
+        k.sets[s - 2].ti = (float)cfg_tune(cfg_pid_key(s, 1)) / 100.0f;
+        k.sets[s - 2].kd = (float)cfg_tune(cfg_pid_key(s, 2)) / 100.0f;
     }
     k.sched = (int)cfg_tune(CFG_SCHED);
     k.b1 = (float)cfg_tune(CFG_B1) / 10.0f;
     k.b2 = (float)cfg_tune(CFG_B2) / 10.0f;
+    k.b3 = (float)cfg_tune(CFG_B3) / 10.0f;
     k.hyst = (float)cfg_tune(CFG_HYST) / 100.0f;
     k.db_close = cfg_tune(CFG_DBC) > 0 ? sc(cfg_tune(CFG_DBC)) : 1;
     return k;
 }
 
 // The PID set in use: in AUTO the one the schedule has switched to; else
-// the one AUTO would start with now (the pressure for PV, the setpoint for
-// SP; 1 with the schedule Off).
+// the one AUTO would start with now (the lower of the pressure and the
+// setpoint, as ctrl_start; the schedule is always on from 0.16.20).
 int valve_pid_set(void)
 {
     ctrl_tune_t k = tune_now();
     if (k.sched == CTRL_SCHED_OFF)
         return 1;
-    if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 3)
+    if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 4)
         return ctl.set;
-    return pv_ok ? ctrl_pick_set(&k, 0, pv_mbar) : 1;
+    return pv_ok ? ctrl_pick_set(&k, 0, ctl.sp_set ? fminf(pv_mbar, ctl.sp) : pv_mbar) : 1;
 }
 
 int32_t valve_range_mmbar(void)
 {
-    cfg_sensor_t sn;
-    if (cfg_sensor(cfg_sensor_active(), &sn) && sn.fs_mmbar > 0)
-        return sn.fs_mmbar;
-    return cfg_psi10_mmbar(150);
+    return cfg_sensor_range_mmbar();   // the 15 psia Druck's (one sensor per board, 0.16.2)
 }
 
 static float range_mbar(void) { return (float)valve_range_mmbar() / 1000.0f; }
@@ -699,19 +714,21 @@ static void auto_end(const char *strip)
 // clearing move and the back-off of homing, where it has always released.
 static bool switch_far(void)
 {
-    return calibrated && mode != VALVE_CALIBRATING && limit_open_now() &&
+    return calibrated && mode != VALVE_CALIBRATING && limit_open_now() && !stepper3_limit_ignored() &&
            stepper3_position() > sc(n_clear + (n_backoff > n_return ? n_backoff : n_return));
 }
 
-// W-4 and W-5, once a second; two reads in a row, so one glitch does not
-// end AUTO.
-static void warn_checks(void)
+// W-4, every pass of the main loop: the switch pressed away from the seat
+// for SW_FAR_MS.
+static void far_check(void)
 {
     char pc[16], v[16];
     if (!switch_far()) {
-        sw_far_n = 0;
+        sw_far_ms = 0;
         sw_far_said = false;
-    } else if (++sw_far_n >= 2 && !sw_far_said) {
+    } else if (!sw_far_ms) {
+        sw_far_ms = lv_tick_get() | 1;   // 0 means not pressed
+    } else if (lv_tick_elaps(sw_far_ms) >= SW_FAR_MS && !sw_far_said) {
         sw_far_said = true;
         int32_t pos = stepper3_position();
         bool was_auto = is_auto();
@@ -727,6 +744,12 @@ static void warn_checks(void)
         if (was_auto)
             ev("MODE", "Manual after W-4, valve idle at %s %%", pct_text(pc, sizeof pc, pos));
     }
+}
+
+// W-5, once a second; two reads in a row, so one glitch does not end AUTO.
+static void warn_checks(void)
+{
+    char pc[16], v[16];
     if (!is_auto() || !pv_ok || pv_mbar <= range_mbar()) {
         over_n = 0;
     } else if (++over_n >= 2) {
@@ -747,7 +770,8 @@ static void auto_step(void)
         return;
     }
     ctrl_tune_t k = tune_now();
-    ctrl_in_t in = { lv_tick_get(), pv_mbar, stepper3_position(), stepper3_busy(), limit_open_now(), range_mbar() };
+    ctrl_in_t in = { lv_tick_get(), pv_mbar, stepper3_position(), stepper3_busy(),
+                     limit_open_now() && !stepper3_limit_ignored(), range_mbar() };
     const int set0 = ctl.set;
     const ctrl_result_t res = ctrl_step(&ctl, &k, &in);
     if (ctl.set != set0 && set0 >= 1) {
@@ -879,7 +903,7 @@ bool valve_set_target(int32_t mmbar, const char **why)
         return false;
     }
     int32_t v = (int32_t)fixed_round(mmbar, 2);   // 0.1 mbar
-    // The same target again (a master writing it every scan, PRES SP
+    // The same target again (a master writing it every scan, SETPOINT
     // repeated) changes nothing: no event, and the W-2 and Stable timers
     // are not restarted.
     if (ctl.sp_set && lroundf(ctl.sp * 10.0f) == v)
@@ -1001,6 +1025,19 @@ valve_mode_t valve_mode(void)   { return mode; }
 bool valve_calibrated(void)     { return calibrated; }
 valve_ref_t valve_reference(void) { return calibrated ? ref_how : VALVE_REF_NONE; }
 int32_t valve_pos_max(void)     { return pm(); }   // in motor counts
+
+bool valve_limit_band(void) { return band_req; }
+int valve_pass_lo(void)      { return (int)cfg_tune(CFG_PASS_LO); }
+int valve_pass_hi(void)      { return (int)cfg_tune(CFG_PASS_HI); }
+
+void valve_limit_band_set(bool on)
+{
+    if (on == band_req)
+        return;
+    band_req = on;
+    valve_event("LIM", on ? "Limit switch disabled from %d to %d %% open: on (screen)"
+                          : "Limit switch disabled from %d to %d %% open: off (screen)", valve_pass_lo(), valve_pass_hi());
+}
 int32_t valve_pct10(void)       { return pct10_of(stepper3_position()); }
 bool valve_fault_latched(void)  { return any_latched(); }
 bool valve_motion_blocked(void) { return any_latched(); }
@@ -1121,7 +1158,7 @@ int valve_reset(char *left, size_t n)
 }
 
 
-// EVNT? <n> (remote.c): "EVNT <count>" now, then the newest count events,
+// EVENT? <n> (remote.c): "EVENT <count>" now, then the newest count events,
 // newest first, as "<age s>,<tag>,<text>", a line at a time from
 // valve_task() as the link has room, so a slow reader does not hold up the
 // main loop (as TREND DUMP).
@@ -1134,7 +1171,7 @@ void valve_events_send(int n)
     if ((uint32_t)n > have)
         n = (int)have;
     char c[24];
-    lv_snprintf(c, sizeof c, "EVNT %d\r\n", n);
+    lv_snprintf(c, sizeof c, "EVENT %d\r\n", n);
     link_write(c);
     edump.next = evt_count;
     edump.end = evt_count - (uint32_t)n;

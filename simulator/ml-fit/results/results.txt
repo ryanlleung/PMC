@@ -1,0 +1,33 @@
+16 files, 171664 samples, 92303 after removing the ones several saves share; 11 runs in 9 groups
+Valve offset of each run (fitted with the physics model):
+  5 Nov 13:42  -0.60 %  (from its first 10 min alone: -0.55 %)
+  6 Nov 15:06  -0.20 %  (from its first 10 min alone: +0.80 %)
+  6 Nov 15:47  -0.80 %  (from its first 10 min alone: +0.80 %)
+  6 Nov 16:52  +0.40 %  (from its first 10 min alone: +0.80 %)
+  9 Nov 06:16  +0.05 %  (from its first 10 min alone: +0.00 %)
+  9 Nov 10:24  +0.00 %  (from its first 10 min alone: -0.25 %)
+  9 Nov 11:45  +0.05 %  (from its first 10 min alone: +0.10 %)
+  9 Nov 15:19  +0.00 %  (from its first 10 min alone: +0.10 %)
+  10 Nov 07:28 +0.45 %  (from its first 10 min alone: +0.50 %)
+  10 Nov 12:21 +0.55 %  (from its first 10 min alone: +0.15 %)
+  10 Nov 16:42 +0.80 %  (from its first 10 min alone: +0.55 %)
+
+Held-out runs, pressure error (rms mbar / median %), heat exchanger under 20 K, after the first 10 min
+run                s | no offset     | physics       learned       | physics       learned       | physics       learned      
+                     | physics       | valve                       | valve + cold head           | valve + both (logged HX)   
+5 Nov 13:42     7477 |  3.77   10 %  |  3.13    6 %   3.16    9 %  |  3.13    6 %   3.20    9 %  |  2.69    6 %   3.12   11 %  
+6 Nov 16:52     2620 |  3.39    6 %  |  3.12    6 %   2.85   11 %  |  3.12    6 %   2.29    8 %  |  7.83   13 %   4.84    7 %  
+9 Nov 06:16    13828 |  0.83    2 %  |  0.78    7 %   1.15   11 %  |  0.78    7 %   0.80    8 %  |  0.56    3 %   0.59    4 %  
+9 Nov 10:24     2592 |  1.17   16 %  |  1.17   16 %   1.16   12 %  |  1.17   16 %   1.16   13 %  |  1.19   16 %   1.10   11 %  
+9 Nov 11:45    10679 |  1.10    9 %  |  1.06    7 %   0.89    5 %  |  1.06    7 %   0.71    5 %  |  0.95    6 %   0.69    3 %  
+9 Nov 15:19     3278 |  0.43    2 %  |  0.43    2 %   0.57    2 %  |  0.43    2 %   0.53    2 %  |  1.13    5 %   0.68    2 %  
+10 Nov 07:28   15466 |  7.36   78 %  |  0.85    8 %   1.14   10 %  |  0.85    8 %   1.05    8 %  |  0.60    5 %   0.42    2 %  
+10 Nov 12:21   14276 |  3.94   64 %  |  1.03   12 %   0.75   11 %  |  1.03   12 %   0.65   10 %  |  0.90   10 %   0.60    8 %  
+10 Nov 16:42    1983 |  1.74    7 %  |  0.95    3 %   0.55    1 %  |  0.95    3 %   0.81    2 %  |  1.34    5 %   0.61    2 %  
+By bench pressure, mbar:
+under 2         7473 |  0.90   34 %  |  0.78   17 %   0.75   18 %  |  0.78   17 %   0.72   19 %  |  0.66   17 %   0.59   16 %  
+2 to 4          4652 |  2.08   66 %  |  1.11   21 %   0.86    9 %  |  1.11   21 %   0.82   10 %  |  1.00   19 %   0.79   13 %  
+4 to 8          5993 |  3.46   49 %  |  1.41   22 %   1.14   13 %  |  1.41   22 %   1.04   13 %  |  1.36   13 %   1.05    6 %  
+8 to 24        46559 |  4.78   15 %  |  1.18    8 %   1.47    9 %  |  1.18    8 %   1.25    7 %  |  1.19    5 %   0.98    3 %  
+over 24         7522 |  3.00    4 %  |  2.91    2 %   2.32    1 %  |  2.91    2 %   2.50    1 %  |  4.78    4 %   3.64    2 %  
+all            72199 |  4.13   16 %  |  1.45    8 %   1.47    9 %  |  1.45    8 %   1.36    7 %  |  1.89    5 %   1.48    4 %  

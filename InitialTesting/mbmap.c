@@ -12,8 +12,9 @@
 #include "valve.h"
 
 /* --------------------------------------------------------------------------
- * Modbus register map, version 2 (0.15.15: the gain schedule, registers
- * 26 to 50, added after the version 1 map). docs/modbus-register-map.md is the
+ * Modbus register map, version 3 (0.15.15: the gain schedule, registers
+ * 26 to 50, added after the version 1 map; 0.16.14: PID set 4 and
+ * boundary 3, registers 51 to 58, added after them). docs/modbus-register-map.md is the
  * reference; keep the two in step. Floats are IEEE 754 single in two
  * registers, high word first (ABCD). NaN means no value (no reading, no
  * target set).
@@ -23,7 +24,7 @@
  * Each accepted write is logged as a NET event with the client's address.
  * ------------------------------------------------------------------------ */
 
-#define MAP_VERSION 2
+#define MAP_VERSION 3
 
 enum {
     HR_VERSION = 0, HR_HEARTBEAT, HR_MODE, HR_STATUS, HR_REGULATION,
@@ -34,8 +35,9 @@ enum {
     // settings, written as the PID tuning page's Save (tuning only, works
     // in AUTO, one settings save per write).
     HR_PID_SET = 26, HR_SCHED = 27, HR_B1 = 28, HR_B2 = 30, HR_HYST = 32,
-    HR_GAINS = 33,   // KP1, TI1, KD1, KP2, TI2, KD2, KP3, TI3, KD3: floats
-    HR_COUNT = HR_GAINS + 18
+    HR_GAINS = 33,   // KP1, TI1, KD1, KP2, TI2, KD2, KP3, TI3, KD3, then (version 3) KP4, TI4, KD4: floats
+    HR_B3 = HR_GAINS + 24,   // version 3
+    HR_COUNT = HR_B3 + 2
 };
 
 // The settings behind the writable schedule registers: the key, 0.01 or
@@ -46,7 +48,8 @@ static bool sched_reg(uint16_t a, cfg_key_t *key, int *dec, bool *flt)
     if (a == HR_HYST)  { *key = CFG_HYST; *dec = 0; *flt = false; return true; }
     if (a == HR_B1)    { *key = CFG_B1; *dec = 1; *flt = true; return true; }
     if (a == HR_B2)    { *key = CFG_B2; *dec = 1; *flt = true; return true; }
-    if (a >= HR_GAINS && a < HR_COUNT && (a - HR_GAINS) % 2 == 0) {
+    if (a == HR_B3)    { *key = CFG_B3; *dec = 1; *flt = true; return true; }
+    if (a >= HR_GAINS && a < HR_B3 && (a - HR_GAINS) % 2 == 0) {
         int g = (a - HR_GAINS) / 2;
         *key = cfg_pid_key(g / 3 + 1, g % 3);
         *dec = 2;
@@ -233,7 +236,7 @@ static uint8_t write_sched(uint16_t addr, uint16_t n, const uint16_t *v)
             x = v[i];
         }
         cfg_range(key, &lo, &hi);
-        if (x < lo || x > hi || (key == CFG_SCHED && x == 1))   // 1, the setpoint, removed in 0.15.20
+        if (x < lo || x > hi)   // the schedule register takes 2 only: 1, the setpoint, removed in 0.15.20, 0, Off, in 0.16.20
             return MODBUS_EX_VALUE;
         val[key] = x;
         on[key] = true;

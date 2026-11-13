@@ -25,11 +25,15 @@ function load(file) {
     // default from 0.13.7, so the link takes set commands. opts.reset: 0
     // power-on (default), 1 watchdog, 2 software (Restart). Every start is
     // OFF (0.15.1): turned on at once (the double tap) unless opts.off.
+    // opts.plant: 1 the physics flow line (default here: the scenarios test
+    // the firmware, and the factory gains suit it), 0 the bench cryostat
+    // fitted to the bench logs (the page's and tcp-board.js's default).
     boot(flash, opts = {}) {
       // application_init() runs once per instance, as on the board: use a new load() per boot.
       if (sim.booted) throw new Error('boot() twice on one instance: use a new load()');
       sim.booted = true;
       x.sim_bench_init();
+      x.sim_set(22, opts.plant === undefined ? 1 : opts.plant);
       const f = new Uint8Array(x.memory.buffer, x.sim_flash(), x.sim_flash_size());
       if (flash) f.set(flash); else f.fill(0xff);
       const d = new Date(2026, 9, 24, 14, 0, 0);
@@ -78,5 +82,7 @@ function load(file) {
 // cfg_key_t (InitialTesting/cfg.h), for save() and setting().
 const CFG = { POSMAX: 0, REVERSE: 1, BACKOFF: 2, RETURN: 3, FHOME: 4, FCREEP: 5, RATE: 6, START: 7, ACCEL: 8,
   KP: 9, TI: 10, OUTMIN: 11, DB: 12, KDIR: 13, BAND: 14, KD: 15,
-  KP2: 16, TI2: 17, KD2: 18, KP3: 19, TI3: 20, KD3: 21, SCHED: 22, B1: 23, B2: 24, HYST: 25, DBC: 26, SENSOR: 27 };
+  KP2: 16, TI2: 17, KD2: 18, KP3: 19, TI3: 20, KD3: 21, SCHED: 22, B1: 23, B2: 24, HYST: 25, DBC: 26,
+  KP4: 27, TI4: 28, KD4: 29, B3: 30, PASS_LO: 31, PASS_HI: 32 };   // SENSOR (27) went in 0.16.2; set 4 and B3 from
+// 0.16.14; the Ignore switch edges from 0.16.21, 33 = CFG_N
 module.exports = { load, CFG };

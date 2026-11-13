@@ -28,16 +28,21 @@
  *     boundaries, as industrial controllers do (Eurotherm EPC3000 gain
  *     scheduling). Below B1 set 1, B1 to B2 set 2, B2 up set 3. On the
  *     pressure a set changes only once the pressure is past the boundary
- *     by the hysteresis (H %), so noise at a boundary cannot flip it; on the
- *     setpoint it changes with the setpoint. Off: set 1 always. A change of
- *     set re-bases the integral, as a KP change does, so the valve does not
- *     jump.
+ *     by the hysteresis (H %), so noise at a boundary cannot flip it. Off:
+ *     set 1 always. A change of set re-bases the integral, as a KP change
+ *     does, so the valve does not jump. Since 0.16.9 (Ryan 10 Nov, from the
+ *     bench model thread) the set follows the LOWER of the pressure and the
+ *     setpoint: going up nothing changes; going down the setpoint's set is
+ *     in charge from the start, so a big step down no longer starts on the
+ *     high set's KP and shuts the valve (bench model, today's gains: 12 to
+ *     8 mbar 91 % under before, 7 % after).
  *   - Response monitor: every CTRL_TCHECK s, the counted position through a
  *     CTRL_TLAG s lag against the pressure change. F-6 after CTRL_NRESP
  *     windows with no response. A window with the valve pinned fully open,
  *     or at AUTO min, while the loop asks for more is judged too. A
  *     wrong-way change counts as a response (no fault since 0.11.20).
- *   - W-2: outside the target band for CTRL_TCONV s; AUTO ends, MANUAL, valve idle.
+ *   - W-2: outside the target band (CTRL_TCONV_BAND at least) for CTRL_TCONV s;
+ *     AUTO ends, MANUAL, valve idle.
  *   - W-6 (0.11.45 to 0.15.10, pinned at the wrong end for 60 s) is removed:
  *     it tripped at low pressure, where the valve rightly rests near closed
  *     (Ryan 5 Nov). A KDIR the wrong way round ends AUTO by W-2.
@@ -46,7 +51,12 @@
  *     and F-6 still use the reading itself), and a move the opposite
  *     way to the last one is only sent once the command is CTRL_REV_PCT of
  *     travel from the valve. Before, the reading's noise turned the motor
- *     round about every 2 s, inside the drive's backlash. AUTO moves run at
+ *     round about every 2 s, inside the drive's backlash. Since 0.16.9 the
+ *     hold is CTRL_REV_MBAR of error at the set's KP, at most CTRL_REV_PCT:
+ *     0.10 % at KP 0.5 and up, 0.012 % at KP 0.06. At the low KPs of the
+ *     low pressures a fixed 0.10 % held the valve far longer than the
+ *     error took to change sign (bench model: 2 mbar step down 24 % under
+ *     before, 6 % after). AUTO moves run at
  *     MOT RATE (the distance-based speed of 0.12.5 was taken out, Ryan 26 Oct).
  */
 
@@ -58,6 +68,7 @@
 #define CTRL_DPMIN      0.05f   // smallest pressure change that counts, mbar
 #define CTRL_CHECKMIN   1000    // smallest lagged move that is judged, steps
 #define CTRL_TCONV_S    1800    // W-2 after this long outside the band, s
+#define CTRL_TCONV_BAND 0.10f   // W-2's band is never narrower than this, mbar (a band of 0 is allowed from 0.16.16)
 #define CTRL_LEAD_MAX   3000    // travel anti-windup, steps
 #define CTRL_TLAG_S     40      // process lag for the response monitor, s
 #define CTRL_STABLE_S   60      // in band this long reads Stable, s
@@ -65,8 +76,9 @@
 #define CTRL_PV_TAU_S   0.0f    // pressure filter for the PI, s (ctrl_t pv_tau); off, see below
 #endif
 #ifndef CTRL_REV_PCT
-#define CTRL_REV_PCT    0.10f   // a reversal waits until the command is this far away, % of travel (rev_pct)
+#define CTRL_REV_PCT    0.10f   // a reversal waits until the command is this far away, % of travel (rev_pct): the most
 #endif
+#define CTRL_REV_MBAR   0.2f    // the reversal hold is this much error at the set's KP (0.16.9), up to rev_pct
 
 // The PID table (gain schedule): Off, or on the pressure. 1 was the
 // setpoint schedule (0.15.15 to 0.15.19), removed in 0.15.20 (Ryan 6 Nov);
@@ -90,9 +102,11 @@ typedef struct {
                        // initialisers without it read 0
     // Gain schedule and the closing deadband (0.15.15); zero (initialisers
     // without them): schedule Off, closing deadband = db, as before.
-    ctrl_pid_t set23[2];   // sets 2 and 3
+    ctrl_pid_t sets[3];    // sets 2, 3 and 4 (set 4 from 0.16.14)
     int sched;             // ctrl_sched_t
-    float b1, b2;          // boundaries, mbar: set 1 below b1, set 3 from b2
+    float b1, b2;          // boundaries, mbar: set 1 below b1, set 2 to b2, set 3 from b2
+    float b3;              // boundary set 3 / set 4, mbar (0.16.14); not above b2 (0: initialisers
+                           // without it): three sets, as before
     float hyst;            // hysteresis on the pressure, fraction of the boundary (0.15)
     int32_t db_close;      // deadband closing, steps; 0 = db
 } ctrl_tune_t;
@@ -135,17 +149,24 @@ typedef struct {
     int last_dir;      // way of the last move sent: +1 opening, -1 closing, 0 none yet
     int move_dir;      // way of the move asked for
     float pv_tau;      // CTRL_PV_TAU_S from ctrl_init; 0 off (the host test's reference runs)
-    float rev_pct;     // CTRL_REV_PCT from ctrl_init; 0 off
-    int set;           // PID set in use, 1 to 3 (0 before AUTO first starts)
+    float rev_pct;     // CTRL_REV_PCT from ctrl_init, the most the hold is; 0 off
+    int set;           // PID set in use, 1 to 4 (0 before AUTO first starts)
     float kd_used;     // derivative of the last step: a change re-bases too
+    float e_last;      // setpoint less pressure at the last step (before a setpoint change), mbar, no KDIR: the re-base keeps the output there (0.16.13)
+    float sp_used;     // the setpoint the integral is based on: a change moves the integral by KP x the change, so P acts on the pressure only (0.16.15)
+    bool sp_kick;      // P on setpoint and pressure, as before 0.16.15: false from ctrl_init; true only in the host test's reference runs
 } ctrl_t;
 
 void ctrl_init(ctrl_t *c);
-// The PID set the schedule gives for x (the pressure for PV, the setpoint
-// for SP), from set now (1 to 3; 0 picks with no hysteresis). 1 when Off.
+// The PID set the schedule gives for x (in AUTO the lower of the pressure
+// and the setpoint), from set now (1 to 4; 0 picks with no hysteresis). 1
+// when Off.
 int ctrl_pick_set(const ctrl_tune_t *k, int now, float x);
 // That set's gains.
 ctrl_pid_t ctrl_set_gains(const ctrl_tune_t *k, int set);
+// How many sets the PID table has: 4 when boundary 3 is above boundary 2
+// (0.16.14), else 3.
+int ctrl_sets(const ctrl_tune_t *k);
 // Every Ts in every mode: the lagged position follows the count (only
 // through the lag once the valve is homed and not homing).
 void ctrl_track(ctrl_t *c, int32_t pos, bool lagged);

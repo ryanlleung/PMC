@@ -1,5 +1,7 @@
 // The simulated board on a TCP port, in real time, for a driver to talk to:
-//   node simulator/tests/tcp-board.js [port] [speed] [--remote-off]
+//   node simulator/tests/tcp-board.js [port] [speed] [--remote-off] [--physics]
+// The flow line is the bench cryostat fitted to the bench logs, as on the
+// simulator page; --physics uses the physics model the scenarios use.
 // Port 8888 by default, as the board; speed runs the simulation faster than
 // the clock (2 = twice as fast). The valve is homed and set to 5 % before
 // the port opens. Remote control is On, as after an operator turned it On
@@ -8,16 +10,16 @@
 // the board.
 const net = require('net');
 const { load } = require('./sim-node.js');
-const argv = process.argv.slice(2).filter(a => a !== '--remote-off');
+const argv = process.argv.slice(2).filter(a => !a.startsWith('--'));
 const port = Number(argv[0] || 8888), speed = Number(argv[1] || 1);
 const remoteOff = process.argv.includes('--remote-off');
 
-const s = load(); s.boot(undefined, { remote: true }); s.set(5, 40000); s.run(2000);
+const s = load(); s.boot(undefined, { remote: true, plant: process.argv.includes('--physics') ? 1 : 0 }); s.set(5, 40000); s.run(2000);
 // Homing is screen-only in the firmware: use the same test hook as run.js.
 if (!s.home()) throw new Error('Cannot home the simulated board: ' + s.why());
-const move = s.cmd('VALV SET 5', 30000);
-const ready = s.cmd('MODE?;VALV?;VALV MOVING?;ALRM?');
-if (move || ready !== 'MODE MANUAL;VALV 5.00 %;VALV MOVING 0;ALRM NONE\r\n')
+const move = s.cmd('VALVE SET 5', 30000);
+const ready = s.cmd('MODE?;VALVE?;VALVE MOVING?;ALARM?');
+if (move || ready !== 'MODE MANUAL;VALVE 5.00 %;VALVE MOVING 0;ALARM NONE\r\n')
   throw new Error('Simulated board not ready: ' + move + ready);
 if (remoteOff) s.x.sim_remote(0);
 s.out = '';

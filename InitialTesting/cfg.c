@@ -23,10 +23,20 @@
  * 0 % below the seat). The slot stays so records keep their layout; it is
  * written 0, and a saved value is dropped when read (an event says so).
  *
+ * Version 10 (0.16.21) adds the Disable switch edges (From and To, % open)
+ * at the end of tune[]; older records load them at 5 and 50 %, the fixed
+ * band before.
+ *
+ * Version 9 (0.16.14) adds PID set 4 and boundary 3 at the end of tune[].
+ * Boundary 3 at 0 means no set 4 (three sets, as before). Version 8 records
+ * load with set 4 as set 3 and boundary 3 at 0, so AUTO runs on their three
+ * sets until boundary 3 is set.
+ *
  * Version 8 (0.15.15) adds PID sets 2 and 3, the gain schedule (type, B1,
  * B2, hysteresis) and the closing deadband at the end of tune[]. Older
- * records load with sets 2 and 3 as set 1, the schedule Off and the closing
- * deadband as the deadband, so AUTO runs as it did until they are changed.
+ * records load with sets 2 and 3 as set 1, the schedule Off (on from
+ * 0.16.20, with every set as set 1, so AUTO still runs as it did) and the
+ * closing deadband as the deadband.
  *
  * Version 7 (0.14.21) adds KD at the end of tune[]; older records load KD 0.
  *
@@ -49,12 +59,22 @@
  * still load, as one sensor (the bench Druck) with default tuning; the
  * first save writes version 2 to the other sector, so an older firmware
  * flashed back still finds the version 1 record as its newest.
+ *
+ * One sensor per board from 0.16.2 (Ryan 9 Nov: "only one pressure sensor
+ * per mm4 and a new one will be recalibrated anyway"): Choose sensor, Add
+ * sensor, Remove sensor and the sensor-in-use setting are gone. The record
+ * keeps its layout (nsens, active, sens[4]) so no version is added: a
+ * record with several sensors loads the one that was in use (an event names
+ * the ones dropped) and the next save writes that one alone, nsens 1. The
+ * range is the 15 psia Druck's whatever a record says (a 30 psi range
+ * could be picked on Add sensor to 0.16.1; an event says if one is dropped).
  * ------------------------------------------------------------------------ */
 #define CFG_ADDR_A   0x7FD000UL
 #define CFG_ADDR_B   0x7FE000UL
 #define CFG_MAGIC    0x47464350UL   // "PCFG"
-#define CFG_VERSION  8
+#define CFG_VERSION  10
 #define OLD_VALVE_N  6       // valve[] in records before version 6
+#define REC_SENS_MAX 4       // sensor slots in the record (one in use from 0.16.2)
 
 enum { M_RATE, M_START, M_ACCEL, M_MODE, M_HOLD, M_DIR, M_ORDER, M_N };
 static const char *const mot_name[M_N] = { "RATE", "START", "ACCEL", "MODE", "HOLD", "DIR", "ORDER" };
@@ -63,29 +83,50 @@ static const char *const mot_name[M_N] = { "RATE", "START", "ACCEL", "MODE", "HO
 // values go last so older records keep their order: KD (0.14.21, Ryan 4 Nov;
 // records before version 7 have the first six, OLD_TUNE_N, and load KD 0),
 // then PID sets 2 and 3, the gain schedule and the closing deadband
-// (0.15.15, Ryan 5 Nov; version 7 records have the first seven, V7_TUNE_N).
+// (0.15.15, Ryan 5 Nov; version 7 records have the first seven, V7_TUNE_N),
+// then PID set 4 and boundary 3 (0.16.14, Ryan 11 Nov "Yes fourth set";
+// version 8 records have the first eighteen, V8_TUNE_N), then the Ignore
+// switch edges (0.16.21, Ryan 12 Nov "make the boundary editable"; version 9
+// records have the first 22, V9_TUNE_N).
 // KP, TI and KD are set 1; DB is the opening deadband.
 enum { T_KP, T_TI, T_OUTMIN, T_DB, T_KDIR, T_BAND, T_KD,
-       T_KP2, T_TI2, T_KD2, T_KP3, T_TI3, T_KD3, T_SCHED, T_B1, T_B2, T_HYST, T_DBC, T_N };
+       T_KP2, T_TI2, T_KD2, T_KP3, T_TI3, T_KD3, T_SCHED, T_B1, T_B2, T_HYST, T_DBC,
+       T_KP4, T_TI4, T_KD4, T_B3, T_PLO, T_PHI, T_N };
 #define OLD_TUNE_N  6        // tune[] in records before version 7
 #define V7_TUNE_N   7        // tune[] in version 7 records
+#define V8_TUNE_N   18       // tune[] in version 8 records
+#define V9_TUNE_N   22       // tune[] in version 9 records
 static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "KDIR", "BAND", "KD",
-                                            "KP2", "TI2", "KD2", "KP3", "TI3", "KD3", "SCHED", "B1", "B2", "HYST", "DBC" };
-// Factory: one PID (sets 2 and 3 the same) and the schedule Off, so a new
-// board runs as before; B1 6 and B2 20 mbar with 15 % hysteresis are ready
-// for when it is turned on.
-static const int32_t tune_def[T_N] = { 400, 25, 0, 8, 1, 10, 0,
-                                       400, 25, 0, 400, 25, 0, 0, 60, 200, 15, 8 };
-static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 10,   0,
-                                       1,     0,     0,     1,     0,     0,     0, 1,     1,     0,  0 };
+                                            "KP2", "TI2", "KD2", "KP3", "TI3", "KD3", "SCHED", "B1", "B2", "HYST", "DBC",
+                                            "KP4", "TI4", "KD4", "B3", "PASSLO", "PASSHI" };
+// Factory (0.16.18, Ryan 12 Nov: "set factory pid settings to boundary at 6
+// 10 14. kp ti kd values, 0.06, 0.6, 0; 0.12 0.82 0; 0.8 0.94 0, 0.4 0.25
+// 0"): the PID table On by the pressure, B1 6, B2 10, B3 14 mbar, 15 %
+// hysteresis; set 1 KP 0.06 TI 0.60, set 2 0.12/0.82, set 3 0.80/0.94, set
+// 4 0.40/0.25, KD 0 (the bench step tests of 12 Nov). To 0.16.17: one PID,
+// KP 4.00 TI 0.25 in every set, the table Off (B2 was 20 to 0.16.13).
+static const int32_t tune_def[T_N] = { 6, 60, 0, 8, 1, 10, 0,
+                                       12, 82, 0, 80, 94, 0, 2, 60, 100, 15, 8,
+                                       40, 25, 0, 140, 5, 50 };
+static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 0,    0,
+                                       1,     0,     0,     1,     0,     0,     2, 1,     1,     0,  0,
+                                       1,     0,     0,     0,     0,  1 };
 static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
-                                       10000, 10000, 10000, 10000, 10000, 10000, 2, 10000, 10000, 40, 2000 };
-static int32_t tune[T_N] = { 400, 25, 0, 8, 1, 10, 0,
-                             400, 25, 0, 400, 25, 0, 0, 60, 200, 15, 8 };
-// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar, 0.01 % per mbar/s;
-// sets 2 and 3 as set 1; PID table 0 Off, 2 on the pressure (1, the setpoint,
-// removed in 0.15.20; loads as Off); B1 and B2
-// 0.1 mbar; hysteresis % of the boundary; closing deadband steps.
+                                       10000, 10000, 10000, 10000, 10000, 10000, 2, 10000, 10000, 40, 2000,
+                                       10000, 10000, 10000, 10000, 99, 100 };
+static int32_t tune[T_N] = { 6, 60, 0, 8, 1, 10, 0,
+                             12, 82, 0, 80, 94, 0, 2, 60, 100, 15, 8,
+                             40, 25, 0, 140, 5, 50 };
+// Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, +-1, 0.01 mbar (the band
+// from 0, 0.10 before 0.16.16, Ryan 12 Nov), 0.01 % per mbar/s;
+// sets 2 to 4 as set 1; PID table 2, on the pressure, always (0.16.20, Ryan
+// 12 Nov: "remove the set 1 pid value function. always has pid table"; 0 Off
+// to 0.16.19 and 1, the setpoint, to 0.15.19 load as 2); B1 to B3
+// 0.1 mbar (B3 0: no set 4, three sets); hysteresis % of the boundary;
+// closing deadband steps; Disable switch From 0 to 99 and To 1 to 100 %
+// open (0.16.22, Ryan 13 Nov: "extend the limit switch ignore to 0 to 100%
+// inputtable"; 1 to 99 and 2 to 100 in 0.16.21), From below To (5 and 50,
+// the band fixed to 0.16.20).
 
 typedef struct {
     uint32_t serial;
@@ -102,15 +143,47 @@ typedef struct {
     int32_t mot[M_N];            // ORDER as four digits, e.g. 213 for 0213
     int32_t valve[VALVE_N_SETTINGS];
     int32_t tune[T_N];
-    uint32_t nsens;              // 1 to CFG_SENS_MAX
-    uint32_t active;             // index of the sensor in use
-    cfg_sens_t sens[CFG_SENS_MAX];
+    uint32_t nsens;              // 1 to REC_SENS_MAX (1 when written from 0.16.2)
+    uint32_t active;             // index of the sensor in use (0 when written from 0.16.2)
+    cfg_sens_t sens[REC_SENS_MAX];
     char saved_at[20];           // "YYYY-MM-DD HH:MM:SS", "" if the clock was not set
     char name[CFG_NAME_LEN + 4]; // cryostat name, NUL-terminated (version 3)
     uint32_t net_ip, net_mask;   // Ethernet address, a.b.c.d as a << 24 | ...; 0 0 = build default (version 4)
     uint32_t remote;             // Remote control: 0 Off, 1 On (version 5)
     uint32_t crc;
 } cfg_rec_t;
+
+// Version 9 (0.16.14 to 0.16.20), read only: version 10 without the Ignore
+// switch edges.
+typedef struct {
+    uint32_t magic, version, size, rev;
+    int32_t mot[M_N];
+    int32_t valve[VALVE_N_SETTINGS];
+    int32_t tune[V9_TUNE_N];
+    uint32_t nsens, active;
+    cfg_sens_t sens[REC_SENS_MAX];
+    char saved_at[20];
+    char name[CFG_NAME_LEN + 4];
+    uint32_t net_ip, net_mask;
+    uint32_t remote;
+    uint32_t crc;
+} cfg_rec_v9_t;
+
+// Version 8 (0.15.15 to 0.16.13), read only: version 9 with the first
+// eighteen tuning values (three PID sets).
+typedef struct {
+    uint32_t magic, version, size, rev;
+    int32_t mot[M_N];
+    int32_t valve[VALVE_N_SETTINGS];
+    int32_t tune[V8_TUNE_N];
+    uint32_t nsens, active;
+    cfg_sens_t sens[REC_SENS_MAX];
+    char saved_at[20];
+    char name[CFG_NAME_LEN + 4];
+    uint32_t net_ip, net_mask;
+    uint32_t remote;
+    uint32_t crc;
+} cfg_rec_v8_t;
 
 // Version 7 (0.14.21 to 0.15.14), read only: version 8 with the first
 // seven tuning values.
@@ -120,7 +193,7 @@ typedef struct {
     int32_t valve[VALVE_N_SETTINGS];
     int32_t tune[V7_TUNE_N];
     uint32_t nsens, active;
-    cfg_sens_t sens[CFG_SENS_MAX];
+    cfg_sens_t sens[REC_SENS_MAX];
     char saved_at[20];
     char name[CFG_NAME_LEN + 4];
     uint32_t net_ip, net_mask;
@@ -135,7 +208,7 @@ typedef struct {
     int32_t valve[VALVE_N_SETTINGS];
     int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
-    cfg_sens_t sens[CFG_SENS_MAX];
+    cfg_sens_t sens[REC_SENS_MAX];
     char saved_at[20];
     char name[CFG_NAME_LEN + 4];
     uint32_t net_ip, net_mask;
@@ -151,7 +224,7 @@ typedef struct {
     int32_t valve[OLD_VALVE_N];
     int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
-    cfg_sens_t sens[CFG_SENS_MAX];
+    cfg_sens_t sens[REC_SENS_MAX];
     char saved_at[20];
     char name[CFG_NAME_LEN + 4];
     uint32_t net_ip, net_mask;
@@ -166,7 +239,7 @@ typedef struct {
     int32_t valve[OLD_VALVE_N];
     int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
-    cfg_sens_t sens[CFG_SENS_MAX];
+    cfg_sens_t sens[REC_SENS_MAX];
     char saved_at[20];
     char name[CFG_NAME_LEN + 4];
     uint32_t net_ip, net_mask;
@@ -181,7 +254,7 @@ typedef struct {
     int32_t valve[OLD_VALVE_N];
     int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
-    cfg_sens_t sens[CFG_SENS_MAX];
+    cfg_sens_t sens[REC_SENS_MAX];
     char saved_at[20];
     char name[CFG_NAME_LEN + 4];
     uint32_t crc;
@@ -195,7 +268,7 @@ typedef struct {
     int32_t valve[OLD_VALVE_N];
     int32_t tune[OLD_TUNE_N];
     uint32_t nsens, active;
-    cfg_sens_t sens[CFG_SENS_MAX];
+    cfg_sens_t sens[REC_SENS_MAX];
     char saved_at[20];
     uint32_t crc;
 } cfg_rec_v2_t;
@@ -213,11 +286,11 @@ typedef struct {
 
 // The sensor the board was built with, for version 1 records and defaults.
 #define FACTORY_SERIAL  5880156UL
-#define FACTORY_PSI10   150
+#define FACTORY_PSI10   150     // the 15 psia Druck: the only range from 0.16.2
 
-// Live sensor list. The cal of the sensor in use lives in cal.c.
-static uint32_t nsens = 1, active_sens;
-static cfg_sens_t sens[CFG_SENS_MAX] = { { FACTORY_SERIAL, FACTORY_PSI10, 0, { 0 } } };
+// The live sensor: its serial (the bench cal id) and the range. Its cal
+// lives in cal.c; has_cal and cal here are filled on capture().
+static cfg_sens_t sensor = { FACTORY_SERIAL, FACTORY_PSI10, 0, { 0 } };
 // Live cryostat name, in the header ("CF-11 pressure controller").
 #define FACTORY_NAME "CF-11"
 static char cname[CFG_NAME_LEN + 1] = FACTORY_NAME;
@@ -265,22 +338,24 @@ static void order_digits(int32_t packed, uint8_t o[4])
     o[0] = packed / 1000 % 10; o[1] = packed / 100 % 10; o[2] = packed / 10 % 10; o[3] = packed % 10;
 }
 
-int32_t cfg_psi10_mmbar(int32_t psi10)
+static int32_t psi10_mmbar(int32_t psi10)
 {
     return (int32_t)(((int64_t)psi10 * 6894757 + 500) / 1000);   // 68.94757 mbar/psi
 }
+
+int32_t cfg_sensor_range_mmbar(void) { return psi10_mmbar(sensor.psi10); }
 
 static void serial_text(char *buf, size_t n, uint32_t serial)
 {
     lv_snprintf(buf, n, "%lu", (unsigned long)serial);
 }
 
-// Tells cal.c which sensor is in use (bench cal id, nominal range).
+// Tells cal.c the sensor's serial (the bench cal id) and nominal range.
 static void tell_cal(void)
 {
     char sn[12];
-    serial_text(sn, sizeof sn, sens[active_sens].serial);
-    cal_set_sensor(sn, cfg_psi10_mmbar(sens[active_sens].psi10));
+    serial_text(sn, sizeof sn, sensor.serial);
+    cal_set_sensor(sn, psi10_mmbar(sensor.psi10));
 }
 
 // The live settings.
@@ -301,14 +376,14 @@ static void capture(cfg_rec_t *r)
     r->mot[M_ORDER] = o[0] * 1000 + o[1] * 100 + o[2] * 10 + o[3];
     valve_settings(r->valve);
     memcpy(r->tune, tune, sizeof r->tune);
-    r->nsens = nsens;
-    r->active = active_sens;
-    memcpy(r->sens, sens, sizeof r->sens);
+    r->nsens = 1;   // the one sensor, in slot 0 (0.16.2)
+    r->active = 0;
+    r->sens[0] = sensor;
     lv_strlcpy(r->name, cname, sizeof r->name);
     r->net_ip = net_ip;
     r->net_mask = net_mask;
     r->remote = remote_on;
-    cfg_sens_t *a = &r->sens[active_sens];
+    cfg_sens_t *a = &r->sens[0];
     a->has_cal = !cal_is_default();
     if (a->has_cal)
         cal_get_record(&a->cal);
@@ -322,7 +397,15 @@ static const char *bounds_why(const int32_t *t)
 {
     if ((int64_t)t[T_B1] * (100 + t[T_HYST]) >= (int64_t)t[T_B2] * (100 - t[T_HYST]))
         return "B2 must be above B1, by more than the hysteresis either side";
+    if (t[T_B3] != 0 && (int64_t)t[T_B2] * (100 + t[T_HYST]) >= (int64_t)t[T_B3] * (100 - t[T_HYST]))
+        return "B3 must be above B2, by more than the hysteresis either side, or 0 for three sets";
     return NULL;
+}
+
+// Disable switch: From below To.
+static const char *pass_why(const int32_t *t)
+{
+    return t[T_PLO] < t[T_PHI] ? NULL : "Disable switch: From must be below To";
 }
 
 // NULL if every value can be applied, else the first that cannot.
@@ -346,12 +429,13 @@ static const char *values_why(const cfg_rec_t *r)
     if (valve_settings_check(r->valve))
         return valve_settings_check(r->valve);
     for (int i = 0; i < T_N; i++)
-        if (r->tune[i] < tune_lo[i] || r->tune[i] > tune_hi[i] || (i == T_KDIR && r->tune[i] == 0) ||
-            (i == T_SCHED && r->tune[i] == 1))
+        if (r->tune[i] < tune_lo[i] || r->tune[i] > tune_hi[i] || (i == T_KDIR && r->tune[i] == 0))
             return tune_name[i];
     if (bounds_why(r->tune))
-        return "B2";
-    if (r->nsens < 1 || r->nsens > CFG_SENS_MAX || r->active >= r->nsens)
+        return bounds_why(r->tune)[1] == '3' ? "B3" : "B2";
+    if (pass_why(r->tune))
+        return "PASSHI";
+    if (r->nsens < 1 || r->nsens > REC_SENS_MAX || r->active >= r->nsens)
         return "SENSOR";
     if (!cfg_name_ok(r->name))
         return "NAME";
@@ -392,11 +476,12 @@ static void from_v1(const cfg_rec_v1_t *v, cfg_rec_t *r)
     r->remote = 1;
 }
 
-// A version 2 to 7 record as version 8. They have the first ntune tuning
+// A version 2 to 7 record as version 9. They have the first ntune tuning
 // values (six to version 6: KD reads 0, the loop as it ran; seven in
 // version 7) and none of the fields after crc_at. The values added since
-// keep the loop as it ran: sets 2 and 3 as set 1, the schedule Off (B1, B2
-// and H at their factory values), the closing deadband as the deadband.
+// keep the loop as it ran: sets 2 to 4 as set 1 (the PID table on, always
+// from 0.16.20; B1 to B3 and H at their factory values), the closing
+// deadband as the deadband.
 // Versions 2 to 5 also lack the return (valve[6]): it is their back-off, so
 // homing ends where it did. Fields they lack are 0 (the build's address),
 // except Remote control, On as the default; versions 5 to 7 have their own.
@@ -416,11 +501,43 @@ static void from_old(const void *v, size_t tune_at, int ntune, size_t crc_at, bo
         r->tune[T_TI2 + 3 * s] = r->tune[T_TI];
         r->tune[T_KD2 + 3 * s] = r->tune[T_KD];
     }
-    r->tune[T_SCHED] = 0;
+    r->tune[T_KP4] = r->tune[T_KP];
+    r->tune[T_TI4] = r->tune[T_TI];
+    r->tune[T_KD4] = r->tune[T_KD];
+    r->tune[T_SCHED] = 2;                                          // on, the sets all set 1: as it ran
     r->tune[T_B1] = tune_def[T_B1];
     r->tune[T_B2] = tune_def[T_B2];
+    r->tune[T_B3] = tune_def[T_B3];
     r->tune[T_HYST] = tune_def[T_HYST];
     r->tune[T_DBC] = r->tune[T_DB];
+    r->version = CFG_VERSION;
+    r->size = sizeof *r;
+}
+
+// Version 9 (four PID sets): all kept; the Disable switch edges are set
+// after (read_slot).
+static void from_v9(const cfg_rec_v9_t *o, cfg_rec_t *r)
+{
+    memset(r, 0, sizeof *r);
+    memcpy(r, o, offsetof(cfg_rec_v9_t, tune));                    // header, mot, valve
+    memcpy(r->tune, o->tune, sizeof o->tune);
+    memcpy(&r->nsens, &o->nsens, offsetof(cfg_rec_v9_t, crc) - offsetof(cfg_rec_v9_t, nsens));
+    r->version = CFG_VERSION;
+    r->size = sizeof *r;
+}
+
+// Version 8 (three PID sets): its tuning kept, set 4 = set 3 and B3 0 (no
+// set 4), so it runs as before until B3 is set (0.16.14).
+static void from_v8(const cfg_rec_v8_t *o, cfg_rec_t *r)
+{
+    memset(r, 0, sizeof *r);
+    memcpy(r, o, offsetof(cfg_rec_v8_t, tune));                    // header, mot, valve
+    memcpy(r->tune, o->tune, sizeof o->tune);
+    memcpy(&r->nsens, &o->nsens, offsetof(cfg_rec_v8_t, crc) - offsetof(cfg_rec_v8_t, nsens));
+    r->tune[T_KP4] = r->tune[T_KP3];
+    r->tune[T_TI4] = r->tune[T_TI3];
+    r->tune[T_KD4] = r->tune[T_KD3];
+    r->tune[T_B3] = 0;
     r->version = CFG_VERSION;
     r->size = sizeof *r;
 }
@@ -429,9 +546,15 @@ _Static_assert(offsetof(cfg_rec_v6_t, tune) == offsetof(cfg_rec_t, tune), "v6 ha
 _Static_assert(offsetof(cfg_rec_v7_t, tune) == offsetof(cfg_rec_t, tune), "v7 has the whole valve[]");
 _Static_assert(offsetof(cfg_rec_t, nsens) == offsetof(cfg_rec_t, tune) + T_N * 4, "tune then nsens");
 _Static_assert(offsetof(cfg_rec_v6_t, crc) - offsetof(cfg_rec_v6_t, tune) - OLD_TUNE_N * 4 ==
-               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v6 is v8 from nsens on");
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v6 is v9 from nsens on");
 _Static_assert(offsetof(cfg_rec_v7_t, crc) - offsetof(cfg_rec_v7_t, tune) - V7_TUNE_N * 4 ==
-               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v7 is v8 from nsens on");
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v7 is v9 from nsens on");
+_Static_assert(offsetof(cfg_rec_v8_t, tune) == offsetof(cfg_rec_t, tune), "v8 has the whole valve[]");
+_Static_assert(offsetof(cfg_rec_v9_t, tune) == offsetof(cfg_rec_t, tune), "v9 has the whole valve[]");
+_Static_assert(offsetof(cfg_rec_v9_t, crc) - offsetof(cfg_rec_v9_t, nsens) ==
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v9 is v10 from nsens on");
+_Static_assert(offsetof(cfg_rec_v8_t, crc) - offsetof(cfg_rec_v8_t, nsens) ==
+               offsetof(cfg_rec_t, crc) - offsetof(cfg_rec_t, nsens), "v8 is v9 from nsens on");
 _Static_assert(offsetof(cfg_rec_v5_t, crc) - offsetof(cfg_rec_v5_t, tune) ==
                offsetof(cfg_rec_v6_t, crc) - offsetof(cfg_rec_v6_t, tune), "v5 is v6 from tune on");
 #define FROM_OLD(T, v, ret, r) from_old((v), offsetof(T, tune), \
@@ -448,6 +571,8 @@ static const char *read_slot(int i)
         cfg_rec_v5_t v5;
         cfg_rec_v6_t v6;
         cfg_rec_v7_t v7;
+        cfg_rec_v8_t v8;
+        cfg_rec_v9_t v9;
     } old;
     cfg_rec_t *r = &slot[i];
     extflash_read(slot_addr[i], r, sizeof *r);
@@ -490,6 +615,16 @@ static const char *read_slot(int i)
         if (old.v7.crc != crc32_ieee(&old.v7, offsetof(cfg_rec_v7_t, crc)))
             return "CRC mismatch";
         FROM_OLD(cfg_rec_v7_t, &old.v7, true, r);
+    } else if (r->magic == CFG_MAGIC && r->version == 8 && r->size == sizeof old.v8) {
+        memcpy(&old.v8, r, sizeof old.v8);
+        if (old.v8.crc != crc32_ieee(&old.v8, offsetof(cfg_rec_v8_t, crc)))
+            return "CRC mismatch";
+        from_v8(&old.v8, r);
+    } else if (r->magic == CFG_MAGIC && r->version == 9 && r->size == sizeof old.v9) {
+        memcpy(&old.v9, r, sizeof old.v9);
+        if (old.v9.crc != crc32_ieee(&old.v9, offsetof(cfg_rec_v9_t, crc)))
+            return "CRC mismatch";
+        from_v9(&old.v9, r);
     } else if (r->magic != CFG_MAGIC || r->version != CFG_VERSION || r->size != sizeof *r) {
         return "not a settings record of this version";
     } else if (r->crc != rec_crc(r)) {
@@ -497,8 +632,17 @@ static const char *read_slot(int i)
     }
     slot_offset[i] = r->valve[5];   // the zero offset, removed in 0.13.31
     r->valve[5] = 0;
-    if (r->tune[T_SCHED] == 1)       // the setpoint schedule, removed in 0.15.20: Off
-        r->tune[T_SCHED] = 0;
+    // The PID table is always on from 0.16.20: Off (0, set 1 at every
+    // pressure) and the setpoint schedule (1, removed in 0.15.20) load as
+    // on the pressure, with the sets as saved. Records from before 0.15.15
+    // have every set equal to set 1 (from_old), so they run as before.
+    if (r->tune[T_SCHED] != 2)
+        r->tune[T_SCHED] = 2;
+    // Before version 10 the Disable switch band was fixed at 5 to 50 %.
+    if (slot_ver[i] < 10) {
+        r->tune[T_PLO] = tune_def[T_PLO];
+        r->tune[T_PHI] = tune_def[T_PHI];
+    }
     if (values_why(r))
         return "value out of range";
     return NULL;
@@ -520,23 +664,22 @@ static const cfg_rec_t *base(void)
     return newest >= 0 ? &slot[newest] : &factory;
 }
 
+// The sensor in use in a record.
+static const cfg_sens_t *rec_sensor(const cfg_rec_t *r) { return &r->sens[r->active]; }
+
+// The same sensor with the same cal. The range is not compared: it is the
+// 15 psia Druck's from 0.16.2, whatever an old record holds.
 static bool sens_same(const cfg_sens_t *a, const cfg_sens_t *b)
 {
-    return a->serial == b->serial && a->psi10 == b->psi10 && a->has_cal == b->has_cal &&
+    return a->serial == b->serial && a->has_cal == b->has_cal &&
            (!a->has_cal || memcmp(&a->cal, &b->cal, sizeof a->cal) == 0);
 }
 
-static const cfg_sens_t *find_sens(const cfg_rec_t *r, uint32_t serial)
-{
-    for (uint32_t i = 0; i < r->nsens; i++)
-        if (r->sens[i].serial == serial)
-            return &r->sens[i];
-    return NULL;
-}
-
 // Counts the settings in live differing from b. With buf, writes one line
-// each for those Review and save has no field for (sensors, calibrations,
-// MOT MODE / HOLD / ORDER, VALVE CLEAR).
+// each for those Review and save has no field for (the calibration, MOT
+// MODE / HOLD / ORDER, VALVE CLEAR). Only the sensor in use counts: the
+// other slots of an old record are dropped at the next save (0.16.2), which
+// the start-up event says, not an unsaved change the screens could discard.
 static int diff(const cfg_rec_t *live, const cfg_rec_t *b, char *buf, size_t n)
 {
     int count = 0;
@@ -577,22 +720,9 @@ static int diff(const cfg_rec_t *live, const cfg_rec_t *b, char *buf, size_t n)
         count++;
         LINE("Remote control: %s\n", live->remote ? "On" : "Off");
     }
-    if (live->sens[live->active].serial != b->sens[b->active].serial) {
+    if (!sens_same(rec_sensor(live), rec_sensor(b))) {
         count++;
-    }
-    for (uint32_t i = 0; i < live->nsens; i++) {
-        const cfg_sens_t *q = &live->sens[i], *o = find_sens(b, q->serial);
-        if (o && sens_same(q, o))
-            continue;
-        count++;
-        const char *what = !o ? "added" : q->psi10 != o->psi10 ? "range changed" : "new calibration";
-        LINE("Sensor s/n %lu: %s\n", (unsigned long)q->serial, what);
-    }
-    for (uint32_t i = 0; i < b->nsens; i++) {
-        if (find_sens(live, b->sens[i].serial))
-            continue;
-        count++;
-        LINE("Sensor s/n %lu: removed\n", (unsigned long)b->sens[i].serial);
+        LINE("Sensor calibration: %s\n", rec_sensor(live)->has_cal ? "new" : "none (nominal)");
     }
 #undef LINE
     if (buf && used && buf[used - 1] == '\n')
@@ -617,8 +747,7 @@ int cfg_unsaved_other(char *buf, size_t n)
 static void sync_cal_saved(void)
 {
     capture(&scratch);
-    const cfg_sens_t *o = newest >= 0 ? find_sens(&slot[newest], sens[active_sens].serial) : NULL;
-    cal_set_saved(newest >= 0 ? o && sens_same(&scratch.sens[active_sens], o) : cal_saved());
+    cal_set_saved(newest >= 0 ? sens_same(rec_sensor(&scratch), rec_sensor(&slot[newest])) : cal_saved());
 }
 
 // Why the settings cannot change now, or NULL. In AUTO only the tuning can
@@ -640,7 +769,9 @@ static const char *mode_why(const cfg_rec_t *r)
 }
 
 // All or nothing: checked first, applied only when idle. False if not applied.
-static bool apply(const cfg_rec_t *r, bool with_sensors)
+// with_sensor: the record's sensor in use (its serial and cal) too; the
+// range stays the 15 psia Druck's (0.16.2).
+static bool apply(const cfg_rec_t *r, bool with_sensor)
 {
     uint8_t o[4];
     if (values_why(r) || busy() || mode_why(r))
@@ -662,11 +793,10 @@ static bool apply(const cfg_rec_t *r, bool with_sensors)
         remote_on = r->remote != 0;
         valve_event("NET", remote_on ? "Remote control on (settings loaded)" : "Remote control off (settings loaded)");
     }
-    if (with_sensors) {
-        nsens = r->nsens;
-        active_sens = r->active;
-        memcpy(sens, r->sens, sizeof sens);
-        const cfg_sens_t *a = &sens[active_sens];
+    if (with_sensor) {
+        const cfg_sens_t *a = rec_sensor(r);
+        sensor = *a;
+        sensor.psi10 = FACTORY_PSI10;
         tell_cal();
         if (a->has_cal)
             cal_set_record(&a->cal, false);
@@ -697,11 +827,9 @@ void cfg_init(void)
 {
     loaded = -1;
     memcpy(tune, tune_def, sizeof tune);
-    nsens = 1;
-    active_sens = 0;
-    memset(sens, 0, sizeof sens);
-    sens[0].serial = FACTORY_SERIAL;
-    sens[0].psi10 = FACTORY_PSI10;
+    memset(&sensor, 0, sizeof sensor);
+    sensor.serial = FACTORY_SERIAL;
+    sensor.psi10 = FACTORY_PSI10;
     net_ip = net_mask = 0;
     remote_on = true;
     // The cal found by cal_init() (old record, or nominal) is the factory sensor's.
@@ -732,6 +860,14 @@ void cfg_init(void)
     if (slot_offset[newest])
         valve_event("CFG", "Zero offset %ld dropped (removed in 0.13.31): 0 %% is the return above the switch",
                     (long)slot_offset[newest]);
+    // One sensor per board (0.16.2): what an older record held besides.
+    const cfg_rec_t *r = &slot[newest];
+    if (r->nsens > 1)
+        valve_event("CFG", "%lu sensors in the saved settings: only s/n %lu, the one in use, is kept (one sensor from 0.16.2)",
+                    (unsigned long)r->nsens, (unsigned long)rec_sensor(r)->serial);
+    if (rec_sensor(r)->psi10 != FACTORY_PSI10)
+        valve_event("CFG", "Sensor range %ld psi in the saved settings not used: the 15 psia sensor's (0.16.2)",
+                    (long)(rec_sensor(r)->psi10 / 10));
 }
 
 // Saves the live settings as the next rev. why is for the screens.
@@ -816,15 +952,13 @@ static const cfg_rec_t *source(cfg_from_t from)
 
 bool cfg_value(cfg_from_t from, cfg_key_t k, int32_t *v)
 {
+    // k from the simulator's test hook can be anything (CFG_SENSOR, 27,
+    // went in 0.16.2): no key, no value.
+    if ((int)k < 0 || k >= CFG_N)
+        return false;
     const cfg_rec_t *r = source(from);
     if (!r)
         return false;
-    if (k == CFG_SENSOR) {
-        if (from == CFG_FROM_DEFAULTS)
-            return false;   // Factory defaults keep the sensors
-        *v = (int32_t)r->sens[r->active].serial;
-        return true;
-    }
     *v = *key_ref((cfg_rec_t *)r, k);
     return true;
 }
@@ -853,14 +987,16 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
         *lo = STEPPER3_ACCEL_MIN; *hi = STEPPER3_ACCEL_MAX;
     } else if (k == CFG_REVERSE) {
         *hi = 1;
-    } else if (k != CFG_SENSOR) {
+    } else {
         int i = k == CFG_POSMAX ? 0 : k == CFG_FHOME ? 1 : k == CFG_FCREEP ? 2 : k == CFG_BACKOFF ? 3 : 6;
         *lo = vlo[i]; *hi = vhi[i];   // the indices key_ref() uses
     }
 }
 _Static_assert(CFG_KP + T_N - 1 == CFG_TUNE_LAST, "tuning keys in tune[] order");
 _Static_assert(CFG_KD - CFG_KP == T_KD && CFG_KP2 - CFG_KP == T_KP2 && CFG_SCHED - CFG_KP == T_SCHED &&
-               CFG_DBC - CFG_KP == T_DBC, "tuning keys in tune[] order");
+               CFG_DBC - CFG_KP == T_DBC && CFG_KP4 - CFG_KP == T_KP4 && CFG_B3 - CFG_KP == T_B3 &&
+               CFG_PASS_LO - CFG_KP == T_PLO && CFG_PASS_HI - CFG_KP == T_PHI,
+               "tuning keys in tune[] order");
 
 int32_t cfg_tune(cfg_key_t k)
 {
@@ -869,12 +1005,12 @@ int32_t cfg_tune(cfg_key_t k)
 
 cfg_key_t cfg_pid_key(int set, int which)
 {
-    static const cfg_key_t key[3][3] = { { CFG_KP, CFG_TI, CFG_KD }, { CFG_KP2, CFG_TI2, CFG_KD2 },
-                                         { CFG_KP3, CFG_TI3, CFG_KD3 } };
-    return key[set >= 1 && set <= 3 ? set - 1 : 0][which >= 0 && which <= 2 ? which : 0];
+    static const cfg_key_t key[4][3] = { { CFG_KP, CFG_TI, CFG_KD }, { CFG_KP2, CFG_TI2, CFG_KD2 },
+                                         { CFG_KP3, CFG_TI3, CFG_KD3 }, { CFG_KP4, CFG_TI4, CFG_KD4 } };
+    return key[set >= 1 && set <= 4 ? set - 1 : 0][which >= 0 && which <= 2 ? which : 0];
 }
 
-static cfg_rec_t cand;   // cfg_save_with, cfg_sensor_use and cfg_load_live (never at once)
+static cfg_rec_t cand;   // cfg_save_with and cfg_load_live (never at once)
 
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
 {
@@ -888,25 +1024,7 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
             continue;
         if (tune_only && (k < CFG_KP || k > CFG_TUNE_LAST)) {
             // cand holds the live values here (only tuning keys are written).
-            bool same = k == CFG_SENSOR ? (uint32_t)v[k] == cand.sens[cand.active].serial
-                                        : v[k] == *key_ref(&cand, (cfg_key_t)k);
-            if (!same) { *why = "Stop AUTO first"; return false; }
-            continue;
-        }
-        if (k == CFG_SENSOR) {
-            const cfg_sens_t *q = find_sens(&cand, (uint32_t)v[k]);
-            if (!q) {
-                // A sensor from a loaded save that is no longer on the board.
-                const cfg_rec_t *from[2] = { source(CFG_FROM_SAVED), source(CFG_FROM_PREVIOUS) };
-                for (int j = 0; j < 2 && !q; j++)
-                    if (from[j] && (q = find_sens(from[j], (uint32_t)v[k])) != NULL) {
-                        if (cand.nsens >= CFG_SENS_MAX) { *why = "four sensors already on the board"; return false; }
-                        cand.sens[cand.nsens++] = *q;
-                        q = &cand.sens[cand.nsens - 1];
-                    }
-                if (!q) { *why = "that sensor is not on the board"; return false; }
-            }
-            cand.active = (uint32_t)(q - cand.sens);
+            if (v[k] != *key_ref(&cand, (cfg_key_t)k)) { *why = "Stop AUTO first"; return false; }
             continue;
         }
         int32_t lo, hi;
@@ -916,11 +1034,12 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     }
     if (cand.mot[M_START] > cand.mot[M_RATE]) { *why = "Start speed must not exceed Run speed"; return false; }
     if ((*why = bounds_why(cand.tune)) != NULL) return false;
+    if ((*why = pass_why(cand.tune)) != NULL) return false;
     if (values_why(&cand)) { *why = "a value is out of range, nothing saved"; return false; }
     if (!tune_only && (*why = mode_why(&cand)) != NULL) return false;
     // Written first, then put in use: a failed write changes nothing, so
-    // "Not saved" also means "not in use" (review of 0.10.11). The active cal
-    // was captured into cand; a switch of sensor applies the new one.
+    // "Not saved" also means "not in use" (review of 0.10.11). The cal was
+    // captured into cand.
     scratch = cand;
     if (!write_scratch(why))
         return false;
@@ -955,7 +1074,7 @@ bool cfg_load_live(cfg_from_t from, const char **why)
     }
     if (from == CFG_FROM_DEFAULTS) {
         cfg_rec_t *d = &cand;   // shared, saves a record's worth of RAM
-        capture(d);   // keep the sensors and their cals
+        capture(d);   // keep the sensor and its cal
         memcpy(d->mot, factory.mot, sizeof d->mot);
         memcpy(d->valve, factory.valve, sizeof d->valve);
         memcpy(d->tune, factory.tune, sizeof d->tune);
@@ -967,88 +1086,14 @@ bool cfg_load_live(cfg_from_t from, const char **why)
 }
 
 /* --------------------------------------------------------------------------
- * Sensors on the board
+ * The sensor's saved cal (Calibrate sensor: the Saved cal reading)
  * ------------------------------------------------------------------------ */
-int cfg_sensor_count(void) { return (int)nsens; }
-int cfg_sensor_active(void) { return (int)active_sens; }
-
-bool cfg_sensor(int i, cfg_sensor_t *out)
+bool cfg_saved_cal(const cal_rec_t **cal)
 {
-    if (i < 0 || i >= (int)nsens)
+    if (newest < 0)
         return false;
-    const cfg_sens_t *q = &sens[i];
-    out->serial = q->serial;
-    out->psi10 = q->psi10;
-    out->fs_mmbar = cfg_psi10_mmbar(q->psi10);
-    out->in_use = i == (int)active_sens;
-    bool has = out->in_use ? !cal_is_default() : q->has_cal != 0;
-    const cal_rec_t *c = out->in_use ? NULL : &q->cal;
-    static cal_rec_t act;
-    if (out->in_use && has) { cal_get_record(&act); c = &act; }
-    out->has_cal = has;
-    out->cal = has ? c : NULL;
-    const cfg_sens_t *sv = newest >= 0 ? find_sens(&slot[newest], q->serial) : NULL;
-    if (out->in_use) {
-        capture(&scratch);
-        out->saved = sv && sens_same(&scratch.sens[i], sv);
-    } else {
-        out->saved = sv && sens_same(q, sv);
-    }
-    return true;
-}
-
-bool cfg_saved_cal(uint32_t serial, const cal_rec_t **cal)
-{
-    const cfg_sens_t *sv = newest >= 0 ? find_sens(&slot[newest], serial) : NULL;
-    if (!sv)
-        return false;
+    const cfg_sens_t *sv = rec_sensor(&slot[newest]);
     *cal = sv->has_cal ? &sv->cal : NULL;
-    return true;
-}
-
-bool cfg_sensor_add(uint32_t serial, int32_t psi10, const char **why)
-{
-    if (serial == 0)                 { *why = "serial number 0"; return false; }
-    if (nsens >= CFG_SENS_MAX)        { *why = "four sensors already on the board"; return false; }
-    for (uint32_t i = 0; i < nsens; i++)
-        if (sens[i].serial == serial) { *why = "that serial number is already on the board"; return false; }
-    memset(&sens[nsens], 0, sizeof sens[nsens]);
-    sens[nsens].serial = serial;
-    sens[nsens].psi10 = psi10;
-    nsens++;
-    valve_event("CFG", "Sensor s/n %lu, %ld psi added, not in use, not calibrated",
-                (unsigned long)serial, (long)(psi10 / 10));
-    return true;
-}
-
-bool cfg_sensor_remove(uint32_t serial, const char **why)
-{
-    for (uint32_t i = 0; i < nsens; i++) {
-        if (sens[i].serial != serial)
-            continue;
-        if (i == active_sens) { *why = "that sensor is in use"; return false; }
-        memmove(&sens[i], &sens[i + 1], (nsens - i - 1) * sizeof sens[0]);
-        nsens--;
-        if (active_sens > i)
-            active_sens--;
-        valve_event("CFG", "Sensor s/n %lu removed from the board", (unsigned long)serial);
-        return true;
-    }
-    *why = "no such sensor";
-    return false;
-}
-
-bool cfg_sensor_use(uint32_t serial, const char **why)
-{
-    if ((*why = busy_why()) != NULL) return false;
-    capture(&cand);
-    const cfg_sens_t *q = find_sens(&cand, serial);
-    if (!q) { *why = "that sensor is not on the board"; return false; }
-    if (q - cand.sens == (ptrdiff_t)cand.active)
-        return true;
-    cand.active = (uint32_t)(q - cand.sens);
-    if (!apply(&cand, true)) { *why = "not applied"; return false; }
-    valve_event("CFG", "Sensor s/n %lu in use, not saved", (unsigned long)serial);
     return true;
 }
 

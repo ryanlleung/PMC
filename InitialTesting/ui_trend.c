@@ -34,6 +34,10 @@ static int32_t val(const trend_pt_t *q, tkey_t k) { return k == K_P ? q->p : k =
 // The pressure pen draws each slot through its first sample, the two either
 // side of its largest change and its last, so a step draws upright, not as
 // a slope across the slot (Ryan, 21 Oct); lo and hi set the scale.
+// The target is not a mean: each slot keeps its last target and when that
+// began, so a step is one straight up or down line, one pixel wide, at the
+// second it changed (Ryan, 10 Nov: a step mid-slot drew a mean level
+// between the two, so it leaned and spread over two pixels).
 #define PTS_MAX 128   // the most any range plots is 121 (win / slot + 1)
 static struct {
     float age;            // seconds before the newest sample
@@ -42,6 +46,7 @@ static struct {
     // and after the largest change, last.
     int32_t p[4], p_lo, p_hi;
     int16_t p_age[4];
+    int16_t sp_age;       // age (s) of the slot's first sample with its last target
 } pts[PTS_MAX];
 static int pts_n;
 
@@ -81,8 +86,8 @@ static void pts_build(uint32_t win, int n)
         if (t_new - s0 > win + slot) continue;
         int64_t sum[3] = { 0, 0, 0 };
         int cnt[3] = { 0, 0, 0 };
-        int32_t pp[4] = { 0, 0, 0, 0 }, p_lo = 0, p_hi = 0, jump = -1;
-        int16_t pa[4] = { 0, 0, 0, 0 };
+        int32_t pp[4] = { 0, 0, 0, 0 }, p_lo = 0, p_hi = 0, jump = -1, sp = TREND_NONE;
+        int16_t pa[4] = { 0, 0, 0, 0 }, sp_age = 0;
         // Samples in the slot, newest second at age 0; a 10 s mean is read
         // once per 10 s (trend_coarse gives the 1 s samples still filling).
         for (uint32_t t = s0; t <= s1; t += r) {
@@ -110,6 +115,10 @@ static void pts_build(uint32_t win, int n)
                     if (v < p_lo) p_lo = v;
                     if (v > p_hi) p_hi = v;
                 }
+                if (k == K_SP && (!cnt[k] || v != sp)) {   // oldest first: the last change wins
+                    sp = v;
+                    sp_age = (int16_t)age;
+                }
                 sum[k] += v;
                 cnt[k]++;
             }
@@ -119,6 +128,8 @@ static void pts_build(uint32_t win, int n)
         if (age > (float)win) continue;
         for (int k = 0; k < 3; k++)
             pts[pts_n].v[k] = cnt[k] ? (int32_t)(sum[k] / cnt[k]) : TREND_NONE;
+        pts[pts_n].v[K_SP] = cnt[K_SP] ? sp : TREND_NONE;
+        pts[pts_n].sp_age = sp_age;
         for (int q = 0; q < 4; q++) {
             pts[pts_n].p[q] = pp[q];
             pts[pts_n].p_age[q] = pa[q];
@@ -201,15 +212,19 @@ static void dot(lv_layer_t *layer, lv_color_t c, float x, float y)
 
 // One pen through the points of pts_build(), win seconds from x0 to x1;
 // y from yof. Gaps (no reading) lift the pen. Returns the last point drawn.
+// stepped (the target): one dashed line across while it holds, then one
+// straight up or down on a whole pixel column at the second it changed.
 typedef float (*yof_t)(void *ctx, int32_t v);
 static bool pen(lv_layer_t *layer, uint32_t win, tkey_t k, float x0, float x1, yof_t yof, void *ctx,
                 lv_color_t c, int32_t w, bool stepped, float *lx, float *ly)
 {
     bool have = false, any = false;
-    float px = 0, py = 0;
+    float px = 0, py = 0, rx = 0;   // rx: where the target's run at py began
     for (int i = 0; i < pts_n; i++) {
         int32_t v = pts[i].v[k];
         if (v == TREND_NONE) {
+            if (have && stepped && px > rx)
+                line(layer, c, w, rx, py, px, py, true);
             have = false;
             continue;
         }
@@ -225,16 +240,26 @@ static bool pen(lv_layer_t *layer, uint32_t win, tkey_t k, float x0, float x1, y
             }
             continue;
         }
-        if (have) {
-            if (stepped && y != py) {   // a target holds, then steps
-                line(layer, c, w, px, py, x, py, true);
-                line(layer, c, w, x, py, x, y, true);
-            } else {
-                line(layer, c, w, px, py, x, y, stepped);
+        if (stepped) {
+            if (!have) {
+                rx = x;
+            } else if (y != py) {
+                float xs = roundf(x1 - (x1 - x0) * (float)pts[i].sp_age / (float)win);
+                if (xs < rx) xs = rx;
+                if (xs > rx)
+                    line(layer, c, w, rx, py, xs, py, true);
+                line(layer, c, w, xs, py, xs, y, true);
+                rx = xs;
             }
+            px = x; py = y; have = any = true;
+            continue;
         }
+        if (have)
+            line(layer, c, w, px, py, x, y, false);
         px = x; py = y; have = any = true;
     }
+    if (have && stepped && px > rx)
+        line(layer, c, w, rx, py, px, py, true);
     if (any) { *lx = px; *ly = py; }
     return any;
 }
@@ -307,11 +332,32 @@ static bool p_range(float *lo, float *hi)
     return any;
 }
 
+// The least pressure span Trend shows (the sparkline too to 0.16.25) (0.16.18, Ryan 12 Nov:
+// "set a limit to the trend and sparkline for pressure so that small
+// fluctuations around a setpoint doesn look huge"): 25 % of the highest
+// pressure or target shown, 1.5 mbar at least (0.16.23, Ryan 13 Nov:
+// "increase 10 to 2.5 and the 2 and 5 to 1.5"; was 20 % and 1 mbar). So
+// 1.5 mbar at 2 and 5 mbar, 2.5 at 10, 6.25 at 25; a step still fills it.
+#define P_SPAN_MIN   1.5f
+#define P_SPAN_FRAC  0.25f
+
+static float p_span_min(float lo, float hi)
+{
+    float m = (fabsf(lo) > fabsf(hi) ? fabsf(lo) : fabsf(hi)) * P_SPAN_FRAC;
+    return m > P_SPAN_MIN ? m : P_SPAN_MIN;
+}
+
 /* --------------------------------------------------------------------------
  * Home sparklines
  * ------------------------------------------------------------------------ */
 #define SPARK_WIN 300   // 5 min, at half the old width (Ryan, 21 Oct)
 #define SPARK_N   61    // one per 5 s
+// The sparkline's least span (0.16.26, Ryan 13 Nov: "maybe use a +-5 mbar
+// for the spark line minimum", "the sparkline should only indicate a big
+// problem, steady state errors or fluctuations thats small enough dont
+// need ot be shown"): 10 mbar, 5 either side of the middle of the data,
+// moved up to start at 0 mbar at low pressures. Trend keeps p_span_min.
+#define SPARK_SPAN_MIN 10.0f
 
 static void spark_draw(lv_event_t *e)
 {
@@ -336,15 +382,17 @@ static void spark_draw(lv_event_t *e)
     if (lo > 0 && hi / lo > 10) {
         s.log = true;
     } else {
-        // At least max(1 mbar, 10 x target band) tall, so a steady hold looks steady.
-        int32_t band = 10;
-        cfg_value(CFG_FROM_LIVE, CFG_BAND, &band);
-        float min = (float)band / 10.0f;   // 10 x band, band in 0.01 mbar
-        if (min < 1) min = 1;
+        // At least SPARK_SPAN_MIN tall (0.16.26; p_span_min or 10 x the
+        // target band to 0.16.25), so only a big change shows.
+        const float min = SPARK_SPAN_MIN;
         if (hi - lo < min) {
             float c = (lo + hi) / 2;
             lo = c - min / 2;
             hi = c + min / 2;
+            if (lo < 0) {   // no negative pressures: 0 to 10 mbar
+                hi -= lo;
+                lo = 0;
+            }
         } else {
             float pad = (hi - lo) * 0.08f;
             lo -= pad;
@@ -408,11 +456,13 @@ static void trend_draw(lv_event_t *e)
     int n = (int)(x1 - x0) / 2 + 1;   // a point every 2 px
 
     // Pressure axis: rounded step giving 3 to 5 intervals, never below 0
-    // unless a reading is (calibration drift reads a little negative).
+    // unless a reading is (calibration drift reads a little negative). At
+    // least p_span_min tall (0.5 mbar to 0.16.17).
     float lo = 0, hi = 10;
     pts_build(win, n);
     bool any = p_range(&lo, &hi);
-    float span = hi - lo < 0.5f ? 0.5f : hi - lo, mid = (hi + lo) / 2;
+    float pmin = p_span_min(lo, hi);
+    float span = hi - lo < pmin ? pmin : hi - lo, mid = (hi + lo) / 2;
     float raw_lo = lo;
     lo = mid - span * 0.6f;
     hi = mid + span * 0.6f;

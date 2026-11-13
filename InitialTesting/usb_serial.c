@@ -189,7 +189,7 @@ bool usb_serial_getline(char *buf, size_t n)
 
     // The NECTO UART Terminal sends the text with no line ending, so a line
     // also ends after LINE_IDLE_MS with nothing more received. Not a line
-    // typed key by key: a pause there would run half a command (VALV SET 5
+    // typed key by key: a pause there would run half a command (VALVE SET 5
     // for 50), so it waits for CR or LF.
     if (line.len > 0)
         quiet_ms = lv_tick_elaps(line.last_ms);   // the FIFO is empty here

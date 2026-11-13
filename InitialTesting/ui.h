@@ -17,7 +17,8 @@
  * Home is kept; other screens are created on open and deleted on leave.
  * A keypad or confirm dialog covers 0,40 480x232 except the STOP slot.
  *
- * Settings > Motor override (motor_screen.c) is a framework screen too.
+ * Motor settings > Override > Motor override (motor_screen.c; on Valve position to
+ * 0.16.16) is a framework screen too.
  */
 
 LV_FONT_DECLARE(ui_font_12)
@@ -61,6 +62,9 @@ void ui_btn_blue(lv_obj_t *btn);   // nav tile filled dark blue, white lettering
 void ui_btn_outline(lv_obj_t *btn, bool on);   // white, blue edge and word
 bool ui_btn_disabled(lv_event_t *e);
 void ui_btn_arrow(lv_obj_t *btn, bool up);       // a drawn 21 x 12 Up or Down chevron in place of the label
+// An icon (a font symbol or a UI_ICON_ below) centred over the label, which
+// moves to the bottom: the Menu's tiles (0.16.2). After ui_btn, before ui_btn_blue.
+void ui_btn_icon(lv_obj_t *btn, const char *icon);
 
 lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
 lv_obj_t *ui_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, const lv_font_t *font,
@@ -97,9 +101,10 @@ const char *ui_fw_text(void);
 void ui_init(void);            // after the drivers and valve/cfg init
 void ui_open(const ui_screen_t *s);
 bool ui_showing(const ui_screen_t *s);   // that screen is up
+const char *ui_screen_title(void);       // the screen up (the simulator's tests)
 void ui_home(void);            // back to Home (deletes the screen left)
 void ui_back(void);            // as the header Back
-void ui_service(void);         // Settings > Motor override (motor_screen.c)
+void ui_service(void);         // Motor settings > Override > Motor override (motor_screen.c)
 
 // Status strip. A message shows for 5 s with an OK, over the screen's own
 // line; refusals use it. The strip's action button is Home's.
@@ -113,6 +118,7 @@ typedef enum { UI_STRIP_INFO, UI_STRIP_PROMPT, UI_STRIP_WARN, UI_STRIP_FAULT } u
 #define UI_ICON_MODE   "\x01m"
 #define UI_ICON_VALVE  "\x01v"
 #define UI_ICON_TARGET "\x01t"
+#define UI_ICON_TREND  "\x01p"   // a chart with a pressure line (the Menu's Trend tile, 0.16.2)
 void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text);
 // Redraws the frame (header, strip, the screen's refresh) within 0.1 s
 // rather than at the next 0.5 s refresh; for a state the strip must show
@@ -149,6 +155,8 @@ void ui_keypad_ex(const ui_kp_t *k);
 void ui_confirm(const char *text, const char *ok, void (*on_ok)(void));
 // The Restart question (System, and the power icon in the template).
 void ui_restart_ask(void);
+// The power icon's Shut down question (also System > Shut down, 0.16.24).
+void ui_shutdown_ask(void);
 // Same with a named cancel button and its own action.
 void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void));
 // With a third button between them (NULL mid: as ui_ask).
@@ -189,10 +197,12 @@ int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 
 // invalidated (Home does it once a second); a tap opens Trend.
 extern const ui_screen_t ui_scr_trend;
 lv_obj_t *ui_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h, bool valve);
-// Valve, Calibrate valve, Events, Diagnostics (ui_valve.c).
+// Valve position, Events, Diagnostics (ui_valve.c).
 extern const ui_screen_t ui_scr_calib, ui_scr_faults, ui_scr_diag;
-// Settings, its five pages and Calibrate sensor (ui_settings.c).
-extern const ui_screen_t ui_scr_settings, ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_sensor_set, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
+// The settings pages, all on the Menu from 0.16.2 (no Settings page, no
+// Choose sensor): System and its two pages, Motor settings, PID tuning,
+// Review and save, Calibrate sensor (ui_settings.c).
+extern const ui_screen_t ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
                          ui_scr_sensor_cal;
 
 #endif // _UI_H_

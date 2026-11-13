@@ -48,8 +48,8 @@
  *   latches nothing; in AUTO it drops to MANUAL.
  * Outside AUTO, STOP stops and holds the valve without a latch (STOP event).
  *
- * The remote commands are in remote.c (PRES SP, MODE, VALV SET, STOP, ALRM,
- * EVNT?); they call the functions below, as the screens do.
+ * The remote commands are in remote.c (SETPOINT, MODE, VALVE SET, STOP, ALARM,
+ * EVENT?); they call the functions below, as the screens do.
  * Events go to the log only; nothing is sent unasked.
  */
 
@@ -70,6 +70,19 @@ bool valve_calibrated(void);
 typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
+// Pass band, "Disable switch" on screen from 0.16.22 ("Ignore switch" in
+// 0.16.21, Ryan 13 Nov: "change ignore to disable") (0.16.5, Ryan 9 Nov:
+// the valve binds about 13 % and the force switch trips there, off the
+// seat): while on and homed, between valve_pass_lo() and valve_pass_hi() %
+// open the switch neither stops closing nor raises W-1, W-4 or F-4. Motor
+// settings > Override (0.16.19). RAM only, off at power-up. The edges are
+// saved settings from 0.16.21 (Ryan 12 Nov: "make the boundary editable";
+// CFG_PASS_LO and CFG_PASS_HI, factory 5 and 50, 0 to 100 % from 0.16.22). Fixed before: 10 to 20 %
+// until 0.16.8, 5 to 25 % until 0.16.11, then 5 to 50 %.
+bool valve_limit_band(void);
+void valve_limit_band_set(bool on);
+int valve_pass_lo(void);         // % open
+int valve_pass_hi(void);
 int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
 bool valve_fault_latched(void);
 bool valve_motion_blocked(void); // a latched fault that stops the motor (not F-1, F-2)
@@ -177,10 +190,10 @@ const char *valve_last_cal_iso(void);   // "YYYY-MM-DD HH:MM:SS" then, "" if the
 
 // Adds an event to the log (tag up to 5 characters).
 void valve_event(const char *tag, const char *fmt, ...);
-// EVNT? <n>: "EVNT <n>" now, then n lines "<age s>,<tag>,<text>", newest
+// EVENT? <n>: "EVENT <n>" now, then n lines "<age s>,<tag>,<text>", newest
 // first, sent from valve_task as the link has room.
 void valve_events_send(int n);
-// An EVNT? dump is still going out: main.c holds the next command line
+// An EVENT? dump is still going out: main.c holds the next command line
 // (up to 0.5 s), so no reply lands among its lines. _stop drops the rest
 // (a new client).
 bool valve_events_sending(void);

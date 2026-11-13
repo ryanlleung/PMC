@@ -98,7 +98,7 @@ def run(board_port, secop_port):
         except Exception:
             check('setpoint out of range refused', True)
 
-        # a board without the barometer replies BARO NONE: status says so instead
+        # a board without the barometer replies BAROMETER NONE: status says so instead
         baro = get('room_pressure', 'value')
         check('room pressure read', abs(baro - 1013.25) < 0.01
               or get('room_pressure', 'status')[1].startswith('no reading'), baro)

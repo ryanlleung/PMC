@@ -63,9 +63,9 @@ static void refuse(int err, const char *fmt, ...)
  *   101 expected: <the form>      202 switch to MANUAL first
  *   102 outside <low> to <high>   203 reset the fault first
  *   103 line too long             204 home the valve first
- *   104 EVNT? on its own line     205 no valid pressure
- *                                 206 set a target first
- *                                 207 target outside the sensor range
+ *   104 EVENT? on its own line    205 no valid pressure
+ *                                 206 set a setpoint first
+ *                                 207 setpoint outside the sensor range
  *                                 208 pressure above the sensor range
  *                                 209 control settings not set
  *                                 210 not reset, cause still present
@@ -83,14 +83,15 @@ static const struct { const char *head; int num; const char *text; } why_codes[]
     { "Reset the fault", 203, "Reset the fault first" },
     { "Home the valve", 204, "Home the valve first" },
     { "No valid pressure", 205, "No valid pressure" }, { "No pressure", 205, "No valid pressure" },
-    { "Set a setpoint", 206, "Set a target first" },
-    { "Setpoint outside", 207, "Target outside the sensor range" },
+    { "Set a setpoint", 206, NULL },
+    { "Setpoint outside", 207, NULL },
     { "Pressure above", 208, "Pressure above the sensor range" },
     { "Pressure response", 209, "Control settings not set" },
     { "Tuning not set", 209, "Control settings not set" },
     { "Controller is off", 213, "Controller is off" },
     { "Shutting down", 213, "Shutting down, STOP to cancel" },
     { "B2 must", 102, NULL },   // SCHED SET boundaries (0.15.15)
+    { "B3 must", 102, NULL },   // and the third (0.16.14)
     { "Expected", 101, NULL },
     { "Outside", 102, NULL },
 };
@@ -115,8 +116,8 @@ static void refuse_why(const char *why)
  * Queries
  * ------------------------------------------------------------------------ */
 
-// ALRM?: faults first (tag, whether ALRM RESET clears it now, text), then
-// the warnings: 1 for a warning ALRM OK clears, 0 while its cause is there.
+// ALARM?: faults first (tag, whether ALARM RESET clears it now, text), then
+// the warnings: 1 for a warning ALARM OK clears, 0 while its cause is there.
 // The parts join with '|'; a '|' or ';' in a text would split the reply, so
 // it becomes ','.
 static void alarm_query(void)
@@ -149,9 +150,9 @@ static void alarm_query(void)
         PART("W-3", 0, "Controller hot");
 #undef PART
     if (n)
-        reply("ALRM %s", a);
+        reply("ALARM %s", a);
     else
-        reply("ALRM NONE");
+        reply("ALARM NONE");
 }
 
 static void idn_query(void)
@@ -163,12 +164,12 @@ static void netw_query(void)
 {
 #if PMC_LINK_ETHERNET
     if (ethlink_ip()[0])
-        reply("NETW STATIC,%s,%s,%s", ethlink_ip(), ethlink_mask(),
+        reply("NETWORK STATIC,%s,%s,%s", ethlink_ip(), ethlink_mask(),
               ethlink_mac()[0] ? ethlink_mac() : "NONE");
     else
-        reply("NETW NONE");
+        reply("NETWORK NONE");
 #else
-    reply("NETW NONE");   // the USB build: no Ethernet
+    reply("NETWORK NONE");   // the USB build: no Ethernet
 #endif
 }
 
@@ -179,33 +180,33 @@ static bool query(const char *c)
     char v[24];
     int32_t t;
 
-    if (strcmp(c, "PRES?") == 0) {
+    if (strcmp(c, "PRESSURE?") == 0) {
         if (s->reading_ok)
-            reply("PRES %s mbar", fixed_fmt(v, sizeof v, s->p_mmbar, 3));
+            reply("PRESSURE %s mbar", fixed_fmt(v, sizeof v, s->p_mmbar, 3));
         else
-            reply("PRES NONE");
-    } else if (strcmp(c, "PRES SP?") == 0) {
+            reply("PRESSURE NONE");
+    } else if (strcmp(c, "SETPOINT?") == 0) {
         if (valve_target(&t))
-            reply("PRES SP %s mbar", fixed_fmt(v, sizeof v, fixed_round(t, 2), 1));
+            reply("SETPOINT %s mbar", fixed_fmt(v, sizeof v, fixed_round(t, 2), 1));
         else
-            reply("PRES SP NONE");
+            reply("SETPOINT NONE");
     } else if (strcmp(c, "MODE?") == 0) {
         reply("MODE %s", valve_mode_name());
-    } else if (strcmp(c, "VALV?") == 0) {
+    } else if (strcmp(c, "VALVE?") == 0) {
         if (valve_reference() != VALVE_REF_NONE)
-            reply("VALV %s %%", fixed_fmt(v, sizeof v, fixed_round(valve_pct_milli(), 1), 2));
+            reply("VALVE %s %%", fixed_fmt(v, sizeof v, fixed_round(valve_pct_milli(), 1), 2));
         else
-            reply("VALV NONE");
-    } else if (strcmp(c, "VALV MOVING?") == 0) {
-        reply("VALV MOVING %d", stepper3_busy() || valve_mode() == VALVE_CALIBRATING ? 1 : 0);
-    } else if (strcmp(c, "BARO?") == 0) {
+            reply("VALVE NONE");
+    } else if (strcmp(c, "VALVE MOVING?") == 0) {
+        reply("VALVE MOVING %d", stepper3_busy() || valve_mode() == VALVE_CALIBRATING ? 1 : 0);
+    } else if (strcmp(c, "BAROMETER?") == 0) {
         if (s->baro_ok)
-            reply("BARO %s mbar", fixed_fmt(v, sizeof v, fixed_round(s->baro_mmbar, 1), 2));
+            reply("BAROMETER %s mbar", fixed_fmt(v, sizeof v, fixed_round(s->baro_mmbar, 1), 2));
         else
-            reply("BARO NONE");
-    } else if (strcmp(c, "ALRM?") == 0) {
+            reply("BAROMETER NONE");
+    } else if (strcmp(c, "ALARM?") == 0) {
         alarm_query();
-    } else if (strcmp(c, "NETW?") == 0) {
+    } else if (strcmp(c, "NETWORK?") == 0) {
         netw_query();
     } else if (strcmp(c, "TIME?") == 0) {
         if (rtclock_valid())
@@ -215,23 +216,25 @@ static bool query(const char *c)
     } else if (strcmp(c, "*IDN?") == 0) {
         idn_query();
     } else if (strcmp(c, "PID?") == 0) {
-        // The set in use (0.15.15; set 1 with the schedule Off, as before).
+        // The set in use (0.15.15; the PID table always on from 0.16.20).
         char kp[16], ti[16];
         const int n = valve_pid_set();
         reply("PID %s,%s,%s", fixed_fmt(kp, sizeof kp, cfg_tune(cfg_pid_key(n, 0)), 2),
               fixed_fmt(ti, sizeof ti, cfg_tune(cfg_pid_key(n, 1)), 2),
               fixed_fmt(v, sizeof v, cfg_tune(cfg_pid_key(n, 2)), 2));
     } else if (strcmp(c, "PIDS?") == 0) {
-        char g[3][3][16];
-        for (int n = 1; n <= 3; n++)
+        // The set in use, then sets 1 to 4 (set 4 from 0.16.14).
+        char g[4][3][16];
+        for (int n = 1; n <= 4; n++)
             for (int w = 0; w < 3; w++)
                 fixed_fmt(g[n - 1][w], sizeof g[0][0], cfg_tune(cfg_pid_key(n, w)), 2);
-        reply("PIDS %d,%s,%s,%s,%s,%s,%s,%s,%s,%s", valve_pid_set(), g[0][0], g[0][1], g[0][2],
-              g[1][0], g[1][1], g[1][2], g[2][0], g[2][1], g[2][2]);
+        reply("PIDS %d,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s", valve_pid_set(), g[0][0], g[0][1], g[0][2],
+              g[1][0], g[1][1], g[1][2], g[2][0], g[2][1], g[2][2], g[3][0], g[3][1], g[3][2]);
     } else if (strcmp(c, "SCHED?") == 0) {
-        char b1[16], b2[16];
-        reply("SCHED %s,%s,%s,%ld", cfg_tune(CFG_SCHED) == CTRL_SCHED_PV ? "PV" : "OFF", fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1),
-              fixed_fmt(b2, sizeof b2, cfg_tune(CFG_B2), 1), (long)cfg_tune(CFG_HYST));
+        char b1[16], b2[16], b3[16];
+        reply("SCHED %s,%s,%s,%s,%ld", cfg_tune(CFG_SCHED) == CTRL_SCHED_PV ? "PV" : "OFF",
+              fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1), fixed_fmt(b2, sizeof b2, cfg_tune(CFG_B2), 1),
+              fixed_fmt(b3, sizeof b3, cfg_tune(CFG_B3), 1), (long)cfg_tune(CFG_HYST));
     } else {
         return false;
     }
@@ -279,8 +282,8 @@ static void pid_set(const char *c, bool pick)
             refuse(101, form);
             return;
         }
-        if (x < 1 || x > 3) {
-            refuse(102, "Outside 1 to 3 for the set");
+        if (x < 1 || x > 4) {
+            refuse(102, "Outside 1 to 4 for the set");
             return;
         }
         set = (int)x;
@@ -317,22 +320,24 @@ static void pid_set(const char *c, bool pick)
         refuse_why(why);
 }
 
-// SCHED SET <OFF|PV>,<b1>,<b2>,<h> (0.15.15; SP removed in 0.15.20): the PID table, as the
-// PID tuning Schedule tab's Save. Boundaries in mbar (1 dp), hysteresis %.
+// SCHED SET PV,<b1>,<b2>,<b3>,<h> (0.15.15; SP removed in 0.15.20; b3, the
+// boundary to set 4, from 0.16.14; OFF refused from 0.16.20, the PID table
+// always on, Ryan 12 Nov): the PID table, as the PID tuning PID table tab's
+// Save. Boundaries in mbar (1 dp), hysteresis %.
 static void sched_set(const char *c)
 {
-    static const char *const form = "Expected: SCHED SET <OFF|PV>,<b1>,<b2>,<h>";
-    static const cfg_key_t key[4] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST };
-    static const char *const nm[4] = { "", "B1", "B2", "H" };
-    static const int dec[4] = { 0, 1, 1, 0 };
+    static const char *const form = "Expected: SCHED SET PV,<b1>,<b2>,<b3>,<h>";
+    static const cfg_key_t key[5] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    static const char *const nm[5] = { "", "B1", "B2", "B3", "H" };
+    static const int dec[5] = { 0, 1, 1, 1, 0 };
     int32_t v[CFG_N] = { 0 };
     bool on[CFG_N] = { false }, same = true;
     char buf[LINK_LINE_MAX + 1], a[16], b[16];
     lv_strlcpy(buf, c, sizeof buf);
     char *p = buf, *e = NULL;
-    for (int n = 0; n < 4; n++, p = e + 1) {
+    for (int n = 0; n < 5; n++, p = e + 1) {
         e = strchr(p, ',');
-        if ((n < 3) != (e != NULL)) {
+        if ((n < 4) != (e != NULL)) {
             refuse(101, form);
             return;
         }
@@ -345,8 +350,11 @@ static void sched_set(const char *c)
             char *q = p + strlen(p);
             while (q > p && q[-1] == ' ')
                 *--q = '\0';
-            if (strcmp(p, "OFF") == 0) x = CTRL_SCHED_OFF;
-            else if (strcmp(p, "PV") == 0) x = CTRL_SCHED_PV;
+            if (strcmp(p, "OFF") == 0) {
+                refuse(102, "The PID table is always on: give PV");
+                return;
+            }
+            if (strcmp(p, "PV") == 0) x = CTRL_SCHED_PV;
             else {
                 refuse(101, form);
                 return;
@@ -373,16 +381,26 @@ static void sched_set(const char *c)
         refuse_why(why);
 }
 
+// What follows the command words (a space and the value, or ""), or NULL if
+// the line does not start with them as whole words.
+static const char *after(const char *c, const char *words)
+{
+    const size_t n = strlen(words);
+    if (strncmp(c, words, n) != 0 || (c[n] != ' ' && c[n] != '\0'))
+        return NULL;
+    return c + n;
+}
+
 static bool set(const char *c)
 {
-    const char *why;
+    const char *why, *v_text;
     int64_t v;
     char a[16];
 
-    if (strncmp(c, "PRES SP ", 8) == 0) {
+    if ((v_text = after(c, "SETPOINT")) != NULL) {
         int32_t fs = valve_range_mmbar();
-        if (!number(c + 8, 3, &v))
-            refuse(101, "Expected: PRES SP <mbar>");
+        if (!number(v_text, 3, &v))
+            refuse(101, "Expected: SETPOINT <mbar>");
         else if (v < 0 || v > fs)
             refuse(102, "Outside 0 to %s mbar", fixed_fmt(a, sizeof a, fixed_round(fs, 2), 1));
         else if (!valve_set_target((int32_t)v, &why))
@@ -397,37 +415,37 @@ static bool set(const char *c)
             refuse_why(valve_off_why());
         else if (valve_auto() && !valve_to_manual(&why))
             refuse_why(why);
-    } else if (strncmp(c, "MODE", 4) == 0 && (c[4] == ' ' || c[4] == '\0')) {
+    } else if (after(c, "MODE")) {
         refuse(101, "Expected: MODE AUTO or MODE MANUAL");
-    } else if (strncmp(c, "VALV SET", 8) == 0 && (c[8] == ' ' || c[8] == '\0')) {
-        if (!number(c + 8, 1, &v))
-            refuse(101, "Expected: VALV SET <%%>");
+    } else if ((v_text = after(c, "VALVE SET")) != NULL) {
+        if (!number(v_text, 1, &v))
+            refuse(101, "Expected: VALVE SET <%%>");
         else if (v < 0 || v > 1000)
             refuse(102, "Outside 0 to 100 %%");
         else if (!valve_goto_pct10((int32_t)v, &why))
             refuse_why(why);
     } else if (strcmp(c, "STOP") == 0) {
         valve_stop();
-    } else if (strcmp(c, "ALRM RESET") == 0) {
+    } else if (strcmp(c, "ALARM RESET") == 0) {
         char left[40];
         valve_reset(left, sizeof left);
         if (left[0])
             refuse(210, "Not reset, cause still present: %s", left);
-    } else if (strcmp(c, "ALRM OK") == 0) {
+    } else if (strcmp(c, "ALARM OK") == 0) {
         // The screen OK and the Modbus OK coil: clear the strip warning.
         const char *w = valve_warning();
         if (w) {
             valve_event("OK", "Warning OK (link): %s", w);
             valve_warning_clear();
         }
-    } else if (strncmp(c, "PID SET", 7) == 0 && (c[7] == ' ' || c[7] == '\0')) {
-        pid_set(c + 7, false);
-    } else if (strncmp(c, "PIDS SET", 8) == 0 && (c[8] == ' ' || c[8] == '\0')) {
-        pid_set(c + 8, true);
-    } else if (strncmp(c, "SCHED SET", 9) == 0 && (c[9] == ' ' || c[9] == '\0')) {
-        sched_set(c + 9);
-    } else if (strncmp(c, "TIME SET", 8) == 0 && (c[8] == ' ' || c[8] == '\0')) {
-        why = rtclock_set_text(c[8] ? c + 9 : "");
+    } else if ((v_text = after(c, "PID SET")) != NULL) {
+        pid_set(v_text, false);
+    } else if ((v_text = after(c, "PIDS SET")) != NULL) {
+        pid_set(v_text, true);
+    } else if ((v_text = after(c, "SCHED SET")) != NULL) {
+        sched_set(v_text);
+    } else if ((v_text = after(c, "TIME SET")) != NULL) {
+        why = rtclock_set_text(v_text[0] ? v_text + 1 : "");
         if (why && strncmp(why, "Expected", 8) == 0)
             refuse(101, "Expected: TIME SET <YYYY-MM-DD> <HH:MM:SS>");
         else if (why)
@@ -444,12 +462,13 @@ static bool set(const char *c)
  * ------------------------------------------------------------------------ */
 static void part(const char *c, bool chained)
 {
-    if (strcmp(c, "EVNT?") == 0 || strncmp(c, "EVNT? ", 6) == 0) {
+    const char *count = after(c, "EVENT?");
+    if (count) {
         int64_t n = 1;
         if (chained)
-            refuse(104, "EVNT? must be on its own line");
-        else if (c[5] && !number(c + 6, 0, &n))
-            refuse(101, "Expected: EVNT? [<n>]");
+            refuse(104, "EVENT? must be on its own line");
+        else if (count[0] && !number(count, 0, &n))
+            refuse(101, "Expected: EVENT? [<n>]");
         else if (n < 1 || n > 100)
             refuse(102, "Outside 1 to 100");
         else

@@ -5,7 +5,8 @@
  * Covers: a version 1 record (0.6.0 to 0.8.x) loading as one sensor; a save
  * from the screens (cfg_save_with) going to the other sector as version 2;
  * a restart; Load settings > Previous save; the IP address (version 4); a combination refused as a
- * whole; sensors added, switched and removed with their own cals; a motor
+ * whole; a record with several sensors (0.9.0 to 0.16.1) loading as the one
+ * in use at the 15 psia range and saving as one (0.16.2); a motor
  * direction change clearing the calibration; a spoiled record; and the
  * saved valve position written at standstill, withdrawn by a move, and
  * found again after the log wraps to the next sector.
@@ -183,12 +184,40 @@ static uint32_t crc32(const void *data, size_t len)
     return ~c;
 }
 
-// A version 8 record (0.15.15) in buf made a version 7 one: tune[7..17],
+// A version 10 record (0.16.21) in buf made a version 9 one: tune[22..23],
+// the Ignore switch edges, taken out (after the 16-byte header, mot[7],
+// valve[7] and tune[0..21]). Returns the version 9 size; the CRC is left for
+// the caller.
+static uint32_t as_v9(uint8_t *buf, uint32_t size10)
+{
+    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 22 * 4, nine = 9, size9 = size10 - 2 * 4;
+    memmove(buf + at, buf + at + 2 * 4, size10 - at - 2 * 4);
+    memcpy(buf + 4, &nine, 4);
+    memcpy(buf + 8, &size9, 4);
+    return size9;
+}
+
+// A version 10 record in buf made a version 8 one: as_v9, then tune[18..21],
+// PID set 4 and boundary 3, taken out (after the 16-byte header, mot[7],
+// valve[7] and tune[0..17]). Returns the version 8 size; the CRC is left
+// for the caller.
+static uint32_t as_v8(uint8_t *buf, uint32_t size10)
+{
+    const uint32_t size9 = as_v9(buf, size10);
+    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 18 * 4, eight = 8, size8 = size9 - 4 * 4;
+    memmove(buf + at, buf + at + 4 * 4, size9 - at - 4 * 4);
+    memcpy(buf + 4, &eight, 4);
+    memcpy(buf + 8, &size8, 4);
+    return size8;
+}
+
+// A version 9 record in buf made a version 7 one: as_v8, then tune[7..17],
 // the PID sets 2 and 3, the schedule and the closing deadband, taken out
 // (after the 16-byte header, mot[7], valve[7] and tune[0..6]). Returns the
 // version 7 size; the CRC is left for the caller.
-static uint32_t as_v7(uint8_t *buf, uint32_t size8)
+static uint32_t as_v7(uint8_t *buf, uint32_t size9)
 {
+    const uint32_t size8 = as_v8(buf, size9);
     const uint32_t at = 16 + 7 * 4 + 7 * 4 + 7 * 4, seven = 7, size7 = size8 - 11 * 4;
     memmove(buf + at, buf + at + 11 * 4, size8 - at - 11 * 4);
     memcpy(buf + 4, &seven, 4);
@@ -196,12 +225,12 @@ static uint32_t as_v7(uint8_t *buf, uint32_t size8)
     return size7;
 }
 
-// A version 8 record in buf made a version 6 one: as_v7, then tune[6], KD,
+// A version 9 record in buf made a version 6 one: as_v7, then tune[6], KD,
 // taken out (after the 16-byte header, mot[7], valve[7] and tune[0..5]).
 // Returns the version 6 size; the CRC is left for the caller.
-static uint32_t as_v6(uint8_t *buf, uint32_t size8)
+static uint32_t as_v6(uint8_t *buf, uint32_t size9)
 {
-    const uint32_t size7 = as_v7(buf, size8);
+    const uint32_t size7 = as_v7(buf, size9);
     const uint32_t at = 16 + 7 * 4 + 7 * 4 + 6 * 4, six = 6, size6 = size7 - 4;
     memmove(buf + at, buf + at + 4, size7 - at - 4);
     memcpy(buf + 4, &six, 4);
@@ -291,6 +320,36 @@ static void corrupt_newest(void)
         flash[0x7FD000 + sl * 0x1000 + 12] ^= 0x5A;   // the rev: the CRC no longer matches
 }
 
+// nsens in a version 10 record: after the header, mot[7], valve[7], tune[24].
+#define REC_NSENS_AT (16 + 7 * 4 + 7 * 4 + 24 * 4)
+
+// Makes the version 10 record at addr one with three sensors, as 0.9.0 to
+// 0.16.1 could save: the one it holds (slot 0), then s/n 1234567 at 30 psi
+// and s/n 7654321 at 15 psi, both uncalibrated, with slot active in use.
+static void three_sensors(uint32_t addr, uint32_t active)
+{
+    static uint8_t rec[4096];
+    const uint8_t *r = flash + addr;
+    uint32_t size, nsens = 3, crc, zero = 0;
+    const uint32_t sens_sz = 12 + sizeof(cal_rec_t);
+    memcpy(&size, r + 8, 4);
+    memcpy(rec, r, size);
+    memcpy(rec + REC_NSENS_AT, &nsens, 4);
+    memcpy(rec + REC_NSENS_AT + 4, &active, 4);
+    const uint32_t sn[2] = { 1234567, 7654321 }, psi[2] = { 300, 150 };
+    for (int i = 0; i < 2; i++) {
+        uint8_t *q = rec + REC_NSENS_AT + 8 + (i + 1) * sens_sz;
+        memset(q, 0, sens_sz);
+        memcpy(q, &sn[i], 4);
+        memcpy(q + 4, &psi[i], 4);
+        memcpy(q + 8, &zero, 4);
+    }
+    crc = crc32(rec, size - 4);
+    memcpy(rec + size - 4, &crc, 4);
+    extflash_erase_4k(addr);
+    extflash_write(addr, rec, size);
+}
+
 static int32_t val(cfg_from_t f, cfg_key_t k)
 {
     int32_t v = -999999;
@@ -305,7 +364,6 @@ static void test_cfg(void)
     const char *why;
     uint32_t rev;
     const char *at;
-    cfg_sensor_t s;
 
     // A 0.8.x board: one version 1 record in A.
     write_v1(0x7FD000, 5);
@@ -313,9 +371,10 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 5);
     CHECK(!cfg_rev(CFG_FROM_PREVIOUS, &rev, &at));
     CHECK(m_rate == 350 && m_start == 180);
-    CHECK(cfg_sensor_count() == 1 && cfg_sensor(0, &s) && s.serial == 5880156 && s.psi10 == 150 && s.in_use);
-    CHECK(s.has_cal && s.saved && !cal_is_default());
-    CHECK(val(CFG_FROM_LIVE, CFG_KP) == 400 && val(CFG_FROM_LIVE, CFG_BAND) == 10);
+    CHECK(cfg_sensor_range_mmbar() == 1034214 && strncmp(cal_id(), "5880156 bench", 13) == 0);
+    CHECK(cal_saved() && !cal_is_default());
+    CHECK(!cfg_value(CFG_FROM_LIVE, (cfg_key_t)CFG_N, &v[0]) && !cfg_value(CFG_FROM_LIVE, (cfg_key_t)-1, &v[0]));   // CFG_SENSOR, gone in 0.16.2
+    CHECK(val(CFG_FROM_LIVE, CFG_KP) == 6 && val(CFG_FROM_LIVE, CFG_BAND) == 10);   // the factory's (KP 0.06 from 0.16.18)
     CHECK(cfg_unsaved() == 0);
 
     // Save from the screens: gain 2.50, run speed 500.
@@ -326,7 +385,7 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_PREVIOUS, &rev, &at) && rev == 5);
     uint32_t ver;
     memcpy(&ver, flash + 0x7FE004, 4);
-    CHECK(ver == 8);   // the save went to B, the v1 record in A is kept
+    CHECK(ver == 10);   // the save went to B, the v1 record in A is kept
     memcpy(&ver, flash + 0x7FD004, 4);
     CHECK(ver == 1);
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
@@ -373,30 +432,48 @@ static void test_cfg(void)
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
 
-    // A second sensor: added (in use, unsaved), then selected and saved.
-    CHECK(cfg_sensor_add(1234567, 300, &why));
-    CHECK(!cfg_sensor_add(1234567, 300, &why));
-    CHECK(cfg_sensor_count() == 2 && cfg_unsaved() == 1);
-    memset(set, 0, sizeof set);
-    v[CFG_SENSOR] = 1234567; set[CFG_SENSOR] = true;
-    CHECK(cfg_save_with(v, set, &why));
-    CHECK(cfg_sensor(cfg_sensor_active(), &s) && s.serial == 1234567 && !s.has_cal && cal_is_default());
-    // Nominal over 30 psi: 10 mV/V is 2068.4 mbar.
-    CHECK(cal_pressure_mmbar(10000000) == cfg_psi10_mmbar(300));
-    CHECK(!cfg_sensor_remove(1234567, &why));   // in use
-    // Back to the first: its own cal comes back.
-    v[CFG_SENSOR] = 5880156;
-    CHECK(cfg_save_with(v, set, &why));
-    CHECK(!cal_is_default() && cal_pressure_mmbar(9300000) == 1013200);
-    CHECK(cfg_sensor_remove(1234567, &why) && cfg_sensor_count() == 1 && cfg_unsaved() == 1);
-    // Removed, then the previous save (which had it) put back.
-    CHECK(cfg_load_live(CFG_FROM_SAVED, &why) && cfg_sensor_count() == 2);
-    CHECK(cfg_sensor_remove(1234567, &why));
+    // A record from 0.9.0 to 0.16.1 with three sensors, the second (30 psi,
+    // uncalibrated) in use: one sensor per board from 0.16.2, so it loads
+    // as that sensor at the 15 psia range, nothing counts as unsaved, and
+    // the next save writes it alone.
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
+    three_sensors(0x7FE000, 1);   // the newest, rev 6, version 9, in B
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
+    CHECK(cal_is_default());   // the sensor in use is uncalibrated (the nominal id, not its serial, until a capture)
+    CHECK(cfg_sensor_range_mmbar() == 1034214 && cal_pressure_mmbar(10000000) == 1034214);   // 15 psia, not 30
+    CHECK(cfg_unsaved() == 0 && cal_saved());
+    const cal_rec_t *sv;
+    CHECK(cfg_saved_cal(&sv) && sv == NULL);   // saved without a cal
     CHECK(cfg_save());
+    {
+        uint32_t nsens, active, ver;
+        memcpy(&nsens, flash + 0x7FD000 + REC_NSENS_AT, 4);
+        memcpy(&active, flash + 0x7FD000 + REC_NSENS_AT + 4, 4);
+        memcpy(&ver, flash + 0x7FD004, 4);
+        CHECK(ver == 10 && nsens == 1 && active == 0);   // written as one sensor, rev 7 in A
+    }
+    // The same record with the bench Druck (s/n 5880156, calibrated) in use,
+    // as the previous save: loading it brings that cal.
+    three_sensors(0x7FE000, 0);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 7 && cal_is_default());
+    CHECK(cfg_load_live(CFG_FROM_PREVIOUS, &why));
+    CHECK(strncmp(cal_id(), "5880156 bench", 13) == 0 && !cal_is_default() && cal_pressure_mmbar(9300000) == 1013200);
+    CHECK(cfg_unsaved() == 1 && !cal_saved());   // the calibration differs from the newest save
+    CHECK(cfg_save());
+    CHECK(cfg_unsaved() == 0 && cal_saved());
 
-    // Factory defaults keep the sensors.
+    // Factory defaults keep the sensor's calibration.
     CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why));
-    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 400 && cfg_sensor_count() == 1 && !cal_is_default());
+    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && !cal_is_default());
+    // The factory PID table (0.16.18, Ryan 12 Nov): On by the pressure, B 6/10/14 mbar, 15 %; sets 0.06/0.60,
+    // 0.12/0.82, 0.80/0.94, 0.40/0.25, KD 0.
+    CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140 &&
+          cfg_tune(CFG_HYST) == 15);
+    CHECK(cfg_tune(CFG_TI) == 60 && cfg_tune(CFG_KD) == 0 && cfg_tune(CFG_KP2) == 12 && cfg_tune(CFG_TI2) == 82 &&
+          cfg_tune(CFG_KP3) == 80 && cfg_tune(CFG_TI3) == 94 && cfg_tune(CFG_KP4) == 40 && cfg_tune(CFG_TI4) == 25 &&
+          cfg_tune(CFG_KD2) == 0 && cfg_tune(CFG_KD3) == 0 && cfg_tune(CFG_KD4) == 0);
     CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
 
     // A latched fault locks the step mode: a load that would change it is
@@ -451,7 +528,7 @@ static void test_capture(void)
     CHECK(cal_pressure_mmbar(9310000) == 1012000 && cal_pressure_mmbar(51000) == 0);
     CHECK(strncmp(cal_id(), "5880156 bench 26-10-16", 22) == 0);
     const cal_rec_t *sv;
-    CHECK(cfg_saved_cal(5880156, &sv) && sv && cal_pressure_with(sv, 9300000) == 1013200);
+    CHECK(cfg_saved_cal(&sv) && sv && cal_pressure_with(sv, 9300000) == 1013200);
     CHECK(cfg_save_with(v, set, &why) && cal_saved() && cfg_unsaved() == 0);
 }
 
@@ -485,7 +562,7 @@ static void test_name(void)
             memcpy(&r3, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             uint32_t v3;
             memcpy(&v3, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (v3 == 8 && r3 >= a3) { a3 = r3; sl = i; }
+            if (v3 == 10 && r3 >= a3) { a3 = r3; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size4, flash + base + 8, 4);
@@ -546,7 +623,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 8 && r >= a4) { a4 = r; sl = i; }
+            if (ver == 10 && r >= a4) { a4 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, three = 3;
         memcpy(&size4, flash + base + 8, 4);
@@ -586,7 +663,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 8 && r >= a5) { a5 = r; sl = i; }
+            if (ver == 10 && r >= a5) { a5 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000, four = 4;
         memcpy(&size5, flash + base + 8, 4);
@@ -623,7 +700,7 @@ static void test_net(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 8 && r >= a6) { a6 = r; sl = i; }
+            if (ver == 10 && r >= a6) { a6 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size6, flash + base + 8, 4);
@@ -651,6 +728,8 @@ static void test_kd(void)
     const char *why;
     cfg_range(CFG_KD, &lo, &hi);
     CHECK(lo == 0 && hi == 10000 && cfg_tune(CFG_KD) == 0);
+    cfg_range(CFG_BAND, &lo, &hi);   // the setpoint band from 0 (0.16.16, Ryan 12 Nov)
+    CHECK(lo == 0 && hi == 1000);
     v[CFG_KD] = 150; set[CFG_KD] = true;
     v[CFG_KP] = 40; set[CFG_KP] = true;
     CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_KD) == 150);
@@ -663,13 +742,13 @@ static void test_kd(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 8 && r >= a7) { a7 = r; sl = i; }
+            if (ver == 10 && r >= a7) { a7 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size7, flash + base + 8, 4);
         static uint8_t buf[4096];
         memcpy(buf, flash + base, size7);
-        uint32_t size6 = as_v6(buf, size7);   // size7: the version 8 record's
+        uint32_t size6 = as_v6(buf, size7);   // size7: the version 9 record's
         uint32_t c = crc32(buf, size6 - 4);
         memcpy(buf + size6 - 4, &c, 4);
         extflash_erase_4k(base);
@@ -688,8 +767,8 @@ static void test_kd(void)
 
 // Gain schedule (0.15.15, version 8): PID sets 2 and 3, the schedule and
 // the closing deadband are saved settings; a version 7 record loads with
-// sets 2 and 3 as set 1, the schedule Off and the closing deadband as the
-// deadband, so AUTO runs as it did.
+// sets 2 and 3 as set 1, the schedule on (Off to 0.16.19; with every set
+// the same AUTO runs as it did) and the closing deadband as the deadband.
 static void test_sched(void)
 {
     int32_t v[CFG_N] = { 0 }, lo, hi;
@@ -697,7 +776,7 @@ static void test_sched(void)
     const char *why;
     CHECK(cfg_pid_key(1, 0) == CFG_KP && cfg_pid_key(2, 1) == CFG_TI2 && cfg_pid_key(3, 2) == CFG_KD3);
     cfg_range(CFG_SCHED, &lo, &hi);
-    CHECK(lo == 0 && hi == 2);
+    CHECK(lo == 2 && hi == 2);   // always on the pressure from 0.16.20
     cfg_range(CFG_HYST, &lo, &hi);
     CHECK(lo == 0 && hi == 40);
     // Boundaries too close for the hysteresis: refused, nothing changes.
@@ -705,28 +784,34 @@ static void test_sched(void)
     v[CFG_B2] = 250; set[CFG_B2] = true;
     v[CFG_HYST] = 15; set[CFG_HYST] = true;
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B2 must be above B1"));
-    CHECK(cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 200);
-    // The 5 Nov proposal for CF-11, on the pressure.
+    CHECK(cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140);
+    // The 5 Nov proposal for CF-11, on the pressure: B2 20 mbar is above
+    // the factory B3 (14), so refused unless B3 is 0 (three sets) or above.
     memset(set, 0, sizeof set);
-    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST, CFG_DB, CFG_DBC };
-    const int32_t x[] = { 10, 40, 80, 30, 120, 30, 2, 60, 200, 15, 200, 8 };
+    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST, CFG_DB, CFG_DBC,
+                            CFG_B3 };
+    const int32_t x[] = { 10, 40, 80, 30, 120, 30, 2, 60, 200, 15, 200, 8, 0 };
     for (int i = 0; i < 12; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
+    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B3 must be above B2"));
+    v[CFG_B3] = 0; set[CFG_B3] = true;
     CHECK(cfg_save_with(v, set, &why));
     reboot();
     bool all = true;
-    for (int i = 0; i < 12; i++) all &= cfg_tune(k[i]) == x[i];
+    for (int i = 0; i < 13; i++) all &= cfg_tune(k[i]) == x[i];
     CHECK(all && cfg_unsaved() == 0);
-    // In AUTO the schedule is tuning too: taken without leaving AUTO.
+    // In AUTO the PID table is tuning too: taken without leaving AUTO. Off
+    // (0) is refused from 0.16.20 (Ryan 12 Nov: "always has pid table").
     v_auto = true;
     memset(set, 0, sizeof set);
     v[CFG_SCHED] = 0; set[CFG_SCHED] = true;
     v[CFG_KP3] = 150; set[CFG_KP3] = true;
-    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_KP3) == 150);
+    CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 120);
     v[CFG_SCHED] = 2;
-    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2);
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150);
     v_auto = false;
     // 1, the setpoint schedule (0.15.15 to 0.15.19), removed in 0.15.20:
-    // refused on save; a saved record holding it loads with the PID table Off.
+    // refused on save; a saved record holding it, or 0 (Off, to 0.16.19),
+    // loads with the PID table on the pressure and the sets as saved.
     memset(set, 0, sizeof set);
     v[CFG_SCHED] = 1; set[CFG_SCHED] = true;
     CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2);
@@ -737,7 +822,7 @@ static void test_sched(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 8 && r >= a8) { a8 = r; sl = i; }
+            if (ver == 10 && r >= a8) { a8 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size8, flash + base + 8, 4);
@@ -752,7 +837,16 @@ static void test_sched(void)
         uint32_t rev;
         const char *at;
         CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
-        CHECK(cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
+        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
+        uint32_t off = 0;                                       // the same with 0, Off
+        memcpy(buf + 16 + 7 * 4 + 7 * 4 + 13 * 4, &off, 4);
+        c = crc32(buf, size8 - 4);
+        memcpy(buf + size8 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size8);
+        reboot();
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
+        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
     }
     // The same record as version 7.
     {
@@ -762,7 +856,7 @@ static void test_sched(void)
             uint32_t r, ver;
             memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
             memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 8 && r >= a8) { a8 = r; sl = i; }
+            if (ver == 10 && r >= a8) { a8 = r; sl = i; }
         }
         uint32_t base = 0x7FD000 + sl * 0x1000;
         memcpy(&size8, flash + base + 8, 4);
@@ -780,8 +874,139 @@ static void test_sched(void)
         CHECK(cfg_tune(CFG_KP) == 10 && cfg_tune(CFG_TI) == 40 && cfg_tune(CFG_DB) == 200);
         CHECK(cfg_tune(CFG_KP2) == 10 && cfg_tune(CFG_TI2) == 40 && cfg_tune(CFG_KP3) == 10 && cfg_tune(CFG_TI3) == 40 &&
               cfg_tune(CFG_KD2) == cfg_tune(CFG_KD) && cfg_tune(CFG_KD3) == cfg_tune(CFG_KD));
-        CHECK(cfg_tune(CFG_SCHED) == 0 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 200 && cfg_tune(CFG_HYST) == 15 &&
-              cfg_tune(CFG_DBC) == 200);
+        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_HYST) == 15 &&
+              cfg_tune(CFG_DBC) == 200);   // on, every set set 1's: as it ran
+        CHECK(cfg_tune(CFG_KP4) == 10 && cfg_tune(CFG_TI4) == 40 && cfg_tune(CFG_KD4) == cfg_tune(CFG_KD) &&
+              cfg_tune(CFG_B3) == 140);
+        CHECK(cfg_unsaved() == 0);
+    }
+}
+
+// Fourth PID set (0.16.14, version 9): set 4 and boundary 3 are saved
+// settings, B3 0 is three sets; a version 8 record loads with set 4 as set
+// 3 and B3 0, its three sets as they ran.
+static void test_set4(void)
+{
+    int32_t v[CFG_N] = { 0 }, lo, hi;
+    bool set[CFG_N] = { false };
+    const char *why;
+    CHECK(cfg_pid_key(4, 0) == CFG_KP4 && cfg_pid_key(4, 1) == CFG_TI4 && cfg_pid_key(4, 2) == CFG_KD4);
+    CHECK(cfg_pid_key(5, 0) == CFG_KP);
+    cfg_range(CFG_B3, &lo, &hi);
+    CHECK(lo == 0 && hi == 10000);
+    // The 11 Nov four-set table: 0.06/0.70, 0.14/1.50, 0.50/1.00, 0.30/0.25
+    // at 6, 10 and 14 mbar, hysteresis 10 %.
+    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_KP4, CFG_TI4,
+                            CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    const int32_t x[] = { 6, 70, 14, 150, 50, 100, 30, 25, 2, 60, 100, 140, 10 };
+    for (int i = 0; i < 13; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
+    CHECK(cfg_save_with(v, set, &why));
+    reboot();
+    bool all = true;
+    for (int i = 0; i < 13; i++) all &= cfg_tune(k[i]) == x[i];
+    CHECK(all && cfg_unsaved() == 0);
+    // B3 within the hysteresis of B2: refused, nothing changes.
+    memset(set, 0, sizeof set);
+    v[CFG_B3] = 110; set[CFG_B3] = true;
+    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B3 must be above B2"));
+    CHECK(cfg_tune(CFG_B3) == 140);
+    // As version 8: the three sets kept, set 4 = set 3, B3 0.
+    {
+        uint32_t size9, a9 = 0;
+        int sl = 0;
+        for (int i = 0; i < 2; i++) {
+            uint32_t r, ver;
+            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+            if (ver == 10 && r >= a9) { a9 = r; sl = i; }
+        }
+        uint32_t base = 0x7FD000 + sl * 0x1000;
+        memcpy(&size9, flash + base + 8, 4);
+        static uint8_t buf[4096];
+        memcpy(buf, flash + base, size9);
+        uint32_t size8 = as_v8(buf, size9);
+        uint32_t c = crc32(buf, size8 - 4);
+        memcpy(buf + size8 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size8);
+        reboot();
+        uint32_t rev;
+        const char *at;
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a9);
+        CHECK(cfg_tune(CFG_KP) == 6 && cfg_tune(CFG_KP2) == 14 && cfg_tune(CFG_KP3) == 50 && cfg_tune(CFG_TI3) == 100);
+        CHECK(cfg_tune(CFG_KP4) == 50 && cfg_tune(CFG_TI4) == 100 && cfg_tune(CFG_KD4) == cfg_tune(CFG_KD3));
+        CHECK(cfg_tune(CFG_B3) == 0 && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_HYST) == 10);
+        CHECK(cfg_unsaved() == 0);
+        // The next save writes version 10.
+        CHECK(cfg_save());
+        uint32_t ver = 0;
+        for (int i = 0; i < 2; i++) {
+            uint32_t r, vv;
+            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+            memcpy(&vv, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+            if (r == a9 + 1) ver = vv;
+        }
+        CHECK(ver == 10);
+    }
+}
+
+// Disable switch edges (0.16.21, version 10, Ryan 12 Nov "make the boundary
+// editable"): saved settings, From 0 to 99 and To 1 to 100 % open (0.16.22), From
+// below To; a version 9 record loads them at 5 and 50, the band before.
+static void test_pass(void)
+{
+    int32_t v[CFG_N] = { 0 }, lo, hi;
+    bool set[CFG_N] = { false };
+    const char *why;
+    reboot();
+    CHECK(cfg_tune(CFG_PASS_LO) == 5 && cfg_tune(CFG_PASS_HI) == 50);
+    cfg_range(CFG_PASS_LO, &lo, &hi);
+    CHECK(lo == 0 && hi == 99);   // 0 to 100 from 0.16.22 (1 to 99 and 2 to 100 in 0.16.21)
+    cfg_range(CFG_PASS_HI, &lo, &hi);
+    CHECK(lo == 1 && hi == 100);
+    v[CFG_PASS_LO] = 10; set[CFG_PASS_LO] = true;
+    v[CFG_PASS_HI] = 30; set[CFG_PASS_HI] = true;
+    CHECK(cfg_save_with(v, set, &why));
+    reboot();
+    CHECK(cfg_tune(CFG_PASS_LO) == 10 && cfg_tune(CFG_PASS_HI) == 30 && cfg_unsaved() == 0);
+    // From at or above To: refused, nothing changes.
+    memset(set, 0, sizeof set);
+    v[CFG_PASS_LO] = 30; set[CFG_PASS_LO] = true;
+    CHECK(!cfg_save_with(v, set, &why) && strstr(why, "From must be below To"));
+    CHECK(cfg_tune(CFG_PASS_LO) == 10);
+    v[CFG_PASS_LO] = -1;
+    CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 10);   // out of range
+    // The whole travel, 0 to 100 % (Ryan 13 Nov: "extend the limit switch ignore to 0 to 100% inputtable").
+    v[CFG_PASS_LO] = 0; v[CFG_PASS_HI] = 100; set[CFG_PASS_HI] = true;
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 0 && cfg_tune(CFG_PASS_HI) == 100);
+    v[CFG_PASS_LO] = 10; v[CFG_PASS_HI] = 30;
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 10 && cfg_tune(CFG_PASS_HI) == 30);
+    // As version 9: the rest kept, the edges 5 and 50.
+    {
+        uint32_t size10, a10 = 0;
+        int sl = 0;
+        for (int i = 0; i < 2; i++) {
+            uint32_t r, ver;
+            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
+            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
+            if (ver == 10 && r >= a10) { a10 = r; sl = i; }
+        }
+        uint32_t base = 0x7FD000 + sl * 0x1000;
+        memcpy(&size10, flash + base + 8, 4);
+        static uint8_t buf[4096];
+        memcpy(buf, flash + base, size10);
+        int32_t b3;
+        memcpy(&b3, buf + 16 + 7 * 4 + 7 * 4 + 21 * 4, 4);
+        uint32_t size9 = as_v9(buf, size10);
+        uint32_t c = crc32(buf, size9 - 4);
+        memcpy(buf + size9 - 4, &c, 4);
+        extflash_erase_4k(base);
+        extflash_write(base, buf, size9);
+        reboot();
+        uint32_t rev;
+        const char *at;
+        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a10);
+        CHECK(cfg_tune(CFG_PASS_LO) == 5 && cfg_tune(CFG_PASS_HI) == 50 && cfg_tune(CFG_B3) == b3);
         CHECK(cfg_unsaved() == 0);
     }
 }
@@ -1109,6 +1334,8 @@ int main(int argc, char **argv)
     test_net();
     test_kd();
     test_sched();
+    test_set4();
+    test_pass();
     test_valvepos();
     test_trend();
     test_auto();

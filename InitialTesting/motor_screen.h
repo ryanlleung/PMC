@@ -4,7 +4,7 @@
 #include "ui.h"
 
 /**
- * @brief Settings > Motor override: jog by a chosen step size and every MOT
+ * @brief Motor settings > Override > Motor override: jog by a chosen step size and every MOT
  * setting (mode, rates, accel, coil order, direction, hold, zero). A
  * framework screen (header, strip, STOP) since 0.11.32; ui_service() opens it.
  */

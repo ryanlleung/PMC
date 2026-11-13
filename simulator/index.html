@@ -54,10 +54,10 @@ select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; ba
       <h2>Text console (as port 8888)</h2>
       <pre id="console"></pre>
       <div class="row">
-        <input id="cmd" placeholder="Command, e.g. PRES?;MODE?, PRES SP 5, MODE AUTO" autocomplete="off" spellcheck="false">
+        <input id="cmd" placeholder="Command, e.g. PRESSURE?;MODE?, SETPOINT 5, MODE AUTO" autocomplete="off" spellcheck="false">
         <button id="send">Send</button>
-        <button data-cmd="PRES?;PRES SP?;MODE?;VALV?;ALRM?">Poll</button>
-        <button data-cmd="EVNT? 10">EVNT? 10</button>
+        <button data-cmd="PRESSURE?;SETPOINT?;MODE?;VALVE?;ALARM?">Poll</button>
+        <button data-cmd="EVENT? 10">EVENT? 10</button>
         <button data-cmd="*IDN?">*IDN?</button>
         <button id="clear">Clear</button>
       </div>
@@ -87,11 +87,15 @@ select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; ba
 
     <div class="card" style="margin-top:12px">
       <h2>Cryostat</h2>
+      <div class="row"><label>Flow line</label>
+        <select id="plant"><option value="0">Bench cryostat (fitted to the bench logs)</option><option value="1">Physics model</option></select></div>
       <div class="row"><label>Helium supply</label><button id="he" class="tg" data-id="3">On</button></div>
       <div class="row"><label>Rotary pump</label><button id="pump" class="tg" data-id="4">On</button></div>
       <div class="row"><label>Line pressure (true)</label><span class="val" id="p"></span></div>
-      <div class="row"><label>Pot temperature</label><span class="val" id="t"></span></div>
-      <div class="row"><label>Pot liquid</label><span class="val" id="ml"></span></div>
+      <div class="row" id="hxrow"><label>Heat exchanger</label><span class="val" id="hx"></span></div>
+      <div class="row" id="trow"><label>Pot temperature</label><span class="val" id="t"></span></div>
+      <div class="row" id="mlrow"><label>Pot liquid</label><span class="val" id="ml"></span></div>
+      <p class="note" id="plantnote">Bench cryostat: the valve and pressure as the bench logs of 6 and 9 Nov show them. Almost no flow below 3 % open. The heat exchanger follows the pressure over minutes, so the pressure creeps after a move; with liquid in it (under about 3.5 K) the pressure follows the valve over 25 to 70 s, dry in about 5 s. At low openings the needle sticks when opening.</p>
     </div>
 
     <div class="card" style="margin-top:12px">
@@ -165,8 +169,8 @@ function flashLoad(o) {
 // Bench switches survive a power cycle (they are the bench, not the board).
 let bench = null;
 function benchSnapshot() {
-  const ids = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 18, 19];
-  const o = {}; ids.forEach(i => o[i] = x.sim_get(i)); o[40] = x.sim_get(0); o[41] = x.sim_get(1); o[42] = x.sim_get(2);
+  const ids = [22, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 18, 19];
+  const o = {}; ids.forEach(i => o[i] = x.sim_get(i)); o[40] = x.sim_get(0); o[41] = x.sim_get(1); o[42] = x.sim_get(2); o[23] = x.sim_get(23);
   return o;
 }
 
@@ -279,6 +283,7 @@ cv.addEventListener('pointercancel', up);
 
 // Bench controls
 function syncControls() {
+  plantRows();
   document.querySelectorAll('.tg').forEach(b => {
     const on = !!x.sim_get(+b.dataset.id);
     const yesNo = b.textContent === 'Yes' || b.textContent === 'No';
@@ -294,6 +299,13 @@ $('sup').oninput = () => x.sim_set(12, +$('sup').value);
 document.querySelectorAll('[data-sup]').forEach(b => b.onclick = () => { x.sim_set(12, +b.dataset.sup); syncControls(); });
 $('die').oninput = () => x.sim_set(13, +$('die').value);
 $('limf').onchange = () => x.sim_set(7, +$('limf').value);
+$('plant').onchange = () => { x.sim_set(22, +$('plant').value); plantRows(); };
+function plantRows() {
+  const bench = x.sim_get(22) === 0;
+  $('plant').value = bench ? '0' : '1';
+  $('hxrow').style.display = $('plantnote').style.display = bench ? '' : 'none';
+  $('trow').style.display = $('mlrow').style.display = bench ? 'none' : '';
+}
 $('exc').onchange = () => x.sim_set(10, +$('exc').value);
 $('room').onchange = () => x.sim_set(19, +$('room').value);
 $('turn').onclick = () => { x.sim_set(5, 2 * Math.round(+$('needleset').value)); };
@@ -307,6 +319,7 @@ function fmt(v, dp) { return Number.isFinite(v) ? v.toFixed(dp) : '----'; }
 function readouts() {
   $('p').textContent = fmt(x.sim_get(0), 2) + ' mbar';
   $('t').textContent = fmt(x.sim_get(1), 2) + ' K';
+  $('hx').textContent = fmt(x.sim_get(23), 2) + ' K';
   $('ml').textContent = fmt(x.sim_get(2), 1) + ' g';
   $('needle').textContent = (x.sim_get(5) / 2).toFixed(1);
   const c = x.sim_get(15);

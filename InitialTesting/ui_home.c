@@ -26,6 +26,11 @@
  *              stays where it is, no question).
  *   NOT HOMED  Valve: Home valve (Home or Set position). Start AUTO greyed.
  *   HOMING     Valve: the Go to box, greyed, "----".
+ * A yellow edge round the Valve tile while the limit switch is pressed
+ * (0.16.4; a "Limit" tag beside the caption in 0.16.1-0.16.3); a valve
+ * fault's red edge wins. While the switch pass band is on (0.16.5; Motor
+ * settings > Override > Switch pass from 0.16.19), 5 to 50 % (10 to 20 % until 0.16.8, 5 to 25 % until
+ * 0.16.11) is yellow on the valve bar.
  * The strip shows the status line, with the 5 min pressure sparkline on its
  * right as on the operator screens (ui.c, Ryan 21 Oct). A tap on the
  * sparkline opens Trend.
@@ -51,10 +56,12 @@ typedef struct {
     lv_obj_t *tile, *reading, *bar, *box, *box_text, *box_chev, *sp_cap;
     int32_t fill;             // bar fill to here, px; -1 no value (no marker)
     bool log;                 // pressure: decade lines; valve: 0/50/100
+    int band;                 // valve: the Disable switch band marked yellow on the track, lo * 1000 + hi, 0 = off
 } tile_t;
 
 static tile_t pt, vt;
 static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn;
+static bool vt_fault;   // a valve fault (F-3 to F-6): the Valve tile's red edge, over the limit's yellow
 
 static void show_if(lv_obj_t *o, bool on)
 {
@@ -142,6 +149,14 @@ static void bar_draw(lv_event_t *e)
         r.bg_color = UI_FILL;
         lv_draw_rect(layer, &r, &bar);
     }
+    // The switch pass band (0.16.5), over the track and fill: where the
+    // switch does not stop closing.
+    if (t->band) {
+        lv_area_t b = { a.x1 + (BAR_W - 1) * (t->band / 1000) / 100, y1,
+                        a.x1 + (BAR_W - 1) * (t->band % 1000) / 100, y2 };
+        r.bg_color = UI_YELLOW;
+        lv_draw_rect(layer, &r, &b);
+    }
     // Lines and end labels.
     lv_draw_label_dsc_t text;
     lv_draw_label_dsc_init(&text);
@@ -196,14 +211,20 @@ static void box_set(tile_t *t, bool active, const char *text)
     ui_set_text(t->box_text, text);
 }
 
-static void alarm_set(tile_t *t, bool on)
+// The tile's 3 px edge: red for a fault (the card style's colour), yellow
+// for a warning (the limit switch pressed, 0.16.4), none.
+static void edge_set(tile_t *t, bool on, lv_color_t c)
 {
     int32_t w = on ? 3 : 0;
     if (lv_obj_get_style_border_width(t->tile, 0) != w) {
         lv_obj_set_style_border_width(t->tile, w, 0);
         lv_obj_set_style_pad_all(t->tile, -w, 0);   // children keep their place
     }
+    if (on && !lv_color_eq(lv_obj_get_style_border_color(t->tile, 0), c))
+        lv_obj_set_style_border_color(t->tile, c, 0);
 }
+
+static void alarm_set(tile_t *t, bool on) { edge_set(t, on, UI_FAULT); }
 
 static void make_tile(lv_obj_t *scr, tile_t *t, int32_t x, const char *cap, const char *unit,
                       const char *sp, bool log, lv_event_cb_t box_cb)
@@ -635,6 +656,18 @@ static void home_fast(void)
     }
     int32_t p = ui_pct_shown(valve_pct_milli());
     bar_set(&vt, cal ? p * BAR_W / 10000 : -1);
+    // Limit switch pressed (the NC contact open): a yellow edge round the
+    // Valve tile at 10 Hz, whatever the mode; a valve fault's red wins
+    // (0.16.4, Ryan PR #43: "add yellow border instead of having the word
+    // limit"; a yellow "Limit" tag beside the caption in 0.16.1-0.16.3).
+    bool lim = stepper3_limit_pressed();   // passed in the pass band or not
+    edge_set(&vt, vt_fault || lim, vt_fault ? UI_FAULT : UI_YELLOW);
+    // The pass band on the valve bar while it is on (Motor settings > Override > Disable switch).
+    int band = valve_limit_band() ? valve_pass_lo() * 1000 + valve_pass_hi() : 0;   // To >= 1, so on is never 0
+    if (band != vt.band) {
+        vt.band = band;
+        lv_obj_invalidate(vt.bar);
+    }
 }
 
 static void home_refresh(void)
@@ -661,9 +694,8 @@ static void home_refresh(void)
     show_if(start_btn, !auto_on);
     ui_btn_enable(start_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
 
+    vt_fault = valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") || valve_fault_is("F-6");
     home_fast();
-    alarm_set(&vt, valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") ||
-                   valve_fault_is("F-6"));
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
     // Where the valve is going, greyed when not editable; "----" while
     // homing.
@@ -729,16 +761,45 @@ void ui_status_line(void)
 const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
 
 /* --------------------------------------------------------------------------
- * Menu: six tiles in three captioned rows, as the common HMI template:
- * Records (Trend, Events), Service (the valve page, Calibration: the
- * Calibrate sensor page; one line from 0.15.21),
- * Setup (System, Settings). From 0.15.19 (Ryan 6 Nov) Calibrate sensor is
- * back on the Menu in Diagnostics' place, and Diagnostics is on System;
- * the motor screen is on Valve position. From 0.15.23 (Ryan 6 Nov)
- * Settings is on the right of its row, filled dark blue.
+ * Menu: nine tiles in three rows of three, an icon over each name, no row
+ * captions (0.16.2, Ryan 9 Nov: "remove the settings page and put
+ * everything in the menu. remove the labels on the menu. show some icons
+ * for each button"). Every page is one tap away:
+ *   Trend           Events          PID tuning
+ *   Motor settings  Valve position  Pressure setup
+ *   System          Diagnostics     Review and save
+ * Valve position and PID tuning swapped places in 0.16.3 (Ryan 9 Nov, PR #43:
+ * "swap location of valve position and pid tuning"): the two valve tiles
+ * side by side in the middle row. Calibration was renamed Pressure setup in
+ * 0.16.7 (Ryan 10 Nov, PR #43: "something with pressure in the name and
+ * doesnt overflow the line"): "Pressure settings" is 141 px and wraps.
+ * Review and save is filled dark blue, as Ryan asked for it and Settings on
+ * 6 Nov (0.15.23); with Settings gone it is the one dark tile, bottom right
+ * where Settings was. Diagnostics stays on System too (0.15.19) and fills
+ * the ninth slot. To 0.16.1: six tiles in captioned rows Records (Trend,
+ * Events), Service (Valve position, Calibration), Setup (System, Settings),
+ * with Choose sensor, Valve setup, PID tuning and Review and save a tap
+ * further on Settings.
+ * Three columns of 148 (x 10, 166, 322): "Review and save" at 16 px is 136
+ * wide, too wide for the template's 109 columns, and Ryan does not want
+ * two-line tile names (6 Nov).
  * ------------------------------------------------------------------------ */
-static const ui_screen_t *const menu_scr[6] = { &ui_scr_trend, &ui_scr_faults, &ui_scr_calib, &ui_scr_sensor_cal,
-                                                &ui_scr_namenet, &ui_scr_settings };
+typedef struct {
+    const char *name, *icon;
+    const ui_screen_t *scr;
+} menu_item_t;
+
+static const menu_item_t menu_items[9] = {
+    { "Trend", UI_ICON_TREND, &ui_scr_trend },
+    { "Events", LV_SYMBOL_LIST, &ui_scr_faults },
+    { "PID tuning", LV_SYMBOL_LOOP, &ui_scr_tune },            // the loop, as the status line shows AUTO
+    { "Motor settings", LV_SYMBOL_EDIT, &ui_scr_valve_set },   // travel, homing, drive: saved numbers (the pencil, as a draft's)
+    { "Valve position", UI_ICON_VALVE, &ui_scr_calib },        // home, set the position, the motor: the valve now
+    { "Pressure sensor", UI_ICON_TARGET, &ui_scr_sensor_cal },  // Sensor calibration (Pressure setup to 0.16.26)
+    { "System", LV_SYMBOL_SETTINGS, &ui_scr_namenet },
+    { "Diagnostics", LV_SYMBOL_EYE_OPEN, &ui_scr_diag },
+    { "Review and save", LV_SYMBOL_SAVE, &ui_scr_review },     // the header's unsaved icon
+};
 
 static void menu_tile_event(lv_event_t *e)
 {
@@ -747,21 +808,13 @@ static void menu_tile_event(lv_event_t *e)
 
 static void menu_build(lv_obj_t *scr)
 {
-    // Grouped in rows with a caption on the left, as on Diagnostics.
-    static const char *const rows[3] = { "Records", "Service", "Setup" };
-    static const char *const names[6] = { "Trend", "Events", "Valve position",
-                                          "Calibration", "System", "Settings" };   // one line (Ryan 6 Nov: not "Calibrate sensor" on two)
-    // Caption and two tiles in 1 : 1.5 : 1.5, the caption centred on its row.
-    for (int r = 0; r < 3; r++) {
-        lv_obj_t *l = ui_label(scr, 10, 0, 111, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);
-        lv_obj_update_layout(l);
-        lv_obj_set_y(l, 48 + r * 56 + (48 - lv_obj_get_height(l)) / 2);
-    }
-    for (int i = 0; i < 6; i++) {
-        lv_obj_t *b = ui_btn(scr, i % 2 ? 303 : 129, 48 + (i / 2) * 56, i % 2 ? 167 : 166, 48, UI_NAV, names[i],
-                             menu_tile_event, (void *)menu_scr[i]);
-        ui_btn_enable(b, menu_scr[i] != NULL);
-        if (menu_scr[i] == &ui_scr_settings)
+    for (int i = 0; i < 9; i++) {
+        const menu_item_t *m = &menu_items[i];
+        // Plain (centred) tiles, no chevron: the icon marks what opens.
+        lv_obj_t *b = ui_btn(scr, 10 + (i % 3) * 156, 48 + (i / 3) * 56, 148, 48, UI_SECONDARY, m->name,
+                             menu_tile_event, (void *)m->scr);
+        ui_btn_icon(b, m->icon);
+        if (m->scr == &ui_scr_review)
             ui_btn_blue(b);
     }
 }

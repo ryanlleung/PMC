@@ -332,6 +332,8 @@ EXPORT(sim_get) double sim_get(int id)
     case 19: return B.room_mbar;
     case 20: return B.baro;
     case 21: return B.baro_err;
+    case 22: return B.plant;
+    case 23: return B.hx;
     case 30: return stepper3_position();
     case 31: return valve_pct_milli();
     default: return 0;
@@ -355,7 +357,9 @@ EXPORT(sim_set) void sim_set(int id, double v)
     case 19: B.room_mbar = v; break;
     case 20: B.baro = v != 0; break;
     case 21: B.baro_err = v; break;
-    case 40: B.P = v; break;
+    case 22: bench_plant((int)v); break;
+    case 23: bench_set_hx(v); break;
+    case 40: bench_set_pressure(v); break;
     case 41: B.T = v; break;
     case 42: B.mL = v; break;
     default: break;
@@ -418,7 +422,7 @@ EXPORT(sim_run) void sim_run(int ms)
 }
 
 EXPORT(sim_version) const char *sim_version(void) { return PMC_FW_VERSION; }
-// The Remote control switch, for tests (the screen's Settings > System).
+// The Remote control switch, for tests (the screen's Menu > System).
 EXPORT(sim_remote) void sim_remote(int on) { cfg_set_remote(on != 0); }
 
 /* ---- Test hooks for tests/run.js: what the screens do, called directly.
@@ -462,3 +466,5 @@ EXPORT(sim_shutdown) int sim_shutdown(int close) { const char *w = NULL; return 
 EXPORT(sim_turn_on) int sim_turn_on(void) { const char *w = NULL; return hook(valve_turn_on(&w), w); }
 EXPORT(sim_override) int sim_override(void) { return stepper3_override(); }
 EXPORT(sim_popup) int sim_popup(void) { return ui_overlay_open(); }   // a popup (keypad, question, list, Help) is open
+// The title of the screen up ("Menu", "Motor settings"), for the Menu tests (0.16.2).
+EXPORT(sim_screen) const char *sim_screen(void) { return ui_screen_title(); }

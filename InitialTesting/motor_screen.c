@@ -12,19 +12,24 @@
 #include "lv_port_indev.h"
 
 /*
- * Settings > Motor override (0.11.32: option B, Ryan 22 Oct; three tabs
+ * Motor settings > Override > Motor override (from 0.16.17; Valve position to 0.16.16;
+ * Settings > Motor override to 0.14.13;
+ * 0.11.32: option B, Ryan 22 Oct; three tabs
  * since 0.11.33, Ryan 23 Oct). A framework screen: the standard header,
  * status strip and STOP; every MOT setting and move from the touchscreen,
  * and the screen follows MOT commands on the link.
  * Body y 48-208, three 48 px rows (y 48, 104, 160). The top row is on every
- * tab: the tabs Move / Speed / Coils (x10 w226) and the position card (x244
- * w226). Below it:
+ * tab: the tabs Move / Speed / Coils (x10 w226) and the position
+ * card (x244 w226). Below it:
  *   Move   Hold to run (move while pressed, on by default) or a step size 1 to 10k, one
  *          choice; then Limit override, Close, Open and Set zero. Limit
  *          override is a two-finger deadman: hold it and press Close or
  *          Open with another finger (Close then goes past the switch)
  *   Speed  Run, Start and Accel [-] value [+], and the time for a full open or close
  *   Coils  Mode WAVE/FULL/HALF, Hold torque, Coils off, Coil order, Direction
+ * The Switch tab (Pass 5 to 50 %, 0.16.5 to 0.16.18) is a toggle on Motor
+ * settings > Override from 0.16.19 (Ryan 12 Nov: "remove the switch tab on
+ * the motor override page"); the strip still says when the switch is passed.
  * Coil order, Direction and Set zero ask first while the valve is homed.
  * The strip reads the motor state and the limit line (a latched fault, the
  * limit override or a message over it, as on every screen).
@@ -457,7 +462,7 @@ static lv_obj_t *btn(lv_obj_t *p, int32_t x, int32_t y, int32_t w, const char *t
     return b;
 }
 
-// Segmented choice as Valve setup's tabs: grey track, the chosen segment
+// Segmented choice as the Motor settings tabs: grey track, the chosen segment
 // raised white (seg_show).
 // first > 0 makes the first segment that wide, the rest share what is left.
 static void seg(lv_obj_t *p, int32_t x, int32_t y, int32_t w, int n, const char *const *labels,
@@ -696,6 +701,7 @@ static void motor_fast(void)
     ui_btn_enable(m.order, !busy && !stepper3_locked());
     ui_btn_enable(m.dir, !busy && !stepper3_locked());
     ui_btn_enable(m.hold, !busy);
+
 }
 
 // The strip: the motor state, then the limit switch (released or pressed,
@@ -709,13 +715,18 @@ static void motor_refresh(void)
                    : stepper3_energised() ? "Idle, coils on" : "Idle, coils off";
     limit_state_t lim = limit_state();
     const char *ls;
+    char lb[48];
     bool warn = false;
     if (!stepper3_limit_fitted())
         ls = lim == LIMIT_CLOSED ? "Switch released, stop off" : lim == LIMIT_OPEN ? "Switch pressed, stop off"
                                                                                    : "Switch not read yet";
     else if (lim == LIMIT_CLOSED)
         ls = "Switch released, closing allowed";
-    else {
+    else if (lim == LIMIT_OPEN && stepper3_limit_ignored()) {
+        // Disable switch on, in its band (Motor settings > Override).
+        lv_snprintf(lb, sizeof lb, "Switch pressed, disabled (%d to %d %%)", valve_pass_lo(), valve_pass_hi());
+        ls = lb;
+    } else {
         ls = lim == LIMIT_OPEN ? "Switch pressed, closing blocked" : "Switch not read yet, closing blocked";
         warn = true;
     }
