@@ -434,7 +434,7 @@ EXPORT(sim_cal) int sim_cal(int what, double mbar)
     const char *w = NULL;
     return hook(cal_capture(what, mbar < 0 ? CAL_P_BARO : (int32_t)(mbar * 1000.0 + 0.5), &w), w);
 }
-// Save settings with one value changed (key < 0: none), as Review and save.
+// Save with one value changed (key < 0: none), as the settings pages.
 EXPORT(sim_save) int sim_save(int key, int value)
 {
     int32_t v[CFG_N] = {0};

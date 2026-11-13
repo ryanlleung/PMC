@@ -23,18 +23,24 @@
  * The record is version 11 from 0.16.30 (cfg.c). Version 10 records
  * (0.16.21 to 0.16.29) are read and converted; older ones are not read.
  *
- * The Settings screens keep their edits as drafts and apply and save them
- * together with cfg_save_with(), all or nothing. The name, the address,
- * Remote control and a captured calibration are set live and stay unsaved
- * until the next save. A loaded record also comes in as live values;
- * anything differing from the newest saved record shows as unsaved.
- * Loading is refused while the valve moves or homes.
+ * Three things act on the record (0.16.31, Ryan 13 Nov: "saving is too
+ * clunky, maybe just a save an undo, and a reset to factory is enough"):
+ *   Save   cfg_save_with(): the screens' drafts and the settings in use,
+ *          checked together, written, then put in use, all or nothing.
+ *   Undo   cfg_undo(): the newest save put back in use.
+ *   Reset  cfg_reset_factory(): the motor, valve and tuning settings back
+ *          to factory and saved; the calibration, the name, the address and
+ *          Remote control stay.
+ * The name, the address and Remote control are set live and saved at once
+ * with cfg_save_system(). A captured calibration and what Motor override
+ * changes are in use at once and unsaved until the next Save.
+ * The record before the newest stays in the other sector as the fallback
+ * for a failed write; nothing loads it by choice (Load settings > Previous
+ * save and Review and save went in 0.16.31).
  */
 
 // After cal_init(), stepper3_init() and valve_init().
 void cfg_init(void);
-// Saves the live settings; prints OK or ERR.
-bool cfg_save(void);
 // Number of settings differing from the newest saved record (or, with none
 // saved, from the start-up values).
 int cfg_unsaved(void);
@@ -44,15 +50,16 @@ int cfg_unsaved(void);
  * ------------------------------------------------------------------------ */
 #define CFG_NAME_LEN 12
 
-// Cryostat name, shown as "<name> pressure controller" on Home. Set live,
-// unsaved until the next save, like a captured calibration.
+// Cryostat name, shown as "<name> pressure controller" on Home. Set live;
+// cfg_save_system() keeps it.
 const char *cfg_name(void);
 bool cfg_name_ok(const char *n);
 bool cfg_set_name(const char *n, const char **why);
 
 // Ethernet address (0.12.13; the only one from 0.14.9, no DHCP), a.b.c.d as
-// a << 24 | b << 16 | c << 8 | d; 0 0 is the build's PMC_IP. Set live, unsaved until a save;
-// the link uses the one loaded at start-up (cfg_net_boot).
+// a << 24 | b << 16 | c << 8 | d; 0 0 is the build's PMC_IP. Set live
+// (cfg_save_system() keeps it); the link uses the one loaded at start-up
+// (cfg_net_boot).
 bool cfg_net_parse(const char *s, uint32_t *v);          // "a.b.c.d"
 const char *cfg_net_why(uint32_t ip, uint32_t mask);    // NULL if usable
 const char *cfg_net_text(char *buf, size_t n, uint32_t ip, uint32_t mask);
@@ -63,10 +70,14 @@ bool cfg_net_restart_due(void);   // the live address differs from the one in us
 
 // Remote control (0.13.4): Off, the network can only read (remote.c ERR 211,
 // Modbus exception 1). On by default and in records before version 5 (0.13.7;
-// Off to 0.13.6). Set live, unsaved until a save, like the name; a change is
-// a NET event.
+// Off to 0.13.6). Set live (cfg_save_system() keeps it); a change is a NET
+// event.
 bool cfg_remote(void);
 void cfg_set_remote(bool on);
+// Saves the name, the address and Remote control as they are now, with the
+// rest of the record as last saved (0.16.31): a calibration or a Motor
+// override change in use but unsaved is not saved by the way.
+bool cfg_save_system(const char **why);
 
 // Settings with a field on the screens. CFG_KP to CFG_TUNE_LAST stay in
 // order (cfg.c tune[]).
@@ -105,13 +116,10 @@ typedef enum {
     CFG_N
 } cfg_key_t;
 
-typedef enum { CFG_FROM_LIVE, CFG_FROM_SAVED, CFG_FROM_PREVIOUS, CFG_FROM_DEFAULTS } cfg_from_t;
+typedef enum { CFG_FROM_LIVE, CFG_FROM_SAVED } cfg_from_t;
 
-// Writes one line per unsaved change the screens have no field for (a new
-// cal, the name, the address); 0 if none.
-int cfg_unsaved_other(char *buf, size_t n);
-// A setting from the live values, a save or the defaults. False if that
-// record does not exist, or k is no key.
+// A setting from the live values or the newest save. False if nothing is
+// saved, or k is no key.
 bool cfg_value(cfg_from_t from, cfg_key_t k, int32_t *v);
 bool cfg_rev(cfg_from_t from, uint32_t *rev, const char **saved_at);
 void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi);
@@ -122,8 +130,13 @@ cfg_key_t cfg_pid_key(int set, int which);
 // Applies the live values with v[k] for each set[k], checked together, then
 // saves. Nothing changes unless all of it is good.
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why);
-// Makes a save (or the defaults) the live values, unsaved until saved.
-bool cfg_load_live(cfg_from_t from, const char **why);
+// Undo: the newest save (with none, the start-up settings) back in use.
+// Refused in AUTO and while the valve moves or homes.
+bool cfg_undo(const char **why);
+// Reset to factory: the motor, valve and tuning settings to factory, saved
+// and put in use. The calibration in use, the name, the address and Remote
+// control stay. Refused in AUTO and while the valve moves or homes.
+bool cfg_reset_factory(const char **why);
 
 // The sensor's full scale, 0.001 mbar: the 15 psia Druck, 1034.214 mbar
 // (the setpoint's limit, the nominal conversion before a cal).

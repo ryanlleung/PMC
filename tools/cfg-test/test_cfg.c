@@ -6,9 +6,9 @@
  * and converting, with what it held that is not kept (a step mode, a
  * reversed pressure response, several sensors, a cal that is not two points)
  * said in the events; versions 1 to 9 not read; a save from the screens
- * (cfg_save_with) going to the other sector as version 11; a restart; Load
- * settings > Previous save; the cryostat name, the IP address and Remote
- * control; a combination refused as a whole; a motor direction change
+ * (cfg_save_with) going to the other sector as version 11; a restart; Undo
+ * and Reset to factory; the cryostat name, the IP address and Remote
+ * control saved as they are set; a combination refused as a whole; a motor direction change
  * clearing the calibration; a spoiled record; and the saved valve position
  * written at standstill, withdrawn by a move, and found again after the log
  * wraps to the next sector.
@@ -254,6 +254,15 @@ static rec_v10_t v10(void)
     return r;
 }
 
+// Save with no drafts: the settings in use, as the screens' Save.
+static bool save_all(void)
+{
+    int32_t v[CFG_N] = { 0 };
+    bool set[CFG_N] = { false };
+    const char *why;
+    return cfg_save_with(v, set, &why);
+}
+
 static void put_v10(uint32_t addr, rec_v10_t *r)
 {
     r->crc = crc32(r, offsetof(rec_v10_t, crc));
@@ -364,7 +373,7 @@ static void test_v10(void)
     CHECK(cfg_unsaved() == 0 && cal_saved());
     const cal_rec_t *sv;
     CHECK(cfg_saved_cal(&sv) && sv == NULL);   // saved without a cal
-    CHECK(cfg_save());
+    CHECK(save_all());
     {
         uint32_t ver, size;
         memcpy(&ver, flash + 0x7FE004, 4);
@@ -420,7 +429,7 @@ static void test_v10(void)
         CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && cal_is_default());
     }
     // A save from there is the first of a new board.
-    CHECK(cfg_save() && cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 1);
+    CHECK(save_all() && cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 1);
     wipe();
 }
 
@@ -445,7 +454,6 @@ static void test_cfg(void)
     put_v10(0x7FD000, &o);
     reboot();
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 5 && strcmp(at, "2026-10-24 14:04:08") == 0);
-    CHECK(!cfg_rev(CFG_FROM_PREVIOUS, &rev, &at));
     CHECK(said("Settings saved 2026-10-24 14:04:08 loaded from A (saved by 0.16.29 or earlier)"));
     CHECK(!said("not kept") && !said("Several sensors") && !said("two-point"));
     CHECK(motor_valve_as_v10() && tune_as_v10(CFG_N));
@@ -460,7 +468,6 @@ static void test_cfg(void)
     v[CFG_RATE] = 500; set[CFG_RATE] = true;
     CHECK(cfg_save_with(v, set, &why));
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6 && strcmp(at, "2026-10-16 08:15:00") == 0);
-    CHECK(cfg_rev(CFG_FROM_PREVIOUS, &rev, &at) && rev == 5);
     uint32_t ver;
     memcpy(&ver, flash + 0x7FE004, 4);
     CHECK(ver == 11);
@@ -474,11 +481,19 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6 && said("loaded from B") && !said("0.16.29"));
     CHECK(!cal_is_default() && cal_pressure_mmbar(9300000) == 1013200 && strcmp(cfg_name(), "CF-10") == 0);
 
-    // Load settings > Previous save: the version 10 record in A.
-    CHECK(cfg_load_live(CFG_FROM_PREVIOUS, &why));
-    CHECK(m_rate == 350 && cfg_tune(CFG_KP) == 7 && cfg_unsaved() == 2);
-    CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
-    CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
+    // Undo (0.16.31): a change in use but not saved (Motor override sets the
+    // run speed live) goes back to the last save. Refused while the valve
+    // moves; with nothing unsaved it changes nothing.
+    stepper3_set_rate(450);
+    stepper3_set_hold(true);
+    CHECK(cfg_unsaved() == 2);
+    m_busy = true;
+    CHECK(!cfg_undo(&why) && strstr(why, "wait for the valve") && m_rate == 450);
+    m_busy = false;
+    CHECK(cfg_undo(&why) && m_rate == 500 && !m_hold && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
+    CHECK(said("Undo: settings saved 2026-10-16 08:15:00 back in use"));
+    CHECK(cfg_undo(&why) && m_rate == 500 && cfg_unsaved() == 0);
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);   // Undo saves nothing
 
     // A combination refused as a whole: start above run.
     memset(set, 0, sizeof set);
@@ -508,16 +523,24 @@ static void test_cfg(void)
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
 
-    // Factory defaults keep the sensor's calibration.
-    CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why));
-    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && !cal_is_default());
+    // Reset to factory (0.16.31): the motor, valve and tuning settings to
+    // factory, saved at once (rev 7 in A); the calibration, the name, the
+    // address and Remote control stay. Refused while the valve moves.
+    m_busy = true;
+    CHECK(!cfg_reset_factory(&why) && m_rate == 500);
+    m_busy = false;
+    CHECK(cfg_reset_factory(&why) && said("Reset to factory"));
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 7 && cfg_unsaved() == 0);
+    CHECK(m_rate == 400 && m_start == 200 && v_set[0] == 99072 && cfg_tune(CFG_KP) == 6);
+    CHECK(!cal_is_default() && cal_saved() && cal_pressure_mmbar(9300000) == 1013200 && strcmp(cfg_name(), "CF-10") == 0);
     // The factory PID table (0.16.18, Ryan 12 Nov): B 6/10/14 mbar, 15 %;
     // sets 0.06/0.60, 0.12/0.82, 0.80/0.94, 0.40/0.25, KD 0.
     CHECK(cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140 && cfg_tune(CFG_HYST) == 15);
     CHECK(cfg_tune(CFG_TI) == 60 && cfg_tune(CFG_KD) == 0 && cfg_tune(CFG_KP2) == 12 && cfg_tune(CFG_TI2) == 82 &&
           cfg_tune(CFG_KP3) == 80 && cfg_tune(CFG_TI3) == 94 && cfg_tune(CFG_KP4) == 40 && cfg_tune(CFG_TI4) == 25 &&
           cfg_tune(CFG_KD2) == 0 && cfg_tune(CFG_KD3) == 0 && cfg_tune(CFG_KD4) == 0);
-    CHECK(cfg_save());   // the factory table is what the tests below start from: rev 7 in A
+    reboot();            // the factory table is what the tests below start from
+    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && !cal_is_default() && cfg_unsaved() == 0);
 
     // Motor direction: saving it clears the calibration.
     v_cal = true; v_mode = VALVE_MANUAL;
@@ -535,7 +558,7 @@ static void test_cfg(void)
     CHECK(!m_rev && said("CRC mismatch"));
 }
 
-// Calibrate sensor on the screen: vacuum, then air, then Save settings.
+// Calibrate sensor on the screen: vacuum, then air, then Save.
 static void test_capture(void)
 {
     const char *why;
@@ -553,6 +576,17 @@ static void test_capture(void)
     cal_points(&vac, &air);
     CHECK(vac.have && vac.r_ppb == 51000 && air.have);   // air kept from the saved cal
     CHECK(!cal_saved() && cfg_unsaved() == 1);
+    // The name saved meanwhile (System saves at once, 0.16.31) does not save
+    // the new calibration by the way.
+    CHECK(cfg_set_name("TEST", &why) && cfg_unsaved() == 2 && cfg_save_system(&why));
+    CHECK(!cal_saved() && cfg_unsaved() == 1);
+    CHECK(cfg_set_name("CF-10", &why) && cfg_save_system(&why) && !cal_saved() && cfg_unsaved() == 1);
+    // Undo puts the saved calibration back; captured again for the rest.
+    CHECK(cfg_undo(&why) && cal_saved() && cfg_unsaved() == 0 && cal_pressure_mmbar(9300000) == 1013200);
+    CHECK(cal_capture(1, 0, &why));
+    for (int i = 0; i < 10; i++)
+        cal_update(&cs);
+    CHECK(!cal_saved() && cfg_unsaved() == 1);
     cs.r_ppb = 9310000;
     CHECK(cal_capture(2, 1012000, &why));
     for (int i = 0; i < 10; i++)
@@ -569,18 +603,27 @@ static void test_capture(void)
     CHECK(vac.have && vac.r_ppb == 51000 && vac.p_mmbar == 0 && air.have && air.r_ppb == 9310000 && air.p_mmbar == 1012000);
 }
 
-// Cryostat name: live and unsaved, too long refused, kept by a save.
+// Cryostat name: too long refused; set live and saved with cfg_save_system
+// (0.16.31), which leaves a setting in use but unsaved as it is.
 static void test_name(void)
 {
-    int32_t v[CFG_N] = { 0 };
-    bool set[CFG_N] = { 0 };
     const char *why;
+    uint32_t rev, rev0;
+    const char *at;
     reboot();
+    cfg_rev(CFG_FROM_SAVED, &rev0, &at);
     CHECK(!cfg_set_name("ABCDEFGHIJKLM", &why) && strcmp(cfg_name(), "CF-10") == 0);
-    CHECK(cfg_set_name("HM-2", &why) && cfg_unsaved() == 1);
-    CHECK(cfg_save_with(v, set, &why) && cfg_unsaved() == 0);
+    stepper3_set_rate(444);   // Motor override
+    CHECK(cfg_set_name("HM-2", &why) && cfg_unsaved() == 2);
+    CHECK(cfg_save_system(&why) && cfg_unsaved() == 1 && m_rate == 444);
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == rev0 + 1);
     reboot();
-    CHECK(strcmp(cfg_name(), "HM-2") == 0);
+    CHECK(strcmp(cfg_name(), "HM-2") == 0 && m_rate != 444 && cfg_unsaved() == 0);
+    // A failed write: the name stays in use, unsaved.
+    write_fails = 1;
+    CHECK(cfg_set_name("AVM-1", &why) && !cfg_save_system(&why) && strstr(why, "flash") && cfg_unsaved() == 1);
+    write_fails = 0;
+    CHECK(cfg_set_name("HM-2", &why) && cfg_save_system(&why) && cfg_unsaved() == 0);
 }
 
 // IP address (0.12.13; the DHCP fallback until 0.14.9): parsing, checks,
@@ -588,8 +631,6 @@ static void test_name(void)
 // return.
 static void test_net(void)
 {
-    int32_t v[CFG_N] = { 0 };
-    bool set[CFG_N] = { 0 };
     const char *why;
     uint32_t ip, mask;
     char a[16], m[16], t[48];
@@ -608,26 +649,26 @@ static void test_net(void)
     CHECK(cfg_set_net(0xC0A80132UL, 0xFFFFFF00UL, &why) && cfg_unsaved() == u0 + 1 && cfg_net_restart_due());
     cfg_net_boot(a, m);
     CHECK(strcmp(a, "192.168.1.100") == 0);   // not until a restart
-    CHECK(cfg_save_with(v, set, &why) && cfg_unsaved() == 0);
+    CHECK(cfg_save_system(&why) && cfg_unsaved() == 0);
     reboot();
     cfg_net(&ip, &mask);
     cfg_net_boot(a, m);
     CHECK(ip == 0xC0A80132UL && mask == 0xFFFFFF00UL && strcmp(a, "192.168.1.50") == 0 &&
           strcmp(m, "255.255.255.0") == 0 && !cfg_net_restart_due());
     CHECK(strcmp(cfg_net_text(t, sizeof t, ip, mask), "192.168.1.50 255.255.255.0") == 0);
-    CHECK(cfg_set_net(0, 0, &why));   // back to the build default
+    CHECK(cfg_set_net(0, 0, &why) && cfg_save_system(&why));   // back to the build default
 
     // Remote control (0.13.4): On by default (0.13.7), live at once and
-    // unsaved, Off kept by a save.
+    // saved with cfg_save_system.
     CHECK(cfg_remote());
     int u1 = cfg_unsaved();
     cfg_set_remote(false);
     CHECK(!cfg_remote() && cfg_unsaved() == u1 + 1);
-    CHECK(cfg_save_with(v, set, &why) && cfg_unsaved() == 0);
+    CHECK(cfg_save_system(&why) && cfg_unsaved() == 0);
     reboot();
     CHECK(!cfg_remote());
     cfg_set_remote(true);
-    CHECK(cfg_save_with(v, set, &why) && cfg_remote());
+    CHECK(cfg_save_system(&why) && cfg_remote() && cfg_unsaved() == 0);
 
     // Homing return (0.13.6): its own setting beside the back-off.
     {
@@ -1058,7 +1099,8 @@ static void test_auto(void)
     v[CFG_KP] = 320;
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "Stop AUTO"));
     CHECK(cfg_tune(CFG_KP) == 300 && m_rate == rate);
-    CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "Stop AUTO"));
+    CHECK(!cfg_reset_factory(&why) && strstr(why, "Stop AUTO"));
+    CHECK(!cfg_undo(&why) && strstr(why, "Stop AUTO"));
     clicks_state_t q = { .pm_found = true, .reading_ok = true, .p_mmbar = 5100 };
     trend_pt_t o;
     lv_tick_inc(1000); trend_second(&q);

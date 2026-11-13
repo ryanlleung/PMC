@@ -350,70 +350,27 @@ static bool cal_same(const cfg_rec_t *a, const cfg_rec_t *b)
     return a->has_cal == b->has_cal && (!a->has_cal || memcmp(&a->cal, &b->cal, sizeof a->cal) == 0);
 }
 
-// Counts the settings in live differing from b. With buf, writes one line
-// each for those Review and save has no field for (the calibration, MOT
-// HOLD / ORDER, VALVE CLEAR).
-static int diff(const cfg_rec_t *live, const cfg_rec_t *b, char *buf, size_t n)
+// Counts the settings in live differing from b.
+static int diff(const cfg_rec_t *live, const cfg_rec_t *b)
 {
     int count = 0;
-    size_t used = 0;
-    if (buf && n)
-        buf[0] = '\0';
-#define LINE(...) do { if (buf && used < n) { lv_snprintf(buf + used, n - used, __VA_ARGS__); used += strlen(buf + used); } } while (0)
-    for (int i = 0; i < M_N; i++) {
-        if (live->mot[i] == b->mot[i])
-            continue;
-        count++;
-        if (buf && (i == M_HOLD || i == M_ORDER))
-            LINE("Motor %s\n", i == M_HOLD ? "HOLD" : "ORDER");
-    }
-    for (int i = 0; i < VALVE_N_SETTINGS; i++) {
-        if (live->valve[i] == b->valve[i])
-            continue;
-        count++;
-        if (buf && i == V_CLEAR)
-            LINE("Valve CLEAR\n");
-    }
-    for (int i = 0; i < T_N; i++) {
-        if (live->tune[i] == b->tune[i])
-            continue;
-        count++;
-    }
-    if (strcmp(live->name, b->name) != 0) {
-        count++;
-        LINE("Cryostat name: %s\n", live->name[0] ? live->name : "none");
-    }
-    if (live->net_ip != b->net_ip || live->net_mask != b->net_mask) {
-        char x[2][48];
-        count++;
-        cfg_net_text(x[0], sizeof x[0], live->net_ip, live->net_mask);
-        LINE("IP address: %s\n", x[0]);
-    }
-    if (live->remote != b->remote) {
-        count++;
-        LINE("Remote control: %s\n", live->remote ? "On" : "Off");
-    }
-    if (!cal_same(live, b)) {
-        count++;
-        LINE("Sensor calibration: %s\n", live->has_cal ? "new" : "none (nominal)");
-    }
-#undef LINE
-    if (buf && used && buf[used - 1] == '\n')
-        buf[used - 1] = '\0';
+    for (int i = 0; i < M_N; i++)
+        count += live->mot[i] != b->mot[i];
+    for (int i = 0; i < VALVE_N_SETTINGS; i++)
+        count += live->valve[i] != b->valve[i];
+    for (int i = 0; i < T_N; i++)
+        count += live->tune[i] != b->tune[i];
+    count += strcmp(live->name, b->name) != 0;
+    count += live->net_ip != b->net_ip || live->net_mask != b->net_mask;
+    count += live->remote != b->remote;
+    count += !cal_same(live, b);
     return count;
 }
 
 int cfg_unsaved(void)
 {
     capture(&scratch);
-    return diff(&scratch, base(), NULL, 0);
-}
-
-int cfg_unsaved_other(char *buf, size_t n)
-{
-    capture(&scratch);
-    diff(&scratch, base(), buf, n);
-    return buf[0] != '\0';
+    return diff(&scratch, base());
 }
 
 // The cal counts as saved when it matches the newest saved record.
@@ -517,9 +474,8 @@ void cfg_init(void)
         valve_event("CFG", "Saved calibration is not a two-point one: not loaded, calibrate the sensor");
 }
 
-// Saves the live settings as the next rev. why is for the screens.
 // Writes the record in scratch as the next rev (cfg_save_with fills it with
-// the candidate before putting it in use; save() with the live settings).
+// the candidate before putting it in use). why is for the screens.
 static bool write_scratch(const char **why)
 {
     if (!flash_ok) {
@@ -552,18 +508,6 @@ static bool write_scratch(const char **why)
     return true;
 }
 
-static bool save(const char **why)
-{
-    capture(&scratch);
-    return write_scratch(why);
-}
-
-bool cfg_save(void)
-{
-    const char *why;
-    return save(&why);
-}
-
 /* --------------------------------------------------------------------------
  * Settings by key, for the screens
  * ------------------------------------------------------------------------ */
@@ -590,8 +534,6 @@ static const cfg_rec_t *source(cfg_from_t from)
     switch (from) {
     case CFG_FROM_LIVE:     capture(&scratch); return &scratch;
     case CFG_FROM_SAVED:    return newest >= 0 ? &slot[newest] : NULL;
-    case CFG_FROM_PREVIOUS: return newest >= 0 && !slot_why[1 - newest] ? &slot[1 - newest] : NULL;
-    case CFG_FROM_DEFAULTS: return &factory;
     }
     return NULL;
 }
@@ -610,7 +552,7 @@ bool cfg_value(cfg_from_t from, cfg_key_t k, int32_t *v)
 
 bool cfg_rev(cfg_from_t from, uint32_t *rev, const char **saved_at)
 {
-    const cfg_rec_t *r = from == CFG_FROM_SAVED || from == CFG_FROM_PREVIOUS ? source(from) : NULL;
+    const cfg_rec_t *r = from == CFG_FROM_SAVED ? source(from) : NULL;
     if (!r)
         return false;
     *rev = r->rev;
@@ -655,7 +597,7 @@ cfg_key_t cfg_pid_key(int set, int which)
     return key[set >= 1 && set <= 4 ? set - 1 : 0][which >= 0 && which <= 2 ? which : 0];
 }
 
-static cfg_rec_t cand;   // cfg_save_with and cfg_load_live (never at once)
+static cfg_rec_t cand;   // cfg_save_with, cfg_reset_factory and cfg_save_system (never at once)
 
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
 {
@@ -701,20 +643,45 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     return true;
 }
 
-bool cfg_load_live(cfg_from_t from, const char **why)
+bool cfg_undo(const char **why)
 {
-    const cfg_rec_t *r = source(from);
-    if (!r || from == CFG_FROM_LIVE) { *why = "no such save"; return false; }
     if ((*why = busy_why()) != NULL) return false;
-    if (from == CFG_FROM_DEFAULTS) {
-        cfg_rec_t *d = &cand;   // shared, saves a record's worth of RAM
-        capture(d);   // keep the cal
-        memcpy(d->mot, factory.mot, sizeof d->mot);
-        memcpy(d->valve, factory.valve, sizeof d->valve);
-        memcpy(d->tune, factory.tune, sizeof d->tune);
-        r = d;
-    }
-    if (!apply(r)) { *why = "record not applied"; return false; }
+    if (!apply(base())) { *why = "record not applied"; return false; }
+    valve_event("CFG", newest >= 0 ? "Undo: settings saved %s back in use" : "Undo: start-up settings back in use",
+                when(base()));
+    return true;
+}
+
+bool cfg_reset_factory(const char **why)
+{
+    if ((*why = busy_why()) != NULL) return false;
+    capture(&cand);   // the calibration in use, the name, the address and Remote control stay
+    memcpy(cand.mot, factory.mot, sizeof cand.mot);
+    memcpy(cand.valve, factory.valve, sizeof cand.valve);
+    memcpy(cand.tune, factory.tune, sizeof cand.tune);
+    // Written first, then put in use, as cfg_save_with.
+    scratch = cand;
+    if (!write_scratch(why))
+        return false;
+    if (!apply(&cand)) { *why = "saved, but not in use until a restart"; return false; }
+    valve_event("CFG", "Reset to factory: motor, valve and PID settings");
+    return true;
+}
+
+bool cfg_save_system(const char **why)
+{
+    cand = *base();
+    cand.magic = CFG_MAGIC;
+    cand.version = CFG_VERSION;
+    cand.size = sizeof cand;
+    lv_strlcpy(cand.name, cname, sizeof cand.name);
+    cand.net_ip = net_ip;
+    cand.net_mask = net_mask;
+    cand.remote = remote_on;
+    scratch = cand;
+    if (!write_scratch(why))
+        return false;
+    sync_cal_saved();   // write_scratch marks the cal saved: only if it is the saved one
     return true;
 }
 

@@ -98,7 +98,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Home IP tile opens System', hdr(a) === hdr(b) && hdr(a) !== home);
 }
 { // The Menu (0.16.2, Ryan 9 Nov: no Settings page, no row captions, an icon on every tile): nine tiles in three
-  // rows of three, each opening its page in one tap; Review and save bottom right, dark blue (0.15.23).
+  // rows of three, each opening its page in one tap; the ninth, Reset to factory, asks (0.16.31; Review and save before).
   const s = homed(load());
   const screen = () => { const m = new Uint8Array(s.x.memory.buffer); let p = s.x.sim_screen(), e = p; while (m[e]) e++;
     return Buffer.from(m.subarray(p, e)).toString(); };
@@ -108,27 +108,24 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Menu opens', screen() === 'Menu', screen());
   shot(s, 'menu');
   const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'PID tuning'], [84, 128, 'Motor settings'],
-    [240, 128, 'Valve position'], [396, 128, 'Sensor calibration'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
-    [396, 184, 'Review and save']];
+    [240, 128, 'Valve position'], [396, 128, 'Sensor calibration'], [84, 184, 'System'], [240, 184, 'Diagnostics']];
   const wrong = tiles.map(([x, y, t]) => { menu(); s.tap(x, y); return [t, screen()]; })
     .filter(([t, got]) => t !== got).map(([t, got]) => t + ' -> ' + got);
   check('every Menu tile opens its page', wrong.length === 0, wrong.join(', '));
-  menu(); s.tap(396, 184); const review = screen(); s.tap(66, 20);
-  check('Back from a page returns to the Menu', review === 'Review and save' && screen() === 'Menu', review + ' then ' + screen());
-  // Review and save is the one dark blue tile: white lettering on the Start AUTO blue, the others white cards.
+  menu(); s.tap(240, 184); const diag = screen(); s.tap(66, 20);
+  check('Back from a page returns to the Menu', diag === 'Diagnostics' && screen() === 'Menu', diag + ' then ' + screen());
+  // No dark blue tile from 0.16.31 (Review and save was): every tile a white card.
   const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
-  check('Review and save tile dark blue, the others white', px(330, 168) !== 0xFFFF && px(18, 168) === 0xFFFF && px(174, 168) === 0xFFFF,
+  check('every Menu tile white', px(330, 168) === 0xFFFF && px(18, 168) === 0xFFFF && px(174, 168) === 0xFFFF,
     [px(330, 168), px(18, 168), px(174, 168)].join());
   s.tap(240, 128); shot(s, 'valve-position'); s.tap(66, 20);
   s.tap(84, 128); shot(s, 'valve-settings'); s.tap(66, 20);
   // Choose sensor is gone (one sensor per board): no CFG_SENSOR key (27 to 0.16.13; set 4's KP from 0.16.14, the
-  // Disable switch edges 31 and 32 from 0.16.21, the keys end at 33), the sensor range is the 15 psia Druck's, and
-  // the old Settings slot now opens Review and save.
-  check('no sensor-in-use setting', s.setting(33) === -2147483648 && s.setting(CFG.DBC) === 8 && s.setting(CFG.B3) === 140 &&
+  // Disable switch edges from 0.16.21; the keys end at 31 from 0.16.30) and the sensor range is the 15 psia Druck's.
+  check('no sensor-in-use setting', s.setting(31) === -2147483648 && s.setting(CFG.DBC) === 8 && s.setting(CFG.B3) === 140 &&
     s.setting(CFG.PASS_LO) === 5 && s.setting(CFG.PASS_HI) === 50,
-    [33, CFG.DBC, CFG.B3, CFG.PASS_LO, CFG.PASS_HI].map(k => s.setting(k)).join(' '));
+    [31, CFG.DBC, CFG.B3, CFG.PASS_LO, CFG.PASS_HI].map(k => s.setting(k)).join(' '));
   check('setpoint limit is the 15 psia range', s.cmd('SETPOINT 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('SETPOINT 1035'));
-  menu(); s.tap(386, 184); check('old Settings slot opens Review and save', screen() === 'Review and save', screen());
   // Motor override moved from Valve position to Motor settings' fourth tab, Override (0.16.17, Ryan 12 Nov: "it
   // doesnt feel right to be in valve position"): asked first, and Back returns to Motor settings on that tab.
   // Its button is at the right of the second row from 0.16.21 (the Disable switch toggle and edges before it).
@@ -144,19 +141,19 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'home-pid');
   s.tap(415, 72); shot(s, 'pid-tuning');
   s.tap(298, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // set 1's KD (the set row), 1.5, Set
-  s.tap(415, 128); s.tap(319, 138);   // Save settings, then Save in the question
+  s.tap(415, 128);   // Save: at once (0.16.31; Save settings then Save in a question before)
   check('KD saves from the PID tuning page', s.setting(CFG.KD) === 150, 'KD ' + s.setting(CFG.KD));
   // Gain schedule on (0.15.15): the PID tab (Gains from 0.16.25) shows the set row; Set 3's KP from its card. Four
   // sets from 0.16.14; from 0.16.25 four cards of 82 px at x 10, 97, 184 and 271.
   s.cmd('SCHED SET PV,6,10,14,15', 1000); s.run(1000);
   shot(s, 'pid-tuning-sets');
   s.tap(221, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // Set 3, KP 1.5, Set
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   check('Set 3 KP saves from the set row', s.setting(CFG.KP3) === 150 && s.setting(CFG.KP) === 6 && s.setting(CFG.KP2) === 12 &&
     s.setting(CFG.KP4) === 40, [s.setting(CFG.KP), s.setting(CFG.KP2), s.setting(CFG.KP3), s.setting(CFG.KP4)].join());
   shot(s, 'pid-tuning-set3');
   s.tap(304, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(320, 212);   // Set 4, KP 1., Set
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   check('Set 4 KP saves from the set row', s.setting(CFG.KP4) === 100 && s.setting(CFG.KP3) === 150,
     [s.setting(CFG.KP3), s.setting(CFG.KP4)].join());
   shot(s, 'pid-tuning-set4');
@@ -165,13 +162,13 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(182, 72); s.run(500);
   shot(s, 'pid-tuning-table');
   s.tap(65, 128); s.tap(110, 183); s.tap(320, 212);   // Set 1 | 2 (B1), 5, Set
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   check('Set ranges: B1 saves from the first card', s.setting(CFG.B1) === 50 && s.setting(CFG.B2) === 100, s.setting(CFG.B1));
   // AUTO (AUTO limits to 0.16.24): AUTO min and the setpoint band beside it (Pressure response went in 0.16.30).
   s.tap(291, 72); s.run(500);
   shot(s, 'pid-tuning-auto');
   s.tap(180, 128); s.tap(40, 239); s.tap(320, 212);   // SP band, 1, Set
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   check('AUTO: the setpoint band saves from the second card', s.setting(CFG.BAND) === 100, s.setting(CFG.BAND));
 }
 { // A tap on anything greyed round a popup closes it, as Back (0.15.16, Ryan 5 Nov: "Make popups exitable when
@@ -537,6 +534,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'system');
   s.tap(357, 72);
   check('switch Off again: refused', s.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n');
+  // The switch saves as it is set (0.16.31): Off is still Off after a power cycle.
+  { const t = load(); t.x.sim_bench_init(); t.boot(s.flash()); t.set(5, 40000); t.run(2000);
+    check('Remote control Off from the screen is saved at once: Off after a power cycle',
+      t.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n' && /Settings saved/.test(events(s, 8)), t.cmd('SETPOINT 6') + events(s, 8)); }
   check('switch Off: PIDS SET and SCHED SET refused, PIDS? and SCHED? answer',
     s.cmd('PIDS SET 2,3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('SCHED SET PV,6,10,14,15') === 'ERR 211 Read only over the network\r\n' &&
@@ -588,6 +589,68 @@ let parkedFlash;
   const n = homed(load());
   n.tap(415, 184); n.tap(84, 184); n.tap(120, 128); const ip = hdr(n); shot(n, 'system-ip');
   check('System: IP address on the second row left opens its page', ip !== sys);
+}
+{ // Save, Undo and Reset to factory (0.16.31, Ryan 13 Nov: "saving is too clunky, maybe just a save an undo, and
+  // a reset to factory is enough"). Save and Undo act in one tap; Undo asks only when something in use would go.
+  const s = homed(load());
+  const screen = () => { const m = new Uint8Array(s.x.memory.buffer); let p = s.x.sim_screen(), e = p; while (m[e]) e++;
+    return Buffer.from(m.subarray(p, e)).toString(); };
+  const home = () => { if (screen() !== 'Home') s.tap(22, 20); }, menu = () => { home(); s.tap(415, 184); };
+  const kp = d => { s.tap(65, 184); s.tap(230, 183); s.tap(230, 239); s.tap(d === 5 ? 110 : 170, 183); s.tap(320, 212); };   // KP 1: 0 . d Set
+  menu(); s.tap(396, 72); s.run(300);                                  // PID tuning
+  kp(5);
+  const draft = s.setting(CFG.KP);                                     // a draft is not in use
+  shot(s, 'save-draft');
+  s.tap(415, 184); const noQ = !s.popup();                             // Undo
+  shot(s, 'save-undone');
+  s.tap(415, 128);                                                     // Save: nothing to save
+  check('Undo drops a draft at once, no question; nothing is saved', draft === 6 && noQ && s.setting(CFG.KP) === 6 &&
+    !/Settings saved/.test(events(s, 5)), [draft, noQ, s.setting(CFG.KP)].join());
+  kp(5); s.tap(415, 128); const noQ2 = !s.popup();
+  shot(s, 'save-saved');
+  check('Save applies and saves at once, no question', noQ2 && s.setting(CFG.KP) === 50 && /Settings saved/.test(events(s, 3)),
+    [noQ2, s.setting(CFG.KP)].join() + events(s, 3));
+  // Reset to factory on the Menu: asks; Cancel leaves everything; Reset puts factory in use and saves it.
+  menu(); s.tap(396, 184); const asked = s.popup();
+  shot(s, 'reset-ask');
+  s.tap(161, 155); const cancelled = !s.popup() && s.setting(CFG.KP) === 50;
+  s.tap(396, 184); s.tap(319, 155);
+  shot(s, 'reset-done');
+  const t = load(); t.x.sim_bench_init(); t.boot(s.flash()); t.set(5, 40000); t.run(2000);
+  check('Reset to factory: asks, Cancel changes nothing, Reset puts the factory settings in use and saves them',
+    asked && cancelled && !s.popup() && s.setting(CFG.KP) === 6 && /Reset to factory/.test(events(s, 4)) && t.setting(CFG.KP) === 6,
+    [asked, cancelled, s.popup(), s.setting(CFG.KP), t.setting(CFG.KP)].join() + events(s, 4));
+  // A new calibration is in use at once and not saved. Undo on its page asks, then puts the saved one back.
+  let calWhy = '';
+  const calibrate = () => { s.set(11, 0); s.set(40, 0.02); s.run(5000); const a = s.cal(1, 0); calWhy = s.why() + ' ' + s.cmd('PRESSURE?'); s.set(11, 1); s.run(60000); const b = s.cal(2, 1009.8); return a && b; };
+  const air = () => parseFloat(s.cmd('PRESSURE?').split(' ')[1]);
+  const nominal = (s.set(11, 1), s.run(60000), air());
+  const cal1 = calibrate(), new1 = air();
+  menu(); s.tap(396, 128); s.run(500);                                 // Pressure sensor
+  shot(s, 'save-cal-unsaved');
+  s.tap(415, 184); const undoQ = s.popup();                            // Undo: asks
+  shot(s, 'save-undo-ask');
+  s.tap(320, 147); s.run(1500);
+  check('Undo with a new calibration in use asks, then puts the saved one back',
+    cal1 && Math.abs(new1 - 1009.8) < 0.5 && undoQ && !s.popup() && Math.abs(air() - nominal) < 0.5 && Math.abs(nominal - 1009.8) > 5 &&
+    /Undo: settings saved/.test(events(s, 4)), [cal1, calWhy, new1, undoQ, s.popup(), air(), nominal].join() + events(s, 4));
+  // The header's unsaved icon (left of the remote light) asks to save what is in use.
+  const cal2 = calibrate();
+  home(); s.run(4000);
+  shot(s, 'save-unsaved-icon');
+  let iconQ = false;
+  for (const x of [287, 325]) { if (!iconQ) { s.tap(x, 20); iconQ = s.popup(); } }
+  shot(s, 'save-unsaved-ask');
+  s.tap(320, 147); s.run(1500);
+  const u = load(); u.x.sim_bench_init(); u.boot(s.flash()); u.set(5, 40000); u.set(11, 1); u.run(60000);
+  const kept = parseFloat(u.cmd('PRESSURE?').split(' ')[1]);
+  check('the unsaved icon asks to save; Save keeps the new calibration over a power cycle',
+    cal2 && iconQ && !s.popup() && Math.abs(kept - 1009.8) < 0.5, [cal2, iconQ, s.popup(), kept].join() + events(s, 4));
+  s.set(11, 0); s.run(120000);
+  // In AUTO the reset is refused: no question.
+  s.cmd('SETPOINT 5;MODE AUTO', 3000);
+  menu(); s.tap(396, 184);
+  check('Reset to factory in AUTO: refused, no question', !s.popup() && s.cmd('MODE?') === 'MODE AUTO\r\n', s.popup() + s.cmd('MODE?'));
 }
 { // Sensor calibration (0.16.27, Fable's review; Calibrate sensor to 0.16.26): a captured point gets the draft edge.
   const s = homed(load());
@@ -868,13 +931,13 @@ let parkedFlash;
     [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
 }
 { // The Disable switch edges are saved settings (0.16.21, Ryan 12 Nov: "make the boundary editable"): From 10 from
-  // its card's keypad and Save settings, and closing past the pressed switch then stops at 10 %. From at or above
+  // its card's keypad and Save, and closing past the pressed switch then stops at 10 %. From at or above
   // To is refused and nothing is saved.
   const s = homed(load()); s.cmd('VALVE SET 40', 150000);
   s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128);   // Menu > Motor settings > Override, Disable switch on
   s.tap(65, 184); s.tap(40, 239); s.tap(230, 183); s.tap(320, 212);   // From: 1 0, Set
   shot(s, 'override-from-draft');
-  s.tap(415, 128); s.tap(319, 138);                                    // Save settings, Save
+  s.tap(415, 128);                                                     // Save
   const saved = s.setting(CFG.PASS_LO);
   s.set(7, 1); s.run(1000);                                            // the switch reads pressed at 40 %
   s.cmd('VALVE SET 2', 120000);
@@ -882,7 +945,7 @@ let parkedFlash;
   s.set(7, 0); s.run(1000);
   s.tap(415, 184); s.tap(84, 128); s.tap(305, 72);
   s.tap(65, 184); s.tap(170, 183); s.tap(230, 183); s.tap(320, 212);  // From: 6 0, above To 50
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   const kept = s.setting(CFG.PASS_LO);
   check('Disable switch: From saved as 10 stops closing at 10 %; From over To refused', saved === 10 &&
     /VALVE (9\.9|10\.0)/.test(at) && /W-1/.test(ev) && kept === 10,

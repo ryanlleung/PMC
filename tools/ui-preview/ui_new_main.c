@@ -10,7 +10,7 @@
  * Menu (0.16.2): three columns of 148 at x 10, 166, 322 (centres 84, 240,
  * 396), rows y 48, 104, 160 (centres 72, 128, 184): Trend, Events, PID
  * tuning / Motor settings, Valve position, Pressure sensor / System,
- * Diagnostics, Review and save (Valve position and PID tuning swapped in
+ * Diagnostics, Reset to factory (Valve position and PID tuning swapped in
  * 0.16.3).
  */
 #ifndef TVX
@@ -217,7 +217,10 @@ static void seed_flash(void)
     c.r_ppb[0] = 127900; c.p_mmbar[0] = 0;
     c.r_ppb[1] = 9798300; c.p_mmbar[1] = 1013250;
     c.crc = crc32(&c, offsetof(cal_rec_t, crc));
-    if (!cal_set_record(&c, false) || !cfg_save()) printf("seed not saved\n");
+    int32_t v[CFG_N] = { 0 };
+    bool on[CFG_N] = { false };
+    const char *why;
+    if (!cal_set_record(&c, false) || !cfg_save_with(v, on, &why)) printf("seed not saved\n");
 }
 
 /* Render ------------------------------------------------------------------ */
@@ -381,7 +384,7 @@ int main(int argc, char **argv)
 #define M_CAL()    tap(396, 128)
 #define M_SYS()    tap(84, 184)
 #define M_DIAG()   tap(240, 184)
-#define M_REVIEW() tap(396, 184)
+#define M_RESET()  tap(396, 184)   // Reset to factory: a question, no page
     for (int i = 0; i < 10; i++) {
         tap(415, 184);          // Menu
         HOME();
@@ -404,7 +407,6 @@ int main(int argc, char **argv)
         MENU(); M_VSET(); BACK();                               // Motor settings (0.16.2: on the Menu; Valve settings to 0.16.15)
         MENU(); M_TUNE(); BACK();                               // PID tuning
         MENU(); M_DIAG(); BACK();                               // Diagnostics
-        MENU(); M_REVIEW(); BACK();                             // Review and save
         HOME();
     }
     run(1200);
@@ -492,13 +494,14 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-tuneauto")) tap(291, 72);    // AUTO tab (AUTO limits to 0.16.24)
     if (!strcmp(st, "set-tunehelp")) tap(415, 72);    // Gains tab, Help
     if (!strcmp(st, "set-tuneset3")) tap(225, 128);   // Gains tab, Set 3
-    if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") ||
-        !strcmp(st, "set-saved")) { tap(94, 72); tap(181, 240); tap(251, 240); tap(111, 184); }
-    if (!strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(321, 184);
-    if (!strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(415, 128);
-    if (!strcmp(st, "set-saved")) tap(249, 136 + 40);
-    if (!strncmp(st, "set-review", 10) || !strcmp(st, "set-load")) M_REVIEW();
-    if (!strcmp(st, "set-load")) tap(120, 184);
+    // KP 1's keypad with 0.1 typed; then Set, which leaves a draft.
+    if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saved") ||
+        !strcmp(st, "set-tuneundo")) { tap(65, 184); tap(231, 183); tap(231, 233); tap(45, 233); }
+    if (!strcmp(st, "set-tunedraft") || !strcmp(st, "set-saved") || !strcmp(st, "set-tuneundo")) tap(305, 208);
+    if (!strcmp(st, "set-saved")) tap(415, 128);    // Save: at once, no question (0.16.31)
+    if (!strcmp(st, "set-tuneundo")) tap(415, 184);   // Undo: at once for drafts
+    if (!strcmp(st, "reset-ask") || !strcmp(st, "reset-done")) { MENU(); M_RESET(); }
+    if (!strcmp(st, "reset-done")) tap(249, 136 + 40);
     if (strstr(st, "trend")) { MENU(); M_TREND(); }   // Menu, Trend
     if (!strcmp(st, "trend1h")) { tap(415, 72); tap(415, 72); }
     if (!strcmp(st, "trend1m")) { tap(415, 128); tap(415, 184); tap(415, 184); }

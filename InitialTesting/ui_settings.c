@@ -17,17 +17,21 @@
 /* --------------------------------------------------------------------------
  * The settings pages (stage 6, simulator v63), each on the Menu from 0.16.2
  * (Ryan 9 Nov: "remove the settings page and put everything in the menu"):
- * System (with Cryostat name and IP address), Motor settings, PID tuning,
- * Review and save, and Calibrate sensor. The Settings page of navigation
+ * System (with Cryostat name and IP address), Motor settings, PID tuning
+ * and Sensor calibration. The Settings page of navigation
  * tiles (0.15.9 to 0.16.1) and Choose sensor (one sensor per board, Ryan 9
  * Nov: "a new one will be recalibrated anyway") are gone.
  *
- * An edit is a draft (dark edge) until Save settings, which
- * checks the drafts and the settings in use together, puts them in use all
- * or nothing, and writes the whole record (cfg_save_with).
- * A grey edge is a setting in use that differs from the last save (a
- * capture, a COM3 command or Load settings). Load settings > Previous save
- * is the undo.
+ * An edit is a draft (dark edge) until Save, which checks the drafts and
+ * the settings in use together, puts them in use all or nothing, and writes
+ * the whole record (cfg_save_with). Undo drops the drafts and puts the last
+ * save back. A grey edge is a setting in use that differs from the last
+ * save (Motor override). Reset to factory is on the Menu.
+ * 0.16.31 (Ryan 13 Nov: "saving is too clunky, maybe just a save an undo,
+ * and a reset to factory is enough"): Save and Undo act at once (Save
+ * settings and Discard changes asked first); the name, the address and
+ * Remote control save as they are set; Review and save, its list of unsaved
+ * changes and Load settings (last, previous, factory) are gone.
  * ------------------------------------------------------------------------ */
 
 #define COL_DRAFT  UI_TEXT   // dark edge, no colour (Ryan, 24 Oct; was violet)
@@ -273,8 +277,8 @@ static bool ed_turns(int32_t v100, const char **why)
 }
 
 // The keypad's side rows. A setting is normally in use as saved, so one
-// row, Saved; In use as well only when they differ (after Load settings or
-// a COM3 change), or In use alone when nothing is saved yet.
+// row, Saved; In use as well only when they differ (after Motor override),
+// or In use alone when nothing is saved yet.
 static void kp_rows(ui_kp_t *k, cfg_key_t key, char *now, char *sv, size_t n)
 {
     int32_t s;
@@ -353,7 +357,9 @@ static void field_event(lv_event_t *e)
 }
 
 /* --------------------------------------------------------------------------
- * Save, discard and the side column (Help, Save settings, Discard changes)
+ * Save, Undo and the side column (Help, Save, Undo). Both act at once
+ * (0.16.31); Undo asks first only when it would drop something in use (a
+ * new calibration, a Motor override change), which typing cannot bring back.
  * ------------------------------------------------------------------------ */
 static void save_now(void)
 {
@@ -361,6 +367,16 @@ static void save_now(void)
     char t[96];
     uint32_t rev;
     const char *at;
+    if (!unsaved()) {
+        ui_msg("Nothing to save");
+        return;
+    }
+    // In AUTO the valve moves all the time; tuning saves there (cfg.c
+    // refuses anything else with "Stop AUTO first").
+    if (!valve_auto() && (stepper3_busy() || valve_mode() == VALVE_CALIBRATING)) {
+        ui_msg("Wait for the valve to stop");
+        return;
+    }
     if (!cfg_save_with(draft_v, draft_set, &why)) {
         lv_snprintf(t, sizeof t, "Not saved: %s", why);
         ui_msg(t);
@@ -374,70 +390,76 @@ static void save_now(void)
     }
 }
 
-static void save_ask(void)
-{
-    static char t[140];
-    char c[24], w[24];
-    uint32_t rev = 0;
-    const char *at;
-    int n = unsaved();
-    if (!n) {
-        ui_msg("Nothing to save");
-        return;
-    }
-    // In AUTO the valve moves all the time; tuning saves there (cfg.c
-    // refuses anything else with "Stop AUTO first").
-    if (!valve_auto() && (stepper3_busy() || valve_mode() == VALVE_CALIBRATING)) {
-        ui_msg("Wait for the valve to stop");
-        return;
-    }
-    (void)rev; (void)at; (void)w;
-    lv_snprintf(t, sizeof t, "Save %s?", plural(c, sizeof c, n, "change"));
-    ui_confirm(t, "Save settings", save_now);
-}
-
-static void discard_drafts(void)
-{
-    char t[48], c[24];
-    lv_snprintf(t, sizeof t, "%s discarded.", plural(c, sizeof c, drafts(), "draft"));
-    drafts_clear();
-    ui_msg(t);
-}
-
-static void discard_live(void)
+static void undo_now(void)
 {
     const char *why;
     char t[64];
-    if (!cfg_load_live(CFG_FROM_SAVED, &why)) {
-        lv_snprintf(t, sizeof t, "Not put back: %s", why);
-        ui_msg(t);
-    } else {
-        ui_msg("Last save put back.");
+    if (cfg_unsaved() && !cfg_undo(&why)) {
+        lv_snprintf(t, sizeof t, "Not undone: %s", why);
+        ui_msg(t);   // the drafts are kept
+        return;
     }
+    drafts_clear();
+    ui_msg("Undone: back to the last save.");
 }
 
-static void discard_ask(void)
+static void undo_ask(void)
 {
-    static char t[160];
+    static char t[96];
     char c[24];
-    uint32_t rev;
-    const char *at;
-    int n = drafts();
-    if (n) {
-        lv_snprintf(t, sizeof t, "Discard %s?",
-                    plural(c, sizeof c, n, "unsaved change"));
-        ui_confirm(t, "Discard changes", discard_drafts);
-    } else if (cfg_unsaved() && cfg_rev(CFG_FROM_SAVED, &rev, &at)) {
-        lv_snprintf(t, sizeof t, "Put the last save back? %s %s lost.", plural(c, sizeof c, cfg_unsaved(), "change"),
-                    cfg_unsaved() == 1 ? "is" : "are");
-        ui_confirm(t, "Put back", discard_live);
+    const int in_use = cfg_unsaved();
+    if (!drafts() && !in_use) {
+        ui_msg("Nothing to undo");
+    } else if (in_use) {
+        lv_snprintf(t, sizeof t, "Undo? %s in use %s back to the last save.", plural(c, sizeof c, in_use, "change"),
+                    in_use == 1 ? "goes" : "go");
+        ui_confirm(t, "Undo", undo_now);
     } else {
-        ui_msg("No unsaved changes");
+        undo_now();
     }
 }
 
-static void save_cb(lv_event_t *e) { (void)e; save_ask(); }
-static void discard_cb(lv_event_t *e) { (void)e; discard_ask(); }
+static void save_cb(lv_event_t *e) { (void)e; save_now(); }
+static void undo_cb(lv_event_t *e) { (void)e; undo_ask(); }
+
+// The header's unsaved icon (ui.c): something is in use and not saved (a
+// new calibration, a Motor override change). Save is one tap from here;
+// Undo is on the settings pages.
+void ui_unsaved_ask(void)
+{
+    static char t[96];
+    char c[24];
+    lv_snprintf(t, sizeof t, "%s in use, not saved: lost at a restart. Save?", plural(c, sizeof c, cfg_unsaved(), "change"));
+    ui_confirm(t, "Save", save_now);
+}
+
+// Reset to factory (the Menu's ninth tile, 0.16.31).
+static void reset_now(void)
+{
+    const char *why;
+    char t[64];
+    if (!cfg_reset_factory(&why)) {
+        lv_snprintf(t, sizeof t, "Not reset: %s", why);
+        ui_msg(t);
+        return;
+    }
+    drafts_clear();
+    ui_msg("Factory settings saved.");
+}
+
+void ui_factory_reset_ask(void)
+{
+    if (valve_auto()) {
+        ui_msg("Stop AUTO first");
+        return;
+    }
+    if (stepper3_busy() || valve_mode() == VALVE_CALIBRATING) {
+        ui_msg("Wait for the valve to stop");
+        return;
+    }
+    ui_confirm("Reset motor and PID settings to factory? Calibration, name and IP address stay. No undo.",
+               "Reset", reset_now);
+}
 
 static const char *help_title, *(*help_text)(void);
 static void help_cb(lv_event_t *e)
@@ -447,18 +469,17 @@ static void help_cb(lv_event_t *e)
 }
 
 static struct {
-    lv_obj_t *save, *discard;
+    lv_obj_t *save, *undo;
 } side;
 
-// Help in row 0 (or Discard on Review and save), Save in row 1, Discard in row 2.
+// Help in row 0, Save in row 1, Undo in row 2.
 static void side_make(lv_obj_t *scr, const char *title, const char *(*help)(void))
 {
     help_title = title;
     help_text = help;
-    if (help)
-        ui_btn(scr, 361, RY[0], 109, RH, UI_NAV, "Help", help_cb, NULL);
-    side.save = ui_btn(scr, 361, RY[1], 109, RH, UI_PRIMARY, "Save settings", save_cb, NULL);
-    side.discard = ui_btn(scr, 361, help ? RY[2] : RY[0], 109, RH, UI_SECONDARY, "Discard changes", discard_cb, NULL);
+    ui_btn(scr, 361, RY[0], 109, RH, UI_NAV, "Help", help_cb, NULL);
+    side.save = ui_btn(scr, 361, RY[1], 109, RH, UI_PRIMARY, "Save", save_cb, NULL);
+    side.undo = ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Undo", undo_cb, NULL);
 }
 
 // Strip and side buttons, every refresh.
@@ -469,9 +490,9 @@ static void side_refresh(void)
     const char *at;
     int n = unsaved();
     ui_btn_enable(side.save, n > 0);
-    ui_btn_enable(side.discard, drafts() > 0 || cfg_unsaved() > 0);
+    ui_btn_enable(side.undo, drafts() > 0 || cfg_unsaved() > 0);
     if (drafts())
-        lv_snprintf(t, sizeof t, "%s. Save settings to use.", plural(c, sizeof c, n, "unsaved change"));
+        lv_snprintf(t, sizeof t, "%s. Save to use.", plural(c, sizeof c, n, "unsaved change"));
     else if (n)
         lv_snprintf(t, sizeof t, "%s in use, not saved.", plural(c, sizeof c, n, "change"));
     else if (cfg_rev(CFG_FROM_SAVED, &rev, &at))
@@ -525,8 +546,8 @@ static void restart_cb(lv_event_t *e)
 
 /* --------------------------------------------------------------------------
  * Cryostat name (System > Cryostat name): a keyboard for the name in the
- * Home title, "<name> pressure controller". Use name puts it in use at
- * once, unsaved until Save settings, like a captured calibration.
+ * Home title, "<name> pressure controller". Use name puts it in use and
+ * saves it (0.16.31; unsaved until Save settings before).
  * ------------------------------------------------------------------------ */
 static struct {
     lv_obj_t *kb, *text, *use;
@@ -577,6 +598,18 @@ static void nm_key(lv_event_t *e)
     nm_show();
 }
 
+// The name, the address and Remote control are saved as they are set
+// (0.16.31). A save that fails says so; the header's unsaved icon then shows.
+static void system_save(void)
+{
+    const char *why;
+    char t[96];
+    if (!cfg_save_system(&why)) {
+        lv_snprintf(t, sizeof t, "In use, not saved: %s", why);
+        ui_msg(t);
+    }
+}
+
 static void nm_use(lv_event_t *e)
 {
     if (ui_btn_disabled(e))
@@ -595,6 +628,7 @@ static void nm_use(lv_event_t *e)
     }
     valve_event("CFG", a[0] ? "Cryostat name set (screen)" : "Cryostat name cleared (screen)");
     ui_back();
+    system_save();
 }
 
 static void nm_cancel(lv_event_t *e)
@@ -647,7 +681,7 @@ static void nm_build(lv_obj_t *scr)
 
 static void nm_refresh(void)
 {
-    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_HOME, "Shown on Home. Save settings to keep it.");
+    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_HOME, "Shown on Home. Use name saves it.");
 }
 
 const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
@@ -665,12 +699,13 @@ static void nn_go(lv_event_t *e) { ui_open((const ui_screen_t *)lv_event_get_use
 
 // Remote control (0.13.4, Ryan 28 Oct, network plan A): a toggle switch
 // since 0.13.7; a press anywhere on the card turns it On or Off, live at
-// once, kept by Save settings like the name.
+// once and saved (0.16.31).
 static void remote_cb(lv_event_t *e)
 {
     (void)e;
     cfg_set_remote(!cfg_remote());
     lv_obj_set_state(nn.rsw, LV_STATE_CHECKED, cfg_remote());
+    system_save();
 }
 
 // Restart and Shut down on System are actions, not pages: filled dark
@@ -741,13 +776,13 @@ static void nn_refresh(void)
         lv_obj_set_state(nn.rsw, LV_STATE_CHECKED, cfg_remote());
     ui_set_text(nn.rtext, cfg_remote() ? "On: network can set" : "Off: network read only");
     ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, cfg_net_restart_due()
-                 ? "New IP address: Save settings, then restart." : "Static IP address.");   // no DHCP wording (Ryan 6 Nov)
+                 ? "New IP address saved: restart to use it." : "Static IP address.");   // no DHCP wording (Ryan 6 Nov)
 }
 
 const ui_screen_t ui_scr_namenet = { "System", nn_build, nn_refresh, NULL };
 
-/* IP address: digits and dots for the address and the mask; Use puts
- * them in use for the next restart, unsaved until Save settings. */
+/* IP address: digits and dots for the address and the mask; Use saves
+ * them (0.16.31) for the next restart. */
 static struct {
     lv_obj_t *kb, *box[2], *val[2], *use;
     char buf[2][16];
@@ -809,8 +844,9 @@ static void na_use(lv_event_t *e)
         return;
     }
     cfg_net_text(t, sizeof t, ip, mask);
-    valve_event("CFG", "IP address set to %s (screen), not saved", t);
+    valve_event("CFG", "IP address set to %s (screen)", t);
     ui_back();
+    system_save();
 }
 
 static void na_default(lv_event_t *e)
@@ -818,8 +854,9 @@ static void na_default(lv_event_t *e)
     (void)e;
     const char *why;
     cfg_set_net(0, 0, &why);
-    valve_event("CFG", "IP address set to the build default (screen), not saved");
+    valve_event("CFG", "IP address set to the build default (screen)");
     ui_back();
+    system_save();
 }
 
 static void na_build(lv_obj_t *scr)
@@ -852,7 +889,7 @@ static void na_build(lv_obj_t *scr)
 
 static void na_refresh(void)
 {
-    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "The controller's address, used after Save settings and a restart.");
+    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "The controller's address. Use saves it; a restart puts it in use.");
 }
 
 const ui_screen_t ui_scr_netaddr = { "IP address", na_build, na_refresh, NULL };
@@ -875,7 +912,7 @@ typedef struct {
 // Motor settings (Valve setup to 0.16.1, Valve settings to 0.16.15, Ryan 12 Nov
 // "change valve settings to motor settings"; Ryan 9 Nov: "the functionality
 // between valve position and valve setup is a bit confusing"): the valve's
-// saved numbers, drafts until Save settings; Travel, Homing and Drive move
+// saved numbers, drafts until Save; Travel, Homing and Drive move
 // nothing. Motor override, which drives the motor by steps, opens from the
 // fourth tab, Override (0.16.17, Ryan 12 Nov: "it doesnt feel right to be in
 // valve position"; the side column and the strip have no room for it). Home
@@ -1262,210 +1299,10 @@ const ui_screen_t ui_scr_valve_set = { "Motor settings", valve_set_build, pg_ref
 const ui_screen_t ui_scr_tune = { "PID tuning", tune_build, pg_refresh, NULL };
 
 /* --------------------------------------------------------------------------
- * Review and save
- * ------------------------------------------------------------------------ */
-static struct {
-    ecard_t changes;
-    lv_obj_t *saved, *prev, *load;
-} rv;
-
-static void changes_cb(lv_event_t *e)
-{
-    (void)e;
-    static char t[900], title[40];
-    char a[40], b[40], cap[40], c[24];
-    size_t u = 0;
-    int n = 0;
-    t[0] = '\0';
-    for (int k = 0; k < CFG_N; k++) {
-        int32_t s;
-        bool have = cfg_value(CFG_FROM_SAVED, (cfg_key_t)k, &s);
-        int32_t l = live((cfg_key_t)k);
-        if (draft_set[k]) {
-            lv_snprintf(t + u, sizeof t - u, "%s: %s to %s (draft)\n", caption(cap, sizeof cap, (cfg_key_t)k),
-                        value_text(a, sizeof a, (cfg_key_t)k, have ? s : l),
-                        value_text(b, sizeof b, (cfg_key_t)k, draft_v[k]));
-        } else if (have && s != l) {
-            lv_snprintf(t + u, sizeof t - u, "%s: %s to %s (in use)\n", caption(cap, sizeof cap, (cfg_key_t)k),
-                        value_text(a, sizeof a, (cfg_key_t)k, s), value_text(b, sizeof b, (cfg_key_t)k, l));
-        } else {
-            continue;
-        }
-        u += strlen(t + u);
-        n++;
-    }
-    char other[300];
-    if (cfg_unsaved_other(other, sizeof other)) {
-        lv_snprintf(t + u, sizeof t - u, "%s\n", other);
-        u += strlen(t + u);
-        for (const char *p = other; *p; p++)
-            n += *p == '\n';
-        n++;
-    }
-    if (n)
-        lv_snprintf(t + u, sizeof t - u, "\nSave settings puts them in use and keeps them.");
-    else
-        lv_snprintf(t, sizeof t, "None");
-    lv_snprintf(title, sizeof title, n ? "Unsaved changes (%s)" : "Unsaved changes", plural(c, sizeof c, n, "line"));
-    ui_text_view(title, t);
-}
-
-static int load_n;
-static cfg_from_t load_from[3];
-
-static cfg_from_t load_sel;
-
-static void load_do(void)
-{
-    cfg_from_t from = load_sel;
-    int n = 0, before = 0;
-    // Each setting with a field comes in as a draft; the calibration of a
-    // save comes in use straight away (it has no draft).
-    if (from != CFG_FROM_DEFAULTS) {
-        const char *why;
-        // What the load replaces: settings in use but unsaved, and drafts.
-        before = cfg_unsaved();
-        for (int k = 0; k < CFG_N; k++)
-            before += draft_set[k];
-        if (!cfg_load_live(from, &why)) {
-            char t[64];
-            lv_snprintf(t, sizeof t, "Not loaded: %s", why);
-            ui_msg(t);   // the drafts are kept
-            return;
-        }
-        drafts_clear();
-        n = cfg_unsaved();
-    } else {
-        for (int k = 0; k < CFG_N; k++) {
-            int32_t v;
-            if (cfg_value(from, (cfg_key_t)k, &v) && v != shown((cfg_key_t)k)) {
-                set_draft((cfg_key_t)k, v);
-                n++;
-            }
-        }
-    }
-    char t[80], c[24];
-    if (!n && before)
-        // Loading the last save puts it back over changes: say so, not "the same".
-        ui_msg(from == CFG_FROM_SAVED ? "Last save restored and in use." : "Restored and in use, the same as the last save.");
-    else if (!n)
-        ui_msg("Already the same");
-    else {
-        if (from == CFG_FROM_DEFAULTS)
-            lv_snprintf(t, sizeof t, "Factory defaults loaded as %s. Save settings to use them.",
-                        plural(c, sizeof c, n, "unsaved change"));
-        else
-            lv_snprintf(t, sizeof t, "Loaded and in use, %s from the last save. Save settings to keep.",
-                        plural(c, sizeof c, n, "change"));
-        ui_msg(t);
-    }
-}
-
-static void load_pick(int i)
-{
-    static char t[160];
-    uint32_t rev;
-    const char *at;
-    load_sel = load_from[i];
-    if (load_sel == CFG_FROM_DEFAULTS) {
-        load_do();
-        return;
-    }
-    char w[24];
-    cfg_rev(load_sel, &rev, &at);
-    lv_snprintf(t, sizeof t, "Load the %s save%s%s? Drafts are dropped.",
-                load_sel == CFG_FROM_SAVED ? "last" : "previous", at[0] ? ", " : "",
-                at[0] ? save_when(w, sizeof w, at) : "");
-    ui_confirm(t, "Load", load_do);
-}
-
-static void load_cb(lv_event_t *e)
-{
-    (void)e;
-    static char names[3][40];
-    static const char *items[3];
-    char w[24];
-    uint32_t rev;
-    const char *at;
-    load_n = 0;
-    if (valve_auto()) {
-        ui_msg("Stop AUTO first");
-        return;
-    }
-    if (stepper3_busy() || valve_mode() == VALVE_CALIBRATING) {
-        ui_msg("Wait for the valve to stop");
-        return;
-    }
-    if (cfg_rev(CFG_FROM_SAVED, &rev, &at)) {
-        lv_snprintf(names[load_n], sizeof names[0], "Last save, %s", save_when(w, sizeof w, at));
-        load_from[load_n++] = CFG_FROM_SAVED;
-    }
-    if (cfg_rev(CFG_FROM_PREVIOUS, &rev, &at)) {
-        lv_snprintf(names[load_n], sizeof names[0], "Previous save, %s", save_when(w, sizeof w, at));
-        load_from[load_n++] = CFG_FROM_PREVIOUS;
-    }
-    lv_snprintf(names[load_n], sizeof names[0], "Factory defaults");
-    load_from[load_n++] = CFG_FROM_DEFAULTS;
-    for (int i = 0; i < load_n; i++)
-        items[i] = names[i];
-    ui_pick("Load which settings?", items, load_n, -1, load_pick);
-}
-
-static const char *rv_help(void)
-{
-    return "Last saved, Previous save: the two stored records.\n"
-           "Save settings: applies drafts and saves.\n"
-           "Load settings: a save loads live; factory loads as drafts, calibration kept.\n"
-           "Discard changes: back to Last saved.";
-}
-
-static void rv_build(lv_obj_t *scr)
-{
-    // Save settings and Discard changes in the same places as on the other pages.
-    rv.saved = ui_info(scr, C2X[0], RY[0], C2W[0], RH, "Last saved");
-    rv.prev = ui_info(scr, C2X[1], RY[0], C2W[1], RH, "Previous save");
-    ecard_make(&rv.changes, scr, 10, RY[1], 343, "Unsaved changes", changes_cb, NULL);
-    rv.load = ui_btn(scr, 10, RY[2], 343, RH, UI_SECONDARY, "Load settings", load_cb, NULL);
-    ui_btn_text(rv.load, "Load settings", "last, previous or factory");
-    side_make(scr, "Review and save", rv_help);
-}
-
-static const char *rev_text(char *buf, size_t n, cfg_from_t from)
-{
-    uint32_t rev;
-    const char *at;
-    if (!cfg_rev(from, &rev, &at))
-        return "None";
-    // Saves from 0.8.x have no date; the caption tells the two apart.
-    return at[0] ? save_when(buf, n, at) : "Date unknown";
-}
-
-static void rv_refresh(void)
-{
-    char t[48], c[24];
-    int n = unsaved(), d = drafts(), u = n - d;
-    // The state in words, not only the dark / light edge (review of 0.10.11).
-    if (d && u > 0)
-        lv_snprintf(t, sizeof t, "%s, %d in use not saved", plural(c, sizeof c, d, "draft"), u);
-    else if (d)
-        lv_snprintf(t, sizeof t, "%s, not in use yet", plural(c, sizeof c, d, "draft"));
-    else if (u > 0)
-        lv_snprintf(t, sizeof t, "%d in use, not saved", u);
-    else
-        lv_strlcpy(t, "None", sizeof t);
-    ecard_state(&rv.changes, t, d > 0, n > 0 && !d);
-    ui_set_text(rv.saved, rev_text(t, sizeof t, CFG_FROM_SAVED));
-    ui_set_text(rv.prev, rev_text(t, sizeof t, CFG_FROM_PREVIOUS));
-    side_refresh();
-}
-
-const ui_screen_t ui_scr_review = { "Review and save", rv_build, rv_refresh, NULL };
-
-/* --------------------------------------------------------------------------
  * Sensor calibration (Menu > Pressure sensor; Calibrate sensor and Pressure
  * setup to 0.16.26): CAL VAC / CAL AIR on the screen.
  * The new cal is in use once both points are held, unsaved until Save
- * settings (as on COM3). One sensor per board from 0.16.2: a new sensor is
+ * (Undo puts the saved one back). One sensor per board from 0.16.2: a new sensor is
  * calibrated here, nothing else to choose (the header named the serial,
  * "Calibrate 5880156", to 0.16.1).
  * ------------------------------------------------------------------------ */
@@ -1488,7 +1325,7 @@ static const char *cs_help(void)
 {
     // Two lines (0.16.27, Fable's review).
     return "Two points: the sensor pumped down, then open to room air.\n"
-           "A new calibration is in use at once; Save settings keeps it.";
+           "A new calibration is in use at once. Save keeps it, Undo puts the saved one back.";
 }
 
 static bool reading_ok(void)

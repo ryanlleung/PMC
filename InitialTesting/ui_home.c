@@ -753,23 +753,16 @@ const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
  * everything in the menu. remove the labels on the menu. show some icons
  * for each button"). Every page is one tap away:
  *   Trend           Events          PID tuning
- *   Motor settings  Valve position  Pressure setup
- *   System          Diagnostics     Review and save
+ *   Motor settings  Valve position  Pressure sensor
+ *   System          Diagnostics     Reset to factory
  * Valve position and PID tuning swapped places in 0.16.3 (Ryan 9 Nov, PR #43:
  * "swap location of valve position and pid tuning"): the two valve tiles
- * side by side in the middle row. Calibration was renamed Pressure setup in
- * 0.16.7 (Ryan 10 Nov, PR #43: "something with pressure in the name and
- * doesnt overflow the line"): "Pressure settings" is 141 px and wraps.
- * Review and save is filled dark blue, as Ryan asked for it and Settings on
- * 6 Nov (0.15.23); with Settings gone it is the one dark tile, bottom right
- * where Settings was. Diagnostics stays on System too (0.15.19) and fills
- * the ninth slot. To 0.16.1: six tiles in captioned rows Records (Trend,
- * Events), Service (Valve position, Calibration), Setup (System, Settings),
- * with Choose sensor, Valve setup, PID tuning and Review and save a tap
- * further on Settings.
- * Three columns of 148 (x 10, 166, 322): "Review and save" at 16 px is 136
- * wide, too wide for the template's 109 columns, and Ryan does not want
- * two-line tile names (6 Nov).
+ * side by side in the middle row. The ninth tile was Review and save, filled
+ * dark blue, to 0.16.30; from 0.16.31 (Ryan 13 Nov: "just a save an undo,
+ * and a reset to factory is enough") it is Reset to factory, which opens
+ * no page: it asks, then resets (ui_factory_reset_ask, ui_settings.c).
+ * Three columns of 148 (x 10, 166, 322): the template's 109 columns are too
+ * narrow for the names, and Ryan does not want two-line tile names (6 Nov).
  * ------------------------------------------------------------------------ */
 typedef struct {
     const char *name, *icon;
@@ -785,12 +778,16 @@ static const menu_item_t menu_items[9] = {
     { "Pressure sensor", UI_ICON_TARGET, &ui_scr_sensor_cal },  // Sensor calibration (Pressure setup to 0.16.26)
     { "System", LV_SYMBOL_SETTINGS, &ui_scr_namenet },
     { "Diagnostics", LV_SYMBOL_EYE_OPEN, &ui_scr_diag },
-    { "Review and save", LV_SYMBOL_SAVE, &ui_scr_review },     // the header's unsaved icon
+    { "Reset to factory", LV_SYMBOL_REFRESH, NULL },           // no page: asks, then resets
 };
 
 static void menu_tile_event(lv_event_t *e)
 {
-    ui_open(lv_event_get_user_data(e));
+    const ui_screen_t *scr = lv_event_get_user_data(e);
+    if (scr)
+        ui_open(scr);
+    else
+        ui_factory_reset_ask();
 }
 
 static void menu_build(lv_obj_t *scr)
@@ -801,8 +798,6 @@ static void menu_build(lv_obj_t *scr)
         lv_obj_t *b = ui_btn(scr, 10 + (i % 3) * 156, 48 + (i / 3) * 56, 148, 48, UI_SECONDARY, m->name,
                              menu_tile_event, (void *)m->scr);
         ui_btn_icon(b, m->icon);
-        if (m->scr == &ui_scr_review)
-            ui_btn_blue(b);
     }
 }
 
