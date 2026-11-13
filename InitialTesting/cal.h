@@ -7,22 +7,23 @@
 #include "clicks.h"
 
 /**
- * @brief Druck calibration: a table of ratio (signal / excitation) against
- * pressure, linear interpolation between points, linear extrapolation past
- * the ends from the end segments.
+ * @brief Druck calibration: two points of ratio (signal / excitation)
+ * against pressure, a straight line through them and past them.
  *
- * The normal cal is the bench two-point: a pumped-down vacuum point and an
+ * The cal is the bench two-point: a pumped-down vacuum point and an
  * air point at a known room pressure, both read live through the INA228 as
  * wired, so the INA228 input loading of the Druck output (about 5 % low)
- * and the INA228 gain and offset are inside the table.
+ * and the INA228 gain and offset are inside the two points.
  *
- * Saved inside the settings record (cfg.c, CFG SAVE or CAL SAVE) and loaded
- * from it at start-up. With no settings record yet, the old stand-alone
- * record (0.3.30 to 0.5.x, at 0x7FF000) is loaded instead; the first save
- * copies it into the settings record and leaves the old one in place. If
- * neither holds a valid table, the nominal 0 mV / 100 mV at 10 V (15 psia)
- * is used and cal_is_default() is true. An old record from before 0.3.30
- * (versions 1 to 3, CAL ATM era) is not loaded: redo the bench cal.
+ * Saved inside the settings record (cfg.c) and loaded from it at start-up.
+ * With none saved, the nominal 0 mV / 100 mV at 10 V (15 psia) is used and
+ * cal_is_default() is true.
+ *
+ * To 0.16.29 the record was a table of up to 32 points (version 4), of
+ * which the bench cal used two; typed tables went with the engineering
+ * commands. cal_from_v4() reads the two points out of one, for the version
+ * 10 settings records. The stand-alone record at 0x7FF000 (0.3.30 to 0.5.x)
+ * is no longer read (0.16.30).
  *
  * The calibration is taken on the Calibrate transducer screen: a vacuum
  * point and an air point, each the live ratio averaged over 5 readings;
@@ -31,45 +32,49 @@
  * settings); either can be redone alone.
  */
 
-#define CAL_MAX_POINTS 32
-#define CAL_ID_LEN     24
-
-#define CAL_KIND_TABLE 0   // a table (the nominal one)
-#define CAL_KIND_BENCH 1   // CAL VAC + CAL AIR
 
 #define CAL_CAPTURE_N       5      // readings per bench capture point, one a second (Ryan, 22 Oct: was 10)
 
 #define CAL_MAGIC       0x4C414350UL  // "PCAL"
-#define CAL_VERSION     4   // 4: bench two-point; 1 to 3 (CAL ATM era) are not loaded
+#define CAL_VERSION     5   // 5: the two bench points (0.16.30); 4 is read through cal_from_v4()
 
-// One table. Little-endian, fixed layout, CRC32 (IEEE) over everything
+// The two points. Little-endian, fixed layout, CRC32 (IEEE) over everything
 // before the crc field. Kept whole inside the settings record (cfg.c).
 typedef struct {
     uint32_t magic;
     uint32_t version;
-    uint32_t npts;
-    char id[CAL_ID_LEN];
-    int32_t r_ppb[CAL_MAX_POINTS];     // ratio, ppb, strictly ascending
-    int32_t p_mmbar[CAL_MAX_POINTS];   // pressure, 0.001 mbar
-    int32_t kind;            // CAL_KIND_TABLE or CAL_KIND_BENCH
-    // Unused since 0.11.37 (the point uncertainties, with UNC?); kept so
-    // saved records load unchanged. Written 0, ignored on load.
-    int32_t spare[2];
+    int32_t r_ppb[2];        // ratio, ppb: the vacuum point, then the air point (higher)
+    int32_t p_mmbar[2];      // pressure, 0.001 mbar
     uint32_t crc;
 } cal_rec_t;
 
-// Loads the old stand-alone record if valid; cfg_init() then overrides it.
+// Version 4 (0.3.30 to 0.16.29), as it sits inside a version 10 settings
+// record. Read only.
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t npts;
+    char id[24];             // "5880156 bench 26-10-16": not kept (nothing showed it)
+    int32_t r_ppb[32];
+    int32_t p_mmbar[32];
+    int32_t kind;
+    int32_t spare[2];
+    uint32_t crc;
+} cal_rec_v4_t;
+// The two points of a version 4 record as a version 5 one. False if it is
+// not a valid version 4 record of exactly two points.
+bool cal_from_v4(const cal_rec_v4_t *o, cal_rec_t *r);
+
+// The nominal cal; cfg_init() then loads the saved one.
 void cal_init(void);
-// True if the active table came from the old record at start-up.
-bool cal_from_old_record(void);
 
 // For cfg.c. The record of the active table, crc filled in.
 void cal_get_record(cal_rec_t *r);
-// Header, points and crc valid.
+// Header, the two points and crc valid.
 bool cal_record_ok(const cal_rec_t *r);
-// Makes r the active table; false (nothing changed) if it is not valid.
+// Makes r the cal in use; false (nothing changed) if it is not valid.
 bool cal_set_record(const cal_rec_t *r, bool saved);
-// Makes the nominal table active.
+// Makes the nominal cal the one in use.
 void cal_set_default(bool saved);
 void cal_set_saved(bool saved);
 // Call once per reading; runs a CAL VAC / CAL AIR capture.
@@ -79,9 +84,8 @@ void cal_update(const clicks_state_t *s);
 int64_t cal_pressure_mmbar(int64_t r_ppb);
 
 bool cal_is_default(void);
-const char *cal_id(void);
-// True once the active table has been written to flash (or was loaded from
-// it), false after APPLY or a bench capture until CFG SAVE or CAL SAVE.
+// True once the cal in use has been written to flash (or was loaded from
+// it), false after a bench capture until the next save.
 bool cal_saved(void);
 // Readings still to take in a running capture, 0 if none.
 int cal_capture_left(void);
@@ -93,12 +97,12 @@ int cal_capturing(void);
 #define CAL_P_BARO (-1)
 bool cal_capture(int what, int32_t p_mmbar, const char **why);
 typedef struct { bool have; int32_t r_ppb, p_mmbar; } cal_point_t;
-// The bench points held for the sensor in use (captured, or from its table).
+// The bench points held (captured, or from the saved cal).
 void cal_points(cal_point_t *vac, cal_point_t *air);
-// The sensor in use: its serial for the bench cal id and its range for the
-// nominal table (0 to 10 mV/V is 0 to fs_mmbar).
-void cal_set_sensor(const char *serial, int32_t fs_mmbar);
-// Pressure for a ratio with a given table (the saved one, for comparison).
+// The sensor's full scale, 0.001 mbar: the 15 psia Druck, 1034.214 mbar.
+// The nominal cal is 0 to 10 mV/V over it.
+#define CAL_FS_MMBAR 1034214
+// Pressure for a ratio with a given cal (the saved one, for comparison).
 int64_t cal_pressure_with(const cal_rec_t *c, int64_t r_ppb);
 
 

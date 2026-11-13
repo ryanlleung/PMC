@@ -41,10 +41,13 @@ enum {
 };
 
 // The settings behind the writable schedule registers: the key, 0.01 or
-// 0.1 per unit (the cfg scale), and whether it is a float.
+// 0.1 per unit (the cfg scale), and whether it is a float. Register 27, the
+// schedule type, has no setting behind it from 0.16.30 (key CFG_N): it
+// reads 2, on the pressure, and takes only 2.
+#define SCHED_PV 2
 static bool sched_reg(uint16_t a, cfg_key_t *key, int *dec, bool *flt)
 {
-    if (a == HR_SCHED) { *key = CFG_SCHED; *dec = 0; *flt = false; return true; }
+    if (a == HR_SCHED) { *key = CFG_N; *dec = 0; *flt = false; return true; }
     if (a == HR_HYST)  { *key = CFG_HYST; *dec = 0; *flt = false; return true; }
     if (a == HR_B1)    { *key = CFG_B1; *dec = 1; *flt = true; return true; }
     if (a == HR_B2)    { *key = CFG_B2; *dec = 1; *flt = true; return true; }
@@ -165,7 +168,7 @@ void mbmap_begin(void)
         if (flt)
             put_f32(a, (float)cfg_tune(key) / (dec == 2 ? 100.0f : 10.0f));
         else
-            reg[a] = (uint16_t)cfg_tune(key);
+            reg[a] = key == CFG_N ? SCHED_PV : (uint16_t)cfg_tune(key);
     }
 }
 
@@ -224,6 +227,12 @@ static uint8_t write_sched(uint16_t addr, uint16_t n, const uint16_t *v)
         bool flt;
         if (!sched_reg((uint16_t)(addr + i), &key, &dec, &flt) || (flt && i + 1 >= n))
             return MODBUS_EX_ADDRESS;
+        if (key == CFG_N) {   // the schedule type: 2 only (1, the setpoint, removed in 0.15.20; 0, Off, in 0.16.20)
+            if (v[i] != SCHED_PV)
+                return MODBUS_EX_VALUE;
+            i++;
+            continue;
+        }
         int32_t x, lo, hi;
         if (flt) {
             float f = get_f32(v + i);
@@ -234,7 +243,7 @@ static uint8_t write_sched(uint16_t addr, uint16_t n, const uint16_t *v)
             x = v[i];
         }
         cfg_range(key, &lo, &hi);
-        if (x < lo || x > hi)   // the schedule register takes 2 only: 1, the setpoint, removed in 0.15.20, 0, Off, in 0.16.20
+        if (x < lo || x > hi)
             return MODBUS_EX_VALUE;
         val[key] = x;
         on[key] = true;

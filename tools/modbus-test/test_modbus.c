@@ -63,8 +63,8 @@ static int saves, pid_set_now = 1;
 static void tune_reset(void)
 {
     static const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KD, CFG_KP2, CFG_TI2, CFG_KD2, CFG_KP3, CFG_TI3, CFG_KD3,
-                                   CFG_KP4, CFG_TI4, CFG_KD4, CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
-    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 400, 25, 0, 2, 60, 100, 140, 15 };
+                                   CFG_KP4, CFG_TI4, CFG_KD4, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 400, 25, 0, 60, 100, 140, 15 };
     for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
         tune[k[i]] = v[i];
 }
@@ -80,7 +80,6 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
     *lo = 0;
     *hi = 10000;
     if (k == CFG_KP || k == CFG_KP2 || k == CFG_KP3 || k == CFG_KP4 || k == CFG_B1 || k == CFG_B2) *lo = 1;
-    if (k == CFG_SCHED) *lo = *hi = 2;   // the PID table always on (0.16.20)
     if (k == CFG_HYST) *hi = 40;
 }
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
@@ -268,7 +267,7 @@ static void tests(void)
         f32(6.5f, q + 8); f32(11.0f, q + 12);
         int s0 = saves;
         req(sizeof q, q);
-        CHECK(rlen == 12 && rsp[9] == 27 && rsp[11] == 6 && tune[CFG_SCHED] == 2 && tune[CFG_B1] == 65 &&
+        CHECK(rlen == 12 && rsp[9] == 27 && rsp[11] == 6 && tune[CFG_B1] == 65 &&
               tune[CFG_B2] == 110 && tune[CFG_HYST] == 10 && saves == s0 + 1);
         CHECK(strstr(last_event, "gain schedule") != NULL);
         req(sizeof q, q);   // the same again: nothing saved
@@ -296,10 +295,12 @@ static void tests(void)
         uint8_t k0[] = { 0x10, 0, 33, 0, 2, 4, 0, 0, 0, 0 };
         f32(0.0f, k0 + 6); req(sizeof k0, k0);       CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_KP] == 400);
         f32(NAN, k0 + 6); req(sizeof k0, k0);        CHECK(is_ex(0x10, MODBUS_EX_VALUE));
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_VALUE));
         REQ(0x10, 0, 32, 0, 1, 2, 0, 41);            CHECK(is_ex(0x10, MODBUS_EX_VALUE));
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 1);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);   // 1, the setpoint, removed in 0.15.20
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 0);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);   // 0, Off, removed in 0.16.20
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 1);             CHECK(is_ex(0x10, MODBUS_EX_VALUE));   // 1, the setpoint, removed in 0.15.20
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 0);             CHECK(is_ex(0x10, MODBUS_EX_VALUE));   // 0, Off, removed in 0.16.20
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 2);             CHECK(rlen == 12);                     // 2: taken, nothing behind it (0.16.30)
+        REQ(0x03, 0, 27, 0, 1);                      CHECK(r16(0) == 2);
         REQ(0x10, 0, 28, 0, 1, 2, 0x40, 0xD0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 26, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 29, 0, 2, 4, 0, 0, 0, 0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));   // the second half of B1

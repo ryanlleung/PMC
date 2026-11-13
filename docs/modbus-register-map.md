@@ -47,7 +47,7 @@ Rewriting the target with the value it already has changes nothing (no event; th
 | 22-23 | F32 | Controller temperature | degC, Power Monitor die. NaN if it does not answer |
 | 24-25 | U32 | Uptime | Seconds since start-up, high word first |
 | 26 | U16 | PID set in use | 1 to 4 (1 to 3 to 0.16.13). In AUTO the set the gain schedule has switched to; otherwise the set AUTO would start with now. 1 with the schedule Off (0.15.15 to 0.16.19) |
-| 27 | U16 W | PID table (gain schedule) | 2, on the pressure, always from 0.16.20. 0 (Off, set 1 always, to 0.16.19) answers exception 3 from 0.16.20; 1 (the setpoint, 0.15.15 to 0.15.19) from 0.15.20 |
+| 27 | U16 W | PID table (gain schedule) | Always 2 (on the pressure). No setting is behind it from 0.16.30: a write of 2 is taken and changes nothing, any other value answers exception 3 (0, Off, to 0.16.19; 1, the setpoint, 0.15.15 to 0.15.19) |
 | 28-29 | F32 W | Boundary 1 | mbar, kept to 0.1 mbar, 0.1 to 1000: set 1 below, set 2 above |
 | 30-31 | F32 W | Boundary 2 | mbar, as boundary 1: set 2 below, set 3 above |
 | 32 | U16 W | Hysteresis | % of the boundary, 0 to 40. On the pressure a set changes only this far past a boundary |

@@ -32,7 +32,6 @@ static int32_t f_creep  = 25;      // steps/s, slow final close
 static int32_t n_backoff = 400;    // steps off the switch after the fast close, before the creep
 static int32_t n_return = 400;     // steps off the switch after the creep: 0 % (0.13.6, Ryan 28 Oct)
 static int32_t n_clear  = 800;     // steps off the switch if pressed at the start
-static int32_t n_unused;           // settings slot 5, the zero offset until 0.13.31: always 0
 static valve_ref_t ref_how;        // how the position was last set (valve_reference)
 
 static const setting_t settings[] = {
@@ -41,27 +40,17 @@ static const setting_t settings[] = {
     { "FCREEP",  &f_creep,   16,   1000 },
     { "BACKOFF", &n_backoff, 10,   5000 },
     { "CLEAR",   &n_clear,   10,   10000 },
-    { "",        &n_unused,  0,    0 },      // was OFFSET (removed in 0.13.31): 0 % is always count 0
     { "RETURN",  &n_return,  10,   5000 },
 };
 #define N_SETTINGS (sizeof settings / sizeof settings[0])
 _Static_assert(N_SETTINGS == VALVE_N_SETTINGS, "valve.h VALVE_N_SETTINGS");
 
-/* The settings above are in full steps (steps/s for the speeds), whatever
- * the step mode; the motor counts half steps in HALF (stepper3_scale()).
- * These give them in motor counts, so a mode change keeps the homing
- * (Ryan, 23 Oct: "just recalculate"). */
-static int32_t sc(int32_t full) { return full * stepper3_scale(); }
-static int32_t pm(void) { return sc(pos_max); }
+/* The settings above and the motor's count are both in full steps (the
+ * only step mode from 0.16.30; HALF counted half steps to 0.16.29). */
 // The count of the seat (the switch point): 0 % is the return above it
 // (Ryan, 26 Oct; the back-off until 0.13.6), so a seated valve reads about
 // -0.6 % with the defaults.
-static int32_t seat_count(void) { return sc(-n_return); }
-static int32_t f_rate(int32_t full)
-{
-    int32_t r = sc(full);
-    return r > STEPPER3_RATE_MAX ? STEPPER3_RATE_MAX : r;
-}
+static int32_t seat_count(void) { return -n_return; }
 
 #define SETTLE_MS     150     // after a move, before the switch is read
 #define CREEP_EXTRA   200     // creep goes this far past the back-off
@@ -149,8 +138,7 @@ static bool hold_on;              // a screen button drives the valve while pres
 static const char *auto_said;     // the AUTO move refusal last logged (once per reason, per AUTO run)
 static bool ref_unproven;         // Direction or coil order changed since the last homing
 static bool running;              // the main loop has started (not the settings load at start-up)
-static int32_t question_at;       // where the switch was pressed, full steps (a mode change rescales the count)
-static int32_t q_count(void) { return question_at * stepper3_scale(); }   // in motor counts now
+static int32_t question_at;       // where the switch was pressed, steps
 
 static uint32_t cal_done_ms, cal_took_s;   // last good calibration
 static bool cal_done;
@@ -164,7 +152,7 @@ static float pv_mbar;
 
 static int32_t pct10_of(int32_t pos)
 {
-    const int32_t m = pm();
+    const int32_t m = pos_max;
     return (int32_t)(((int64_t)pos * 1000 + (pos >= 0 ? m / 2 : -m / 2)) / m);
 }
 
@@ -216,7 +204,7 @@ static bool any_latched(void)
 }
 
 // OFF is not a lock here (0.15.1): the controller starts OFF, before
-// cfg_init() sets the saved step mode, which a lock would refuse. Nothing
+// cfg_init() sets the saved motor settings, which a lock would refuse. Nothing
 // can move the valve while OFF anyway: the OFF screen covers the screens
 // and valve_off_why() refuses the rest.
 static void update_lock(void)
@@ -322,15 +310,15 @@ static bool cal_go(int32_t to, int32_t rate, bool first)
 
 static bool cal_fast(bool first)
 {
-    int32_t n = (int32_t)(((int64_t)pm() * 11 + 5) / 10);
+    int32_t n = (int32_t)(((int64_t)pos_max * 11 + 5) / 10);
     cal_stage = CAL_FAST;
-    return cal_go(stepper3_position() - n, f_rate(f_home), first);
+    return cal_go(stepper3_position() - n, f_home, first);
 }
 
 static void cal_creep(void)
 {
     cal_stage = CAL_CREEP;
-    cal_go(stepper3_position() - sc(n_backoff + CREEP_EXTRA), f_rate(f_creep), false);
+    cal_go(stepper3_position() - (n_backoff + CREEP_EXTRA), f_creep, false);
 }
 
 static bool cal_start(const char **err)
@@ -351,7 +339,7 @@ static bool cal_start(const char **err)
     bool ok;
     if (limit_open_now()) {
         cal_stage = CAL_CLEAR;
-        ok = cal_go(stepper3_position() + sc(n_clear), f_rate(f_home), true);
+        ok = cal_go(stepper3_position() + n_clear, f_home, true);
     } else {
         ok = cal_fast(true);
     }
@@ -384,10 +372,10 @@ static void cal_move_ended(stepper3_stop_t why)
     case CAL_FAST:
         if (why == STEPPER3_STOP_LIMIT) {
             cal_stage = CAL_BACK;
-            cal_go(stepper3_position() + sc(n_backoff), f_rate(f_home), false);
+            cal_go(stepper3_position() + n_backoff, f_home, false);
         } else if (why == STEPPER3_STOP_DONE) {
             raise(F03, true, "Homing: switch not found within %ld steps",
-                  (long)(((int64_t)pm() * 11 + 5) / 10));
+                  (long)(((int64_t)pos_max * 11 + 5) / 10));
         } else {
             cal_abort(stepper3_stop_name(why));
         }
@@ -401,7 +389,7 @@ static void cal_move_ended(stepper3_stop_t why)
             // Then off the switch by the return, so it is not left
             // pressed against the seat; that point is 0 % (Ryan, 26 Oct).
             cal_stage = CAL_PARK;
-            cal_go(0, f_rate(f_home), false);
+            cal_go(0, f_home, false);
         } else if (why == STEPPER3_STOP_DONE) {
             raise(F03, true, "Homing: switch not found on the creep close");
         } else {
@@ -430,7 +418,7 @@ static void cal_homed(void)
 static void cal_settled(void)
 {
     cal_settling = false;
-    int32_t moved = sc(cal_stage == CAL_CLEAR ? n_clear : cal_stage == CAL_PARK ? n_return : n_backoff);
+    int32_t moved = cal_stage == CAL_CLEAR ? n_clear : cal_stage == CAL_PARK ? n_return : n_backoff;
     if (limit_open_now()) {
         raise(F04, true, "Switch still active after %ld-step %s", (long)moved,
               cal_stage == CAL_CLEAR ? "clearance move" : cal_stage == CAL_PARK ? "return" : "back-off");
@@ -447,11 +435,11 @@ static void limit_hit(void)
 {
     if (!calibrated || question)
         return;
-    question_at = stepper3_position() / stepper3_scale();
+    question_at = stepper3_position();
     question = true;
     char p[16];
     ev("W-1", "Limit switch pressed at count %ld (%s %%): Set as seat or Skip",
-       (long)q_count(), pct_text(p, sizeof p, q_count()));
+       (long)question_at, pct_text(p, sizeof p, question_at));
 
 }
 
@@ -660,7 +648,7 @@ void valve_task(void)
     // change the travel); not while not homed or homing: the count is not
     // the valve's then.
     stepper3_limit_band(band_req && calibrated && mode != VALVE_CALIBRATING && mode != VALVE_OFF,
-                        pm() * valve_pass_lo() / 100, pm() * valve_pass_hi() / 100);
+                        pos_max * valve_pass_lo() / 100, pos_max * valve_pass_hi() / 100);
     far_check();
     if (hold_on && !stepper3_busy())
         hold_on = false;   // the held move has ended (released, the switch, its end)
@@ -672,19 +660,17 @@ void valve_task(void)
  * AUTO (stage 8): ctrl.c works out the command, this runs it.
  * ------------------------------------------------------------------------ */
 // The tuning from cfg.c (CFG TUNE units: 0.01 %/mbar, 0.01 min, 0.1 %,
-// steps, +-1, 0.01 mbar, 0.01 % per mbar/s).
+// steps, 0.01 mbar, 0.01 % per mbar/s).
 static ctrl_tune_t tune_now(void)
 {
     ctrl_tune_t k;
     k.kp = (float)cfg_tune(CFG_KP) / 100.0f;
     k.ti = (float)cfg_tune(CFG_TI) / 100.0f;
     k.outmin = (float)cfg_tune(CFG_OUTMIN) / 10.0f;
-    k.db = sc(cfg_tune(CFG_DB));   // full steps, in motor counts (HALF doubles)
-    k.kdir = (int)cfg_tune(CFG_KDIR);
+    k.db = cfg_tune(CFG_DB);
     k.band = (float)cfg_tune(CFG_BAND) / 100.0f;
     k.kd = (float)cfg_tune(CFG_KD) / 100.0f;
-    k.pos_max = pm();
-    k.steps = stepper3_scale();
+    k.pos_max = pos_max;
     // Sets 2 to 4, the schedule (0.1 mbar boundaries, % hysteresis) and
     // the closing deadband (0 = none: one step).
     for (int s = 2; s <= 4; s++) {
@@ -692,12 +678,11 @@ static ctrl_tune_t tune_now(void)
         k.sets[s - 2].ti = (float)cfg_tune(cfg_pid_key(s, 1)) / 100.0f;
         k.sets[s - 2].kd = (float)cfg_tune(cfg_pid_key(s, 2)) / 100.0f;
     }
-    k.sched = (int)cfg_tune(CFG_SCHED);
     k.b1 = (float)cfg_tune(CFG_B1) / 10.0f;
     k.b2 = (float)cfg_tune(CFG_B2) / 10.0f;
     k.b3 = (float)cfg_tune(CFG_B3) / 10.0f;
     k.hyst = (float)cfg_tune(CFG_HYST) / 100.0f;
-    k.db_close = cfg_tune(CFG_DBC) > 0 ? sc(cfg_tune(CFG_DBC)) : 1;
+    k.db_close = cfg_tune(CFG_DBC) > 0 ? cfg_tune(CFG_DBC) : 1;
     return k;
 }
 
@@ -707,8 +692,6 @@ static ctrl_tune_t tune_now(void)
 int valve_pid_set(void)
 {
     ctrl_tune_t k = tune_now();
-    if (k.sched == CTRL_SCHED_OFF)
-        return 1;
     if (mode == VALVE_AUTO && ctl.set >= 1 && ctl.set <= 4)
         return ctl.set;
     return pv_ok ? ctrl_pick_set(&k, 0, ctl.sp_set ? fminf(pv_mbar, ctl.sp) : pv_mbar) : 1;
@@ -741,7 +724,7 @@ static void auto_end(const char *strip)
 static bool switch_far(void)
 {
     return calibrated && mode != VALVE_CALIBRATING && limit_open_now() && !stepper3_limit_ignored() &&
-           stepper3_position() > sc(n_clear + (n_backoff > n_return ? n_backoff : n_return));
+           stepper3_position() > n_clear + (n_backoff > n_return ? n_backoff : n_return);
 }
 
 // W-4, every pass of the main loop: the switch pressed away from the seat
@@ -787,7 +770,7 @@ static void auto_step(void)
     const ctrl_result_t res = ctrl_step(&ctl, &k, &in);
     if (ctl.set != set0 && set0 >= 1) {
         char a[16];
-        ev("MODE", "AUTO PID set %d to %d, pressure %s mbar", set0, ctl.set, mbar_text(a, sizeof a, ctl.pv_f, 1));
+        ev("MODE", "AUTO PID set %d to %d, pressure %s mbar", set0, ctl.set, mbar_text(a, sizeof a, pv_mbar, 1));
     }
     switch (res) {
     case CTRL_RUN:
@@ -831,7 +814,7 @@ static const char *auto_why(void)
     if (mode == VALVE_CALIBRATING) return "Homing: STOP to cancel";
     if (valve_off_why()) return valve_off_why();
     ctrl_tune_t k = tune_now();
-    const char *why = ctrl_check(&ctl, &k, calibrated, valve_fault_count() > 0, pv_ok, pv_mbar, range_mbar());
+    const char *why = ctrl_check(&ctl, &k, calibrated, valve_fault_count() > 0, pv_ok, range_mbar());
     if (!why && switch_far())
         why = "Limit switch pressed away from the seat";
     // A bench cal point being taken would change the reading AUTO uses.
@@ -861,11 +844,8 @@ bool valve_start_auto(const char **why)
     warn[0] = 0;
     update_lock();
     char a[16], p[16];
-    char st[16] = "";
-    if (k.sched != CTRL_SCHED_OFF)
-        lv_snprintf(st, sizeof st, ", PID set %d", ctl.set);
-    ev("MODE", "%s at setpoint %s mbar, valve %s %%%s", "Auto",
-       mbar_text(a, sizeof a, ctl.sp, 1), pct_text(p, sizeof p, now), st);
+    ev("MODE", "Auto at setpoint %s mbar, valve %s %%, PID set %d",
+       mbar_text(a, sizeof a, ctl.sp, 1), pct_text(p, sizeof p, now), ctl.set);
     return true;
 }
 
@@ -1010,7 +990,7 @@ static bool set_by_hand(bool zero, int32_t pct100, const char **why)
     if (is_auto())                  { *why = "Stop AUTO first"; return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
     if (ref_unproven)               { *why = "Direction or coil order changed: home the valve first"; return false; }
-    int32_t c = zero ? 0 : (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
+    int32_t c = zero ? 0 : (int32_t)(((int64_t)pct100 * pos_max + 5000) / 10000);
     if (stepper3_busy() || !stepper3_set_position(c)) { *why = "Wait for the valve to stop"; return false; }
     calibrated = true;
     ref_how = VALVE_REF_HAND;
@@ -1032,7 +1012,7 @@ bool valve_set_position(int32_t pct100, const char **why) { return set_by_hand(f
 valve_mode_t valve_mode(void)   { return mode; }
 bool valve_calibrated(void)     { return calibrated; }
 valve_ref_t valve_reference(void) { return calibrated ? ref_how : VALVE_REF_NONE; }
-int32_t valve_pos_max(void)     { return pm(); }   // in motor counts
+int32_t valve_pos_max(void)     { return pos_max; }
 
 bool valve_limit_band(void) { return band_req; }
 int valve_pass_lo(void)      { return (int)cfg_tune(CFG_PASS_LO); }
@@ -1168,11 +1148,6 @@ static void evt_dump_task(void)
 }
 
 
-const char *valve_setting_name(int i)
-{
-    return i >= 0 && i < (int)N_SETTINGS ? settings[i].name : "?";
-}
-
 void valve_settings(int32_t v[VALVE_N_SETTINGS])
 {
     for (size_t i = 0; i < N_SETTINGS; i++)
@@ -1210,9 +1185,9 @@ bool valve_goto_pct100(int32_t pct100, const char **why)
     if (is_auto())                  { *why = "Stop AUTO first"; return false; }
     if (!calibrated)                { *why = "Home the valve first"; return false; }
     if (holding())                  { *why = "Valve being moved on the screen"; return false; }
-    int32_t to = (int32_t)(((int64_t)pct100 * pm() + 5000) / 10000);
+    int32_t to = (int32_t)(((int64_t)pct100 * pos_max + 5000) / 10000);
     if (to < 0) to = 0;
-    if (to > pm()) to = pm();
+    if (to > pos_max) to = pos_max;
     if (!stepper3_goto(to))         { *why = stepper3_refusal(); return false; }
     return true;
 }
@@ -1221,8 +1196,8 @@ bool valve_calibrate(const char **why) { return cal_start(why); }
 
 uint32_t valve_cal_budget_s(void)
 {
-    return (uint32_t)(((int64_t)pm() * 11 / 10 + sc(n_clear + 2 * n_backoff + n_return)) / f_rate(f_home)
-                      + sc(n_backoff + CREEP_EXTRA) / f_rate(f_creep) + 1);
+    return (uint32_t)(((int64_t)pos_max * 11 / 10 + n_clear + 2 * n_backoff + n_return) / f_home
+                      + (n_backoff + CREEP_EXTRA) / f_creep + 1);
 }
 
 int valve_cal_step(void)
@@ -1239,7 +1214,7 @@ int valve_cal_step(void)
 
 static int32_t milli_of(int32_t pos)
 {
-    const int32_t m = pm();
+    const int32_t m = pos_max;
     return (int32_t)(((int64_t)pos * 100000 + (pos >= 0 ? m / 2 : -m / 2)) / m);
 }
 int32_t valve_pct_milli(void)        { return milli_of(stepper3_position()); }
@@ -1275,7 +1250,7 @@ bool valve_fault_is(const char *tag)
 bool valve_question(int32_t *pct10)
 {
     if (question && pct10)
-        *pct10 = pct10_of(q_count());
+        *pct10 = pct10_of(question_at);
     return question;
 }
 
@@ -1287,13 +1262,13 @@ bool valve_answer(bool set_zero, const char **why)
     if (set_zero && stepper3_busy()) { *why = "Wait for the valve to stop"; return false; }
     question = false;
     if (set_zero) {
-        int32_t d = stepper3_position() - q_count();
+        int32_t d = stepper3_position() - question_at;
         stepper3_set_position(seat_count() + d);
         ev("W-1", "Point set as the seat, count %ld (0 %% is the return above it)", (long)seat_count());
         if (!strncmp(warn, "W-4", 3))
             warn[0] = 0;   // the switch was right, the count was not
     } else {
-        ev("W-1", "Zero skipped, count kept at %ld", (long)q_count());
+        ev("W-1", "Zero skipped, count kept at %ld", (long)question_at);
     }
     return true;
 }

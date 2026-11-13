@@ -26,16 +26,16 @@
  *          override is a two-finger deadman: hold it and press Close or
  *          Open with another finger (Close then goes past the switch)
  *   Speed  Run, Start and Accel [-] value [+], and the time for a full open or close
- *   Coils  Mode WAVE/FULL/HALF, Hold torque, Coils off, Coil order, Direction
+ *   Coils  Hold torque, Coils off, Coil order, Direction (full steps only from 0.16.30)
  * The Switch tab (Pass 5 to 50 %, 0.16.5 to 0.16.18) is a toggle on Motor
  * settings > Override from 0.16.19 (Ryan 12 Nov: "remove the switch tab on
  * the motor override page"); the strip still says when the switch is passed.
  * Coil order, Direction and Set zero ask first while the valve is homed.
  * The strip reads the motor state and the limit line (a latched fault, the
  * limit override or a message over it, as on every screen).
- * Moves are relative, by the selected step size, in steps of the current
- * mode (half steps in HALF). With Hold, Close and Open move while pressed
- * and ramp down on release. Settings are refused while moving, as on the
+ * Moves are relative, by the selected step size, in full steps. With Hold,
+ * Close and Open move while pressed and ramp down on release. Settings are
+ * refused while moving, as on the
  * link. Buttons act on press. Each action is echoed on the link as
  * "MOT screen: ..." so a terminal log shows what was done.
  */
@@ -49,7 +49,7 @@ enum { TAB_MOVE, TAB_SPEED, TAB_COILS, TAB_N };
 static struct {
     lv_obj_t *tabs[TAB_N], *page[TAB_N];
     lv_obj_t *pos;
-    lv_obj_t *size[6], *mode[3], *turns, *travel;
+    lv_obj_t *size[6], *turns, *travel;
     lv_obj_t *rate, *start, *accel, *adj[6];
     lv_obj_t *close, *open, *zero, *over, *hold, *off, *order, *dir;
     lv_obj_t *held;   // the Close or Open button driving a hold move
@@ -192,15 +192,6 @@ static void guarded(const char *what, const char *ok, void (*act)(void))
     }
     snprintf(ask_text, sizeof ask_text, "%s? This clears the homing.", what);
     ui_confirm(ask_text, ok, act);
-}
-
-static void mode_event(lv_event_t *e)
-{
-    if (stepper3_busy() || stepper3_locked())
-        return;
-    stepper3_mode_t md = (stepper3_mode_t)event_arg(e);
-    (void)stepper3_set_mode(md);
-    motor_fast();
 }
 
 enum { SET_RATE, SET_START, SET_ACCEL };
@@ -584,14 +575,11 @@ static void motor_build(lv_obj_t *scr)
     // How long a full open or close takes at these rates (Ryan, 28 Oct).
     m.travel = ui_info(p, 244, y3, 226, H, "Full open or close");
 
-    // Coils: mode, hold torque, coils off, order, direction.
+    // Coils: hold torque, coils off, order, direction. (The step mode row
+    // went in 0.16.30: full step only.)
     p = m.page[TAB_COILS] = page(scr);
-    static const char *modes[3];
-    for (int i = 0; i < 3; i++)
-        modes[i] = stepper3_mode_name((stepper3_mode_t)i);
-    seg(p, 10, y2, 226, 3, modes, m.mode, mode_event, 0);
-    m.hold = btn(p, 244, y2, 109, "", hold_event, 0);
-    m.off = btn(p, 361, y2, 109, "Coils off", off_event, 0);
+    m.hold = btn(p, 10, y2, 226, "", hold_event, 0);
+    m.off = btn(p, 244, y2, 226, "Coils off", off_event, 0);
     m.order = btn(p, 10, y3, 226, "", order_event, 0);
     m.dir = btn(p, 244, y3, 226, "", dir_event, 0);
 
@@ -650,15 +638,13 @@ static void motor_fast(void)
 
     for (int i = 0; i < 6; i++)
         seg_show(m.size[i], i ? !hold_on && i - 1 == size_sel : hold_on, true);
-    // Output turns from count 0, in the steps of the current mode.
+    // Output turns from count 0.
     char tn[24];
-    int64_t c100 = (int64_t)stepper3_position() * 100 / ((int64_t)STEPPER3_STEPS_PER_TURN * stepper3_scale());
+    int64_t c100 = (int64_t)stepper3_position() * 100 / STEPPER3_STEPS_PER_TURN;
     int64_t a100 = c100 < 0 ? -c100 : c100;
     lv_snprintf(tn, sizeof tn, "%s%ld.%02ld turns", stepper3_position() < 0 ? "-" : "", (long)(a100 / 100),
                 (long)(a100 % 100));
     ui_set_text(m.turns, tn);
-    for (int i = 0; i < 3; i++)
-        seg_show(m.mode[i], (int)stepper3_mode() == i, !busy && !stepper3_locked());
     // Close is greyed while the limit stop reads open, unless the override
     // is on; Set zero and Limit override while the motor is locked. A
     // move does not grey the row (0.12.19, Ryan 27 Oct: the buttons seemed

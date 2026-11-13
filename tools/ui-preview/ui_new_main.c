@@ -175,9 +175,7 @@ bool extflash_write(uint32_t a, const void *b, size_t n)
     for (size_t i = 0; i < n; i++) flash[a + i] &= p[i];
     return true;
 }
-static int32_t v_set[VALVE_N_SETTINGS] = { 99072, 400, 25, 400, 800, 0, 400 };
-static const char *const v_name[VALVE_N_SETTINGS] = { "POSMAX", "FHOME", "FCREEP", "BACKOFF", "CLEAR", "OFFSET", "RETURN" };
-const char *valve_setting_name(int i) { return v_name[i]; }
+static int32_t v_set[VALVE_N_SETTINGS] = { 99072, 400, 25, 400, 800, 400 };
 void valve_settings(int32_t v[VALVE_N_SETTINGS]) { memcpy(v, v_set, sizeof v_set); }
 const char *valve_settings_check(const int32_t v[VALVE_N_SETTINGS]) { (void)v; return NULL; }
 bool valve_set_settings(const int32_t v[VALVE_N_SETTINGS]) { memcpy(v_set, v, sizeof v_set); return true; }
@@ -208,32 +206,18 @@ static uint32_t crc32(const void *data, size_t len)
     return ~c;
 }
 
-// A 0.8.x board: one version 1 record (bench cal of s/n 5880156), rev 5.
+// A board with saved settings: the bench cal of s/n 5880156 (the record is
+// written through cfg.c, so it is always the current version).
 static void seed_flash(void)
 {
-    struct {
-        uint32_t magic, version, size, rev;
-        int32_t mot[7];
-        int32_t valve[6];   // a version 1 record
-        uint32_t has_cal;
-        cal_rec_t cal;
-        uint32_t crc;
-    } r;
-    memset(&r, 0, sizeof r);
-    r.magic = 0x47464350UL; r.version = 1; r.size = sizeof r; r.rev = 5;
-    int32_t mot[7] = { 400, 200, 3200, 1, 0, 0, 213 };
-    memcpy(r.mot, mot, sizeof mot);
-    memcpy(r.valve, v_set, sizeof r.valve);
-    r.has_cal = 1;
-    cal_rec_t *c = &r.cal;
-    c->magic = CAL_MAGIC; c->version = CAL_VERSION; c->npts = 2;
-    strcpy(c->id, "5880156 bench 26-10-05");
-    c->r_ppb[0] = 127900; c->p_mmbar[0] = 0;
-    c->r_ppb[1] = 9798300; c->p_mmbar[1] = 1013250;
-    c->kind = CAL_KIND_BENCH;
-    c->crc = crc32(c, offsetof(cal_rec_t, crc));
-    r.crc = crc32(&r, offsetof(__typeof__(r), crc));
-    extflash_write(0x7FD000, &r, sizeof r);
+    cal_init();
+    cfg_init();
+    cal_rec_t c;
+    cal_get_record(&c);
+    c.r_ppb[0] = 127900; c.p_mmbar[0] = 0;
+    c.r_ppb[1] = 9798300; c.p_mmbar[1] = 1013250;
+    c.crc = crc32(&c, offsetof(cal_rec_t, crc));
+    if (!cal_set_record(&c, false) || !cfg_save()) printf("seed not saved\n");
 }
 
 /* Render ------------------------------------------------------------------ */
@@ -368,13 +352,13 @@ int main(int argc, char **argv)
     }
     cal_init();
     cfg_init();
-    // The gain schedule on pressure with three sets (0.15.15).
+    // The PID table with other gains in sets 1 to 3 (0.15.15).
     if (!strcmp(st, "autosched")) {
         int32_t v[CFG_N] = { 0 };
         bool on[CFG_N] = { false };
         const char *why;
-        static const cfg_key_t k[] = { CFG_SCHED, CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3 };
-        static const int32_t x[] = { 2, 10, 40, 80, 30, 120, 30 };
+        static const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3 };
+        static const int32_t x[] = { 10, 40, 80, 30, 120, 30 };
         for (size_t i = 0; i < sizeof k / sizeof k[0]; i++) { v[k[i]] = x[i]; on[k[i]] = true; }
         if (!cfg_save_with(v, on, &why)) printf("schedule not saved: %s\n", why);
     }
@@ -440,7 +424,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "motor-moving")) { extern bool fake_busy; fake_busy = true; ui_service(); }   // a move running
     if (!strcmp(st, "motor-speed")) tap(95, 72);
     if (!strcmp(st, "motor-steps")) { tap(301, 128); ui_service(); }   // 100 steps instead of Hold to run
-    if (!strcmp(st, "motor-coils") || !strcmp(st, "motor-ask")) tap(149, 72);
+    if (!strcmp(st, "motor-coils") || !strcmp(st, "motor-ask")) tap(198, 72);
     if (!strcmp(st, "motor-ask")) { v_cal = true; tap(120, 184); }   // Coil order while homed: asks
     if (!strcmp(st, "overon")) { fake_override = true; tap(415, 184); }   // Menu, override armed
     if (!strcmp(st, "menu")) MENU();

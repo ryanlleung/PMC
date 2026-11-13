@@ -124,7 +124,7 @@ static void calib_build(lv_obj_t *scr)
 static void calib_fast(void)
 {
     char buf[16];
-    int64_t full = (int64_t)stepper3_position() / stepper3_scale();
+    int64_t full = (int64_t)stepper3_position();
     ui_set_text(cp.turns, fixed_fmt(buf, sizeof buf, fixed_round(full * 1000 / STEPPER3_STEPS_PER_TURN, 1), 2));
 }
 

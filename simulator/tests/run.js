@@ -167,12 +167,12 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(65, 128); s.tap(110, 183); s.tap(320, 212);   // Set 1 | 2 (B1), 5, Set
   s.tap(415, 128); s.tap(319, 138);
   check('Set ranges: B1 saves from the first card', s.setting(CFG.B1) === 50 && s.setting(CFG.B2) === 100, s.setting(CFG.B1));
-  // AUTO (AUTO limits to 0.16.24): AUTO min and Pressure response, the setpoint band under AUTO min.
+  // AUTO (AUTO limits to 0.16.24): AUTO min and the setpoint band beside it (Pressure response went in 0.16.30).
   s.tap(291, 72); s.run(500);
   shot(s, 'pid-tuning-auto');
-  s.tap(65, 184); s.tap(40, 239); s.tap(320, 212);   // SP band, 1, Set
+  s.tap(180, 128); s.tap(40, 239); s.tap(320, 212);   // SP band, 1, Set
   s.tap(415, 128); s.tap(319, 138);
-  check('AUTO: the setpoint band saves from the second row', s.setting(CFG.BAND) === 100, s.setting(CFG.BAND));
+  check('AUTO: the setpoint band saves from the second card', s.setting(CFG.BAND) === 100, s.setting(CFG.BAND));
 }
 { // A tap on anything greyed round a popup closes it, as Back (0.15.16, Ryan 5 Nov: "Make popups exitable when
   // tapping the greyed out areas"): the dimmed page, the greyed strip, the greyed header icons. A tap on the box does not.
@@ -195,12 +195,12 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(24, 20); s.tap(24, 20); const se = !s.popup();              // the greyed power icon
   check('Shut down question: closes on the dimmed page, the greyed strip and the greyed power icon, not on its box; nothing done',
     sa && sb && sc && sd && se && s.cmd('MODE?') === 'MODE MANUAL\r\n', [sa, sb, sc, sd, se].join() + ' ' + s.cmd('MODE?'));
-  s.tap(415, 72); s.tap(182, 72); s.tap(94, 128); const pa = s.popup();   // PID tuning > Schedule > Schedule on: the list
+  s.tap(415, 72); s.tap(182, 72); s.tap(94, 128); const pa = s.popup();   // PID tuning > Set ranges > Boundary 1: its keypad
   s.tap(100, 54); const pb = s.popup();                             // its caption
-  shot(s, 'popup-pick');
+  shot(s, 'popup-card-keypad');
   s.tap(415, 200);                                                  // the dimmed page (Discard changes under it)
-  check('pick list: stays on a tap on its caption, closes on the dimmed page; nothing picked',
-    pa && pb && !s.popup() && s.setting(CFG.SCHED) === 2, [pa, pb, s.popup(), s.setting(CFG.SCHED)].join());
+  check('keypad of a settings card: stays on a tap on its caption, closes on the dimmed page; nothing set',
+    pa && pb && !s.popup() && s.setting(CFG.B1) === 60, [pa, pb, s.popup(), s.setting(CFG.B1)].join());
   s.tap(415, 72); const ha = s.popup();                             // Help
   s.tap(100, 240); const hb = !s.popup();                           // the greyed strip under it
   check('Help: closes on a tap on the greyed strip', ha && hb, [ha, hb].join());
@@ -345,6 +345,65 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.set(24, 0);
   s.home();
   check('W-5 while homing: homes at the next try', /Homed in/.test(events(s, 10)) && s.cmd('MODE?') === 'MODE MANUAL\r\n', events(s, 10));
+}
+{ // A board that ran 0.16.29 (fixtures/flash-0.16.29.json, a flash image that firmware wrote): its version 10
+  // settings record loads converted (0.16.30), the saved valve position is still offered, the two-point cal
+  // still reads, and the first save writes version 11 to the other sector.
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'flash-0.16.29.json')));
+  const crc32 = b => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1)); } return ~c >>> 0; };
+  const NEW = 0x7fe000, OLD = 0x7fd000;   // rev 30 (loaded) and rev 29
+  // The image, with patch(dv, at) applied to the newest record and its CRC redone.
+  const image = patch => {
+    const f = new Uint8Array(8 << 20).fill(0xff);
+    for (const [a, b] of Object.entries(fx.sectors)) f.set(Buffer.from(b, 'base64'), Number(a));
+    if (patch) {
+      const dv = new DataView(f.buffer);
+      patch(dv, NEW);
+      dv.setUint32(NEW + 1504, crc32(f.subarray(NEW, NEW + 1504)), true);
+    }
+    return f;
+  };
+  const start = flash => { const t = load(); t.x.sim_bench_init(); t.boot(flash); t.set(5, fx.needle_half); t.run(3000); return t; };
+  const ver = (f, at) => new DataView(f.buffer, f.byteOffset).getUint32(at + 4, true);
+  const t = start(image());
+  const ev = events(t, 20);
+  check('0.16.29 flash: the version 10 record loads, and says which firmware saved it',
+    /Settings saved 2026-10-24 14:04:08 loaded from B \(saved by 0\.16\.29 or earlier\)/.test(ev) && !/not kept|Several sensors|two-point|not used/.test(ev), ev);
+  const tbl = t.cmd('PIDS?;SCHED?');
+  check('0.16.29 flash: the PID table as saved', tbl ===
+    'PIDS 1,0.07,0.61,0.03,0.13,0.83,0.04,0.81,0.95,0.05,0.41,0.26,0.06;SCHED PV,5.5,9.5,13.5,12\r\n', tbl);
+  const want = { POSMAX: 60000, REVERSE: 0, BACKOFF: 300, RETURN: 350, FHOME: 380, FCREEP: 30, RATE: 350, START: 180, ACCEL: 3000,
+    OUTMIN: 5, DB: 9, BAND: 12, DBC: 7, PASS_LO: 4, PASS_HI: 45 };
+  const got = Object.keys(want).filter(k => t.setting(CFG[k]) !== want[k]).map(k => k + ' ' + t.setting(CFG[k]) + ' (want ' + want[k] + ')');
+  check('0.16.29 flash: the motor, homing and AUTO settings as saved', got.length === 0, got.join(', '));
+  check('0.16.29 flash: the valve position saved at 12.50 % is offered', t.offer() === 7500, 'offer ' + t.offer());
+  t.set(11, 1); t.run(60000);
+  const air = parseFloat(t.cmd('PRESSURE?').split(' ')[1]);
+  check('0.16.29 flash: the two-point cal reads room air as it was calibrated (1009.8 mbar; the nominal cal reads about 964)',
+    Math.abs(air - 1009.8) < 0.5, 'PRESSURE ' + air);
+  t.set(11, 0);
+  const saved = t.save(), f2 = t.flash();
+  check('0.16.29 flash: a save writes version 11 over the older record; the newest version 10 record stays',
+    saved && ver(f2, OLD) === 11 && ver(f2, NEW) === 10, [saved, ver(f2, OLD), ver(f2, NEW), t.why()].join());
+  const u = start(f2), ev2 = events(u, 20), tbl2 = u.cmd('PIDS?;SCHED?');
+  check('0.16.29 flash: after the save and a power cycle the version 11 record loads, the same settings',
+    /Settings saved [-0-9: ]+ loaded from A\r?\n/.test(ev2.replace(/;/g, '\n')) && !/0\.16\.29/.test(ev2) && tbl2 === tbl && u.setting(CFG.POSMAX) === 60000 &&
+    u.offer() === 7500, ev2 + tbl2 + u.offer());
+  // What the record held that is not kept is said once, at start-up.
+  const notes = [
+    ['half step (MOT MODE HALF)', (dv, at) => dv.setInt32(at + 16 + 3 * 4, 2, true), /Step mode in the saved settings not kept: full step only/],
+    ['Pressure response Reversed', (dv, at) => dv.setInt32(at + 72 + 4 * 4, -1, true), /Pressure response Reversed in the saved settings not kept/],
+    ['a cal table of three points', (dv, at) => dv.setUint32(at + 196, 3, true), /Saved calibration is not a two-point one: not loaded, calibrate the sensor/],
+  ];
+  for (const [what, patch, re] of notes) {
+    const n = start(image(patch)), e = events(n, 20);
+    check('0.16.29 flash with ' + what + ': loads, and the events say what is not kept',
+      /loaded from B \(saved by 0\.16\.29 or earlier\)/.test(e) && re.test(e) && n.setting(CFG.POSMAX) === 60000 && n.offer() === 7500, e);
+  }
+  // A record of version 9 (0.16.14 to 0.16.20) is not read: the older version 10 one loads.
+  const v9 = start(image((dv, at) => dv.setUint32(at + 4, 9, true))), e9 = events(v9, 20);
+  check('0.16.29 flash with the newest record of version 9: not read, said, the other record loads',
+    /Record in B not used: saved before 0\.16\.21, no longer read/.test(e9) && /loaded from A \(saved by 0\.16\.29 or earlier\)/.test(e9), e9);
 }
 { // W-3 (controller hot) was removed in 0.16.29: a hot chip is no alarm.
   const s = homed(load()); s.set(13, 57); s.run(3000);
@@ -727,7 +786,7 @@ let parkedFlash;
   check('refusals change nothing', one('SCHED?;PIDS?') ===
     'SCHED PV,6.0,10.0,14.0,15;PIDS 1,0.06,0.60,0.00,5.00,0.30,0.00,6.00,0.35,0.50,7.00,0.40,0.00\r\n', one('SCHED?;PIDS?'));
   check('SCHED SET PV, B3 0: three sets', one('SCHED SET PV,6,20,0,15') === '' && one('SCHED?') === 'SCHED PV,6.0,20.0,0.0,15\r\n' &&
-    s.setting(CFG.SCHED) === 2 && s.setting(CFG.B1) === 60 && s.setting(CFG.B2) === 200 && s.setting(CFG.B3) === 0, one('SCHED?'));
+    s.setting(CFG.B1) === 60 && s.setting(CFG.B2) === 200 && s.setting(CFG.B3) === 0, one('SCHED?'));
   // The sim plant runs about 0.8 to 12.5 mbar (20 to 100 % open), so the
   // boundaries here are 3, 6 and 8 mbar with 10 %: up at 3.3, 6.6 and 8.8,
   // down at 7.2, 5.4 and 2.7. Sim-plant gains, a different set each.

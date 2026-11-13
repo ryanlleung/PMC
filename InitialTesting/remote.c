@@ -205,7 +205,8 @@ static bool query(const char *c)
               g[1][0], g[1][1], g[1][2], g[2][0], g[2][1], g[2][2], g[3][0], g[3][1], g[3][2]);
     } else if (strcmp(c, "SCHED?") == 0) {
         char b1[16], b2[16], b3[16];
-        reply("SCHED %s,%s,%s,%s,%ld", cfg_tune(CFG_SCHED) == CTRL_SCHED_PV ? "PV" : "OFF",
+        // "PV": on the pressure, the only schedule (kept in the reply for the PC tools).
+        reply("SCHED PV,%s,%s,%s,%ld",
               fixed_fmt(b1, sizeof b1, cfg_tune(CFG_B1), 1), fixed_fmt(b2, sizeof b2, cfg_tune(CFG_B2), 1),
               fixed_fmt(b3, sizeof b3, cfg_tune(CFG_B3), 1), (long)cfg_tune(CFG_HYST));
     } else {
@@ -297,7 +298,7 @@ static void pid_set(const char *c)
 static void sched_set(const char *c)
 {
     static const char *const form = "Expected: SCHED SET PV,<b1>,<b2>,<b3>,<h>";
-    static const cfg_key_t key[5] = { CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    static const cfg_key_t key[5] = { CFG_N, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };   // [0]: the word PV, no setting
     static const char *const nm[5] = { "", "B1", "B2", "B3", "H" };
     static const int dec[5] = { 0, 1, 1, 1, 0 };
     int32_t v[CFG_N] = { 0 };
@@ -324,11 +325,11 @@ static void sched_set(const char *c)
                 refuse(102, "The PID table is always on: give PV");
                 return;
             }
-            if (strcmp(p, "PV") == 0) x = CTRL_SCHED_PV;
-            else {
+            if (strcmp(p, "PV") != 0) {
                 refuse(101, form);
                 return;
             }
+            continue;
         } else {
             if (!number(p, dec[n], &x)) {
                 refuse(101, form);

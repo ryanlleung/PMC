@@ -114,7 +114,7 @@ static const char *plural(char *buf, size_t n, int count, const char *word)
 /* --------------------------------------------------------------------------
  * Fields
  * ------------------------------------------------------------------------ */
-typedef enum { K_NUM, K_TURNS, K_TOGGLE, K_SCHED } kind_t;
+typedef enum { K_NUM, K_TURNS, K_TOGGLE } kind_t;
 
 typedef struct {
     const char *cap, *unit;
@@ -138,7 +138,6 @@ static const field_t F[CFG_N] = {
     [CFG_TI]      = { "TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "Lowest opening AUTO commands" },
     [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO opening moves gather to this, then go at once" },
-    [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "Normally opening raises the pressure" },
     [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Tolerance about the setpoint; 0 = none" },
     [CFG_KD]      = { "KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
     // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD);
@@ -149,7 +148,6 @@ static const field_t F[CFG_N] = {
     [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD3]     = { "Set 3 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
-    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Always on" },
     [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
     [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },
@@ -168,12 +166,8 @@ static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
     switch (F[k].kind) {
     case K_TURNS:
         return fixed_fmt(buf, n, fixed_round((int64_t)v * 1000 / STEPS_PER_TURN, 1), 2);
-    case K_TOGGLE:
-        if (k == CFG_REVERSE)
-            return v ? "Reversed" : "Normal";
-        return v > 0 ? "Opening raises" : "Opening lowers";
-    case K_SCHED:
-        return v == CTRL_SCHED_PV ? "On" : "Off";
+    case K_TOGGLE:   // CFG_REVERSE, the only one (Pressure response went in 0.16.30)
+        return v ? "Reversed" : "Normal";
     default:
         // 0 means none here (0.16.25, Fable): no set 4, no band.
         if (v == 0 && (k == CFG_B3 || k == CFG_BAND))
@@ -318,7 +312,7 @@ static void ed_turns_present(void)
 
 static void ed_toggle_ok(void)
 {
-    set_draft(ed_key, ed_key == CFG_REVERSE ? !shown(ed_key) : shown(ed_key) > 0 ? -1 : 1);
+    set_draft(ed_key, !shown(ed_key));
 }
 
 static void edit(cfg_key_t k)
@@ -327,7 +321,7 @@ static void edit(cfg_key_t k)
     char b[16];
     ed_key = k;
     if (F[k].kind == K_TURNS) {
-        int32_t lo, hi, pos = stepper3_position() / stepper3_scale();
+        int32_t lo, hi, pos = stepper3_position();
         cfg_range(CFG_POSMAX, &lo, &hi);
         if (!valve_calibrated() || stepper3_busy() || pos < lo || pos > hi) {
             ed_turns_keypad();
@@ -338,11 +332,8 @@ static void edit(cfg_key_t k)
                     value_text(b, sizeof b, k, pos));
         ui_ask(t, "Present", ed_turns_present, "Type turns", ed_turns_keypad);
     } else if (F[k].kind == K_TOGGLE) {
-        if (k == CFG_REVERSE)
-            lv_snprintf(t, sizeof t, "Set motor direction to %s? Saving clears the zero.",
-                        shown(k) ? "Normal" : "Reversed");
-        else
-            lv_snprintf(t, sizeof t, "Set to %s?", shown(k) > 0 ? "Opening lowers pressure" : "Opening raises pressure");
+        lv_snprintf(t, sizeof t, "Set motor direction to %s? Saving clears the zero.",
+                    shown(k) ? "Normal" : "Reversed");
         ui_confirm(t, "Change", ed_toggle_ok);
     } else {
         int32_t lo, hi, s;
@@ -877,8 +868,8 @@ typedef struct {
     bool tall;                // the keys as three tall cards (PID tuning's PID tab)
     bool over;                // the Disable switch toggle, its two edges and the Motor override button (Override tab)
     bool brow;                // B1, B2 and B3 in a row, the last key under them (Set ranges tab)
-    bool arow;                // 109 + 226 on the first row, 109 under it (AUTO tab)
-    const char *aside;        // grey text right of the last row's 109 px card
+    bool arow;                // two 109 px cards in a row, the grey text under them (AUTO tab)
+    const char *aside;        // grey text right of the last row's 109 px card (under the cards on the AUTO tab)
 } tab_t;
 
 // Motor settings (Valve setup to 0.16.1, Valve settings to 0.16.15, Ryan 12 Nov
@@ -925,7 +916,7 @@ static const tab_t tune_tabs[3] = {
     { "Set ranges", { CFG_B1, CFG_B2, CFG_B3, CFG_HYST }, 4,
       "Each boundary splits two sets. Set 3 | 4 None: three sets.", false, false, true, false,
       "The lower of pressure and setpoint picks the set. Hysteresis: % of the boundary." },
-    { "AUTO", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
+    { "AUTO", { CFG_OUTMIN, CFG_BAND }, 2,
       "AUTO min: lowest opening AUTO commands. Band 0 = none.", false, false, false, true,
       "SP band: the In band and Stable tolerance about the setpoint." },
 };
@@ -1113,26 +1104,27 @@ static void pg_fields(void)
         lv_obj_set_style_border_color(b, UI_WARN, 0);
     }
     // Set ranges (brow, 0.16.25): B1, B2 and B3 in a row, each captioned by
-    // the two sets it splits, then the hysteresis under B1. AUTO (arow):
-    // AUTO min and Pressure response, the setpoint band under AUTO min.
-    // Either way a grey line (aside) fills the cell right of the last card.
+    // the two sets it splits, then the hysteresis under B1, with a grey line
+    // (aside) in the cell right of it. AUTO (arow): AUTO min and the
+    // setpoint band in a row, the grey line under them (Pressure response
+    // sat between them to 0.16.29).
     for (int i = 0; i < t->n && (t->brow || t->arow); i++) {
         static const char *const bn[4] = { "Set 1 | 2, mB", "Set 2 | 3, mB", "Set 3 | 4, mB", "Hysteresis, %" };
-        static const char *const an[3] = { "AUTO min, %", "Pressure response", "SP band, mB" };
+        static const char *const an[2] = { "AUTO min, %", "SP band, mB" };
         int32_t x, y, w = 109;
         if (t->brow) {
             x = i < 3 ? 10 + i * 117 : 10;
             y = RY[y0 + (i < 3 ? 0 : 1)];
         } else {
-            x = i == 1 ? 127 : 10;
-            y = RY[y0 + (i < 2 ? 0 : 1)];
-            if (i == 1) w = 226;
+            x = 10 + i * 117;
+            y = RY[y0];
         }
         ecard_make(&pg.f[i], pg.scr, x, y, w, t->brow ? bn[i] : an[i], field_event, (void *)(intptr_t)t->keys[i]);
     }
     if (t->aside) {
         // Up to three 12 px lines, centred on the row.
-        lv_obj_t *l = pg.f[5].card = ui_label(pg.scr, 139, 0, 212, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, t->aside);
+        lv_obj_t *l = pg.f[5].card = ui_label(pg.scr, t->arow ? 10 : 139, 0, t->arow ? 341 : 212, &ui_font_12, UI_MUTED,
+                                              LV_TEXT_ALIGN_LEFT, t->aside);
         lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
         lv_obj_set_height(l, LV_SIZE_CONTENT);
         lv_obj_update_layout(l);
@@ -1625,7 +1617,7 @@ static bool pt_new(const cal_rec_t *saved, int i, const cal_point_t *p)
 {
     if (!p->have)
         return false;
-    if (!saved || saved->npts != 2)
+    if (!saved)
         return true;
     return saved->r_ppb[i] != p->r_ppb || saved->p_mmbar[i] != p->p_mmbar;
 }

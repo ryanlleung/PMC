@@ -165,7 +165,7 @@ static bool before_move(const char **why)
         return true;
     offer = false;
     still = false;
-    int32_t pos = stepper3_position() / stepper3_scale();   // saved in full steps
+    int32_t pos = stepper3_position();   // saved in full steps
     if (valve_calibrated() ? put2(pos, VP_MOVING) : withdraw(pos)) {
         warned = false;
         return true;
@@ -244,7 +244,7 @@ void valvepos_init(void)
             valve_event("REF", "Last power-off without Shut down");
         valve_event("REF", "Saved position on offer: count %ld (%s %%)%s, use it or calibrate",
                     (long)boot_count, fixed_fmt(p, sizeof p,
-                    fixed_round((int64_t)boot_count * stepper3_scale() * 10000 / valve_pos_max(), 1), 1),
+                    fixed_round((int64_t)boot_count * 10000 / valve_pos_max(), 1), 1),
                     boot_moving ? ", saved while moving" : "");
     } else if (live(&last)) {
         // Saved as SAFE or MOVING under another direction or coil order.
@@ -267,7 +267,7 @@ static void parked_check(void)
         return;
     }
     const char *why;
-    if (!valve_restore_parked(last.count * stepper3_scale(), state_of(&last) == VP_PARKED, &why))
+    if (!valve_restore_parked(last.count, state_of(&last) == VP_PARKED, &why))
         valve_event("REF", "Position kept at shut down not used: %s", why);
 }
 
@@ -283,7 +283,7 @@ void valvepos_task(void)
     valve_mode_t m = valve_mode();
     bool moving = stepper3_busy() || m == VALVE_CALIBRATING || m == VALVE_SHUTDOWN;
     bool cal = valve_calibrated();
-    int32_t pos = stepper3_position() / stepper3_scale();   // saved in full steps
+    int32_t pos = stepper3_position();   // saved in full steps
     if (m == VALVE_OFF && cal) {
         // Shut down, coils off: parked, at once (the supply may be switched
         // off any moment now), saying whether it was homed. Tried again
@@ -350,7 +350,7 @@ static bool offer_stands(void)
 bool valvepos_offer(int32_t *count)
 {
     if (offer_stands())
-        *count = boot_count * stepper3_scale();
+        *count = boot_count;
     return offer;
 }
 
@@ -366,14 +366,14 @@ bool valvepos_offer_moving(int32_t *steps)
     // allowed), at the fastest rate (a move may have run at a rate that was
     // not saved) and in HALF's counts if it is HALF now (it may have run in
     // FULL).
-    *steps = (int32_t)((uint64_t)STEPPER3_RATE_MAX * stepper3_scale() * (MOVE_MS + 2000) / 1000);
+    *steps = (int32_t)((uint64_t)STEPPER3_RATE_MAX * (MOVE_MS + 2000) / 1000);
     return offer_stands() && boot_moving;
 }
 
 bool valvepos_use(const char **why)
 {
     if (!offer_stands()) { *why = "No saved position to use"; return false; }
-    if (!valve_restore(boot_count * stepper3_scale(), why))
+    if (!valve_restore(boot_count, why))
         return false;
     offer = false;
     return true;

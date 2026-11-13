@@ -14,13 +14,13 @@
 static clicks_state_t st;
 static bool fake_wdt;
 static char value[24];
-static bool fake_saved, fake_bench;
+static bool fake_saved;
 
 void fake_hw_set_scenario(const char *name)
 {
     memset(&st, 0, sizeof st);
     fake_wdt = false;
-    fake_saved = fake_bench = false;
+    fake_saved = false;
     st.cal_nominal = true;
     st.boost_set_mv = 9999;
     st.pm_found = true;
@@ -43,13 +43,13 @@ void fake_hw_set_scenario(const char *name)
         strcpy(value, "----");
     } else if (!strcmp(name, "cal")) {
         st.cal_nominal = false;
-        fake_saved = fake_bench = true;
+        fake_saved = true;
         st.p_mmbar = 1013200;
         strcpy(value, "1013.20");
     } else if (!strcmp(name, "neg")) {
         // Pumped below the vacuum point after drift: reads below zero.
         st.cal_nominal = false;
-        fake_saved = fake_bench = true;
+        fake_saved = true;
         st.r_ppb = 127100;
         st.p_mmbar = -123;
         strcpy(value, "-0.12");
@@ -76,7 +76,6 @@ void clicks_poll(void) {}
 const clicks_state_t *clicks_state(void) { return &st; }
 #ifndef REAL_CAL
 bool cal_is_default(void) { return st.cal_nominal; }
-const char *cal_id(void) { return fake_bench ? "5880156 bench" : "5880156"; }
 bool cal_saved(void) { return fake_saved; }
 void cal_update(const clicks_state_t *s) { (void)s; }
 int cal_capture_left(void) { return 0; }
@@ -98,7 +97,6 @@ bool rtclock_valid(void) { return !st.cal_nominal; }
 #include "limit.h"
 static int32_t m_pos;
 static uint32_t m_rate = 400, m_start = 200, m_accel = 3200;
-static stepper3_mode_t m_mode = STEPPER3_FULL;
 static bool m_hold, m_rev;
 static uint8_t m_order[4] = { 0, 2, 1, 3 };
 static stepper3_stop_t m_stop = STEPPER3_STOP_NONE;
@@ -124,21 +122,17 @@ void stepper3_override_arm(void) { fake_override = true; }
 bool stepper3_set_rate(uint32_t v) { m_rate = v; return true; }
 bool stepper3_set_start(uint32_t v) { m_start = v; return true; }
 bool stepper3_set_accel(uint32_t v) { m_accel = v; return true; }
-bool stepper3_set_mode(stepper3_mode_t m) { m_mode = m; return true; }
 bool stepper3_set_hold(bool on) { m_hold = on; return true; }
 bool stepper3_set_reverse(bool on) { m_rev = on; return true; }
 bool stepper3_set_order(const uint8_t o[4]) { memcpy(m_order, o, 4); return true; }
 uint32_t stepper3_rate(void) { return m_rate; }
 uint32_t stepper3_start_rate(void) { return m_start; }
 uint32_t stepper3_accel(void) { return m_accel; }
-stepper3_mode_t stepper3_mode(void) { return m_mode; }
-int32_t stepper3_scale(void) { return m_mode == STEPPER3_HALF ? 2 : 1; }
 bool stepper3_hold(void) { return m_hold; }
 bool stepper3_reverse(void) { return m_rev; }
 bool stepper3_energised(void) { return m_hold; }
 int8_t stepper3_direction(void) { return 0; }
 void stepper3_order(uint8_t o[4]) { memcpy(o, m_order, 4); }
-const char *stepper3_mode_name(stepper3_mode_t m) { return m == STEPPER3_WAVE ? "WAVE" : m == STEPPER3_FULL ? "FULL" : "HALF"; }
 const char *stepper3_stop_name(stepper3_stop_t s) { return s == STEPPER3_STOP_DONE ? "done" : s == STEPPER3_STOP_CMD ? "stopped" : s == STEPPER3_STOP_LIMIT ? "LIMIT" : "none"; }
 
 /* Limit switch: closed, except in the trip scenario. */

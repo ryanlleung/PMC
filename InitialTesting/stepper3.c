@@ -43,9 +43,10 @@ static const out_pin_t out_pins[4] = {
 
 static digital_out_t sdk_pins[4];
 
-// Half-step sequence, bit n = coil n on. Even entries one coil (wave),
-// odd entries two coils (full step).
-static const uint8_t seq[8] = { 0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9 };
+// Full-step sequence, two coils on, bit n = coil n on. The only step mode
+// from 0.16.30 (Ryan 13 Nov: "only keep full"): WAVE (one coil) and HALF
+// (the two alternating) were the entries between these.
+static const uint8_t seq[4] = { 0x3, 0x6, 0xC, 0x9 };
 
 #define TICK_HZ        1000000UL
 #define SETTLE_US      20000UL    // coils stay on this long after the last step
@@ -63,7 +64,6 @@ static const uint8_t seq[8] = { 0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9 };
 static uint32_t rate_run   = 400;    // steps/s
 static uint32_t rate_start = 200;    // steps/s, ramp starts and ends here
 static uint32_t accel      = 3200;   // steps/s^2
-static stepper3_mode_t mode = STEPPER3_FULL;
 static bool hold;                    // coils on when idle
 static bool reverse;                // flips the sequence direction. Normal (0) is the direction that was
                                     // "Reversed" before 0.11.19, the factory default (Ryan, 22 Oct)
@@ -75,7 +75,7 @@ static uint8_t order[4] = { 0, 2, 1, 3 };   // coil n -> output order[n]; 0213 f
 typedef enum { ST_IDLE, ST_MOVING, ST_SETTLE } run_state_t;
 
 static volatile run_state_t run_state = ST_IDLE;
-static volatile int32_t position;       // steps of the current mode
+static volatile int32_t position;       // full steps
 static volatile int32_t target;         // where the running move ends
 static volatile bool stop_ramp;         // ramp down to the start rate, then stop
 static volatile stepper3_stop_t last_stop = STEPPER3_STOP_NONE;
@@ -323,10 +323,8 @@ void TIM7_IRQHandler(void)
         return;
     }
 
-    int8_t inc = (mode == STEPPER3_HALF) ? 1 : 2;
-    if (reverse == (dir < 0))
-        inc = -inc;
-    phase = (uint8_t)(phase + inc) & 7;
+    const int8_t inc = reverse == (dir < 0) ? -1 : 1;
+    phase = (uint8_t)(phase + inc) & 3;
     write_coils(seq[phase]);
     position += dir;
 
@@ -478,11 +476,6 @@ from_rest:
         override_active = dist < 0;
     }
 
-    // Wave uses the one-coil entries, full the two-coil entries.
-    if (mode == STEPPER3_WAVE)
-        phase &= ~1u;
-    else if (mode == STEPPER3_FULL)
-        phase |= 1u;
     write_coils(seq[phase]);
     energised = true;
 
@@ -659,28 +652,6 @@ bool stepper3_set_accel(uint32_t sps2)
     return true;
 }
 
-int32_t stepper3_scale(void) { return mode == STEPPER3_HALF ? 2 : 1; }
-
-bool stepper3_set_mode(stepper3_mode_t nm)
-{
-    // Refused in AUTO and while homing (lock_why): the controller and the
-    // homing hold positions in the old step size.
-    if (run_state != ST_IDLE || nm > STEPPER3_HALF || lock_why)
-        return false;
-    // Keep the position in the new step size; the homing stays (since
-    // 0.11.33, Ryan 23 Oct), the valve settings being in full steps. HALF to
-    // FULL or WAVE drops an odd half step, and WAVE and FULL rest half a
-    // step apart: at most one half step, against 16512 full steps a turn.
-    if (mode == STEPPER3_HALF && nm != STEPPER3_HALF)
-        position /= 2;
-    else if (mode != STEPPER3_HALF && nm == STEPPER3_HALF)
-        position *= 2;
-    mode = nm;
-    if (energised)
-        coils_off();     // re-energised on the right entry at the next move
-    return true;
-}
-
 bool stepper3_set_hold(bool on)
 {
     if (run_state != ST_IDLE)
@@ -732,16 +703,11 @@ bool stepper3_last_move(int32_t *from, uint32_t *ms)
 uint32_t stepper3_rate(void)            { return rate_run; }
 uint32_t stepper3_start_rate(void)      { return rate_start; }
 uint32_t stepper3_accel(void)           { return accel; }
-stepper3_mode_t stepper3_mode(void)     { return mode; }
 bool stepper3_hold(void)                { return hold; }
 bool stepper3_reverse(void)             { return reverse; }
 bool stepper3_energised(void)           { return energised; }
 int8_t stepper3_direction(void)         { return run_state == ST_MOVING ? dir : 0; }
 void stepper3_order(uint8_t o[4])       { memcpy(o, order, sizeof order); }
-const char *stepper3_mode_name(stepper3_mode_t m)
-{
-    return m == STEPPER3_WAVE ? "WAVE" : m == STEPPER3_FULL ? "FULL" : "HALF";
-}
 const char *stepper3_stop_name(stepper3_stop_t s)
 {
     switch (s) {

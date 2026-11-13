@@ -26,7 +26,7 @@
 // settings, tuning, saving and the motor are on the touch screen.
 
 // Shown on screen and returned by VER?, with the build date and time.
-#define PMC_FW_VERSION    "0.16.29"
+#define PMC_FW_VERSION    "0.16.30"
 
 // Valve limit switch: one NC dry contact to GND on S1 TX, PD5 (Adapter Click
 // IDC10 pad 8, printed RX: the Adapter labels from the Click's side; 0.14.6).
@@ -46,9 +46,6 @@
 // (BAROMETER?, baro.c); nothing changes if it is not fitted.
 // 0: not built in.
 #define PMC_BARO          1
-
-// Serial number of the Druck in use, shown on the Calibration tab.
-#define PMC_DRUCK_SERIAL  "5880156"
 
 // The text command port (8888 from 0.13.0; 5000 before).
 #define PMC_TCP_PORT      8888

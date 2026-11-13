@@ -108,11 +108,8 @@ int32_t valve_range_mmbar(void);                 // sensor in use, full scale
 ctrl_reg_t valve_regulation(void);               // status words, in AUTO
 int valve_pid_set(void);                         // PID set in use (AUTO) or AUTO would start with, 1 to 3
 
-// Settings, in the order POSMAX FHOME FCREEP BACKOFF CLEAR (unused, was
-// OFFSET: always 0) RETURN
-// (cfg.c; RETURN from 0.13.6).
-#define VALVE_N_SETTINGS 7
-const char *valve_setting_name(int i);
+// Settings, in the order POSMAX FHOME FCREEP BACKOFF CLEAR RETURN (cfg.c).
+#define VALVE_N_SETTINGS 6
 void valve_settings(int32_t v[VALVE_N_SETTINGS]);
 // NULL if every value is in range, else the name of the first that is not.
 const char *valve_settings_check(const int32_t v[VALVE_N_SETTINGS]);

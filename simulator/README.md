@@ -7,7 +7,7 @@ From 0.11.38 the simulator runs the mm4 firmware itself. `pmc-wasm.js` is the fi
 | On the board | In the simulator |
 |---|---|
 | Display and touch panel | 480 x 272 canvas, mouse or finger (a press lasts at least 80 ms) |
-| Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so the step mode, direction and coil order selected on Settings > Motor override > Coils act as on the bench |
+| Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so the direction and coil order selected on Settings > Motor override > Coils act as on the bench |
 | Needle valve, limit switch | flow-line needle, 16512 steps a turn, seats 30 steps past the switch; switch faults: broken wire, stuck, trips early |
 | Druck through the INA228 | the cryostat flow line read through the 5 % input loading; open to room air for calibration. Two flow lines (Cryostat > Flow line): the bench cryostat (default), fitted to the bench logs of 6 and 9 Nov 2026, and the physics model (v63, as `tools/ctrl-test/model.c`) |
 | Boost 10, motor 12 V supply (the motor stalls without it; the firmware does not sense it from 0.14.3), INA228 die temperature | bench controls (excitation, supply volts, controller temperature) |

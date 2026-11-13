@@ -2,8 +2,6 @@
 # Builds and runs the host test of the settings store and the saved valve
 # position and the trend slots (test_cfg.c). Needs gcc; uses the LVGL library tools/ui-preview
 # builds (for lv_snprintf and the tick). -v prints the link and event lines.
-# Built with the engineering commands (PMC_ENG_COMMANDS 1): it drives CFG,
-# PID and VALVE over the link.
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 PROJ="$HERE/../../InitialTesting"

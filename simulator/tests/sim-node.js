@@ -81,8 +81,7 @@ function load(file) {
 }
 // cfg_key_t (InitialTesting/cfg.h), for save() and setting().
 const CFG = { POSMAX: 0, REVERSE: 1, BACKOFF: 2, RETURN: 3, FHOME: 4, FCREEP: 5, RATE: 6, START: 7, ACCEL: 8,
-  KP: 9, TI: 10, OUTMIN: 11, DB: 12, KDIR: 13, BAND: 14, KD: 15,
-  KP2: 16, TI2: 17, KD2: 18, KP3: 19, TI3: 20, KD3: 21, SCHED: 22, B1: 23, B2: 24, HYST: 25, DBC: 26,
-  KP4: 27, TI4: 28, KD4: 29, B3: 30, PASS_LO: 31, PASS_HI: 32 };   // SENSOR (27) went in 0.16.2; set 4 and B3 from
-// 0.16.14; the Ignore switch edges from 0.16.21, 33 = CFG_N
+  KP: 9, TI: 10, OUTMIN: 11, DB: 12, BAND: 13, KD: 14,
+  KP2: 15, TI2: 16, KD2: 17, KP3: 18, TI3: 19, KD3: 20, B1: 21, B2: 22, HYST: 23, DBC: 24,
+  KP4: 25, TI4: 26, KD4: 27, B3: 28, PASS_LO: 29, PASS_HI: 30 };   // KDIR and SCHED went in 0.16.30; 31 = CFG_N
 module.exports = { load, CFG };
