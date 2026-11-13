@@ -534,7 +534,7 @@ int main(int argc, char **argv)
         k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
         k.sets[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
         k.sets[1] = (ctrl_pid_t){ 0.30f, 0.25f, 0 };
-        k.db = k.db_close = 1;
+        k.db = 1;
         const float per = 0.14f / 100.0f * (float)k.pos_max;   // set 2's KP, steps per mB
         long kick[2];
         int sets[2][2];
@@ -571,7 +571,7 @@ int main(int argc, char **argv)
             ctrl_tune_t k = K;
             k.kp = kps[f];
             k.ti = 0;                                       // P alone: the command is KP x e from the start
-            k.db = k.db_close = 1;
+            k.db = 1;
             ctrl_t c;
             ctrl_init(&c);
             ctrl_set_sp(&c, 5, FS, 0);
@@ -585,11 +585,10 @@ int main(int argc, char **argv)
         CHECK(sent[0] == -59 && sent[1] == 0, "reversal hold with KP: a 59-step closing turn round sent at KP 0.06 (%ld), "
               "held at KP 4 (%ld)", sent[0], sent[1]);
     }
-    // Deadbands (0.15.15): opening moves wait for DB open, closing ones for DB close.
+    // Deadband (one setting from 0.16.32): moves either way wait for it.
     {
         ctrl_tune_t k = K;
         k.db = 200;
-        k.db_close = 8;
         k.kp = 1.0f;          // 990.72 steps/mB
         k.ti = 1.6512f;       // 10 steps/s at 1 mB of error
         ctrl_t c;
@@ -603,20 +602,24 @@ int main(int argc, char **argv)
             if (c.move) first = i;
         }
         CHECK(first == 20 && c.move_to - 30000 >= 200 && c.move_to - 30000 < 210,
-              "DB open 200: the creep sends nothing for 19 s, then one move of %ld steps at %d s", (long)(c.move_to - 30000), first);
-        ctrl_t d;
-        ctrl_init(&d);
-        ctrl_set_sp(&d, 6, FS, 0);
-        ctrl_start(&d, &k, 0, 6, 30000);
-        ctrl_in_t in = { .t_ms = 1000, .pv = 6.01f, .pos = 30000, .fs = FS };
-        ctrl_step(&d, &k, &in);
-        const bool closed_now = d.move && d.move_to < 30000;
-        ctrl_init(&d);
-        ctrl_set_sp(&d, 6, FS, 0);
-        ctrl_start(&d, &k, 0, 6, 30000);
-        in.pv = 5.99f;
-        ctrl_step(&d, &k, &in);
-        CHECK(closed_now && !d.move, "DB close 8: a 10-step closing move goes at once, the same opening is held");
+              "DB 200: the creep sends nothing for 19 s, then one move of %ld steps at %d s", (long)(c.move_to - 30000), first);
+        // A 10-step correction, closing then opening: held at DB 200, sent at DB 8.
+        bool sent[2][2];
+        for (int w = 0; w < 2; w++) {
+            k.db = w ? 8 : 200;
+            for (int dir = 0; dir < 2; dir++) {
+                ctrl_t d;
+                ctrl_init(&d);
+                ctrl_set_sp(&d, 6, FS, 0);
+                ctrl_start(&d, &k, 0, 6, 30000);
+                ctrl_in_t in = { .t_ms = 1000, .pv = dir ? 5.99f : 6.01f, .pos = 30000, .fs = FS };
+                ctrl_step(&d, &k, &in);
+                sent[w][dir] = d.move && (dir ? d.move_to > 30000 : d.move_to < 30000);
+            }
+        }
+        CHECK(!sent[0][0] && !sent[0][1] && sent[1][0] && sent[1][1],
+              "one deadband both ways: a 10-step move is held at DB 200 (%d %d) and sent at DB 8 (%d %d)",
+              sent[0][0], sent[0][1], sent[1][0], sent[1][1]);
     }
 
     printf(fails ? "%d failed\n" : "all passed\n", fails);

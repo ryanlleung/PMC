@@ -189,12 +189,11 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     if (in->limit && cmd < (float)c->pos_cmd)
         cmd = (float)c->pos_cmd;
     c->pos_cmd = (int32_t)lroundf(cmd);
-    // Deadbands: opening (counts up) and closing; a closing one of 0 is the
-    // opening one (initialisers from before 0.15.15).
-    const int32_t db_open = k->db > 1 ? k->db : 1;
-    const int32_t db_close = k->db_close > 1 ? k->db_close : k->db_close == 1 ? 1 : db_open;
+    // Deadband: a correction waits until it adds up to this many steps,
+    // either way (one setting from 0.16.32; opening and closing before).
+    const int32_t db = k->db > 1 ? k->db : 1;
     int32_t step = c->pos_cmd - c->last_sent;
-    if (step >= db_open || step <= -db_close) {
+    if (step >= db || step <= -db) {
         // Reversal hysteresis: turning round for less than this is lost in
         // the drive's backlash and only makes the motor hunt. CTRL_REV_MBAR
         // of error at this set's KP, at most rev_pct (0.16.9, ctrl.h).
@@ -220,8 +219,7 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         const bool pin_open = err > 0 && AT(p, pos_max) && AT(c->pos_f, pos_max) && AT(c->win_pos, pos_max);
         const bool pin_min = err < 0 && AT(p, lo) && AT(c->pos_f, lo) && AT(c->win_pos, lo);
 #undef AT
-        const int32_t db_max = db_open > db_close ? db_open : db_close;
-        const float judge = (float)(db_max > CTRL_CHECKMIN ? db_max : CTRL_CHECKMIN);
+        const float judge = (float)(db > CTRL_CHECKMIN ? db : CTRL_CHECKMIN);
         const bool judged = fabsf(moved) >= judge;
         const int way = judged ? sgnf(moved) : !in->moving && pin_open ? 1 : !in->moving && pin_min ? -1 : 0;
         if (way) {

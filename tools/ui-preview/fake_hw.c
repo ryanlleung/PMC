@@ -108,7 +108,6 @@ bool fake_busy;   // set by the "moving" scenario
 bool stepper3_busy(void) { return fake_busy; }
 int32_t stepper3_position(void) { return m_pos; }
 int32_t stepper3_target(void) { return m_pos + (fake_busy ? 1000 : 0); }   // "moving" opens
-void stepper3_zero(void) { m_pos = 0; }
 stepper3_stop_t stepper3_last_stop(void) { return m_stop; }
 bool stepper3_limit_open(void) { return limit_state() != LIMIT_CLOSED; }
 bool stepper3_limit_pressed(void) { return limit_state() != LIMIT_CLOSED; }

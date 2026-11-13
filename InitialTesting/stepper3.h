@@ -94,7 +94,6 @@ void stepper3_off(void);
 
 bool stepper3_busy(void);
 int32_t stepper3_position(void);
-void stepper3_zero(void);
 #define STEPPER3_STEPS_PER_TURN 16512   // full steps per output turn: 48 x 344 (bench, 22 Oct)
 // Called when the step count stops matching the valve's homing: MOT ZERO,
 // a change of direction or coil order (from the link, the motor

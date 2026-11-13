@@ -614,15 +614,6 @@ static void ref_changed(const char *why)
         ref_cb(why);
 }
 
-void stepper3_zero(void)
-{
-    if (run_state != ST_IDLE)
-        return;
-    if (position != 0)
-        ref_changed("motor count zeroed");
-    position = 0;
-}
-
 /* --------------------------------------------------------------------------
  * Settings, shared by the MOT commands and the motor screen. Each setter
  * refuses (returns false) while a move is running or for a value out of

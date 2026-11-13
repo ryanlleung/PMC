@@ -105,7 +105,6 @@ int32_t valve_target_pct_milli(void) { return (moving ? v_target10 : v_pct10) * 
 int valve_cal_step(void) { return v_step; }
 uint32_t valve_cal_budget_s(void) { return 300; }
 bool valve_set_closed(const char **why) { (void)why; v_cal = true; v_ref = VALVE_REF_HAND; v_mode = VALVE_MANUAL; v_pct10 = 0; return true; }
-bool valve_set_position(int32_t p, const char **why) { (void)why; v_cal = true; v_ref = VALVE_REF_HAND; v_mode = VALVE_MANUAL; v_pct10 = p / 10; return true; }
 bool valve_calibrate(const char **why) { (void)why; v_mode = VALVE_CALIBRATING; v_step = 1; return true; }
 bool valve_goto_pct10(int32_t p, const char **why) { (void)why; v_target10 = p; moving = true; return true; }
 bool valve_goto_pct100(int32_t p, const char **why) { return valve_goto_pct10(p / 10, why); }
@@ -425,7 +424,6 @@ int main(int argc, char **argv)
     if (!strcmp(st, "motor-held")) { extern bool fake_busy; fake_override = true; fake_busy = true; }   // Limit override held
     if (!strcmp(st, "motor-moving")) { extern bool fake_busy; fake_busy = true; ui_service(); }   // a move running
     if (!strcmp(st, "motor-speed")) tap(95, 72);
-    if (!strcmp(st, "motor-steps")) { tap(301, 128); ui_service(); }   // 100 steps instead of Hold to run
     if (!strcmp(st, "motor-coils") || !strcmp(st, "motor-ask")) tap(198, 72);
     if (!strcmp(st, "motor-ask")) { v_cal = true; tap(120, 184); }   // Coil order while homed: asks
     if (!strcmp(st, "overon")) { fake_override = true; tap(415, 184); }   // Menu, override armed

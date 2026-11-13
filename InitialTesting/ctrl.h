@@ -91,14 +91,12 @@ typedef struct {
     float outmin;      // AUTO min, % open
     int32_t pos_max;   // steps for 100 %
     float kd;          // derivative, % of POS_MAX per mbar/s of pressure change (0 = off)
-    // The PID table (always on, by the pressure) and the closing deadband
-    // (0.15.15; 0: the closing deadband = db).
+    // The PID table (always on, by the pressure).
     ctrl_pid_t sets[3];    // sets 2, 3 and 4 (set 4 from 0.16.14)
     float b1, b2;          // boundaries, mbar: set 1 below b1, set 2 to b2, set 3 from b2
     float b3;              // boundary set 3 / set 4, mbar (0.16.14); not above b2 (0: initialisers
                            // without it): three sets, as before
     float hyst;            // hysteresis on the pressure, fraction of the boundary (0.15)
-    int32_t db_close;      // deadband closing, steps; 0 = db
 } ctrl_tune_t;
 
 typedef struct {

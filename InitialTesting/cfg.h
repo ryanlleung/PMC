@@ -94,7 +94,7 @@ typedef enum {
     CFG_KP,        // gain, 0.01 %/mbar
     CFG_TI,        // integral time, 0.01 min (0 = off)
     CFG_OUTMIN,    // auto minimum, 0.1 %
-    CFG_DB,        // deadband, steps
+    CFG_DB,        // deadband, steps, opening and closing (a separate closing one to 0.16.31)
     CFG_BAND,      // target band, 0.01 mbar
     CFG_KD,        // derivative, 0.01 % per mbar/s (0 = off)
     // The PID table (0.15.15; always on, by the pressure): CFG_KP, CFG_TI
@@ -106,7 +106,6 @@ typedef enum {
     CFG_B1,        // boundary set 1 / set 2, 0.1 mbar
     CFG_B2,        // boundary set 2 / set 3, 0.1 mbar
     CFG_HYST,      // hysteresis on the pressure, % of the boundary
-    CFG_DBC,       // deadband closing, steps (CFG_DB is the opening one)
     // A fourth PID set (0.16.14): set 4 from boundary 3.
     CFG_KP4, CFG_TI4, CFG_KD4,
     CFG_B3,        // boundary set 3 / set 4, 0.1 mbar

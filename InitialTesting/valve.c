@@ -682,7 +682,6 @@ static ctrl_tune_t tune_now(void)
     k.b2 = (float)cfg_tune(CFG_B2) / 10.0f;
     k.b3 = (float)cfg_tune(CFG_B3) / 10.0f;
     k.hyst = (float)cfg_tune(CFG_HYST) / 100.0f;
-    k.db_close = cfg_tune(CFG_DBC) > 0 ? cfg_tune(CFG_DBC) : 1;
     return k;
 }
 
@@ -980,34 +979,28 @@ bool valve_restore(int32_t count, const char **why)
     return true;
 }
 
-// The operator's position: 0 % where it stands (Set as 0 %), or a typed %.
-// Set as 0 % reads 0.00 % (0.14.14, Ryan 4 Nov), not the seat below it.
-static bool set_by_hand(bool zero, int32_t pct100, const char **why)
+// The operator's position: 0 % where it stands (Set as 0 %). It reads
+// 0.00 % (0.14.14, Ryan 4 Nov), not the seat below it. (A typed % went in
+// 0.16.32.)
+bool valve_set_closed(const char **why)
 {
-    if (pct100 < 0 || pct100 > 10000) { *why = "Outside 0 to 100 %"; return false; }
     if (mode == VALVE_CALIBRATING) { *why = "Homing: STOP to cancel"; return false; }
     if (valve_off_why())            { *why = valve_off_why(); return false; }
     if (is_auto())                  { *why = "Stop AUTO first"; return false; }
     if (any_latched())              { *why = "Reset the fault first"; return false; }
     if (ref_unproven)               { *why = "Direction or coil order changed: home the valve first"; return false; }
-    int32_t c = zero ? 0 : (int32_t)(((int64_t)pct100 * pos_max + 5000) / 10000);
+    const int32_t c = 0;
     if (stepper3_busy() || !stepper3_set_position(c)) { *why = "Wait for the valve to stop"; return false; }
     calibrated = true;
     ref_how = VALVE_REF_HAND;
     mode = VALVE_MANUAL;
     char p[16];
-    if (zero)
-        ev("REF", "Set as 0 %% by the operator: count %ld (%s %%), not verified by homing", (long)c,
-           pct_text(p, sizeof p, c));
-    else
-        ev("REF", "Position set by the operator: count %ld (%ld.%02ld %%), not verified by homing",
-           (long)c, (long)(pct100 / 100), (long)(pct100 % 100));
+    ev("REF", "Set as 0 %% by the operator: count %ld (%s %%), not verified by homing", (long)c,
+       pct_text(p, sizeof p, c));
     update_lock();
     return true;
 }
 
-bool valve_set_closed(const char **why) { return set_by_hand(true, 0, why); }
-bool valve_set_position(int32_t pct100, const char **why) { return set_by_hand(false, pct100, why); }
 
 valve_mode_t valve_mode(void)   { return mode; }
 bool valve_calibrated(void)     { return calibrated; }

@@ -121,10 +121,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(240, 128); shot(s, 'valve-position'); s.tap(66, 20);
   s.tap(84, 128); shot(s, 'valve-settings'); s.tap(66, 20);
   // Choose sensor is gone (one sensor per board): no CFG_SENSOR key (27 to 0.16.13; set 4's KP from 0.16.14, the
-  // Disable switch edges from 0.16.21; the keys end at 31 from 0.16.30) and the sensor range is the 15 psia Druck's.
-  check('no sensor-in-use setting', s.setting(31) === -2147483648 && s.setting(CFG.DBC) === 8 && s.setting(CFG.B3) === 140 &&
+  // Disable switch edges from 0.16.21; the keys end at 30 from 0.16.32) and the sensor range is the 15 psia Druck's.
+  check('no sensor-in-use setting', s.setting(30) === -2147483648 && s.setting(CFG.DB) === 8 && s.setting(CFG.B3) === 140 &&
     s.setting(CFG.PASS_LO) === 5 && s.setting(CFG.PASS_HI) === 50,
-    [31, CFG.DBC, CFG.B3, CFG.PASS_LO, CFG.PASS_HI].map(k => s.setting(k)).join(' '));
+    [30, CFG.DB, CFG.B3, CFG.PASS_LO, CFG.PASS_HI].map(k => s.setting(k)).join(' '));
   check('setpoint limit is the 15 psia range', s.cmd('SETPOINT 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('SETPOINT 1035'));
   // Motor override moved from Valve position to Motor settings' fourth tab, Override (0.16.17, Ryan 12 Nov: "it
   // doesnt feel right to be in valve position"): asked first, and Back returns to Motor settings on that tab.
@@ -365,12 +365,13 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const t = start(image());
   const ev = events(t, 20);
   check('0.16.29 flash: the version 10 record loads, and says which firmware saved it',
-    /Settings saved 2026-10-24 14:04:08 loaded from B \(saved by 0\.16\.29 or earlier\)/.test(ev) && !/not kept|Several sensors|two-point|not used/.test(ev), ev);
+    /Settings saved 2026-10-24 14:04:08 loaded from B \(saved by 0\.16\.29 or earlier\)/.test(ev) && /Deadband close in the saved settings not kept: one deadband, 9 steps/.test(ev) &&
+    !/Step mode|Pressure response|Several sensors|two-point|not used/.test(ev), ev);
   const tbl = t.cmd('PIDS?;SCHED?');
   check('0.16.29 flash: the PID table as saved', tbl ===
     'PIDS 1,0.07,0.61,0.03,0.13,0.83,0.04,0.81,0.95,0.05,0.41,0.26,0.06;SCHED PV,5.5,9.5,13.5,12\r\n', tbl);
   const want = { POSMAX: 60000, REVERSE: 0, BACKOFF: 300, RETURN: 350, FHOME: 380, FCREEP: 30, RATE: 350, START: 180, ACCEL: 3000,
-    OUTMIN: 5, DB: 9, BAND: 12, DBC: 7, PASS_LO: 4, PASS_HI: 45 };
+    OUTMIN: 5, DB: 9, BAND: 12, PASS_LO: 4, PASS_HI: 45 };
   const got = Object.keys(want).filter(k => t.setting(CFG[k]) !== want[k]).map(k => k + ' ' + t.setting(CFG[k]) + ' (want ' + want[k] + ')');
   check('0.16.29 flash: the motor, homing and AUTO settings as saved', got.length === 0, got.join(', '));
   check('0.16.29 flash: the valve position saved at 12.50 % is offered', t.offer() === 7500, 'offer ' + t.offer());
@@ -429,7 +430,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const over = (d) => s.x.sim_touch(64, 184, d), second = (px, d) => s.x.sim_touch2(px, 184, d);
   over(1); s.run(2000); const alone = s.get(30);
   check('limit override alone does nothing', blocked && alone === c0 && !s.busy(), 'count ' + alone);
-  second(415, 1); s.run(1000); second(415, 0); s.run(200);              // second finger on Set zero
+  s.x.sim_touch2(120, 72, 1); s.run(1000); s.x.sim_touch2(120, 72, 0); s.run(200);   // second finger on the tabs (no Set zero from 0.16.32)
   check('second finger elsewhere does nothing', s.get(30) === c0, 'count ' + s.get(30));
   second(186, 1); s.run(3000); const held = s.get(30);
   check('override + Close closes past the switch', held < -500, 'count ' + held);
@@ -442,8 +443,14 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   second(186, 0); s.run(300);
   s.x.sim_touch(186, 184, 1); s.run(1000); s.x.sim_touch(186, 184, 0); s.run(500);
   check('Close alone still refused after', s.get(30) === rel2, 'count ' + s.get(30));
-  over(1); s.run(200); second(298, 1); s.run(2000); const opened = s.get(30);
-  second(298, 0); over(0); s.run(2000);
+  over(1); s.run(200); second(396, 1); s.run(2000); const opened = s.get(30);
+  second(396, 0); over(0); s.run(2000);
+  // Close and Open are hold to run only (0.16.32): Open moves while pressed and ramps down on release.
+  const p0 = s.get(30); s.x.sim_touch(396, 130, 1); s.run(2000); const p1 = s.get(30); s.x.sim_touch(396, 130, 0); s.run(3000);
+  const p2 = s.get(30); s.run(1000);
+  shot(s, 'motor-override-move');
+  check('Motor override: Open runs while held and stops on release', p1 > p0 + 300 && p2 >= p1 && p2 < p1 + 400 && s.get(30) === p2 && !s.busy(),
+    [p0, p1, p2, s.get(30)].join());
   check('override + Open opens', opened > rel2 + 300, opened + ' vs ' + rel2);
 }
 { // Pressure 21: the air point at the room sensor's reading.

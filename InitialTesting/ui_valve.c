@@ -44,7 +44,7 @@ static void right(lv_obj_t *l)
  * override (0.16.17), and nothing here changes a saved setting.
  * ------------------------------------------------------------------------ */
 static struct {
-    lv_obj_t *state, *state_cap, *turns, *start, *closed, *enter, *saved;
+    lv_obj_t *state, *state_cap, *turns, *start, *closed, *saved;
 } cp;
 
 /* One page (Ryan, 24 Oct: no tabs, less homing detail). Row 1 the valve's
@@ -53,7 +53,7 @@ static struct {
 static const char *const calib_help =
     "Acts on the valve now; its saved numbers are on Motor settings.\n\n"
     "Home valve: close to the switch, back off, close slowly, Return = 0 %. STOP cancels.\n\n"
-    "Set as 0 %, Set as other %, Use last saved: set the position without moving.\n\n"
+    "Set as 0 %, Use last saved: set the position without moving.\n\n"
     "F-3 switch not found, F-4 switch stuck: check the switch, reset, home again.";
 
 static void start_cb(lv_event_t *e)
@@ -113,10 +113,11 @@ static void calib_build(lv_obj_t *scr)
     ui_btn(scr, 361, 48, 109, 48, UI_NAV, "Help", calib_help_cb, NULL);
     // Ryan, 24 Oct: set positions on the left, Home valve and Use last
     // saved on the right.
+    // 0.16.32: Set as other % is gone; the two set positions on the left,
+    // Home valve both rows tall on the right.
     cp.closed = ui_btn(scr, 10, 104, 226, 48, UI_SECONDARY, "Set as 0 %", setpos_cb, (void *)(intptr_t)0);
-    cp.start = ui_btn(scr, 244, 104, 226, 48, UI_PRIMARY, "Home valve", start_cb, NULL);
-    cp.enter = ui_btn(scr, 10, 160, 226, 48, UI_SECONDARY, "Set as other %", setpos_cb, (void *)(intptr_t)1);
-    cp.saved = ui_btn(scr, 244, 160, 226, 48, UI_SECONDARY, "Use last saved", setpos_cb, (void *)(intptr_t)2);
+    cp.saved = ui_btn(scr, 10, 160, 226, 48, UI_SECONDARY, "Use last saved", setpos_cb, (void *)(intptr_t)1);
+    cp.start = ui_btn(scr, 244, 104, 226, 104, UI_PRIMARY, "Home valve", start_cb, NULL);
 }
 
 // Motor turns from closed at 10 Hz (Ryan, 24 Oct: turns read more
@@ -173,7 +174,6 @@ static void calib_refresh(void)
     }
     ui_btn_text(cp.saved, "Use last saved", offer ? sv : NULL);
     ui_btn_enable(cp.closed, can);
-    ui_btn_enable(cp.enter, can);
     ui_btn_enable(cp.saved, can && offer);
     ui_status_line();
 }

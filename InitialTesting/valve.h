@@ -65,7 +65,7 @@ valve_mode_t valve_mode(void);
 const char *valve_mode_name(void);
 bool valve_calibrated(void);
 // How the position was last set: homed on the switch, or set by the
-// operator (closed or a typed %) or from the saved position, neither
+// operator (Set as 0 %) or from the saved position, neither
 // checked against the switch, or kept from the last Shut down of a homed
 // valve (PARKED; not homed before it: SAVED). NONE when not homed.
 typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
@@ -123,8 +123,6 @@ void valve_uncalibrate(const char *why);         // e.g. motor direction changed
 bool valve_restore(int32_t count, const char **why);
 // Takes the present position as 0 % (count 0, reads 0.00 %), without homing.
 bool valve_set_closed(const char **why);
-// The same, taking the present position as pct100 (0.01 %, 0 to 10000).
-bool valve_set_position(int32_t pct100, const char **why);
 uint32_t valve_cal_budget_s(void);               // longest calibration, s
 int valve_cal_step(void);    // -1 not calibrating, 0 moving off the switch, 1-4 step
 bool valve_goto_pct10(int32_t pct10, const char **why);   // VALVE SET, 0.1 %

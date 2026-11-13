@@ -356,27 +356,10 @@ static void set_closed(void)
         ui_msg("Position set to 0 %. Not verified by homing.");
 }
 
-static bool set_position(int32_t v100, const char **why)
-{
-    if (!valve_set_position(v100, why)) {
-        if (valve_motion_blocked()) *why = "Reset the fault first";
-        return false;
-    }
-    char v[16], t[64];
-    lv_snprintf(t, sizeof t, "Position set to %s %%. Not verified by homing.", ui_fmt2(v, sizeof v, (int64_t)v100 * 10));
-    ui_msg(t);
-    return true;
-}
-
 /* Home and Set position are two jobs, kept apart on every screen (Ryan,
  * 23 Oct): Home finds the limit switch (0 % is the back-off above it); Set position takes the
- * position from the operator (closed, a typed %, or the saved position),
- * not verified by homing. */
-static void set_position_ask(void)
-{
-    ui_keypad("Set position, %", NULL, 0, 10000, NULL, NULL, set_position);
-}
-
+ * position from the operator (closed, or the saved position), not
+ * verified by homing. A typed % (Set as other %) went in 0.16.32. */
 static void set_closed_ask(void)
 {
     ui_confirm("Set the present position as 0 %? Not verified by homing.",
@@ -394,27 +377,28 @@ void ui_set_position_pick(int i)
 {
     if (i == 0)
         set_closed_ask();
-    else if (i == 1)
-        set_position_ask();
     else
         use_saved();
 }
 
-// The ways to set it: closed, a typed %, the saved position when offered.
+// The ways to set it: closed, or the saved position when offered (then a
+// list of the two).
 void ui_set_position_ask(void)
 {
     static char saved[32];
-    static const char *items[3] = { "Set as 0 %", "Set as other %", saved };
+    static const char *items[2] = { "Set as 0 %", saved };
     int32_t q;
-    int n = 2;
-    if (valvepos_offer(&q)) {
+    if (!valvepos_offer(&q)) {
+        set_closed_ask();
+        return;
+    }
+    {
         char v[16];
         int32_t pm = valve_pos_max();
         ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
         lv_snprintf(saved, sizeof saved, "Use last saved, %s %%", v);
-        n = 3;
     }
-    ui_pick("Set position (not verified by homing)", items, n, -1, ui_set_position_pick);
+    ui_pick("Set position (not verified by homing)", items, 2, -1, ui_set_position_pick);
 }
 
 static char home_q[128];

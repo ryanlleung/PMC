@@ -141,7 +141,7 @@ static const field_t F[CFG_N] = {
     [CFG_KP]      = { "KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI]      = { "TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "Lowest opening AUTO commands" },
-    [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO opening moves gather to this, then go at once" },
+    [CFG_DB]      = { "Deadband", "steps", 0, K_NUM, "AUTO moves gather to this, then go at once" },
     [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Tolerance about the setpoint; 0 = none" },
     [CFG_KD]      = { "KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
     // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD);
@@ -155,7 +155,6 @@ static const field_t F[CFG_N] = {
     [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
     [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },
-    [CFG_DBC]     = { "Deadband close", "steps", 0, K_NUM, "AUTO closing moves below this are skipped" },
     [CFG_KP4]     = { "Set 4 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI4]     = { "Set 4 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD4]     = { "Set 4 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
@@ -927,9 +926,9 @@ typedef struct {
 #define VALVE_SET_NOTE "Saved numbers; nothing moves. Home or set the valve on Valve position."
 static const tab_t valve_tabs[4] = {
     { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved with the valve stopped." },
-    // The deadbands (0.15.15: opening and closing) are the valve's: from
-    // the 5 Nov bench, the needle sticks opening at low openings.
-    { "Travel", { CFG_POSMAX, CFG_REVERSE, CFG_DB, CFG_DBC }, 4, VALVE_SET_NOTE },
+    // The deadband is the valve's (one from 0.16.32, Ryan 13 Nov; opening
+    // and closing from 0.15.15).
+    { "Travel", { CFG_POSMAX, CFG_REVERSE, CFG_DB }, 3, VALVE_SET_NOTE },
     { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4, "Used by Home valve. " VALVE_SET_NOTE },
     { "Override", { CFG_PASS_LO, CFG_PASS_HI }, 2,
       "Disable switch: when On and homed, the limit switch does not stop closing from From to To % open "

@@ -43,12 +43,12 @@ enum { V_POSMAX, V_FHOME, V_FCREEP, V_BACKOFF, V_CLEAR, V_RETURN };   // valve.c
 _Static_assert(VALVE_N_SETTINGS == V_RETURN + 1, "valve[] indices");
 
 // Control tuning. Fixed point as noted below. KP, TI and KD are PID set 1;
-// DB is the opening deadband, DBC the closing one.
+// DB is the deadband, both ways (a separate closing one, DBC, to 0.16.31).
 enum { T_KP, T_TI, T_OUTMIN, T_DB, T_BAND, T_KD,
-       T_KP2, T_TI2, T_KD2, T_KP3, T_TI3, T_KD3, T_B1, T_B2, T_HYST, T_DBC,
+       T_KP2, T_TI2, T_KD2, T_KP3, T_TI3, T_KD3, T_B1, T_B2, T_HYST,
        T_KP4, T_TI4, T_KD4, T_B3, T_PLO, T_PHI, T_N };
 static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "BAND", "KD",
-                                            "KP2", "TI2", "KD2", "KP3", "TI3", "KD3", "B1", "B2", "HYST", "DBC",
+                                            "KP2", "TI2", "KD2", "KP3", "TI3", "KD3", "B1", "B2", "HYST",
                                             "KP4", "TI4", "KD4", "B3", "PASSLO", "PASSHI" };
 // Factory (0.16.18, Ryan 12 Nov: "set factory pid settings to boundary at 6
 // 10 14. kp ti kd values, 0.06, 0.6, 0; 0.12 0.82 0; 0.8 0.94 0, 0.4 0.25
@@ -56,19 +56,19 @@ static const char *const tune_name[T_N] = { "KP", "TI", "OUTMIN", "DB", "BAND", 
 // set 2 0.12/0.82, set 3 0.80/0.94, set 4 0.40/0.25, KD 0 (the bench step
 // tests of 12 Nov).
 static const int32_t tune_def[T_N] = { 6, 60, 0, 8, 10, 0,
-                                       12, 82, 0, 80, 94, 0, 60, 100, 15, 8,
+                                       12, 82, 0, 80, 94, 0, 60, 100, 15,
                                        40, 25, 0, 140, 5, 50 };
 static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    0,    0,
-                                       1,     0,     0,     1,     0,     0,     1,     1,     0,  0,
+                                       1,     0,     0,     1,     0,     0,     1,     1,     0,
                                        1,     0,     0,     0,     0,  1 };
 static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000, 1000, 10000,
-                                       10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 40, 2000,
+                                       10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 40,
                                        10000, 10000, 10000, 10000, 99, 100 };
 static int32_t tune[T_N];   // cfg_init: tune_def
 // Fixed point: 0.01 %/mbar, 0.01 min, 0.1 %, steps, 0.01 mbar (the band
 // from 0, 0.10 before 0.16.16, Ryan 12 Nov), 0.01 % per mbar/s; sets 2 to 4
 // as set 1; B1 to B3 0.1 mbar (B3 0: no set 4, three sets); hysteresis % of
-// the boundary; closing deadband steps; Disable switch From 0 to 99 and To
+// the boundary; Disable switch From 0 to 99 and To
 // 1 to 100 % open (0.16.22, Ryan 13 Nov: "extend the limit switch ignore to
 // 0 to 100% inputtable"), From below To.
 
@@ -244,13 +244,13 @@ static const char *values_why(const cfg_rec_t *r)
 
 // What a version 10 record held that version 11 does not keep: said in the
 // events when that record is the one loaded (cfg_init).
-enum { NOTE_MODE = 1, NOTE_KDIR = 2, NOTE_SENSORS = 4, NOTE_CAL = 8 };
+enum { NOTE_MODE = 1, NOTE_KDIR = 2, NOTE_SENSORS = 4, NOTE_CAL = 8, NOTE_DBC = 16 };
 
 // A version 10 record as version 11, value by value. NULL, or why not.
 static const char *from_v10(const cfg_rec_v10_t *o, cfg_rec_t *r, uint32_t *notes)
 {
-    // tune[] of version 10 without KDIR (4) and SCHED (13).
-    static const uint8_t from[T_N] = { 0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 };
+    // tune[] of version 10 without KDIR (4), SCHED (13) and DBC (17).
+    static const uint8_t from[T_N] = { 0, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 18, 19, 20, 21, 22, 23 };
     memset(r, 0, sizeof *r);
     r->magic = CFG_MAGIC;
     r->version = CFG_VERSION;
@@ -271,6 +271,8 @@ static const char *from_v10(const cfg_rec_v10_t *o, cfg_rec_t *r, uint32_t *note
         r->tune[i] = o->tune[from[i]];
     if (o->tune[4] != 1)                 // KDIR -1: opening lowered the pressure
         *notes |= NOTE_KDIR;
+    if (o->tune[17] != o->tune[3])       // a closing deadband of its own: the opening one is kept (0.16.32)
+        *notes |= NOTE_DBC;
     if (o->nsens < 1 || o->nsens > 4 || o->active >= o->nsens)
         return "value out of range";
     if (o->nsens > 1)
@@ -468,6 +470,8 @@ void cfg_init(void)
         valve_event("CFG", "Step mode in the saved settings not kept: full step only");
     if (n & NOTE_KDIR)
         valve_event("CFG", "Pressure response Reversed in the saved settings not kept: opening raises the pressure");
+    if (n & NOTE_DBC)
+        valve_event("CFG", "Deadband close in the saved settings not kept: one deadband, %ld steps", (long)tune[T_DB]);
     if (n & NOTE_SENSORS)
         valve_event("CFG", "Several sensors in the saved settings: only the one in use is kept");
     if (n & NOTE_CAL)
@@ -581,7 +585,7 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
 }
 _Static_assert(CFG_KP + T_N - 1 == CFG_TUNE_LAST, "tuning keys in tune[] order");
 _Static_assert(CFG_KD - CFG_KP == T_KD && CFG_KP2 - CFG_KP == T_KP2 && CFG_B1 - CFG_KP == T_B1 &&
-               CFG_DBC - CFG_KP == T_DBC && CFG_KP4 - CFG_KP == T_KP4 && CFG_B3 - CFG_KP == T_B3 &&
+               CFG_KP4 - CFG_KP == T_KP4 && CFG_B3 - CFG_KP == T_B3 &&
                CFG_PASS_LO - CFG_KP == T_PLO && CFG_PASS_HI - CFG_KP == T_PHI,
                "tuning keys in tune[] order");
 

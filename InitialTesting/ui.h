@@ -184,7 +184,7 @@ void ui_reset_fault_event(lv_event_t *e);   // the strip's Reset fault (ui_home.
 // valve on Home's Valve tile while not homed).
 void ui_home_ask(void);
 void ui_set_position_ask(void);
-void ui_set_position_pick(int i);   // 0 closed, 1 enter %, 2 saved
+void ui_set_position_pick(int i);   // 0 closed, 1 saved
 void ui_position_ask(void);
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
 // Trend and the Home sparklines (ui_trend.c). A sparkline redraws when

@@ -82,6 +82,6 @@ function load(file) {
 // cfg_key_t (InitialTesting/cfg.h), for save() and setting().
 const CFG = { POSMAX: 0, REVERSE: 1, BACKOFF: 2, RETURN: 3, FHOME: 4, FCREEP: 5, RATE: 6, START: 7, ACCEL: 8,
   KP: 9, TI: 10, OUTMIN: 11, DB: 12, BAND: 13, KD: 14,
-  KP2: 15, TI2: 16, KD2: 17, KP3: 18, TI3: 19, KD3: 20, B1: 21, B2: 22, HYST: 23, DBC: 24,
-  KP4: 25, TI4: 26, KD4: 27, B3: 28, PASS_LO: 29, PASS_HI: 30 };   // KDIR and SCHED went in 0.16.30; 31 = CFG_N
+  KP2: 15, TI2: 16, KD2: 17, KP3: 18, TI3: 19, KD3: 20, B1: 21, B2: 22, HYST: 23,
+  KP4: 24, TI4: 25, KD4: 26, B3: 27, PASS_LO: 28, PASS_HI: 29 };   // KDIR and SCHED went in 0.16.30, DBC in 0.16.32; 30 = CFG_N
 module.exports = { load, CFG };

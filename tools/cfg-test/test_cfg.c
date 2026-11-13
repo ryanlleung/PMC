@@ -239,7 +239,7 @@ static rec_v10_t v10(void)
     r.rev = 5;
     const int32_t mot[7] = { 350, 180, 3000, 1, 0, 0, 213 };
     const int32_t valve[7] = { 60000, 380, 30, 300, 800, 0, 350 };
-    const int32_t tune[24] = { 7, 61, 5, 9, 1, 12, 3, 13, 83, 4, 81, 95, 5, 2, 55, 95, 12, 7, 41, 26, 6, 135, 4, 45 };
+    const int32_t tune[24] = { 7, 61, 5, 9, 1, 12, 3, 13, 83, 4, 81, 95, 5, 2, 55, 95, 12, 9, 41, 26, 6, 135, 4, 45 };
     memcpy(r.mot, mot, sizeof mot);
     memcpy(r.valve, valve, sizeof valve);
     memcpy(r.tune, tune, sizeof tune);
@@ -312,9 +312,9 @@ static int32_t val(cfg_from_t f, cfg_key_t k)
 
 // The tuning of v10(), by key, as it must load.
 static const cfg_key_t TK[] = { CFG_KP, CFG_TI, CFG_OUTMIN, CFG_DB, CFG_BAND, CFG_KD, CFG_KP2, CFG_TI2, CFG_KD2,
-                                CFG_KP3, CFG_TI3, CFG_KD3, CFG_B1, CFG_B2, CFG_HYST, CFG_DBC, CFG_KP4, CFG_TI4, CFG_KD4,
+                                CFG_KP3, CFG_TI3, CFG_KD3, CFG_B1, CFG_B2, CFG_HYST, CFG_KP4, CFG_TI4, CFG_KD4,
                                 CFG_B3, CFG_PASS_LO, CFG_PASS_HI };
-static const int32_t TV[] = { 7, 61, 5, 9, 12, 3, 13, 83, 4, 81, 95, 5, 55, 95, 12, 7, 41, 26, 6, 135, 4, 45 };
+static const int32_t TV[] = { 7, 61, 5, 9, 12, 3, 13, 83, 4, 81, 95, 5, 55, 95, 12, 41, 26, 6, 135, 4, 45 };
 static bool tune_as_v10(cfg_key_t but)
 {
     bool all = true;
@@ -358,6 +358,15 @@ static void test_v10(void)
     reboot();
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && tune_as_v10(CFG_N) && cfg_remote());
     CHECK(said("Pressure response Reversed in the saved settings not kept") && !said("Step mode"));
+
+    // A closing deadband of its own (0.15.15 to 0.16.31): the opening one is
+    // kept, for both ways, and the events say so.
+    o = v10();
+    o.tune[17] = 7;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && tune_as_v10(CFG_N) && cfg_tune(CFG_DB) == 9);
+    CHECK(said("Deadband close in the saved settings not kept: one deadband, 9 steps") && !said("Step mode"));
 
     // Three sensors (0.9.0 to 0.16.1 could save them), the second (30 psi,
     // uncalibrated) in use: it loads as that sensor at the 15 psia range,
@@ -730,16 +739,15 @@ static void test_table(void)
     // The 5 Nov proposal for CF-11: B2 20 mbar is above the factory B3 (14),
     // so refused unless B3 is 0 (three sets) or above.
     memset(set, 0, sizeof set);
-    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_B1, CFG_B2, CFG_HYST, CFG_DB, CFG_DBC,
-                            CFG_B3 };
-    const int32_t x[] = { 10, 40, 80, 30, 120, 30, 60, 200, 15, 200, 8, 0 };
-    for (int i = 0; i < 11; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
+    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_B1, CFG_B2, CFG_HYST, CFG_DB, CFG_B3 };
+    const int32_t x[] = { 10, 40, 80, 30, 120, 30, 60, 200, 15, 200, 0 };
+    for (int i = 0; i < 10; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B3 must be above B2"));
     v[CFG_B3] = 0; set[CFG_B3] = true;
     CHECK(cfg_save_with(v, set, &why));
     reboot();
     bool all = true;
-    for (int i = 0; i < 12; i++) all &= cfg_tune(k[i]) == x[i];
+    for (int i = 0; i < 11; i++) all &= cfg_tune(k[i]) == x[i];
     CHECK(all && cfg_unsaved() == 0);
     // In AUTO the PID table is tuning too: taken without leaving AUTO.
     v_auto = true;
