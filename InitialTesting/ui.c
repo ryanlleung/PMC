@@ -687,16 +687,18 @@ static void comm_draw(lv_event_t *e)
     lv_draw_rect_dsc_init(&r);
     lv_draw_triangle_dsc_t t;
     lv_draw_triangle_dsc_init(&t);
-    // In: an arrow down on the left. Out: an arrow up on the right.
+    // In: an arrow down on the left. Out: an arrow up on the right. Each
+    // 8 x 11 px from 0.16.26 (Ryan 13 Nov: "make the transmittion and
+    // receiving icon a bit smaller"; 10 x 16 before), centred on the header.
     r.bg_color = t.color = comm_on[0] ? lv_color_white() : COMM_IDLE;
-    lv_area_t s = { x + 8, y + 12, x + 10, y + 20 };
+    lv_area_t s = { x + 9, y + 15, x + 11, y + 20 };
     lv_draw_rect(layer, &r, &s);
-    t.p[0].x = x + 4;  t.p[0].y = y + 20; t.p[1].x = x + 14; t.p[1].y = y + 20; t.p[2].x = x + 9;  t.p[2].y = y + 27;
+    t.p[0].x = x + 6;  t.p[0].y = y + 20; t.p[1].x = x + 14; t.p[1].y = y + 20; t.p[2].x = x + 10; t.p[2].y = y + 25;
     lv_draw_triangle(layer, &t);
     r.bg_color = t.color = comm_on[1] ? lv_color_white() : COMM_IDLE;
-    lv_area_t u = { x + 20, y + 20, x + 22, y + 28 };
+    lv_area_t u = { x + 18, y + 20, x + 20, y + 25 };
     lv_draw_rect(layer, &r, &u);
-    t.p[0].x = x + 16; t.p[0].y = y + 20; t.p[1].x = x + 26; t.p[1].y = y + 20; t.p[2].x = x + 21; t.p[2].y = y + 13;
+    t.p[0].x = x + 15; t.p[0].y = y + 20; t.p[1].x = x + 23; t.p[1].y = y + 20; t.p[2].x = x + 19; t.p[2].y = y + 15;
     lv_draw_triangle(layer, &t);
 }
 

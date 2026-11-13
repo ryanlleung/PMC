@@ -332,7 +332,7 @@ static bool p_range(float *lo, float *hi)
     return any;
 }
 
-// The least pressure span the sparkline and Trend show (0.16.18, Ryan 12 Nov:
+// The least pressure span Trend shows (the sparkline too to 0.16.25) (0.16.18, Ryan 12 Nov:
 // "set a limit to the trend and sparkline for pressure so that small
 // fluctuations around a setpoint doesn look huge"): 25 % of the highest
 // pressure or target shown, 1.5 mbar at least (0.16.23, Ryan 13 Nov:
@@ -352,6 +352,12 @@ static float p_span_min(float lo, float hi)
  * ------------------------------------------------------------------------ */
 #define SPARK_WIN 300   // 5 min, at half the old width (Ryan, 21 Oct)
 #define SPARK_N   61    // one per 5 s
+// The sparkline's least span (0.16.26, Ryan 13 Nov: "maybe use a +-5 mbar
+// for the spark line minimum", "the sparkline should only indicate a big
+// problem, steady state errors or fluctuations thats small enough dont
+// need ot be shown"): 10 mbar, 5 either side of the middle of the data,
+// moved up to start at 0 mbar at low pressures. Trend keeps p_span_min.
+#define SPARK_SPAN_MIN 10.0f
 
 static void spark_draw(lv_event_t *e)
 {
@@ -376,17 +382,17 @@ static void spark_draw(lv_event_t *e)
     if (lo > 0 && hi / lo > 10) {
         s.log = true;
     } else {
-        // At least p_span_min (25 % of the pressure, 1.5 mbar; 0.16.23) or
-        // 10 x the target band tall, so a steady hold looks steady.
-        int32_t band = 10;
-        cfg_value(CFG_FROM_LIVE, CFG_BAND, &band);
-        float min = (float)band / 10.0f;   // 10 x band, band in 0.01 mbar
-        float pmin = p_span_min(lo, hi);
-        if (min < pmin) min = pmin;
+        // At least SPARK_SPAN_MIN tall (0.16.26; p_span_min or 10 x the
+        // target band to 0.16.25), so only a big change shows.
+        const float min = SPARK_SPAN_MIN;
         if (hi - lo < min) {
             float c = (lo + hi) / 2;
             lo = c - min / 2;
             hi = c + min / 2;
+            if (lo < 0) {   // no negative pressures: 0 to 10 mbar
+                hi -= lo;
+                lo = 0;
+            }
         } else {
             float pad = (hi - lo) * 0.08f;
             lo -= pad;

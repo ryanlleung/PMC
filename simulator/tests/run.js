@@ -209,7 +209,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   // each arrow lit until 3 s after its last message, not 300 ms a message.
   const s = homed(load()); s.run(12000);
   const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
-  const arrows = () => [px(324, 16), px(336, 24)];   // the arrow down's and the arrow up's stems
+  const arrows = () => [px(325, 17), px(334, 23)];   // the arrow down's and the arrow up's stems (smaller from 0.16.26)
   let dark = 0, n = 0;
   for (let i = 0; i < 8; i++) {
     s.send('PRESSURE?');
