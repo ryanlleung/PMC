@@ -117,8 +117,8 @@ typedef enum {
     // A fourth PID set (0.16.14, record version 9): set 4 from boundary 3.
     CFG_KP4, CFG_TI4, CFG_KD4,
     CFG_B3,        // boundary set 3 / set 4, 0.1 mbar
-    // Ignore switch (the pass band, valve.h) edges (0.16.21, record version
-    // 10), % open: From below To.
+    // Disable switch (the pass band, valve.h) edges (0.16.21, record
+    // version 10), % open, 0 to 100: From below To.
     CFG_PASS_LO, CFG_PASS_HI,
     CFG_N          // (CFG_SENSOR, the sensor in use, went in 0.16.2: one sensor per board)
 } cfg_key_t;

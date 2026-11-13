@@ -125,21 +125,21 @@ typedef struct {
 
 // In cfg_key_t order.
 static const field_t F[CFG_N] = {
-    [CFG_POSMAX]  = { "100 % travel", "turns", 2, K_TURNS, "Output turns, closed to fully open" },
-    [CFG_REVERSE] = { "Motor direction", NULL, 0, K_TOGGLE, "Reverse if Open closes the valve; saving clears the zero" },
-    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Homing step 2, off the switch after the fast close" },
-    [CFG_RETURN]  = { "Return", "steps", 0, K_NUM, "Homing step 4, off the switch after the slow close; defines 0 %" },
+    [CFG_POSMAX]  = { "100 % travel", "turns", 2, K_TURNS, "Output turns, closed to open" },
+    [CFG_REVERSE] = { "Motor direction", NULL, 0, K_TOGGLE, "Reverse if Open closes; saving clears the zero" },
+    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Homing step 2, off the switch" },
+    [CFG_RETURN]  = { "Return", "steps", 0, K_NUM, "Homing step 4, off the switch; sets 0 %" },
     [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM, "Homing step 1, to the switch" },
     [CFG_FCREEP]  = { "Slow close", "steps/s", 0, K_NUM, "Homing step 3, onto the switch" },
     [CFG_RATE]    = { "Run speed", "steps/s", 0, K_NUM, "Move speed" },
-    [CFG_START]   = { "Start speed", "steps/s", 0, K_NUM, "Start and stop speed of a move" },
+    [CFG_START]   = { "Start speed", "steps/s", 0, K_NUM, "Start and stop speed" },
     [CFG_ACCEL]   = { "Acceleration", "steps/s/s", 0, K_NUM, "Ramp from start to run speed" },
     [CFG_KP]      = { "KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI]      = { "TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "Lowest opening AUTO commands" },
-    [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO opening moves accumulate to this, then go in one step (needle stiction)" },
-    [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "Process direction; normally opening raises the pressure" },
-    [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "In-band tolerance about the setpoint; 0 = none (In band and Stable then never show)" },
+    [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO opening moves gather to this, then go at once" },
+    [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "Normally opening raises the pressure" },
+    [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Tolerance about the setpoint; 0 = none" },
     [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
     // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD);
     // set 4 and boundary 3 from 0.16.14.
@@ -149,7 +149,7 @@ static const field_t F[CFG_N] = {
     [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
-    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Always on: set by the lower of pressure and setpoint" },
+    [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Always on" },
     [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
     [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },
@@ -157,10 +157,10 @@ static const field_t F[CFG_N] = {
     [CFG_KP4]     = { "Set 4 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI4]     = { "Set 4 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
     [CFG_KD4]     = { "Set 4 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
-    [CFG_B3]      = { "Boundary 3", "mB", 1, K_NUM, "Set 3 / set 4 switch point; 0 = no set 4 (three sets)" },
-    // Ignore switch edges (0.16.21; "From, %" and "To, %" on their cards).
-    [CFG_PASS_LO] = { "Ignore from", "%", 0, K_NUM, "Lower edge; below it the switch stops closing" },
-    [CFG_PASS_HI] = { "Ignore to", "%", 0, K_NUM, "Upper edge; above it the switch works as always" },
+    [CFG_B3]      = { "Boundary 3", "mB", 1, K_NUM, "Set 3 / set 4 switch point; 0 = no set 4" },
+    // Disable switch edges (0.16.21; "From, %" and "To, %" on their cards).
+    [CFG_PASS_LO] = { "Disable from", "%", 0, K_NUM, "Switch works below this" },
+    [CFG_PASS_HI] = { "Disable to", "%", 0, K_NUM, "Switch works above this" },
 };
 
 static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
@@ -860,7 +860,7 @@ typedef struct {
     int n;
     const char *note;
     bool tall;                // the keys as three tall cards (PID tuning's PID tab)
-    bool over;                // the Ignore switch toggle, its two edges and the Motor override button (Override tab)
+    bool over;                // the Disable switch toggle, its two edges and the Motor override button (Override tab)
     bool brow;                // the first key alone, then B1, B2 and B3 short in a row (PID table tab)
 } tab_t;
 
@@ -875,23 +875,20 @@ typedef struct {
 // Drive is the first tab from 0.16.21 (Ryan 12 Nov: "put drive in the
 // first tab"). The Override tab's Ignore switch wording is from 0.16.21
 // (Ryan 12 Nov: the description was unclear; "Switch pass" to 0.16.20), and
-// its edges are saved settings (Ryan: "make the boundary editable").
-#define VALVE_SET_NOTE "Saved numbers; Drive, Travel and Homing move nothing. The Override tab has Ignore switch and opens Motor override, which drives the motor by steps. To home the valve or set its position, Valve position."
+// its edges are saved settings (Ryan: "make the boundary editable"). From
+// 0.16.22 (Ryan 13 Nov: "change ignore to disable, and make the description
+// less verbose. also make all help notes or subtexts less verbose"):
+// Disable switch, and every note here a line or two.
+#define VALVE_SET_NOTE "Saved numbers; nothing moves. Home or set the valve on Valve position."
 static const tab_t valve_tabs[4] = {
-    { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved only with the valve stopped." },
+    { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved with the valve stopped." },
     // The deadbands (0.15.15: opening and closing) are the valve's: from
     // the 5 Nov bench, the needle sticks opening at low openings.
     { "Travel", { CFG_POSMAX, CFG_REVERSE, CFG_DB, CFG_DBC }, 4, VALVE_SET_NOTE },
-    { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4,
-      "What Home valve (Valve position) does with the switch. " VALVE_SET_NOTE },
+    { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4, "Used by Home valve. " VALVE_SET_NOTE },
     { "Override", { CFG_PASS_LO, CFG_PASS_HI }, 2,
-      "Ignore switch: use this when the valve binds part way while closing and the limit switch trips before the "
-      "needle is on its seat. While it is On and the valve is homed, the limit switch is ignored between the From "
-      "and To edges (% open). It does not stop closing there and raises no W-1, W-4 or F-4. Below From and above "
-      "To the switch works as always, so the valve still stops on its seat. A tap takes effect at once. It is Off "
-      "after every restart. From and To are saved settings: edit, then Save settings. From must be below To.\n\n"
-      "Motor override drives the motor by steps, past the valve's checks, for commissioning and a stuck limit "
-      "switch. It asks first; Back returns here.", false, true },
+      "Disable switch: when On and homed, the limit switch does not stop closing from From to To % open "
+      "(no W-1, W-4 or F-4). Off after a restart.\n\nMotor override: drives the motor by steps.", false, true },
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
 // name on their own tab, the rest of AUTO's settings on the other. From
@@ -904,14 +901,11 @@ static const tab_t valve_tabs[4] = {
 // row, and the PID table tab has the hysteresis on its first row and the
 // three boundaries under it.
 static const tab_t tune_tabs[3] = {
-    { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3,
-      "Four sets, tap one to edit; dot = set in use. Applied at the next control step; Save to keep.", true },
+    { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3, "Tap a set to edit it; dot = in use. Save to keep.", true },
     { "PID table", { CFG_HYST, CFG_B1, CFG_B2, CFG_B3 }, 4,
-      "Always on. Set 1 below B1, set 2 to B2, set 3 to B3, set 4 above B3 (B3 0: three sets), by the lower of the "
-      "pressure and the setpoint. Set changes are bumpless. Applied at the next control step; Save to keep.",
+      "Always on, by the lower of pressure and setpoint: set 1 below B1, 2 to B2, 3 to B3, 4 above. Save to keep.",
       false, false, true },
-    { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
-      "Applied at the next control step; Save to keep." },
+    { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3, "Save to keep." },
 };
 
 static struct {
@@ -923,7 +917,7 @@ static struct {
     int set;                                   // the PID set the PID tab shows, 1 to 4
     bool sets;                                 // the PID tab shows the set row (schedule on)
     lv_obj_t *sel, *selb[4], *selr[4], *seld[4];   // the set row: track, segments, range lines, in-use dots
-    lv_obj_t *band_sw, *band_title, *band_text;   // Motor settings' Override tab: the Ignore switch toggle
+    lv_obj_t *band_sw, *band_title, *band_text;   // Motor settings' Override tab: the Disable switch toggle
 } pg;
 
 // The key a tab shows in place i: on the PID tab, the set picked.
@@ -1028,7 +1022,7 @@ static void pg_fields(void)
         lv_obj_delete(pg.sel);
         pg.sel = NULL;
     }
-    pg.band_sw = pg.band_title = pg.band_text = NULL;   // went with their card
+    pg.band_sw = pg.band_title = pg.band_text = NULL;   // went with their card (the Disable switch's)
     const tab_t *t = &pg.tabs[pg.tab];
     int y0 = pg.ntabs > 1 ? 1 : 0;
     char cap[40];
@@ -1045,7 +1039,7 @@ static void pg_fields(void)
             ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, cap, field_event, (void *)(intptr_t)k);
         }
     }
-    // Motor settings' Override tab: the Ignore switch toggle across both
+    // Motor settings' Override tab: the Disable switch toggle across both
     // columns (0.16.19, Ryan 12 Nov: "make switch override a toggle on the
     // override screen in motor settings page"; the Switch tab of Motor
     // override from 0.16.5), its edges From and To under it (0.16.21), then
@@ -1158,13 +1152,15 @@ static void pg_refresh(void)
         bool band = valve_limit_band();
         if (lv_obj_has_state(pg.band_sw, LV_STATE_CHECKED) != band)
             lv_obj_set_state(pg.band_sw, LV_STATE_CHECKED, band);
-        // Wording by Fable (Ryan 12 Nov: "ask fable for a better description").
+        // Wording by Fable (0.16.21), shorter and Disable from 0.16.22.
         char t1[40], t2[48];
-        lv_snprintf(t1, sizeof t1, "Ignore switch %d to %d %%", valve_pass_lo(), valve_pass_hi());
-        lv_snprintf(t2, sizeof t2, "On: closing still stops below %d %%", valve_pass_lo());
+        lv_snprintf(t1, sizeof t1, "Disable switch %d to %d %%", valve_pass_lo(), valve_pass_hi());
+        if (valve_pass_lo() > 0)
+            lv_snprintf(t2, sizeof t2, "On: still stops below %d %%", valve_pass_lo());
+        else
+            lv_snprintf(t2, sizeof t2, "On: stops by count at 0 %%");   // From 0: the move's own end
         ui_set_text(pg.band_title, t1);
-        ui_set_text(pg.band_text, !band ? "Off: limit switch always stops closing"
-                                  : valve_calibrated() ? t2 : "On: no effect until valve is homed");
+        ui_set_text(pg.band_text, !band ? "Off: switch stops closing" : valve_calibrated() ? t2 : "On: works once homed");
     }
     side_refresh();
 }
@@ -1366,10 +1362,8 @@ static void load_cb(lv_event_t *e)
 static const char *rv_help(void)
 {
     return "Last saved, Previous save: the two stored records.\n"
-           "Unsaved changes: drafts and live changes.\n"
-           "Save settings: applies drafts and saves; Last saved becomes Previous save.\n"
-           "Load settings: a save loads live, calibration included; factory defaults "
-           "load as drafts, the calibration kept.\n"
+           "Save settings: applies drafts and saves.\n"
+           "Load settings: a save loads live; factory loads as drafts, calibration kept.\n"
            "Discard changes: back to Last saved.";
 }
 
@@ -1380,7 +1374,7 @@ static void rv_build(lv_obj_t *scr)
     rv.prev = ui_info(scr, C2X[1], RY[0], C2W[1], RH, "Previous save");
     ecard_make(&rv.changes, scr, 10, RY[1], 343, "Unsaved changes", changes_cb, NULL);
     rv.load = ui_btn(scr, 10, RY[2], 343, RH, UI_SECONDARY, "Load settings", load_cb, NULL);
-    ui_btn_text(rv.load, "Load settings", "last save, previous save or factory defaults");
+    ui_btn_text(rv.load, "Load settings", "last, previous or factory");
     side_make(scr, "Review and save", rv_help);
 }
 
@@ -1438,12 +1432,10 @@ static const char *pt_text(char *buf, size_t n, bool have, int32_t p, int32_t r)
 
 static const char *cs_help(void)
 {
-    return "Two-point cal of the sensor, through the board input. A new sensor: calibrate it here.\n"
-           "Capture vacuum: sensor pumped down; point = 0 mB (Not 0 mB: enter a gauge reading).\n"
-           "Capture air: sensor vented; room pressure from Pressure 21, or Enter value (barometer, mB).\n"
-           "5 readings averaged per capture; each point can be redone alone.\n"
-           "Signal: Druck output [mV/V]. Saved cal, Captured: pressure from the saved and the new points.\n"
-           "With both points the new cal is live, unsaved: compare, then Save settings or Discard changes.";
+    return "Two-point calibration.\n"
+           "Capture vacuum: sensor pumped down (0 mB, or enter a gauge reading).\n"
+           "Capture air: sensor vented; Pressure 21 or a typed barometer reading.\n"
+           "The new cal is live but unsaved: Save settings or Discard changes.";
 }
 
 static bool reading_ok(void)

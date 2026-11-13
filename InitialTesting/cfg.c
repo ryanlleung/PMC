@@ -23,7 +23,7 @@
  * 0 % below the seat). The slot stays so records keep their layout; it is
  * written 0, and a saved value is dropped when read (an event says so).
  *
- * Version 10 (0.16.21) adds the Ignore switch edges (From and To, % open)
+ * Version 10 (0.16.21) adds the Disable switch edges (From and To, % open)
  * at the end of tune[]; older records load them at 5 and 50 %, the fixed
  * band before.
  *
@@ -110,7 +110,7 @@ static const int32_t tune_def[T_N] = { 6, 60, 0, 8, 1, 10, 0,
                                        40, 25, 0, 140, 5, 50 };
 static const int32_t tune_lo[T_N]  = { 1,     0,     0,   0,    -1, 0,    0,
                                        1,     0,     0,     1,     0,     0,     2, 1,     1,     0,  0,
-                                       1,     0,     0,     0,     1,  2 };
+                                       1,     0,     0,     0,     0,  1 };
 static const int32_t tune_hi[T_N]  = { 10000, 10000, 500, 2000,  1, 1000, 10000,
                                        10000, 10000, 10000, 10000, 10000, 10000, 2, 10000, 10000, 40, 2000,
                                        10000, 10000, 10000, 10000, 99, 100 };
@@ -123,8 +123,10 @@ static int32_t tune[T_N] = { 6, 60, 0, 8, 1, 10, 0,
 // 12 Nov: "remove the set 1 pid value function. always has pid table"; 0 Off
 // to 0.16.19 and 1, the setpoint, to 0.15.19 load as 2); B1 to B3
 // 0.1 mbar (B3 0: no set 4, three sets); hysteresis % of the boundary;
-// closing deadband steps; Ignore switch From 1 to 99 and To 2 to 100 %
-// open, From below To (5 and 50, the band fixed to 0.16.20).
+// closing deadband steps; Disable switch From 0 to 99 and To 1 to 100 %
+// open (0.16.22, Ryan 13 Nov: "extend the limit switch ignore to 0 to 100%
+// inputtable"; 1 to 99 and 2 to 100 in 0.16.21), From below To (5 and 50,
+// the band fixed to 0.16.20).
 
 typedef struct {
     uint32_t serial;
@@ -400,10 +402,10 @@ static const char *bounds_why(const int32_t *t)
     return NULL;
 }
 
-// Ignore switch: From below To.
+// Disable switch: From below To.
 static const char *pass_why(const int32_t *t)
 {
-    return t[T_PLO] < t[T_PHI] ? NULL : "Ignore switch: From must be below To";
+    return t[T_PLO] < t[T_PHI] ? NULL : "Disable switch: From must be below To";
 }
 
 // NULL if every value can be applied, else the first that cannot.
@@ -512,7 +514,7 @@ static void from_old(const void *v, size_t tune_at, int ntune, size_t crc_at, bo
     r->size = sizeof *r;
 }
 
-// Version 9 (four PID sets): all kept; the Ignore switch edges are set
+// Version 9 (four PID sets): all kept; the Disable switch edges are set
 // after (read_slot).
 static void from_v9(const cfg_rec_v9_t *o, cfg_rec_t *r)
 {
@@ -636,7 +638,7 @@ static const char *read_slot(int i)
     // have every set equal to set 1 (from_old), so they run as before.
     if (r->tune[T_SCHED] != 2)
         r->tune[T_SCHED] = 2;
-    // Before version 10 the Ignore switch band was fixed at 5 to 50 %.
+    // Before version 10 the Disable switch band was fixed at 5 to 50 %.
     if (slot_ver[i] < 10) {
         r->tune[T_PLO] = tune_def[T_PLO];
         r->tune[T_PHI] = tune_def[T_PHI];

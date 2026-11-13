@@ -723,8 +723,8 @@ static void motor_refresh(void)
     else if (lim == LIMIT_CLOSED)
         ls = "Switch released, closing allowed";
     else if (lim == LIMIT_OPEN && stepper3_limit_ignored()) {
-        // Ignore switch on, in its band (Motor settings > Override).
-        lv_snprintf(lb, sizeof lb, "Switch pressed, ignored (%d to %d %%)", valve_pass_lo(), valve_pass_hi());
+        // Disable switch on, in its band (Motor settings > Override).
+        lv_snprintf(lb, sizeof lb, "Switch pressed, disabled (%d to %d %%)", valve_pass_lo(), valve_pass_hi());
         ls = lb;
     } else {
         ls = lim == LIMIT_OPEN ? "Switch pressed, closing blocked" : "Switch not read yet, closing blocked";

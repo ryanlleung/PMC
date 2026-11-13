@@ -192,7 +192,7 @@ static bool sw_far_said;  // W-4 raised for this occurrence
 // Long enough that one glitch on the wire does not end AUTO.
 #define SW_FAR_MS 200
 // Pass band (0.16.5, Ryan 9 Nov): asked for on Motor settings > Override
-// > Ignore switch (Motor override > Switch to 0.16.18); in force
+// > Disable switch (Ignore switch in 0.16.21; Motor override > Switch to 0.16.18); in force
 // (stepper3_limit_band) only while homed. RAM only, off at power-up. Its
 // edges are saved settings from 0.16.21 (valve_pass_lo, valve_pass_hi).
 static bool band_req;
@@ -1035,8 +1035,8 @@ void valve_limit_band_set(bool on)
     if (on == band_req)
         return;
     band_req = on;
-    valve_event("LIM", on ? "Limit switch ignored from %d to %d %% open: on (screen)"
-                          : "Limit switch ignored from %d to %d %% open: off (screen)", valve_pass_lo(), valve_pass_hi());
+    valve_event("LIM", on ? "Limit switch disabled from %d to %d %% open: on (screen)"
+                          : "Limit switch disabled from %d to %d %% open: off (screen)", valve_pass_lo(), valve_pass_hi());
 }
 int32_t valve_pct10(void)       { return pct10_of(stepper3_position()); }
 bool valve_fault_latched(void)  { return any_latched(); }

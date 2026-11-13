@@ -51,15 +51,10 @@ static struct {
  * state, turns and Help; then Home valve and the three ways to set the
  * position. */
 static const char *const calib_help =
-    "This page acts on the valve now. Its saved numbers (travel, direction, homing distances and speeds) "
-    "are on Motor settings.\n\n"
-    "Home valve: fast close to the switch, back-off, slow close, Return off the switch = 0 % "
-    "(Motor settings > Homing). Seated reads about -0.6 %. STOP cancels.\n\n"
-    "Set as 0 %, Set as other %, Use last saved: set the reference without moving; "
-    "not verified against the switch. Use last saved: the position saved at power loss, "
-    "offered until the valve moves or is homed.\n\n"
-    "Motor override (drives the motor by steps) is on Motor settings > Override.\n\n"
-    "F-3 switch not found, F-4 switch stuck: check switch and wiring, reset, home again.";
+    "Acts on the valve now; its saved numbers are on Motor settings.\n\n"
+    "Home valve: close to the switch, back off, close slowly, Return = 0 %. STOP cancels.\n\n"
+    "Set as 0 %, Set as other %, Use last saved: set the position without moving.\n\n"
+    "F-3 switch not found, F-4 switch stuck: check the switch, reset, home again.";
 
 static void start_cb(lv_event_t *e)
 {

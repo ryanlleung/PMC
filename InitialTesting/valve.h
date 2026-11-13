@@ -70,13 +70,14 @@ bool valve_calibrated(void);
 typedef enum { VALVE_REF_NONE, VALVE_REF_HOMED, VALVE_REF_HAND, VALVE_REF_SAVED, VALVE_REF_PARKED } valve_ref_t;
 valve_ref_t valve_reference(void);
 int32_t valve_pos_max(void);
-// Pass band, "Ignore switch" on screen from 0.16.21 (0.16.5, Ryan 9 Nov:
+// Pass band, "Disable switch" on screen from 0.16.22 ("Ignore switch" in
+// 0.16.21, Ryan 13 Nov: "change ignore to disable") (0.16.5, Ryan 9 Nov:
 // the valve binds about 13 % and the force switch trips there, off the
 // seat): while on and homed, between valve_pass_lo() and valve_pass_hi() %
 // open the switch neither stops closing nor raises W-1, W-4 or F-4. Motor
 // settings > Override (0.16.19). RAM only, off at power-up. The edges are
 // saved settings from 0.16.21 (Ryan 12 Nov: "make the boundary editable";
-// CFG_PASS_LO and CFG_PASS_HI, factory 5 and 50). Fixed before: 10 to 20 %
+// CFG_PASS_LO and CFG_PASS_HI, factory 5 and 50, 0 to 100 % from 0.16.22). Fixed before: 10 to 20 %
 // until 0.16.8, 5 to 25 % until 0.16.11, then 5 to 50 %.
 bool valve_limit_band(void);
 void valve_limit_band_set(bool on);

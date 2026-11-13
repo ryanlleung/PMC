@@ -503,7 +503,8 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-netused")) tap(298, 184);
     if (!strncmp(st, "set-valve", 9)) M_VSET();
     // Motor settings tabs from 0.16.21: Drive, Travel, Homing, Override.
-    if (!strcmp(st, "set-override")) { M_VSET(); tap(305, 72); tap(180, 128); }   // Override tab, Ignore switch on
+    if (!strcmp(st, "set-override")) { M_VSET(); tap(305, 72); tap(180, 128); }   // Override tab, Disable switch on
+    if (!strcmp(st, "set-overhelp")) { M_VSET(); tap(305, 72); tap(415, 72); }     // Override tab, Help
     if (!strcmp(st, "set-valve2") || !strcmp(st, "set-valvepos")) tap(138, 72);   // Travel
     if (!strcmp(st, "set-valve3")) tap(221, 72);                                   // Homing
     if (!strcmp(st, "set-valvepos")) tap(94, 128);                                 // 100 % travel

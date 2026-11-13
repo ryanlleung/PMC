@@ -950,8 +950,8 @@ static void test_set4(void)
     }
 }
 
-// Ignore switch edges (0.16.21, version 10, Ryan 12 Nov "make the boundary
-// editable"): saved settings, From 1 to 99 and To 2 to 100 % open, From
+// Disable switch edges (0.16.21, version 10, Ryan 12 Nov "make the boundary
+// editable"): saved settings, From 0 to 99 and To 1 to 100 % open (0.16.22), From
 // below To; a version 9 record loads them at 5 and 50, the band before.
 static void test_pass(void)
 {
@@ -961,9 +961,9 @@ static void test_pass(void)
     reboot();
     CHECK(cfg_tune(CFG_PASS_LO) == 5 && cfg_tune(CFG_PASS_HI) == 50);
     cfg_range(CFG_PASS_LO, &lo, &hi);
-    CHECK(lo == 1 && hi == 99);
+    CHECK(lo == 0 && hi == 99);   // 0 to 100 from 0.16.22 (1 to 99 and 2 to 100 in 0.16.21)
     cfg_range(CFG_PASS_HI, &lo, &hi);
-    CHECK(lo == 2 && hi == 100);
+    CHECK(lo == 1 && hi == 100);
     v[CFG_PASS_LO] = 10; set[CFG_PASS_LO] = true;
     v[CFG_PASS_HI] = 30; set[CFG_PASS_HI] = true;
     CHECK(cfg_save_with(v, set, &why));
@@ -974,8 +974,13 @@ static void test_pass(void)
     v[CFG_PASS_LO] = 30; set[CFG_PASS_LO] = true;
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "From must be below To"));
     CHECK(cfg_tune(CFG_PASS_LO) == 10);
-    v[CFG_PASS_LO] = 0;
+    v[CFG_PASS_LO] = -1;
     CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 10);   // out of range
+    // The whole travel, 0 to 100 % (Ryan 13 Nov: "extend the limit switch ignore to 0 to 100% inputtable").
+    v[CFG_PASS_LO] = 0; v[CFG_PASS_HI] = 100; set[CFG_PASS_HI] = true;
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 0 && cfg_tune(CFG_PASS_HI) == 100);
+    v[CFG_PASS_LO] = 10; v[CFG_PASS_HI] = 30;
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 10 && cfg_tune(CFG_PASS_HI) == 30);
     // As version 9: the rest kept, the edges 5 and 50.
     {
         uint32_t size10, a10 = 0;
