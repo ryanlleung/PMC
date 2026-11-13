@@ -420,7 +420,7 @@ int main(int argc, char **argv)
         MENU(); M_EVENTS(); HOME();                             // Events
         MENU(); M_CAL(); HOME();                                // Calibrate sensor
         MENU(); M_SYS();                                        // System
-        tap(298, 184); BACK(); HOME();                          //   Diagnostics (0.15.19)
+        HOME();                                                 //   (Diagnostics on the Menu only from 0.16.24)
         MENU(); M_VSET(); BACK();                               // Motor settings (0.16.2: on the Menu; Valve settings to 0.16.15)
         MENU(); M_TUNE(); BACK();                               // PID tuning
         MENU(); M_DIAG(); BACK();                               // Diagnostics
@@ -488,8 +488,8 @@ int main(int argc, char **argv)
     if (!strncmp(st, "set-name", 8)) { tap(120, 72); tap(331, 189); tap(331, 189); tap(24, 65); tap(338, 65); }
     if (!strcmp(st, "set-named")) { tap(415, 128); tap(24, 20); tap(24, 20); }   // Use name, Home
     // System, IP address (0.12.13): keys at x 45/122/199, y 66/107/149/190.
-    if (!strcmp(st, "set-remote")) tap(357, 128);   // Remote control Off (On by default)
-    if (!strncmp(st, "set-netaddr", 11) || !strcmp(st, "set-netused")) tap(356, 72);
+    if (!strcmp(st, "set-remote")) tap(357, 72);    // Remote control Off (On by default; top right from 0.16.24)
+    if (!strncmp(st, "set-netaddr", 11) || !strcmp(st, "set-netused")) tap(120, 128);   // IP address, second row left (0.16.24)
     if (!strcmp(st, "set-netaddr2") || !strcmp(st, "set-netused")) {
         for (int i = 0; i < 13; i++) tap(199, 190);
         static const int16_t k1[][2] = { {45,66},{122,190},{45,190},{45,66},{45,190},{122,66},{45,190},{122,107},{122,190} };
@@ -510,6 +510,8 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-valvepos")) tap(94, 128);                                 // 100 % travel
     if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) M_TUNE();
     if (!strcmp(st, "set-tunetable")) tap(180, 72);   // PID table tab, always on (0.16.20)
+    if (!strcmp(st, "set-tuneauto")) tap(291, 72);    // AUTO limits tab
+    if (!strcmp(st, "set-tunehelp")) tap(415, 72);    // PID tab, Help
     if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") ||
         !strcmp(st, "set-saved")) { tap(94, 72); tap(181, 240); tap(251, 240); tap(111, 184); }
     if (!strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(321, 184);

@@ -1851,6 +1851,11 @@ static void shut_ask(void)
     frame_refresh();
 }
 
+void ui_shutdown_ask(void)
+{
+    shut_ask();
+}
+
 // Text page over the screen (Help). Header Back closes it, or a tap on the
 // greyed strip (0.15.16). No dragging (a
 // drag redraws the card every frame and crowded Back): small Up and Down

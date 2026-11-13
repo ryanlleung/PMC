@@ -662,7 +662,8 @@ const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
  * System (on the Menu; Name and network 0.12.13 to 0.13.6, System 0.13.7 to 0.13.18,
  * Ryan 28 Oct): the cryostat name, the Ethernet address (static, no DHCP
  * from 0.14.9), the address in use, the MAC, the
- * firmware and its build date, and the Remote control switch.
+ * firmware and its build date, the Remote control switch, Restart and
+ * Shut down (0.16.24).
  * ------------------------------------------------------------------------ */
 static struct { lv_obj_t *name, *net, *mac, *fw, *remote, *rsw, *rtext; } nn;
 
@@ -678,32 +679,37 @@ static void remote_cb(lv_event_t *e)
     lv_obj_set_state(nn.rsw, LV_STATE_CHECKED, cfg_remote());
 }
 
+// Restart and Shut down on System are actions, not pages: filled dark
+// (Restart from 0.13.5, Ryan 28 Oct; Shut down beside it from 0.16.24).
+static void nn_dark(lv_obj_t *b)
+{
+    lv_obj_set_style_bg_color(b, UI_TEXT, 0);
+    lv_obj_set_style_text_color(b, lv_color_white(), 0);
+    lv_obj_set_style_border_width(b, 0, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(0x3C4856), LV_STATE_PRESSED);
+}
+
+static void shut_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_shutdown_ask();   // the power icon's question
+}
+
 static void nn_build(lv_obj_t *scr)
 {
-    // Common HMI template: on the Menu; Address in use dropped (static
-    // only, the IP address tile says it), Firmware, Diagnostics and Restart
-    // in the bottom row.
+    // 0.16.24 (Ryan 13 Nov: "diagnostics should not be a button in system.
+    // put remote control on the first row right. ip on second row left and
+    // mac on second row right ... maybe put restart in diagnostics place and
+    // shut down in where restart is now"): Cryostat name and Remote control,
+    // IP address and MAC, then Firmware, Restart and Shut down. Diagnostics
+    // is on the Menu only.
     nn.name = ui_btn(scr, 10, RY[0], 226, RH, UI_NAV, "Cryostat name", nn_go, (void *)&ui_scr_name);
-    nn.net = ui_btn(scr, 244, RY[0], 226, RH, UI_NAV, "IP address", nn_go, (void *)&ui_scr_netaddr);
-    // The MAC, for the site's network records (Ryan, 28 Oct).
-    nn.mac = ui_info(scr, 10, RY[1], 226, RH, "MAC address");
-    // Firmware 226 wide from 0.15.19 (343 to 0.15.18), with Diagnostics
-    // beside it (from the Menu, Ryan 6 Nov), then Restart.
-    nn.fw = ui_info(scr, 10, RY[2], 226, RH, "Firmware");
-    // No chevron: "Diagnostics" needs the button's whole 109 px.
-    ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Diagnostics", nn_go, (void *)&ui_scr_diag);
     // Remote control: the name and what it means, the switch on the right.
-    lv_obj_t *c = nn.remote = ui_card(scr, 244, RY[1], 226, RH);
+    lv_obj_t *c = nn.remote = ui_card(scr, 244, RY[0], 226, RH);
     lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(c, remote_cb, LV_EVENT_PRESSED, NULL);
     ui_label(c, 12, 6, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Remote control");
     nn.rtext = ui_label(c, 12, 26, 150, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
-    // Restart filled dark so it does not read as a page (0.13.5, Ryan 28 Oct).
-    lv_obj_t *r = ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Restart", restart_cb, NULL);
-    lv_obj_set_style_bg_color(r, UI_TEXT, 0);
-    lv_obj_set_style_text_color(r, lv_color_white(), 0);
-    lv_obj_set_style_border_width(r, 0, 0);
-    lv_obj_set_style_bg_color(r, lv_color_hex(0x3C4856), LV_STATE_PRESSED);
     lv_obj_t *sw = nn.rsw = lv_switch_create(c);
     lv_obj_set_size(sw, 52, 28);
     lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -12, 0);
@@ -711,6 +717,12 @@ static void nn_build(lv_obj_t *scr)
     lv_obj_set_style_bg_color(sw, lv_color_hex(0xC3CDD7), LV_PART_MAIN);
     lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_set_style_anim_duration(sw, 0, 0);
+    nn.net = ui_btn(scr, 10, RY[1], 226, RH, UI_NAV, "IP address", nn_go, (void *)&ui_scr_netaddr);
+    // The MAC, for the site's network records (Ryan, 28 Oct).
+    nn.mac = ui_info(scr, 244, RY[1], 226, RH, "MAC address");
+    nn.fw = ui_info(scr, 10, RY[2], 226, RH, "Firmware");
+    nn_dark(ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Restart", restart_cb, NULL));
+    nn_dark(ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Shut down", shut_cb, NULL));
 }
 
 static void nn_refresh(void)

@@ -429,11 +429,11 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('switch Off: SETPOINT refused', s.cmd('SETPOINT 5') === 'ERR 211 Read only over the network\r\n', s.cmd('SETPOINT 5'));
   check('switch Off: STOP refused', s.cmd('STOP') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: queries answer', s.cmd('MODE?;SETPOINT?') === 'MODE NOT HOMED;SETPOINT NONE\r\n', s.cmd('MODE?;SETPOINT?'));
-  s.tap(415, 184); s.tap(84, 184); s.tap(357, 128);   // Menu, System (0.16.2: bottom left), Remote control
+  s.tap(415, 184); s.tap(84, 184); s.tap(357, 72);    // Menu, System (0.16.2: bottom left), Remote control (top right from 0.16.24)
   check('switch On from the screen: SETPOINT taken', s.cmd('SETPOINT 5;SETPOINT?') === 'SETPOINT 5.0 mbar\r\n', s.cmd('SETPOINT?'));
   check('switch On is a NET event', /NET,Remote control on \(screen\)/.test(events(s, 5)), events(s, 5));
   shot(s, 'system');
-  s.tap(357, 128);
+  s.tap(357, 72);
   check('switch Off again: refused', s.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n');
   check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('PID?') === 'PID 0.06,0.60,0.00\r\n', s.cmd('PID?'));
@@ -470,6 +470,24 @@ let parkedFlash;
   s.run(3000);
   check('double tap at start: NOT HOMED', s.cmd('MODE?') === 'MODE NOT HOMED\r\n', s.cmd('MODE?'));
   shot(s, 'turned-on');
+}
+{ // System (0.16.24, Ryan 13 Nov): Cryostat name and Remote control, IP address and MAC, Firmware, Restart and
+  // Shut down; no Diagnostics button (it is on the Menu). Shut down asks the power icon's question, Restart its own.
+  const hdr = (s) => Buffer.from(new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 40).slice().buffer).toString('base64');
+  const s = homed(load());
+  s.tap(415, 184); s.tap(84, 184); const sys = hdr(s);
+  s.tap(415, 184); const shutQ = s.popup();
+  s.tap(318, 165, 3000);
+  check('System > Shut down: the power question, then shutting down', shutQ && /^MODE (SHUTDOWN|OFF)/.test(s.cmd('MODE?')),
+    [shutQ, s.cmd('MODE?')].join());
+  const r = homed(load());
+  r.tap(415, 184); r.tap(84, 184); r.tap(298, 184); const restartQ = r.popup();
+  r.tap(160, 147);   // Cancel
+  check('System > Restart: asks, Cancel leaves it running', restartQ && !r.popup() && r.cmd('MODE?') === 'MODE MANUAL\r\n',
+    [restartQ, r.cmd('MODE?')].join());
+  const n = homed(load());
+  n.tap(415, 184); n.tap(84, 184); n.tap(120, 128); const ip = hdr(n); shot(n, 'system-ip');
+  check('System: IP address on the second row left opens its page', ip !== sys);
 }
 { // From the screen: the power icon (top left), Shut down, the black screen, OFF, a double tap.
   const s = homed(load());

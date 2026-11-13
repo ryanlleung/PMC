@@ -155,6 +155,8 @@ void ui_keypad_ex(const ui_kp_t *k);
 void ui_confirm(const char *text, const char *ok, void (*on_ok)(void));
 // The Restart question (System, and the power icon in the template).
 void ui_restart_ask(void);
+// The power icon's Shut down question (also System > Shut down, 0.16.24).
+void ui_shutdown_ask(void);
 // Same with a named cancel button and its own action.
 void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void));
 // With a third button between them (NULL mid: as ui_ask).
