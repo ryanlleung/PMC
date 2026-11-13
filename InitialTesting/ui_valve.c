@@ -518,7 +518,7 @@ const ui_screen_t ui_scr_faults = { "Events", faults_build, faults_refresh, NULL
  * Diagnostics
  * ------------------------------------------------------------------------ */
 static struct {
-    lv_obj_t *v[9];   // v[5] the board temperature from 0.13.4; v[7] the room sensor from 0.14.5
+    lv_obj_t *v[8];   // v[5] the board temperature from 0.13.4; v[7] the room sensor from 0.14.5
 } dp;
 
 // Valve motor row: position and limit switch, at 50 Hz so the switch
@@ -532,33 +532,36 @@ static void diag_motor(lv_timer_t *t)
     ui_set_text(dp.v[4], limit_open_now() ? "Pressed" : "Released");
 }
 
+static const char diag_help[] =
+    "Live raw readings.\n"
+    "Raw: the pressure before calibration, near Room in air.\n"
+    "----: no reading.";
+
+static void diag_help_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_text_view("Diagnostics", diag_help);
+}
 
 static void diag_build(lv_obj_t *scr)
 {
-    // The board temperature in the bottom row from 0.13.4, as the strip
-    // shows the Home status line (Ryan, 28 Oct); Moved, steps went.
-    static const char *const rows[3] = { "Pressure", "Valve motor", "Controller" };
-    // The valve motor row: steps, limit switch, last move ("Past limit"
-    // went in 0.12.9, Ryan 26 Oct; the motor supply in 0.14.3). The
-    // Pressure 21 room reading from 0.14.5 (Ryan 30 Oct), with the
-    // excitation moved to the controller row.
-    // Shorter captions for the 85 px inside a grid tile: Before cal is the
-    // nominal scale, Temperature the board's.
-    static const char *const caps[9] = { "Signal, mV", "Nominal, mB", "Room, mB",
-                                         "Steps", "Limit switch", "Last move",
-                                         "Board, \xC2\xB0" "C", "Excitation, V", "Move took, s" };
-    lv_obj_t **const to[9] = { &dp.v[0], &dp.v[2], &dp.v[7], &dp.v[3], &dp.v[4], &dp.v[6],
-                               &dp.v[5], &dp.v[1], &dp.v[8] };
-    static const int32_t x[3] = { 127, 244, 361 };   // grid columns 2 to 4 (common HMI template)
-    for (int r = 0; r < 3; r++) {
-        // 16 px as the Menu captions, centred on the row (Ryan, 22 Oct).
-        lv_obj_t *l = ui_label(scr, 10, 0, 109, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, rows[r]);
-        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-        lv_obj_update_layout(l);
-        lv_obj_set_y(l, 48 + r * 56 + (48 - lv_obj_get_height(l)) / 2);
-        for (int c = 0; c < 3; c++)
-            *to[r * 3 + c] = ui_info(scr, x[c], 48 + r * 56, 109, 48, caps[r * 3 + c]);
-    }
+    // 0.16.27 (Ryan 13 Nov: "use fable again to review it so review the
+    // display order, whether things are grouped shown intuitively, and make
+    // it more coherent to the other screens"; Fable's review): no row
+    // captions, cards from x 10 and Help at the top right as on the other
+    // pages. A row each for the transducer, in signal order (excitation,
+    // bridge output, pressure before calibration), the valve motor (steps,
+    // limit switch, last move with how long it took, 226 wide) and the
+    // surroundings (room pressure, board temperature). Row captions
+    // Pressure, Valve motor and Controller to 0.16.26.
+    static const struct { int8_t v; int16_t x, w; uint8_t row; const char *cap; } c[8] = {
+        { 1, 10, 109, 0, "Excitation, V" }, { 0, 127, 109, 0, "Bridge, mV" }, { 2, 244, 109, 0, "Raw, mB" },
+        { 3, 10, 109, 1, "Motor, steps" },  { 4, 127, 109, 1, "Limit switch" }, { 6, 244, 226, 1, "Last move" },
+        { 7, 10, 109, 2, "Room, mB" },      { 5, 127, 109, 2, "Board, \xC2\xB0" "C" },
+    };
+    for (int i = 0; i < 8; i++)
+        dp.v[c[i].v] = ui_info(scr, c[i].x, 48 + c[i].row * 56, c[i].w, 48, c[i].cap);   // rows at y 48, 104, 160
+    ui_btn(scr, 361, 48, 109, 48, UI_NAV, "Help", diag_help_cb, NULL);
     lv_timer_t *t = lv_timer_create(diag_motor, 20, NULL);
     lv_obj_add_event_cb(scr, timer_deleted, LV_EVENT_DELETE, t);
     diag_motor(t);
@@ -578,28 +581,30 @@ static void diag_refresh(void)
     ui_set_text(dp.v[2], sig ? ui_fmt1(buf, sizeof buf, (int64_t)s->r_ppb * valve_range_mmbar() / 10000000) : "----");
     ui_set_text(dp.v[7], s->baro_ok ? ui_fmt1(buf, sizeof buf, s->baro_mmbar) : "----");   // Pressure 21
 
+    // Last move: how it ended and how long it took, "At target, 41.3 s"
+    // (Move took on a card of its own to 0.16.26).
     int32_t from;
     uint32_t ms;
     bool any = stepper3_last_move(&from, &ms);
-    const char *res = "None yet";
-    if (stepper3_busy() && any) res = "Moving";
+    const char *res = NULL;
+    if (any && stepper3_busy()) res = "Moving";
     else switch (stepper3_last_stop()) {
         case STEPPER3_STOP_DONE:    res = "At target"; break;
         case STEPPER3_STOP_LIMIT:   res = "At limit"; break;
         case STEPPER3_STOP_CMD:     res = "Stopped"; break;
         case STEPPER3_STOP_TIMEOUT: res = "Timed out"; break;
-        case STEPPER3_STOP_REVERSED: res = "Switch while opening"; break;
+        case STEPPER3_STOP_REVERSED: res = "Switch on opening"; break;
         case STEPPER3_STOP_STALL:   res = "Loop stalled"; break;
-        default: break;
+        default: res = NULL; break;   // no move yet
     }
-    // 85 px inside a grid tile: a long result drops to 12 px.
-    lv_point_t sz;
-    lv_text_get_size(&sz, res, &ui_num_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    const lv_font_t *f = sz.x > lv_obj_get_width(dp.v[6]) ? &ui_font_12 : &ui_num_16;
-    if (lv_obj_get_style_text_font(dp.v[6], 0) != f)
-        lv_obj_set_style_text_font(dp.v[6], f, 0);
-    ui_set_text(dp.v[6], res);
-    ui_set_text(dp.v[8], any ? ui_fmt1(buf, sizeof buf, ms) : "--");
+    char took[16], lm[48];
+    if (!any || !res)
+        lv_strlcpy(lm, "None yet", sizeof lm);
+    else if (!stepper3_busy())
+        lv_snprintf(lm, sizeof lm, "%s, %s s", res, ui_fmt1(took, sizeof took, ms));
+    else
+        lv_strlcpy(lm, res, sizeof lm);   // Moving
+    ui_set_text(dp.v[6], lm);
 
     // Raw readings only (0.13.2, Ryan 28 Oct); the firmware, address, MAC
     // and Restart are on System. The strip is Home's

@@ -108,7 +108,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Menu opens', screen() === 'Menu', screen());
   shot(s, 'menu');
   const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'PID tuning'], [84, 128, 'Motor settings'],
-    [240, 128, 'Valve position'], [396, 128, 'Calibrate sensor'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
+    [240, 128, 'Valve position'], [396, 128, 'Sensor calibration'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
     [396, 184, 'Review and save']];
   const wrong = tiles.map(([x, y, t]) => { menu(); s.tap(x, y); return [t, screen()]; })
     .filter(([t, got]) => t !== got).map(([t, got]) => t + ' -> ' + got);
@@ -498,6 +498,25 @@ let parkedFlash;
   const n = homed(load());
   n.tap(415, 184); n.tap(84, 184); n.tap(120, 128); const ip = hdr(n); shot(n, 'system-ip');
   check('System: IP address on the second row left opens its page', ip !== sys);
+}
+{ // Sensor calibration (0.16.27, Fable's review; Calibrate sensor to 0.16.26): a captured point gets the draft edge.
+  const s = homed(load());
+  const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
+  s.tap(415, 184); s.tap(396, 128); s.run(500);
+  shot(s, 'sensor-cal');
+  const before = px(10, 126);
+  s.tap(298, 128); const asked = s.popup(); shot(s, 'sensor-cal-vac-ask');
+  s.tap(320, 147); s.run(20000);
+  shot(s, 'sensor-cal-new-vac');
+  check('Sensor calibration: a new vacuum point gets the draft edge', asked && before === 0xFFFF && px(10, 126) !== 0xFFFF &&
+    px(10, 182) === 0xFFFF, [asked, before.toString(16), px(10, 126).toString(16), px(10, 182).toString(16)].join());
+}
+{ // Diagnostics (0.16.27, Fable's review): no row captions, Help at the top right.
+  const s = homed(load());
+  s.tap(415, 184); s.tap(240, 184); s.run(500);
+  shot(s, 'diagnostics');
+  s.tap(415, 72);
+  shot(s, 'diagnostics-help');
 }
 { // From the screen: the power icon (top left), Shut down, the black screen, OFF, a double tap.
   const s = homed(load());

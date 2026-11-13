@@ -1470,14 +1470,16 @@ static void rv_refresh(void)
 const ui_screen_t ui_scr_review = { "Review and save", rv_build, rv_refresh, NULL };
 
 /* --------------------------------------------------------------------------
- * Calibrate sensor (Menu > Pressure setup): CAL VAC / CAL AIR on the screen.
+ * Sensor calibration (Menu > Pressure sensor; Calibrate sensor and Pressure
+ * setup to 0.16.26): CAL VAC / CAL AIR on the screen.
  * The new cal is in use once both points are held, unsaved until Save
  * settings (as on COM3). One sensor per board from 0.16.2: a new sensor is
  * calibrated here, nothing else to choose (the header named the serial,
  * "Calibrate 5880156", to 0.16.1).
  * ------------------------------------------------------------------------ */
 static struct {
-    lv_obj_t *sig, *now, *nw, *vac, *air, *bv, *ba;
+    lv_obj_t *sig, *now, *sv, *vac, *air, *bv, *ba;
+    lv_obj_t *ev, *ea;   // the draft edges on the point cards (0.16.27)
 } cs;
 
 // "0.0 at 0.0128": a cal point, mB at mV/V.
@@ -1492,10 +1494,9 @@ static const char *pt_text(char *buf, size_t n, bool have, int32_t p, int32_t r)
 
 static const char *cs_help(void)
 {
-    return "Two-point calibration.\n"
-           "Capture vacuum: sensor pumped down (0 mB, or enter a gauge reading).\n"
-           "Capture air: sensor vented; Pressure 21 or a typed barometer reading.\n"
-           "The new cal is live but unsaved: Save settings or Discard changes.";
+    // Two lines (0.16.27, Fable's review).
+    return "Two points: the sensor pumped down, then open to room air.\n"
+           "A new calibration is in use at once; Save settings keeps it.";
 }
 
 static bool reading_ok(void)
@@ -1543,8 +1544,9 @@ static void vac_cb(lv_event_t *e)
         ui_msg(cal_capturing() ? "A capture is running" : "No pressure signal");
         return;
     }
-    ui_ask("Sensor at vacuum? Capture sets 0 mB.",
-           "Not 0 mB", cs_vac_typed, "Capture", cs_vac0);
+    // "Enter value" as on the air question (Not 0 mB to 0.16.26).
+    ui_ask("Sensor pumped down? Capture records 0 mB.",
+           "Enter value", cs_vac_typed, "Capture", cs_vac0);
 }
 
 static bool cs_air_set(int32_t v10, const char **why)
@@ -1584,16 +1586,48 @@ static void air_cb(lv_event_t *e)
     ui_ask(q, "Enter value", cs_air_typed, "Capture", cs_air_baro);
 }
 
+// A dark edge on a point card while its point is new, as on a draft
+// setting (0.16.27).
+static lv_obj_t *cs_edge(lv_obj_t *value)
+{
+    lv_obj_t *e = ui_card(lv_obj_get_parent(value), -1, 5, 3, 36);
+    lv_obj_set_style_radius(e, 0, 0);
+    lv_obj_set_style_border_width(e, 0, 0);
+    lv_obj_set_style_bg_color(e, COL_DRAFT, 0);
+    lv_obj_add_flag(e, LV_OBJ_FLAG_HIDDEN);
+    return e;
+}
+
 static void cs_build(lv_obj_t *scr)
 {
+    // 0.16.27 (Ryan 13 Nov: "come up with a better name for the pressure
+    // sensor calibration page ... also evaluate and improve the ui on that
+    // screen"; Fable's review): the Menu tile Pressure sensor (Pressure
+    // setup to 0.16.26), the page Sensor calibration (Calibrate sensor).
+    // Row 1 Signal, the Pressure now (with the calibration in use) and the
+    // pressure by the Saved calibration, which says In use when it is the
+    // one in use (Saved cal and Captured to 0.16.26; Captured said None yet
+    // almost always). A new point gets the draft edge.
     cs.sig = ui_info(scr, 10, RY[0], 109, RH, "Signal, mV/V");
-    cs.now = ui_info(scr, 127, RY[0], 109, RH, "Saved cal, mB");
-    cs.nw = ui_info(scr, 244, RY[0], 109, RH, "Captured, mB");
+    cs.now = ui_info(scr, 127, RY[0], 109, RH, "Pressure, mB");
+    cs.sv = ui_info(scr, 244, RY[0], 109, RH, "Saved cal, mB");
     cs.vac = ui_info(scr, 10, RY[1], 226, RH, "Vacuum point, mB at mV/V");
     cs.air = ui_info(scr, 10, RY[2], 226, RH, "Air point, mB at mV/V");
+    cs.ev = cs_edge(cs.vac);
+    cs.ea = cs_edge(cs.air);
     cs.bv = ui_btn(scr, 244, RY[1], 109, RH, UI_SECONDARY, "Capture\nvacuum", vac_cb, NULL);
     cs.ba = ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Capture\nair", air_cb, NULL);   // both on two lines
-    side_make(scr, "Calibrate sensor", cs_help);
+    side_make(scr, "Sensor calibration", cs_help);
+}
+
+// A point new since the save: not the saved bench cal's (vacuum 0, air 1).
+static bool pt_new(const cal_rec_t *saved, int i, const cal_point_t *p)
+{
+    if (!p->have)
+        return false;
+    if (!saved || saved->npts != 2)
+        return true;
+    return saved->r_ppb[i] != p->r_ppb || saved->p_mmbar[i] != p->p_mmbar;
 }
 
 static void cs_refresh(void)
@@ -1609,10 +1643,8 @@ static void cs_refresh(void)
                     : (int64_t)s->r_ppb * cfg_sensor_range_mmbar() / 10000000;   // nominal: 0 to 10 mV/V
     cal_point_t v, a;
     cal_points(&v, &a);
-    // Saved cal: none before the first save. Captured: only once both
-    // points are held and the cal in use is not the saved one.
-    ui_set_text(cs.now, !ok ? "----" : !in_save ? "None" : ui_fmt1(t, sizeof t, as_saved ? s->p_mmbar : p_saved));
-    ui_set_text(cs.nw, !ok ? "----" : v.have && a.have && !as_saved ? ui_fmt1(t, sizeof t, s->p_mmbar) : "None yet");
+    ui_set_text(cs.now, ok ? ui_fmt1(t, sizeof t, s->p_mmbar) : "----");
+    ui_set_text(cs.sv, !ok ? "----" : !in_save ? "None" : as_saved ? "In use" : ui_fmt1(t, sizeof t, p_saved));
     int cap = cal_capturing(), left = cal_capture_left();
     if (cap == 1)
         lv_snprintf(t, sizeof t, "Capturing %d of %d", CAL_CAPTURE_N - left, CAL_CAPTURE_N);
@@ -1621,9 +1653,18 @@ static void cs_refresh(void)
     if (cap == 2)
         lv_snprintf(u, sizeof u, "Capturing %d of %d", CAL_CAPTURE_N - left, CAL_CAPTURE_N);
     ui_set_text(cs.air, cap == 2 ? u : pt_text(u, sizeof u, a.have, a.p_mmbar, a.r_ppb));
+    const bool nv = !as_saved && cap != 1 && pt_new(saved, 0, &v), na = !as_saved && cap != 2 && pt_new(saved, 1, &a);
+    if (nv == lv_obj_has_flag(cs.ev, LV_OBJ_FLAG_HIDDEN)) {
+        if (nv) lv_obj_remove_flag(cs.ev, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(cs.ev, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (na == lv_obj_has_flag(cs.ea, LV_OBJ_FLAG_HIDDEN)) {
+        if (na) lv_obj_remove_flag(cs.ea, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(cs.ea, LV_OBJ_FLAG_HIDDEN);
+    }
     ui_btn_enable(cs.bv, ok && !cap);
     ui_btn_enable(cs.ba, ok && !cap);
     side_refresh();
 }
 
-const ui_screen_t ui_scr_sensor_cal = { "Calibrate sensor", cs_build, cs_refresh, NULL };
+const ui_screen_t ui_scr_sensor_cal = { "Sensor calibration", cs_build, cs_refresh, NULL };

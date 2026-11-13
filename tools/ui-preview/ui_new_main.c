@@ -9,7 +9,7 @@
  *          | valve | valvenc | limithit | calpage | faults | detail | diag | help
  * Menu (0.16.2): three columns of 148 at x 10, 166, 322 (centres 84, 240,
  * 396), rows y 48, 104, 160 (centres 72, 128, 184): Trend, Events, PID
- * tuning / Motor settings, Valve position, Pressure setup / System,
+ * tuning / Motor settings, Valve position, Pressure sensor / System,
  * Diagnostics, Review and save (Valve position and PID tuning swapped in
  * 0.16.3).
  */
@@ -418,7 +418,7 @@ int main(int argc, char **argv)
         tap(415, 72); BACK();                                   // PID tile: PID tuning
         MENU(); M_TREND(); HOME();                              // Trend
         MENU(); M_EVENTS(); HOME();                             // Events
-        MENU(); M_CAL(); HOME();                                // Calibrate sensor
+        MENU(); M_CAL(); HOME();                                // Sensor calibration
         MENU(); M_SYS();                                        // System
         HOME();                                                 //   (Diagnostics on the Menu only from 0.16.24)
         MENU(); M_VSET(); BACK();                               // Motor settings (0.16.2: on the Menu; Valve settings to 0.16.15)
@@ -534,7 +534,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "calpage") || !strcmp(st, "calpage2") || !strncmp(st, "calset", 6)) { MENU(); M_VPOS(); }
     if (!strcmp(st, "calhelp")) { MENU(); M_VPOS(); tap(415, 72); }
     if (!strcmp(st, "bootpick")) { run(600); tap(240, 146); }   // start-up question, Set position
-    if (!strcmp(st, "diag")) { MENU(); M_DIAG(); }
+    if (!strcmp(st, "diag")) { stepper3_move(0); MENU(); M_DIAG(); }   // a move done: "At target, 41.3 s"
     run(1200);
 
     FILE *f = fopen(argv[2], "wb");
