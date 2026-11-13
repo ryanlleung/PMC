@@ -161,8 +161,5 @@ void stepper3_order(uint8_t order[4]);
 const char *stepper3_mode_name(stepper3_mode_t mode);
 const char *stepper3_stop_name(stepper3_stop_t stop);
 
-// Short status line for the screen and the link.
-const char *stepper3_status(void);
-
 
 #endif // _STEPPER3_H_

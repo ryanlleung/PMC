@@ -83,10 +83,7 @@ bool valve_limit_band(void);
 void valve_limit_band_set(bool on);
 int valve_pass_lo(void);         // % open
 int valve_pass_hi(void);
-int32_t valve_pct10(void);       // position in 0.1 % of POS_MAX
-bool valve_fault_latched(void);
 bool valve_motion_blocked(void); // a latched fault that stops the motor (not F-1, F-2)
-const char *valve_status(void);  // one status line
 
 // AUTO (stage 8).
 bool valve_auto(void);
@@ -107,7 +104,6 @@ bool valve_to_manual(const char **why);          // MODE MANUAL, Switch to MANUA
 bool valve_set_target(int32_t mmbar, const char **why);
 bool valve_target(int32_t *mmbar);               // false: no target set yet
 int32_t valve_range_mmbar(void);                 // sensor in use, full scale
-int32_t valve_band_mmbar(void);                  // target band (BAND)
 ctrl_reg_t valve_regulation(void);               // status words, in AUTO
 int valve_pid_set(void);                         // PID set in use (AUTO) or AUTO would start with, 1 to 3
 
@@ -132,11 +128,9 @@ bool valve_set_closed(const char **why);
 // The same, taking the present position as pct100 (0.01 %, 0 to 10000).
 bool valve_set_position(int32_t pct100, const char **why);
 uint32_t valve_cal_budget_s(void);               // longest calibration, s
-uint32_t valve_cal_elapsed_s(void);              // into the calibration running, s; 0 if none
 int valve_cal_step(void);    // -1 not calibrating, 0 moving off the switch, 1-4 step
 bool valve_goto_pct10(int32_t pct10, const char **why);   // VALVE SET, 0.1 %
 bool valve_goto_pct100(int32_t pct100, const char **why); // the same in 0.01 % (keypad)
-int32_t valve_target_pct10(void);                // where the valve is going
 int32_t valve_pct_milli(void);                   // position in 0.001 % (for 2 dp on screen)
 int32_t valve_target_pct_milli(void);
 void valve_stop(void);                           // STOP (in AUTO: MANUAL, nothing latched)

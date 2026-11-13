@@ -154,7 +154,6 @@ static uint32_t cal_done_ms, cal_took_s;   // last good calibration
 static bool cal_done;
 static char cal_done_iso[20];              // its wall time, "" if the clock is not set
 
-static char status_text[160];
 
 // AUTO (ctrl.c): the loop's state and the last reading it used.
 static ctrl_t ctl;
@@ -920,8 +919,6 @@ bool valve_target(int32_t *mmbar)
     return ctl.sp_set;
 }
 
-int32_t valve_band_mmbar(void) { return cfg_tune(CFG_BAND) * 10; }
-
 ctrl_reg_t valve_regulation(void)
 {
     if (mode != VALVE_AUTO)
@@ -1038,8 +1035,6 @@ void valve_limit_band_set(bool on)
     valve_event("LIM", on ? "Limit switch disabled from %d to %d %% open: on (screen)"
                           : "Limit switch disabled from %d to %d %% open: off (screen)", valve_pass_lo(), valve_pass_hi());
 }
-int32_t valve_pct10(void)       { return pct10_of(stepper3_position()); }
-bool valve_fault_latched(void)  { return any_latched(); }
 bool valve_motion_blocked(void) { return any_latched(); }
 
 const char *valve_mode_name(void)
@@ -1052,47 +1047,6 @@ const char *valve_mode_name(void)
     case VALVE_OFF:         return "OFF";
     default:                return "NOT HOMED";
     }
-}
-
-static const char *cal_stage_name(void)
-{
-    static const char *const names[] = { "", "moving off the switch", "1 of 4 closing to the switch",
-                                         "2 of 4 backing off", "3 of 4 slow close",
-                                         "4 of 4 return" };
-    return names[cal_stage];
-}
-
-static void faults_text(char *buf, size_t n)
-{
-    buf[0] = '\0';
-    for (int i = 0; i < F_N; i++) {
-        if (!latched[i])
-            continue;
-        size_t len = strlen(buf);
-        lv_snprintf(buf + len, n - len, "%s%s", len ? " " : "", fault_tag[i]);
-    }
-}
-
-const char *valve_status(void)
-{
-    char p[16], f[40];
-    faults_text(f, sizeof f);
-    if (is_auto()) {
-        // No position here: it changes every second in AUTO, and the DATA
-        // line carries it; this one prints on a change of state.
-        char a[16];
-        lv_snprintf(status_text, sizeof status_text, "Valve: %s at %s mbar%s%s", valve_mode_name(),
-                    mbar_text(a, sizeof a, ctl.sp, 1), f[0] ? ", faults " : "", f);
-    } else if (calibrated)
-        lv_snprintf(status_text, sizeof status_text, "Valve: %s, calibrated, %s %% (count %ld of %ld)%s%s%s",
-                    valve_mode_name(), pct_text(p, sizeof p, stepper3_position()),
-                    (long)stepper3_position(), (long)pm(), f[0] ? ", faults " : "", f,
-                    question ? ", switch question waiting" : "");
-    else
-        lv_snprintf(status_text, sizeof status_text, "Valve: %s%s%s, count %ld%s%s",
-                    valve_mode_name(), cal_stage ? ", " : "", cal_stage_name(),
-                    (long)stepper3_position(), f[0] ? ", faults " : "", f);
-    return status_text;
 }
 
 /* --------------------------------------------------------------------------
@@ -1254,8 +1208,6 @@ bool valve_goto_pct100(int32_t pct100, const char **why)
 
 bool valve_calibrate(const char **why) { return cal_start(why); }
 
-uint32_t valve_cal_elapsed_s(void) { return mode == VALVE_CALIBRATING ? lv_tick_elaps(cal_t0) / 1000 : 0; }
-
 uint32_t valve_cal_budget_s(void)
 {
     return (uint32_t)(((int64_t)pm() * 11 / 10 + sc(n_clear + 2 * n_backoff + n_return)) / f_rate(f_home)
@@ -1273,8 +1225,6 @@ int valve_cal_step(void)
     default:        return -1;
     }
 }
-
-int32_t valve_target_pct10(void) { return pct10_of(stepper3_target()); }
 
 static int32_t milli_of(int32_t pos)
 {

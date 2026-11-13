@@ -35,26 +35,9 @@
 #include "trend.h"
 #include "baro.h"
 #include "remote.h"
-#if PMC_LINK_ETHERNET
+#if PMC_LINK_ETHERNET   // 0: a host build (the simulator compiles this file)
 #include "ethlink.h"
 #endif
-
-/*
- * PERF?: how responsive the main loop is, since the last PERF?. Touch is
- * read inside lv_timer_handler, so a long handler or loop pass is input lag.
- */
-extern uint32_t disp_flush_ms, disp_flush_px;
-static uint32_t perf_loops, perf_gap_max, perf_handler_max, perf_last_end;
-
-static void perf_note(uint32_t t0)
-{
-    uint32_t now = lv_tick_get();
-    uint32_t handler = now - t0;
-    if (handler > perf_handler_max) perf_handler_max = handler;
-    if (perf_last_end && now - perf_last_end > perf_gap_max) perf_gap_max = now - perf_last_end;
-    perf_last_end = now;
-    perf_loops++;
-}
 
 
 /**
@@ -63,17 +46,9 @@ static void perf_note(uint32_t t0)
 void board_init()
 {
     lv_init();
-    // A second LVGL heap pool in main SRAM: the 64 KB in CCM ran out with the
-    // 0.6.0 Service screens built and the Valve page keypad open (0.8.1).
-#if !PMC_LINK_ETHERNET
-    // Not in the Ethernet build (0.11.30): with it, .bss ran to within about
-    // 3 KB of the top of SRAM, which left no room for the stack and the
-    // network buffers (malloc'd), and the screen stayed blank at boot. That
-    // build has the 64 KB in CCM only; the host previews peak at about 55 KB
+    // The LVGL heap is the 64 KB in CCM only: main SRAM is left for the
+    // stack and the network buffers. The host previews peak at about 55 KB
     // with 64-bit pointers, and the board read 33 KB on 14 Oct.
-    static uint8_t lv_pool2[24 * 1024] __attribute__((aligned(8)));
-    lv_mem_add_pool(lv_pool2, sizeof lv_pool2);
-#endif
     lv_port_disp_init();
     lv_port_indev_init();
 
@@ -120,8 +95,8 @@ void application_init()
     // Draw the screen once first, so a link start-up fault cannot leave it blank.
     lv_timer_handler();
 
-    // Text link to the PC (pmc_config.h): USB COM port (sets the 48 MHz USB
-    // clock) or Ethernet (sets SYSCLK 150 MHz and the 50 MHz RMII clock).
+    // Text link to the PC over Ethernet (sets SYSCLK 150 MHz and the 50 MHz
+    // RMII clock).
     link_init();
 }
 
@@ -197,9 +172,7 @@ int main(void)
             held_from = lv_tick_get();
         if ((!dumping || lv_tick_elaps(held_from) >= 500) && link_getline(line, sizeof line))
             remote_line(line);
-        uint32_t t0 = lv_tick_get();
         lv_timer_handler();
-        perf_note(t0);
         watchdog_kick();
         Delay_ms(1);
     }

@@ -189,17 +189,6 @@ bool cal_saved(void)
     return active_saved;
 }
 
-uint32_t cal_old_version(void) { return old_version; }
-
-bool cal_bench(int32_t *r_vac, int32_t *p_vac, int32_t *r_air, int32_t *p_air)
-{
-    if (active_is_default || active.kind != CAL_KIND_BENCH)
-        return false;
-    *r_vac = active.r_ppb[0]; *p_vac = active.p_mmbar[0];
-    *r_air = active.r_ppb[1]; *p_air = active.p_mmbar[1];
-    return true;
-}
-
 int cal_capture_left(void) { return cap.what ? CAPTURE_N - cap.n : 0; }
 
 /* --------------------------------------------------------------------------

@@ -124,8 +124,6 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text);
 // rather than at the next 0.5 s refresh; for a state the strip must show
 // at once.
 void ui_refresh_soon(void);
-// Strip width for this screen (343 unless a screen sets it in build()).
-void ui_strip_width(int32_t w);
 void ui_strip_action(const char *text, const char *small, lv_event_cb_t cb);   // NULL text: none
 
 // Keypad over the screen. on_set gets the value in 0.01 units (two
@@ -170,8 +168,6 @@ void ui_ask3(const char *text, const char *cancel, void (*on_cancel)(void), cons
 void ui_pick(const char *title, const char *const *items, int n, int sel, void (*on_pick)(int i));
 // Scrolling text over the screen (Help); header Back closes it.
 void ui_text_view(const char *title, const char *text);
-// Empty overlay over 0,40 480x232 (STOP stays on top) for a screen's own dialog.
-lv_obj_t *ui_overlay(void);
 // The same, for a dialog with buttons on the bottom row (left of STOP): the
 // status strip is hidden while it is open, as for the keypad.
 lv_obj_t *ui_overlay_full(void);
@@ -191,7 +187,6 @@ void ui_home_ask(void);
 void ui_set_position_ask(void);
 void ui_set_position_pick(int i);   // 0 closed, 1 enter %, 2 saved
 void ui_position_ask(void);
-int32_t ui_log_px(int32_t p_mmbar, int32_t w);   // 0.1-1000 mbar on a log scale, 0 to w px
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
 // Trend and the Home sparklines (ui_trend.c). A sparkline redraws when
 // invalidated (Home does it once a second); a tap opens Trend.

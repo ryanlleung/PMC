@@ -44,7 +44,6 @@ valve_ref_t valve_reference(void) { return VALVE_REF_HOMED; }
 bool valve_target(int32_t *m) { *m = sp; return sp_set; }
 int32_t valve_range_mmbar(void) { return 1034000; }
 ctrl_reg_t valve_regulation(void) { return CTRL_REG_BAND; }
-bool valve_fault_latched(void) { return fault_f5; }
 bool valve_fault_is(const char *t) { return fault_f5 && !strcmp(t, "F-5"); }
 int valve_fault_count(void) { return fault_f5; }
 uint32_t valve_event_total(void) { return 70000; }
@@ -198,7 +197,7 @@ static void tests(void)
     CHECK(r16(1) == (uint16_t)123456);          // heartbeat
     CHECK(r16(2) == VALVE_MANUAL);
     CHECK(r16(3) & 1);                          // reading OK
-    CHECK(((r16(3) >> 8) & 1) == (PMC_MODBUS_WRITE != 0));
+    CHECK(((r16(3) >> 8) & 1) == 1);                // remote writes on
     CHECK(r16(8) == (uint16_t)70000);
     CHECK(fabsf(rf(10) - 4.625f) < 1e-6f);
     CHECK(isnan(rf(12)));                       // no target yet
@@ -253,7 +252,6 @@ static void tests(void)
     uint8_t w[] = { 0x10, 0, 12, 0, 2, 4, 0, 0, 0, 0 };
     f32(4.8f, w + 6);
     req(sizeof w, w);
-#if PMC_MODBUS_WRITE
     CHECK(rlen == 12 && rsp[7] == 0x10 && rsp[9] == 12 && rsp[11] == 2);
     CHECK(sp_set && sp == 4800);
     CHECK(strstr(last_event, "target 4.8 mbar") != NULL);
@@ -340,16 +338,11 @@ static void tests(void)
     f32(6.0f, w + 6); req(sizeof w, w); CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && sp != 6000);
     REQ(0x05, 0, 1, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && stops == 1);
     REQ(0x03, 0, 3, 0, 1);    CHECK(rlen == 11 && ((r16(0) >> 8) & 1) == 0);
-    remote = true;
-    REQ(0x03, 0, 3, 0, 1);    CHECK(((r16(0) >> 8) & 1) == 1);
-#else
-    CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && !sp_set);
-    REQ(0x10, 0, 27, 0, 1, 2, 0, 2);   CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && tune[CFG_SCHED] == 2);
-    REQ(0x05, 0, 0, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && mode == VALVE_MANUAL);
-    REQ(0x05, 0, 1, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && stops == 0);
+    REQ(0x05, 0, 0, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION));
     // Outside the map is still an address error, not a write refusal.
     REQ(0x05, 0, 9, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_ADDRESS));
-#endif
+    remote = true;
+    REQ(0x03, 0, 3, 0, 1);    CHECK(((r16(0) >> 8) & 1) == 1);
     // Warning bits: W-1 question, W-3 hot, W-6 strip.
     question = true; cs.die_mc = 56000; warn = "W-6 Valve driven the wrong way: check KDIR";
     REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == ((1u << 0) | (1u << 2) | (1u << 5)));
@@ -393,9 +386,11 @@ static void serve(int port)
 int main(int argc, char **argv)
 {
     tests();
-    printf("modbus test, writes %s: %d checks, %d failed\n", PMC_MODBUS_WRITE ? "on" : "off", checks, fails);
-    if (argc == 3 && !strcmp(argv[1], "serve")) {
+    printf("modbus test: %d checks, %d failed\n", checks, fails);
+    // serve <port> [off]: off serves with Remote control Off (writes refused).
+    if (argc >= 3 && !strcmp(argv[1], "serve")) {
         sp = 0; sp_set = false; mode = VALVE_MANUAL;
+        remote = !(argc == 4 && !strcmp(argv[3], "off"));
         serve(atoi(argv[2]));
     }
     return fails != 0;

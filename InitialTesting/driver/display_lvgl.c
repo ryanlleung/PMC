@@ -12,9 +12,6 @@ static void disp_flush(lv_display_t * display, const lv_area_t * area, uint8_t *
 
 static lv_display_t * g_disp;
 
-// For PERF?: time spent and pixels sent in disp_flush.
-uint32_t disp_flush_ms, disp_flush_px;
-
 void lv_port_disp_init(void)
 {
     /*-------------------------
@@ -121,10 +118,7 @@ static void disp_flush(lv_display_t * display, const lv_area_t * area, uint8_t *
     /* Flush data. The SDK's write_array_data makes three HAL calls per
      * pixel, so the registers are written directly in display_px.c, which is
      * built at -O2 (this file must stay at -O0, see CMakeLists.txt). */
-    uint32_t t0 = lv_tick_get();
     display_px_write(color_p, act_w, act_y2 - act_y1 + 1, full_w);
-    disp_flush_ms += lv_tick_elaps(t0);
-    disp_flush_px += (uint32_t)act_w * (uint32_t)(act_y2 - act_y1 + 1);
 
     /* Deselect display. */
     display_deselect();

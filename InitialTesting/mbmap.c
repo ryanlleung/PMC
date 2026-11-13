@@ -20,7 +20,7 @@
  * target set).
  *
  * Writes go through the same calls as the screen buttons, so every check
- * and refusal is the same; they are refused while PMC_MODBUS_WRITE is 0.
+ * and refusal is the same; they are refused while Remote control is Off.
  * Each accepted write is logged as a NET event with the client's address.
  * ------------------------------------------------------------------------ */
 
@@ -92,11 +92,10 @@ static float get_f32(const uint16_t *v)
     return f;
 }
 
-// PMC_MODBUS_WRITE 0 refuses writes whatever the Remote control switch
-// says; with 1, writes need the switch On (0.13.4).
+// Writes need the Remote control switch On (0.13.4).
 bool mbmap_writes_allowed(void)
 {
-    return PMC_MODBUS_WRITE != 0 && cfg_remote();
+    return cfg_remote();
 }
 
 void mbmap_begin(void)

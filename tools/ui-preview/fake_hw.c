@@ -1,4 +1,4 @@
-/* Fake clicks.c and usb_serial.c for the host render. Readings are fixed
+/* Fake clicks.c and the link for the host render. Readings are fixed
  * per scenario and roughly match the bench on 7 Oct 2026. */
 #include <stdarg.h>
 #include <stdio.h>
@@ -73,46 +73,25 @@ void fake_hw_set_scenario(const char *name)
 
 void clicks_init(void) {}
 void clicks_poll(void) {}
-const char *clicks_stepper3_status(void) { return "S2 Stepper 3: pins set, coils off (no readback)"; }
-const char *clicks_boost10_status(void) { return "S3 Boost 10: fake"; }
-const char *clicks_powermonitor_status(void) { return "S4 Power Monitor: fake"; }
-const char *clicks_druck_status(void) { return "Druck: fake"; }
-const char *clicks_druck_value(void) { return value; }
-bool clicks_druck_cal_nominal(void) { return st.cal_nominal; }
 const clicks_state_t *clicks_state(void) { return &st; }
 #ifndef REAL_CAL
 bool cal_is_default(void) { return st.cal_nominal; }
 const char *cal_id(void) { return fake_bench ? "5880156 bench" : "5880156"; }
 bool cal_saved(void) { return fake_saved; }
 void cal_update(const clicks_state_t *s) { (void)s; }
-uint32_t cal_old_version(void) { return 0; }
 int cal_capture_left(void) { return 0; }
-bool cal_bench(int32_t *r_vac, int32_t *p_vac, int32_t *r_air, int32_t *p_air)
-{
-    if (!fake_bench) return false;
-    *r_vac = 127900; *p_vac = 0;
-    *r_air = 9798300; *p_air = 1013250;
-    return true;
-}
 #endif
 
 void link_init(void) {}
 void link_task(void) {}
 bool link_getline(char *buf, size_t n) { (void)buf; (void)n; return false; }
-const char *link_status(void) { return "Ethernet: 192.168.1.23 port 8888, client connected"; }
-const char *link_chip_text(void) { return "192.168.1.23"; }
-bool link_chip_ok(void) { return true; }
-bool link_take_new_client(void) { return false; }
 const char *sysinfo_reset_reason(void) { return fake_wdt ? "watchdog" : "power-on"; }
-bool sysinfo_reset_abnormal(void) { return fake_wdt; }
-const char *sysinfo_line(void) { return "PMC firmware 0.3.0 (preview), last reset: power-on"; }
 void sysinfo_restart(void) {}
 void link_write(const char *s) { fputs(s, stderr); }   // TREND DUMP (trend.c)
 void link_traffic(uint32_t *in, uint32_t *out) { *in = *out = 0; }
 uint32_t link_quiet_ms(void) { return UINT32_MAX; }
 bool link_client(void) { return false; }
 bool rtclock_valid(void) { return !st.cal_nominal; }
-const char *rtclock_screen_text(void) { return st.cal_nominal ? "time not set" : "08 Oct  12:34"; }
 
 /* Stepper 3: settings only, a move completes at once. */
 #include "stepper3.h"
@@ -164,13 +143,11 @@ const char *stepper3_stop_name(stepper3_stop_t s) { return s == STEPPER3_STOP_DO
 
 /* Limit switch: closed, except in the trip scenario. */
 limit_state_t limit_state(void) { return st.boost_tripped ? LIMIT_OPEN : LIMIT_CLOSED; }
-const char *limit_text(void) { return limit_state() == LIMIT_OPEN ? "OPEN" : "closed"; }
 
 /* Valve layer, as far as the screens use it. */
 #include "valve.h"
 const char *stepper3_locked(void) { return NULL; }
 void valve_sense(const clicks_state_t *s) { (void)s; }
-const char *valve_status(void) { return "Valve: MANUAL"; }
 
 /* A pump-down (sim_main.c "hist"): sets the reading for step t of 600. */
 void fake_hw_pumpdown(int t)

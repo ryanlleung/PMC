@@ -94,20 +94,16 @@ bool valve_start_auto_at(int32_t m, const char **why)
     return valve_set_target(m, why) && valve_start_auto(why);
 }
 int32_t valve_range_mmbar(void) { return 1034214; }
-int32_t valve_band_mmbar(void) { return 100; }
 ctrl_reg_t valve_regulation(void) { return v_mode == VALVE_AUTO ? v_reg : CTRL_REG_NONE; }
 static int v_pidset = 1;
 int valve_pid_set(void) { return v_pidset; }
 bool valve_calibrated(void) { return v_cal; }
 static valve_ref_t v_ref = VALVE_REF_HOMED;
 valve_ref_t valve_reference(void) { return v_cal ? v_ref : VALVE_REF_NONE; }
-int32_t valve_pct10(void) { return v_pct10; }
-int32_t valve_target_pct10(void) { return moving ? v_target10 : v_pct10; }
 int32_t valve_pct_milli(void) { return v_pct10 * 100 + 37; }
-int32_t valve_target_pct_milli(void) { return valve_target_pct10() * 100; }
+int32_t valve_target_pct_milli(void) { return (moving ? v_target10 : v_pct10) * 100; }
 int valve_cal_step(void) { return v_step; }
 uint32_t valve_cal_budget_s(void) { return 300; }
-uint32_t valve_cal_elapsed_s(void) { return v_mode == VALVE_CALIBRATING ? 42 : 0; }
 bool valve_set_closed(const char **why) { (void)why; v_cal = true; v_ref = VALVE_REF_HAND; v_mode = VALVE_MANUAL; v_pct10 = 0; return true; }
 bool valve_set_position(int32_t p, const char **why) { (void)why; v_cal = true; v_ref = VALVE_REF_HAND; v_mode = VALVE_MANUAL; v_pct10 = p / 10; return true; }
 bool valve_calibrate(const char **why) { (void)why; v_mode = VALVE_CALIBRATING; v_step = 1; return true; }

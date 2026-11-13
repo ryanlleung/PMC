@@ -477,11 +477,10 @@ static void part(const char *c, bool chained)
     }
     if (query(c))
         return;
-    // Over the network, set commands (STOP included) and the engineering
-    // commands need PMC_LINK_WRITE 1 and the Remote control switch On
-    // (0.13.4); a USB link is local. Only the queries above are free: a line
-    // that merely ends in '?' (CFG NAME X?) is not one.
-    if (PMC_REMOTE_SWITCH && (!PMC_LINK_WRITE || !cfg_remote())) {
+    // Set commands (STOP included) need the Remote control switch On
+    // (0.13.4). Only the queries above are free: a line that merely ends in
+    // '?' (CFG NAME X?) is not one.
+    if (!cfg_remote()) {
         refuse(211, "Read only over the network");
         return;
     }

@@ -2,14 +2,9 @@
 
 #include "mcu.h"
 #include "lvgl.h"   // lv_snprintf
-#include "pmc_config.h"
-#include "link.h"
-#include "ethlink.h"
 #include "sysinfo.h"
 
 static const char *reason = "unknown";
-static bool abnormal;
-static char line[96];
 
 void sysinfo_init(void)
 {
@@ -18,28 +13,18 @@ void sysinfo_init(void)
     // A power-on also sets the pin and brown-out flags, so check the most
     // specific causes first. mikroBootloader runs before the application;
     // if it ever clears these flags the result is "unknown".
-    if (csr & RCC_CSR_IWDGRSTF)       { reason = "watchdog"; abnormal = true; }
-    else if (csr & RCC_CSR_WWDGRSTF)  { reason = "window watchdog"; abnormal = true; }
-    else if (csr & RCC_CSR_LPWRRSTF)  { reason = "low-power"; abnormal = true; }
+    if (csr & RCC_CSR_IWDGRSTF)       reason = "watchdog";
+    else if (csr & RCC_CSR_WWDGRSTF)  reason = "window watchdog";
+    else if (csr & RCC_CSR_LPWRRSTF)  reason = "low-power";
     else if (csr & RCC_CSR_SFTRSTF)   reason = "software";
     else if (csr & RCC_CSR_PORRSTF)   reason = "power-on";
-    else if (csr & RCC_CSR_BORRSTF)   { reason = "brown-out"; abnormal = true; }
+    else if (csr & RCC_CSR_BORRSTF)   reason = "brown-out";
     else if (csr & RCC_CSR_PINRSTF)   reason = "reset pin";
 
     RCC->CSR |= RCC_CSR_RMVF;
-
-    lv_snprintf(line, sizeof line, "PMC firmware %s, last reset: %s",
-                sysinfo_version(), reason);
-}
-
-const char *sysinfo_version(void)
-{
-    return PMC_FW_VERSION " (" __DATE__ " " __TIME__ ")";
 }
 
 const char *sysinfo_reset_reason(void) { return reason; }
-bool sysinfo_reset_abnormal(void)      { return abnormal; }
-const char *sysinfo_line(void)         { return line; }
 
 void sysinfo_restart(void)
 {

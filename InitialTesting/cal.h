@@ -83,11 +83,6 @@ const char *cal_id(void);
 // True once the active table has been written to flash (or was loaded from
 // it), false after APPLY or a bench capture until CFG SAVE or CAL SAVE.
 bool cal_saved(void);
-// Version of an old record found in flash and not loaded, 0 if none.
-uint32_t cal_old_version(void);
-// Bench points of the active table (ratio ppb, pressure 0.001 mbar); false
-// if the active table is not a bench cal.
-bool cal_bench(int32_t *r_vac, int32_t *p_vac, int32_t *r_air, int32_t *p_air);
 // Readings still to take in a running capture, 0 if none.
 int cal_capture_left(void);
 // The running capture: 0 none, 1 vacuum, 2 air.

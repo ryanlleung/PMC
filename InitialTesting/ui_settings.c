@@ -743,7 +743,7 @@ static void nn_refresh(void)
 #if PMC_LINK_ETHERNET
     ui_set_text(nn.mac, ethlink_mac()[0] ? ethlink_mac() : "Not read");
 #else
-    ui_set_text(nn.mac, "None, USB build");
+    ui_set_text(nn.mac, "None (host build)");
 #endif
     ui_set_text(nn.fw, ui_fw_text());
     if (lv_obj_has_state(nn.rsw, LV_STATE_CHECKED) != cfg_remote())

@@ -98,15 +98,6 @@ static int32_t p_shown(int32_t p_mmbar)
     return p_mmbar < 0 ? 0 : (p_mmbar + 50) / 100 * 100;
 }
 
-int32_t ui_log_px(int32_t p_mmbar, int32_t w)
-{
-    const int32_t lo = log2_q8(100), hi = log2_q8(1000000);   // 0.1, 1000 mbar
-    p_mmbar = p_shown(p_mmbar);
-    int32_t l = log2_q8(p_mmbar > 1 ? (uint32_t)p_mmbar : 1);
-    int32_t x = (l - lo) * w / (hi - lo);
-    return x < 0 ? 0 : x > w ? w : x;
-}
-
 // Pressure bar end lines, the same distance in from each end: half the
 // wider of "0.1" and "1k", so that label meets its end of the bar (Ryan,
 // 16 Oct) and the decade lines stay evenly spaced.
@@ -595,14 +586,10 @@ static int ip_prefix(const char *m)
 
 static void ip_refresh(void)
 {
-#if PMC_REMOTE_SWITCH
     char ip[16], mask[16], t[24];
     cfg_net_boot(ip, mask);
     lv_snprintf(t, sizeof t, "%s/%d", ip, ip_prefix(mask));
     ui_set_text(ip_val, t);
-#else
-    ui_set_text(ip_val, "USB build");
-#endif
 }
 
 void ui_reset_fault_event(lv_event_t *e)

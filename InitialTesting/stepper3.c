@@ -103,7 +103,6 @@ static volatile bool reversed_hit, stall_hit;   // latched for valve.c (stepper3
 static volatile uint32_t alive_ms;      // the main loop's last pass (stepper3_poll)
 #define STALL_MS       1000             // no pass for this long: the step interrupt stops the move
 
-static char status_text[160];
 
 /* --------------------------------------------------------------------------
  * Limit switch (one NC dry contact at the closed end of travel), read by
@@ -629,24 +628,6 @@ void stepper3_zero(void)
     if (position != 0)
         ref_changed("motor count zeroed");
     position = 0;
-}
-
-const char *stepper3_status(void)
-{
-    const char *st = run_state == ST_MOVING ? (dir > 0 ? "opening" : "closing")
-                   : energised ? "idle, coils on" : "idle, coils off";
-    char to[24] = "";
-    if (run_state == ST_MOVING)
-        lv_snprintf(to, sizeof to, " to %ld", (long)target);
-    lv_snprintf(status_text, sizeof status_text,
-                "S2 Stepper 3: %s, pos %ld%s, %s %lu sps, limit %s",
-                st, (long)position, to, stepper3_mode_name(mode),
-                (unsigned long)(run_state == ST_MOVING ? move_rate : rate_run),
-                !LIMIT_FITTED ? "stop off (PMC_LIMIT_STOP 0)"
-                : stepper3_override() ? (limit_open_now() ? "pressed, override" : "free, override armed")
-                : stepper3_limit_ignored() && limit_open_now() ? "pressed, passed (pass band)"
-                : stepper3_limit_open() ? "pressed" : "free");
-    return status_text;
 }
 
 /* --------------------------------------------------------------------------

@@ -16,7 +16,6 @@ static inline void timerInit(void) {}
 #include <stdarg.h>
 #include <time.h>
 
-#include "usb_serial.h"
 #include "extflash.h"
 #include "bench.h"
 
@@ -69,7 +68,7 @@ bool extflash_write(uint32_t addr, const void *buf, size_t len)
     return true;
 }
 
-/* ---- USB serial: the page's console -------------------------------------- */
+/* ---- the text link: the page's console (link.h) ---------------------------- */
 #define TX_SIZE 65536
 static char tx[TX_SIZE];
 static uint32_t tx_len;
@@ -78,25 +77,18 @@ static uint32_t rx_head, rx_tail;
 static link_line_t rx_line;
 static uint32_t rx_bytes;
 
-void usb_serial_init(void) {}
-void usb_serial_task(void) {}
-const char *usb_serial_status(void) { return "USB: port open (simulator console)"; }
-size_t usb_serial_tx_room(void) { return TX_SIZE - tx_len; }
-uint32_t usb_serial_rx_bytes(void) { return rx_bytes; }
-void usb_serial_printf(const char *fmt, ...)
+void link_init(void) {}
+void link_task(void) {}
+size_t link_tx_room(void) { return TX_SIZE - tx_len; }
+bool link_client(void) { return false; }
+void link_send(const char *s)
 {
-    char buf[256];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = lv_vsnprintf(buf, sizeof buf, fmt, ap);
-    va_end(ap);
-    if (n < 0) return;
-    if ((size_t)n >= sizeof buf) n = sizeof buf - 1;
-    if (tx_len + (uint32_t)n > TX_SIZE) return;   // the page has not read: dropped, as a full USB buffer
-    memcpy(tx + tx_len, buf, (size_t)n);
+    size_t n = strlen(s);
+    if (tx_len + n > TX_SIZE) return;   // the page has not read: dropped, as a full send buffer
+    memcpy(tx + tx_len, s, n);
     tx_len += (uint32_t)n;
 }
-bool usb_serial_getline(char *buf, size_t n)
+bool link_getline(char *buf, size_t n)
 {
     while (rx_tail != rx_head) {
         char c = rx[rx_tail];
@@ -123,12 +115,9 @@ static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px)
     for (int y = a->y1; y <= a->y2; y++)
         for (int x = a->x1; x <= a->x2; x++)
             fb[y * W + x] = *p++;
-    disp_flush_px += (uint32_t)lv_area_get_size(a);
     frames++;
     lv_display_flush_ready(d);
 }
-
-uint32_t disp_flush_ms, disp_flush_px;
 
 void lv_port_disp_init(void)
 {
@@ -414,9 +403,7 @@ EXPORT(sim_run) void sim_run(int ms)
         }
         if (link_getline(line, sizeof line))
             remote_line(line);
-        uint32_t t0 = lv_tick_get();
         lv_timer_handler();
-        perf_note(t0);
         coils_from_pins();   // a stop or coils-off from the main loop
     }
 }

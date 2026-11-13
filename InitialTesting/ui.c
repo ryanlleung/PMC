@@ -784,7 +784,7 @@ static void build_frame(void)
     lv_obj_set_ext_click_area(unsaved_btn, 6);
     lv_obj_add_flag(unsaved_btn, LV_OBJ_FLAG_HIDDEN);
     // The remote light: shown while a remote client is connected, or for
-    // 10 s after a message (the USB build has no client to see). Grey
+    // 10 s after a message. Grey
     // arrows, each white for a moment with every request in or reply out.
     // A tap opens System setup.
     comm_obj = plain(hdr);
@@ -881,8 +881,6 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
     lv_strlcpy(line_text, text, sizeof line_text);
     phrase(line_text);
 }
-
-void ui_strip_width(int32_t w) { strip_w = w; }
 
 void ui_strip_action(const char *text, const char *small, lv_event_cb_t cb)
 {
@@ -1356,8 +1354,6 @@ void ui_overlay_close(void)
     overlay_full = false;
     kp_open = false;
 }
-
-lv_obj_t *ui_overlay(void) { return overlay_new(); }
 
 lv_obj_t *ui_overlay_full(void)
 {

@@ -11,7 +11,7 @@ Map version 3, from firmware 0.16.14: version 2 (registers 0 to 50, firmware 0.1
 
 ## Writes
 
-`PMC_MODBUS_WRITE` in `pmc_config.h` is 1 from 0.12.6, so anyone who can reach port 502 can set the target and run the valve. From 0.13.4 writes also need Menu > System > Remote control On on the screen (On by default from 0.13.7, Off to 0.13.6, kept by Save settings); while it is Off every write answers exception 1 and the reads go on as before. With `PMC_MODBUS_WRITE 0` the server is read only and every write (FC5, FC16) answers exception 1, whatever the switch says. A write to an address outside the map answers exception 2 either way.
+Writes are built in from 0.12.6, so anyone who can reach port 502 can set the target and run the valve. From 0.13.4 writes need Menu > System > Remote control On on the screen (On by default from 0.13.7, Off to 0.13.6, kept by Save settings); while it is Off every write answers exception 1 and the reads go on as before. The build flag `PMC_MODBUS_WRITE` went in 0.16.28: the switch is the only gate. A write to an address outside the map answers exception 2 either way.
 
 With writes on, the writable registers and command coils go through the same calls as the screen buttons, so the same checks and refusals apply. A write the controller refuses answers exception 4 and logs a NET event with the reason ("Switch to MANUAL first", "No target set", ...). While OFF or shutting down (mode 5 or 4), the AUTO coil and the valve going to register are refused ("Controller is off", "Shutting down"); STOP cancels a shut down; the target can still be written. Each accepted write is logged as a NET event with the client's IP address.
 
@@ -77,7 +77,7 @@ The set in use changes in AUTO when the lower of the pressure and the setpoint (
 | 5 | 21 | A fault is latched |
 | 6 | 22 | A warning is showing (W-1 to W-6) |
 | 7 | 23 | Target set |
-| 8 | 24 | Remote writes on (`PMC_MODBUS_WRITE 1` and Remote control On, 0.13.4) |
+| 8 | 24 | Remote writes on (Remote control On, 0.13.4) |
 | 9 | 25 | Legacy motor 12 V supply flag: always 1 (sensing was removed in 0.14.3). This is not a measurement and cannot detect loss of motor power |
 
 ### Faults and warnings (registers 5 and 6)
