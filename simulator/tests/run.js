@@ -146,8 +146,8 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(298, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // set 1's KD (the set row), 1.5, Set
   s.tap(415, 128); s.tap(319, 138);   // Save settings, then Save in the question
   check('KD saves from the PID tuning page', s.setting(CFG.KD) === 150, 'KD ' + s.setting(CFG.KD));
-  // Gain schedule on (0.15.15): the PID tab shows the set row; Set 3's KP from its card. Four sets from 0.16.14:
-  // the segments 83 px wide, set 3 at x 180 to 263, set 4 at 263 to 346.
+  // Gain schedule on (0.15.15): the PID tab (Gains from 0.16.25) shows the set row; Set 3's KP from its card. Four
+  // sets from 0.16.14; from 0.16.25 four cards of 82 px at x 10, 97, 184 and 271.
   s.cmd('SCHED SET PV,6,10,14,15', 1000); s.run(1000);
   shot(s, 'pid-tuning-sets');
   s.tap(221, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // Set 3, KP 1.5, Set
@@ -160,9 +160,19 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Set 4 KP saves from the set row', s.setting(CFG.KP4) === 100 && s.setting(CFG.KP3) === 150,
     [s.setting(CFG.KP3), s.setting(CFG.KP4)].join());
   shot(s, 'pid-tuning-set4');
-  // The PID table tab: the two switches, then B1, B2 and B3 in a row.
+  // Set ranges (the PID table tab to 0.16.24; 0.16.25, Fable's review): B1, B2 and B3 in a row, the hysteresis
+  // under B1. B1 from its card.
   s.tap(182, 72); s.run(500);
   shot(s, 'pid-tuning-table');
+  s.tap(65, 128); s.tap(110, 183); s.tap(320, 212);   // Set 1 | 2 (B1), 5, Set
+  s.tap(415, 128); s.tap(319, 138);
+  check('Set ranges: B1 saves from the first card', s.setting(CFG.B1) === 50 && s.setting(CFG.B2) === 100, s.setting(CFG.B1));
+  // AUTO (AUTO limits to 0.16.24): AUTO min and Pressure response, the setpoint band under AUTO min.
+  s.tap(291, 72); s.run(500);
+  shot(s, 'pid-tuning-auto');
+  s.tap(65, 184); s.tap(40, 239); s.tap(320, 212);   // SP band, 1, Set
+  s.tap(415, 128); s.tap(319, 138);
+  check('AUTO: the setpoint band saves from the second row', s.setting(CFG.BAND) === 100, s.setting(CFG.BAND));
 }
 { // A tap on anything greyed round a popup closes it, as Back (0.15.16, Ryan 5 Nov: "Make popups exitable when
   // tapping the greyed out areas"): the dimmed page, the greyed strip, the greyed header icons. A tap on the box does not.

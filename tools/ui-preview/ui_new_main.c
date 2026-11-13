@@ -509,9 +509,10 @@ int main(int argc, char **argv)
     if (!strcmp(st, "set-valve3")) tap(221, 72);                                   // Homing
     if (!strcmp(st, "set-valvepos")) tap(94, 128);                                 // 100 % travel
     if (!strncmp(st, "set-tune", 8) || !strncmp(st, "set-save", 8)) M_TUNE();
-    if (!strcmp(st, "set-tunetable")) tap(180, 72);   // PID table tab, always on (0.16.20)
-    if (!strcmp(st, "set-tuneauto")) tap(291, 72);    // AUTO limits tab
-    if (!strcmp(st, "set-tunehelp")) tap(415, 72);    // PID tab, Help
+    if (!strcmp(st, "set-tunetable")) tap(180, 72);   // Set ranges tab (PID table to 0.16.24)
+    if (!strcmp(st, "set-tuneauto")) tap(291, 72);    // AUTO tab (AUTO limits to 0.16.24)
+    if (!strcmp(st, "set-tunehelp")) tap(415, 72);    // Gains tab, Help
+    if (!strcmp(st, "set-tuneset3")) tap(225, 128);   // Gains tab, Set 3
     if (!strcmp(st, "set-tunekp") || !strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") ||
         !strcmp(st, "set-saved")) { tap(94, 72); tap(181, 240); tap(251, 240); tap(111, 184); }
     if (!strcmp(st, "set-tunedraft") || !strcmp(st, "set-saveask") || !strcmp(st, "set-saved")) tap(321, 184);

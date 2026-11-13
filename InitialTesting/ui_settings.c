@@ -140,15 +140,15 @@ static const field_t F[CFG_N] = {
     [CFG_DB]      = { "Deadband open", "steps", 0, K_NUM, "AUTO opening moves gather to this, then go at once" },
     [CFG_KDIR]    = { "Pressure response", NULL, 0, K_TOGGLE, "Normally opening raises the pressure" },
     [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Tolerance about the setpoint; 0 = none" },
-    [CFG_KD]      = { "KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
+    [CFG_KD]      = { "KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
     // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD);
     // set 4 and boundary 3 from 0.16.14.
     [CFG_KP2]     = { "Set 2 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI2]     = { "Set 2 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
-    [CFG_KD2]     = { "Set 2 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
+    [CFG_KD2]     = { "Set 2 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
     [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
-    [CFG_KD3]     = { "Set 3 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
+    [CFG_KD3]     = { "Set 3 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
     [CFG_SCHED]   = { "PID table", NULL, 0, K_SCHED, "Always on" },
     [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
     [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
@@ -156,7 +156,7 @@ static const field_t F[CFG_N] = {
     [CFG_DBC]     = { "Deadband close", "steps", 0, K_NUM, "AUTO closing moves below this are skipped" },
     [CFG_KP4]     = { "Set 4 KP", "%/mB", 2, K_NUM, "Proportional gain" },
     [CFG_TI4]     = { "Set 4 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
-    [CFG_KD4]     = { "Set 4 KD", "%/(mB/s)", 2, K_NUM, "Derivative on the pressure; 0 = off" },
+    [CFG_KD4]     = { "Set 4 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
     [CFG_B3]      = { "Boundary 3", "mB", 1, K_NUM, "Set 3 / set 4 switch point; 0 = no set 4" },
     // Disable switch edges (0.16.21; "From, %" and "To, %" on their cards).
     [CFG_PASS_LO] = { "Disable from", "%", 0, K_NUM, "Switch works below this" },
@@ -175,6 +175,9 @@ static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
     case K_SCHED:
         return v == CTRL_SCHED_PV ? "On" : "Off";
     default:
+        // 0 means none here (0.16.25, Fable): no set 4, no band.
+        if (v == 0 && (k == CFG_B3 || k == CFG_BAND))
+            return "None";
         return fixed_fmt(buf, n, v, F[k].dec);
     }
 }
@@ -873,7 +876,9 @@ typedef struct {
     const char *note;
     bool tall;                // the keys as three tall cards (PID tuning's PID tab)
     bool over;                // the Disable switch toggle, its two edges and the Motor override button (Override tab)
-    bool brow;                // the first key alone, then B1, B2 and B3 short in a row (PID table tab)
+    bool brow;                // B1, B2 and B3 in a row, the last key under them (Set ranges tab)
+    bool arow;                // 109 + 226 on the first row, 109 under it (AUTO tab)
+    const char *aside;        // grey text right of the last row's 109 px card
 } tab_t;
 
 // Motor settings (Valve setup to 0.16.1, Valve settings to 0.16.15, Ryan 12 Nov
@@ -904,20 +909,25 @@ static const tab_t valve_tabs[4] = {
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
 // name on their own tab, the rest of AUTO's settings on the other. From
-// 0.15.15 (Ryan 5 Nov, "build like industry ones"): three PID sets, the
-// PID tab showing one at a time (the keys here are set 1's; the set row
-// picks), and the gain schedule on its own tab. From 0.16.14 (Ryan 11 Nov,
-// "Yes fourth set"): four sets and a third boundary. From 0.16.20 (Ryan 12
-// Nov: "remove the set 1 pid value function. always has pid table") the
-// table is always on: no Off/On switch, so the PID tab always shows the set
-// row, and the PID table tab has the hysteresis on its first row and the
-// three boundaries under it.
+// 0.15.15 (Ryan 5 Nov, "build like industry ones"): three PID sets, one
+// shown at a time (the keys here are set 1's; the set row picks), and the
+// gain schedule on its own tab. From 0.16.14 (Ryan 11 Nov, "Yes fourth
+// set"): four sets and a third boundary. From 0.16.20 (Ryan 12 Nov) the
+// table is always on. From 0.16.25 (Ryan 13 Nov: "rework the pid tuning
+// page, use fable to evaluate whether each control is intuitive"; Fable's
+// review): tabs named by what they hold, Gains, Set ranges and AUTO; the
+// set row as four cards, the one shown outlined, so it does not read as a
+// second tab bar; the set in the gain captions; each boundary captioned by
+// the two sets it splits, the hysteresis under them; 0 shown as None; a
+// grey line of explanation in the empty cell; no "Save to keep".
 static const tab_t tune_tabs[3] = {
-    { "PID", { CFG_KP, CFG_TI, CFG_KD }, 3, "Tap a set to edit it; dot = in use. Save to keep.", true },
-    { "PID table", { CFG_HYST, CFG_B1, CFG_B2, CFG_B3 }, 4,
-      "Always on, by the lower of pressure and setpoint: set 1 below B1, 2 to B2, 3 to B3, 4 above. Save to keep.",
-      false, false, true },
-    { "AUTO limits", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3, "Save to keep." },
+    { "Gains", { CFG_KP, CFG_TI, CFG_KD }, 3, "Tap a set to edit it. Dot = set in use now.", true },
+    { "Set ranges", { CFG_B1, CFG_B2, CFG_B3, CFG_HYST }, 4,
+      "Each boundary splits two sets. Set 3 | 4 None: three sets.", false, false, true, false,
+      "The lower of pressure and setpoint picks the set. Hysteresis: % of the boundary." },
+    { "AUTO", { CFG_OUTMIN, CFG_KDIR, CFG_BAND }, 3,
+      "AUTO min: lowest opening AUTO commands. Band 0 = none.", false, false, false, true,
+      "SP band: the In band and Stable tolerance about the setpoint." },
 };
 
 static struct {
@@ -928,7 +938,8 @@ static struct {
     lv_obj_t *scr;
     int set;                                   // the PID set the PID tab shows, 1 to 4
     bool sets;                                 // the PID tab shows the set row (schedule on)
-    lv_obj_t *sel, *selb[4], *selr[4], *seld[4];   // the set row: track, segments, range lines, in-use dots
+    bool sel;                                  // the set row is up
+    lv_obj_t *selb[4], *selr[4], *seld[4];     // the set row: cards, range lines, in-use dots
     lv_obj_t *band_sw, *band_title, *band_text;   // Motor settings' Override tab: the Disable switch toggle
 } pg;
 
@@ -972,27 +983,42 @@ static lv_obj_t *segs_make(lv_obj_t *scr, int32_t y, int n, lv_obj_t **b, lv_eve
     return track;
 }
 
-// The set row: "Set 2" over its pressures, a dot on the set in use.
+// The set row: "Set 2" over its pressures, a dot on the set in use. Four
+// white cards of 82 px from 0.16.25 (a grey track with segments, like the
+// tab bar, to 0.16.24), the one shown with a 2 px dark outline.
+static void sel_draw(void)
+{
+    for (int i = 0; i < 4; i++) {
+        bool on = i + 1 == pg.set;
+        lv_obj_set_style_border_width(pg.selb[i], on ? 2 : 1, 0);
+        lv_obj_set_style_border_color(pg.selb[i], on ? UI_TEXT : UI_TICK, 0);
+    }
+}
+
 static void sel_make(void)
 {
-    pg.sel = segs_make(pg.scr, RY[1], 4, pg.selb, set_cb, 1);
-    int32_t iw = (343 - 8) / 4;
+    const int32_t iw = 82;
+    pg.sel = true;
     for (int i = 0; i < 4; i++) {
         char t[8];
+        lv_obj_t *b = pg.selb[i] = ui_card(pg.scr, 10 + i * 87, RY[1], iw, RH);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_bg_color(b, UI_TRACK, LV_STATE_PRESSED);
+        lv_obj_add_event_cb(b, set_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(i + 1));
         lv_snprintf(t, sizeof t, "Set %d", i + 1);
-        ui_label(pg.selb[i], 0, 2, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, t);
-        pg.selr[i] = ui_label(pg.selb[i], 0, 22, iw, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
+        ui_label(b, 0, 4, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, t);
+        pg.selr[i] = ui_label(b, 0, 24, iw, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
         // The dot 6 px before "Set n", on the middle of its capitals (0.15.20,
         // Ryan: it sat at the segment's left edge, apart from the name).
         lv_point_t sz;
         lv_text_get_size(&sz, t, &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        const int32_t cap_mid = 2 + ui_font_16.line_height - ui_font_16.base_line - 6;   // half a 12 px capital
-        pg.seld[i] = ui_card(pg.selb[i], (iw - sz.x) / 2 - 6 - 8, cap_mid - 4, 8, 8);
+        const int32_t cap_mid = 4 + ui_font_16.line_height - ui_font_16.base_line - 6;   // half a 12 px capital
+        pg.seld[i] = ui_card(b, (iw - sz.x) / 2 - 6 - 8, cap_mid - 4, 8, 8);
         lv_obj_set_style_radius(pg.seld[i], 4, 0);
         lv_obj_set_style_border_width(pg.seld[i], 0, 0);
         lv_obj_set_style_bg_color(pg.seld[i], UI_TEXT, 0);
     }
-    segs_draw(pg.selb, 4, pg.set - 1);
+    sel_draw();
 }
 
 static void sel_refresh(void)
@@ -1031,8 +1057,11 @@ static void pg_fields(void)
             pg.f[i].card = NULL;
         }
     if (pg.sel) {
-        lv_obj_delete(pg.sel);
-        pg.sel = NULL;
+        for (int i = 0; i < 4; i++) {
+            lv_obj_delete(pg.selb[i]);
+            pg.selb[i] = NULL;
+        }
+        pg.sel = false;
     }
     pg.band_sw = pg.band_title = pg.band_text = NULL;   // went with their card (the Disable switch's)
     const tab_t *t = &pg.tabs[pg.tab];
@@ -1043,11 +1072,12 @@ static void pg_fields(void)
     // it Off to 0.16.19).
     pg.sets = t->tall;
     if (pg.sets) {
+        // The set in the caption (0.16.25): "KP 2, %/mB" (78 px of caption).
         static const char *const nm[3] = { "KP", "TI", "KD" };
         sel_make();
         for (int i = 0; i < 3; i++) {
             const cfg_key_t k = pg_key(t, i);
-            lv_snprintf(cap, sizeof cap, "%s, %s", nm[i], i == 2 ? "%/mB/s" : F[k].unit);   // 78 px of caption
+            lv_snprintf(cap, sizeof cap, "%s %d, %s", nm[i], pg.set, F[k].unit);   // KD in %s/mB: % per mB/s (0.16.25)
             ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, cap, field_event, (void *)(intptr_t)k);
         }
     }
@@ -1082,18 +1112,36 @@ static void pg_fields(void)
         lv_obj_set_style_border_width(b, 2, 0);
         lv_obj_set_style_border_color(b, UI_WARN, 0);
     }
-    // Two columns; the PID table tab (brow) the hysteresis alone, then B1,
-    // B2 and B3 short-captioned in a row.
-    for (int i = 0; i < t->n && !t->tall && !t->over; i++) {
-        if (t->brow && i >= 1) {
-            static const char *const bn[3] = { "B1, mB", "B2, mB", "B3, mB" };
-            ecard_make(&pg.f[i], pg.scr, 10 + (i - 1) * 117, RY[y0 + 1], 109, bn[i - 1],
-                       field_event, (void *)(intptr_t)t->keys[i]);
-            continue;
+    // Set ranges (brow, 0.16.25): B1, B2 and B3 in a row, each captioned by
+    // the two sets it splits, then the hysteresis under B1. AUTO (arow):
+    // AUTO min and Pressure response, the setpoint band under AUTO min.
+    // Either way a grey line (aside) fills the cell right of the last card.
+    for (int i = 0; i < t->n && (t->brow || t->arow); i++) {
+        static const char *const bn[4] = { "Set 1 | 2, mB", "Set 2 | 3, mB", "Set 3 | 4, mB", "Hysteresis, %" };
+        static const char *const an[3] = { "AUTO min, %", "Pressure response", "SP band, mB" };
+        int32_t x, y, w = 109;
+        if (t->brow) {
+            x = i < 3 ? 10 + i * 117 : 10;
+            y = RY[y0 + (i < 3 ? 0 : 1)];
+        } else {
+            x = i == 1 ? 127 : 10;
+            y = RY[y0 + (i < 2 ? 0 : 1)];
+            if (i == 1) w = 226;
         }
+        ecard_make(&pg.f[i], pg.scr, x, y, w, t->brow ? bn[i] : an[i], field_event, (void *)(intptr_t)t->keys[i]);
+    }
+    if (t->aside) {
+        // Up to three 12 px lines, centred on the row.
+        lv_obj_t *l = pg.f[5].card = ui_label(pg.scr, 139, 0, 212, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, t->aside);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
+        lv_obj_set_height(l, LV_SIZE_CONTENT);
+        lv_obj_update_layout(l);
+        lv_obj_set_y(l, RY[y0 + 1] + (RH - lv_obj_get_height(l)) / 2);
+    }
+    // Two columns (Motor settings' Drive, Travel and Homing tabs).
+    for (int i = 0; i < t->n && !t->tall && !t->over && !t->brow && !t->arow; i++)
         ecard_make(&pg.f[i], pg.scr, C2X[i % 2], RY[y0 + i / 2], C2W[i % 2], caption(cap, sizeof cap, t->keys[i]),
                    field_event, (void *)(intptr_t)t->keys[i]);
-    }
 }
 
 static void segs_draw(lv_obj_t *const *b, int n, int on)
