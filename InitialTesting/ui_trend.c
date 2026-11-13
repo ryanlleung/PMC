@@ -334,12 +334,12 @@ static bool p_range(float *lo, float *hi)
 
 // The least pressure span the sparkline and Trend show (0.16.18, Ryan 12 Nov:
 // "set a limit to the trend and sparkline for pressure so that small
-// fluctuations around a setpoint doesn look huge"): 20 % of the highest
-// pressure or target shown, 1 mbar at least. A hold at 8 mbar wandering
-// 0.1 mbar either side then fills about an eighth of the height; a step
-// still fills it.
-#define P_SPAN_MIN   1.0f
-#define P_SPAN_FRAC  0.20f
+// fluctuations around a setpoint doesn look huge"): 25 % of the highest
+// pressure or target shown, 1.5 mbar at least (0.16.23, Ryan 13 Nov:
+// "increase 10 to 2.5 and the 2 and 5 to 1.5"; was 20 % and 1 mbar). So
+// 1.5 mbar at 2 and 5 mbar, 2.5 at 10, 6.25 at 25; a step still fills it.
+#define P_SPAN_MIN   1.5f
+#define P_SPAN_FRAC  0.25f
 
 static float p_span_min(float lo, float hi)
 {
@@ -376,7 +376,7 @@ static void spark_draw(lv_event_t *e)
     if (lo > 0 && hi / lo > 10) {
         s.log = true;
     } else {
-        // At least p_span_min (20 % of the pressure, 1 mbar; 0.16.18) or
+        // At least p_span_min (25 % of the pressure, 1.5 mbar; 0.16.23) or
         // 10 x the target band tall, so a steady hold looks steady.
         int32_t band = 10;
         cfg_value(CFG_FROM_LIVE, CFG_BAND, &band);
