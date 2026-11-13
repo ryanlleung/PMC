@@ -43,8 +43,9 @@
  * Reset on the screen), which clears only the latches whose cause has gone:
  *   F-1 no pressure signal, F-2 excitation outside 9.5-10.5 V or tripped,
  *   F-3 switch not found while calibrating, F-4 switch still pressed
- *   after moving off it, F-5 motion timeout; in AUTO only: F-6 no
- *   pressure response. F-1 and F-2 do not block manual moves. STOP
+ *   after moving off it; in AUTO only: F-6 no pressure response (there
+ *   is no F-5: the motion timeout is the warning W-5 from 0.16.29).
+ *   F-1 and F-2 do not block manual moves. STOP
  *   latches nothing; in AUTO it drops to MANUAL.
  * Outside AUTO, STOP stops and holds the valve without a latch (STOP event).
  *
@@ -139,7 +140,7 @@ bool valve_stop_latches(void);                   // STOP would end AUTO now (red
 int valve_reset(char *left, size_t n);
 int valve_fault_count(void);
 bool valve_fault_first(const char **tag, const char **text);   // highest priority
-bool valve_fault_is(const char *tag);            // e.g. "F-5" latched
+bool valve_fault_is(const char *tag);            // e.g. "F-6" latched
 bool valve_question(int32_t *pct10);             // switch question waiting, where
 bool valve_answer(bool set_zero, const char **why);   // VALVE SETZERO / VALVE SKIP
 

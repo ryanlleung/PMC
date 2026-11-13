@@ -77,7 +77,6 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
     if (!pv_ok)                     return "No valid pressure";
     if (!c->sp_set)                 return "Set a setpoint first";
     if (c->sp < 0 || c->sp > fs)    return "Setpoint outside the sensor range";
-    if (pv > fs)                    return "Pressure above the sensor range";
     if (!k->kdir)                   return "Pressure response not set";
     // Set 1 always; sets 2 to 4 when the schedule can pick them.
     for (int s = 1; s <= (k->sched == CTRL_SCHED_OFF ? 1 : ctrl_sets(k)); s++) {

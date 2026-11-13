@@ -114,12 +114,14 @@ void valve_event(const char *tag, const char *fmt, ...)
 /* --------------------------------------------------------------------------
  * Faults, in the simulator's FAULT_ORDER (highest priority first).
  * ------------------------------------------------------------------------ */
-typedef enum { F01, F02, F03, F04, F05, F06, F_N } fault_t;   // priority order (Ryan, 22 Oct)
+// F-5 (motion timeout) is the warning W-5 from 0.16.29: the numbers of the
+// others stay.
+typedef enum { F01, F02, F03, F04, F06, F_N } fault_t;   // priority order (Ryan, 22 Oct)
 
-static const char *const fault_tag[F_N]   = { "F-1", "F-2", "F-3", "F-4", "F-5", "F-6" };
+static const char *const fault_tag[F_N]   = { "F-1", "F-2", "F-3", "F-4", "F-6" };
 static const char *const fault_short[F_N] = {
     "No pressure signal", "Excitation out of window", "Limit not found while calibrating",
-    "Limit pressed when it should be free", "Motion timeout", "No pressure response" };
+    "Limit pressed when it should be free", "No pressure response" };
 
 static bool latched[F_N];
 static uint32_t latched_ms[F_N];    // when each latched
@@ -180,8 +182,11 @@ static bool sensor_fault(fault_t f) { return f == F01 || f == F02; }
 
 static bool is_auto(void) { return mode == VALVE_AUTO; }
 
-// The warning that ended AUTO or needs a look (W-2, W-4, W-5; W-6 removed in 0.15.11), shown on
-// the status strip until OK, the next Start AUTO or homing.
+// The warning that ended AUTO or needs a look (W-2, W-4, W-5; W-6 removed in
+// 0.15.11), shown on the status strip until OK, the next Start AUTO or
+// homing. W-5 is the move timeout from 0.16.29 (F-5 before; the pressure
+// above the sensor range to 0.16.28, removed: a 15 psia sensor on a pumped
+// line cannot reach it).
 static char warn[72];
 static uint32_t sw_far_ms; // W-4: when the switch was first read pressed away from the seat, 0 = not
 static bool sw_far_said;  // W-4 raised for this occurrence
@@ -195,7 +200,6 @@ static bool sw_far_said;  // W-4 raised for this occurrence
 // (stepper3_limit_band) only while homed. RAM only, off at power-up. Its
 // edges are saved settings from 0.16.21 (valve_pass_lo, valve_pass_hi).
 static bool band_req;
-static int over_n;        // W-5: consecutive reads above the sensor range in AUTO
 
 // Shut down (valve.h): the move to 0 % running, and where it started.
 #define OFF_WHY  "Controller is off: turn it on at the screen"
@@ -596,7 +600,30 @@ void valve_init(void)
     update_lock();
 }
 
-// A move has ended since the last look: why (F-5, homing, the limit).
+static void auto_end(const char *strip);
+
+// W-5 (F-5 to 0.16.28; Ryan 13 Nov: "make it a warning instead, use faults
+// for stuff thats is verifiably a fault"): a move ran past its time and
+// stepper3_poll stopped it. The stepper is open loop, so this is the
+// firmware's own step timing, not a stalled motor. Nothing latches: AUTO,
+// a homing or a shut down ends, the strip says so until OK, and the next
+// move is allowed.
+static void move_timeout(void)
+{
+    char pc[16];
+    int32_t pos = stepper3_position();
+    ev("W-5", "Move timed out at count %ld (%s %%), valve stopped", (long)pos, pct_text(pc, sizeof pc, pos));
+    if (is_auto()) {
+        auto_end("W-5 Move timed out: switched to MANUAL");
+        ev("MODE", "Manual after W-5, valve idle at %s %%", pct_text(pc, sizeof pc, pos));
+        return;
+    }
+    cal_abort("W-5 move timed out");
+    shut_cancel("W-5 move timed out", NULL);
+    lv_snprintf(warn, sizeof warn, "W-5 Move timed out, valve stopped");
+}
+
+// A move has ended since the last look: why (W-5, homing, the limit).
 static void seq_check(void)
 {
     if (stepper3_take_reversed())
@@ -612,7 +639,7 @@ static void seq_check(void)
         seq_seen = seq;
         stepper3_stop_t why = stepper3_last_stop();
         if (why == STEPPER3_STOP_TIMEOUT)
-            raise(F05, false, "Motion timeout at count %ld", (long)stepper3_position());
+            move_timeout();
         else if (why == STEPPER3_STOP_REVERSED || why == STEPPER3_STOP_STALL)
             ;   // handled above, from the latches
         else if (mode == VALVE_CALIBRATING && cal_moving)
@@ -745,24 +772,9 @@ static void far_check(void)
     }
 }
 
-// W-5, once a second; two reads in a row, so one glitch does not end AUTO.
-static void warn_checks(void)
-{
-    char pc[16], v[16];
-    if (!is_auto() || !pv_ok || pv_mbar <= range_mbar()) {
-        over_n = 0;
-    } else if (++over_n >= 2) {
-        over_n = 0;
-        auto_end("W-5 Pressure above the sensor range: switched to MANUAL");
-        ev("W-5", "Pressure %s mbar above the sensor range (%s mbar), AUTO ended, MANUAL, valve idle",
-           mbar_text(pc, sizeof pc, pv_mbar, 1), mbar_text(v, sizeof v, range_mbar(), 1));
-    }
-}
-
 // Once a second, after the faults of this read.
 static void auto_step(void)
 {
-    warn_checks();
     ctrl_track(&ctl, stepper3_position(), calibrated && mode != VALVE_CALIBRATING);
     if (mode != VALVE_AUTO || !pv_ok) {
         ctrl_idle(&ctl);
@@ -847,7 +859,6 @@ bool valve_start_auto(const char **why)
     ctrl_start(&ctl, &k, lv_tick_get(), pv_mbar, now);
     mode = VALVE_AUTO;
     warn[0] = 0;
-    over_n = 0;
     update_lock();
     char a[16], p[16];
     char st[16] = "";

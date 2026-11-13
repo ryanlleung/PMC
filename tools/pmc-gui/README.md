@@ -25,7 +25,7 @@ Screenshots on the simulator (GUI build 425, firmware 0.16.9): [Live, during an 
 
 The tabs:
 
-- **Live**: mode (AUTO / MANUAL), setpoint, Go to %; the PID gains in use (`PID?`) and Set and save (`PID SET`, firmware 0.15.8 and later); the logger; the Lake Shore 336 connection; the activity log.
+- **Live**: mode (AUTO / MANUAL), setpoint, Go to %; the PID gains in use (`PIDS?`) and Set and save (`PIDS SET` on the set in use, firmware 0.16.14 and later); the logger; the Lake Shore 336 connection; the activity log.
 - **Gains**: the autotune for the board's PID table, from `tools/gain-schedule/pmc_autotune.py` (its README has the rules and numbers). Firmware 0.15.15 and later has its own gain schedule, the PID table (three PID sets, four from 0.16.14, Menu > PID tuning > PID table); while it is on, the PID box line names the set in use. The autotune finds the sets by experiment, as an industrial autotuner does.
   - Before it starts it checks that the valve is homed, there is no fault and Remote control is On. Start it with AUTO holding a mid setpoint. Setpoints are 2 4 8 12 16 24 48 mbar unless changed (1 mbar sits below the valve's knee and its gains are far too high for the setpoints above it). They run in the order typed, so "24 16 12 8 4 2" tests on the way down. Coming down from a high flow the heat exchanger starts cold, so below about 8 mbar the pressure is steeper with valve and answers faster for the first 10 to 20 min; a run down may find a lower KP and shorter TI there. Learned gains are kept per setpoint, not per direction: a run down replaces the run up's rows (each run's own results.csv keeps them). Then, at each setpoint in turn:
     1. AUTO at the setpoint until it holds (10 minutes at most): the last minute's mean within 5 % of it, the last 30 s within 2.5 % and level, with the First gains at the first setpoint (KP 0.10, TI 0.40 unless changed) and the gains found at the setpoint before for each later one. The valve position it holds at is x0.
@@ -94,6 +94,6 @@ The 336 can also be connected from the page (Live tab, Lake Shore 336: its IP, t
 - The board takes one text-port connection at a time, and a new one replaces the old. Close PuTTY first. The 336 logger can run alongside: it is a separate connection to a separate instrument.
 - STOP on the page and on the screen both end AUTO.
 - A fault (F-) ends an autotune run, since the board refuses AUTO and valve moves until it is reset: reset it on the Board tab and start the run again with the setpoints left. A warning that drops the board to MANUAL (W-2, W-4, W-5) skips that setpoint only.
-- Every Set and save that changes a gain is written to flash, and so is every PID SET the autotune sends (it sends one when the gains differ). Set gains when they change, not in a loop.
+- Every Set and save that changes a gain is written to flash, and so is every PIDS SET the autotune sends (it sends one when the gains differ). Set gains when they change, not in a loop.
 
 To try it without the board, run `node simulator/tests/tcp-board.js` and use `127.0.0.1` as the address. Its flow line is the bench cryostat fitted to the bench logs, so an autotune there sees roughly the bench's gains, periods, creep and needle stick; a speed above 1 (the second argument) shortens the cryostat's times but not the GUI's 1 s samples, so run an autotune at speed 1.

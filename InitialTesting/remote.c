@@ -13,9 +13,6 @@
 #include "valve.h"
 #include "remote.h"
 #include "cfg.h"
-#if PMC_LINK_ETHERNET
-#include "ethlink.h"
-#endif
 
 /* --------------------------------------------------------------------------
  * The reply line: query replies and at most one refusal, joined by ';'.
@@ -66,7 +63,8 @@ static void refuse(int err, const char *fmt, ...)
  *   104 EVENT? on its own line    205 no valid pressure
  *                                 206 set a setpoint first
  *                                 207 setpoint outside the sensor range
- *                                 208 pressure above the sensor range
+ *                                 208 not used (pressure above the sensor
+ *                                     range, to 0.16.28)
  *                                 209 control settings not set
  *                                 210 not reset, cause still present
  *                                 211 read only over the network
@@ -85,7 +83,6 @@ static const struct { const char *head; int num; const char *text; } why_codes[]
     { "No valid pressure", 205, "No valid pressure" }, { "No pressure", 205, "No valid pressure" },
     { "Set a setpoint", 206, NULL },
     { "Setpoint outside", 207, NULL },
-    { "Pressure above", 208, "Pressure above the sensor range" },
     { "Pressure response", 209, "Control settings not set" },
     { "Tuning not set", 209, "Control settings not set" },
     { "Controller is off", 213, "Controller is off" },
@@ -125,7 +122,7 @@ static void alarm_query(void)
     char a[200];
     size_t n = 0;
     valve_fault_t f;
-    int32_t at, mc;
+    int32_t at;
     a[0] = '\0';
 #define PART(tag, ok, text) do { \
         char t_[80]; lv_strlcpy(t_, text, sizeof t_); \
@@ -146,8 +143,6 @@ static void alarm_query(void)
         tag[k] = '\0';
         PART(tag, 1, w[k] ? w + k + 1 : "");
     }
-    if (sense_hot(&mc) && n < sizeof a)
-        PART("W-3", 0, "Controller hot");
 #undef PART
     if (n)
         reply("ALARM %s", a);
@@ -158,19 +153,6 @@ static void alarm_query(void)
 static void idn_query(void)
 {
     reply("MercShore,iPC,%s,%s", sysinfo_chip_id(), PMC_FW_VERSION);
-}
-
-static void netw_query(void)
-{
-#if PMC_LINK_ETHERNET
-    if (ethlink_ip()[0])
-        reply("NETWORK STATIC,%s,%s,%s", ethlink_ip(), ethlink_mask(),
-              ethlink_mac()[0] ? ethlink_mac() : "NONE");
-    else
-        reply("NETWORK NONE");
-#else
-    reply("NETWORK NONE");   // the USB build: no Ethernet
-#endif
 }
 
 // One query; false if it is not one of the set.
@@ -206,8 +188,6 @@ static bool query(const char *c)
             reply("BAROMETER NONE");
     } else if (strcmp(c, "ALARM?") == 0) {
         alarm_query();
-    } else if (strcmp(c, "NETWORK?") == 0) {
-        netw_query();
     } else if (strcmp(c, "TIME?") == 0) {
         if (rtclock_valid())
             reply("TIME %s", rtclock_iso());
@@ -215,13 +195,6 @@ static bool query(const char *c)
             reply("TIME NONE");
     } else if (strcmp(c, "*IDN?") == 0) {
         idn_query();
-    } else if (strcmp(c, "PID?") == 0) {
-        // The set in use (0.15.15; the PID table always on from 0.16.20).
-        char kp[16], ti[16];
-        const int n = valve_pid_set();
-        reply("PID %s,%s,%s", fixed_fmt(kp, sizeof kp, cfg_tune(cfg_pid_key(n, 0)), 2),
-              fixed_fmt(ti, sizeof ti, cfg_tune(cfg_pid_key(n, 1)), 2),
-              fixed_fmt(v, sizeof v, cfg_tune(cfg_pid_key(n, 2)), 2));
     } else if (strcmp(c, "PIDS?") == 0) {
         // The set in use, then sets 1 to 4 (set 4 from 0.16.14).
         char g[4][3][16];
@@ -255,45 +228,42 @@ static bool number(const char *s, int dec, int64_t *v)
     return *s == '\0';
 }
 
-// PID SET <kp>,<ti>[,<kd>] (0.15.8, for a PC gain schedule): what the PID
+// PIDS SET <set>,<kp>,<ti>[,<kd>] (for a PC gain schedule): what the PID
 // tab's Save does, so it works in AUTO and the loop takes the gains at its
 // next step (cfg_save_with, tuning only). KP %/mB, TI min, KD %/(mB/s), 2 dp.
 // Each change is a settings save in flash: unchanged gains write nothing.
-// From 0.15.15 PID SET sets the set in use and PIDS SET <set>,... any set.
-static void pid_set(const char *c, bool pick)
+// PID? and PID SET (the set in use) were removed in 0.16.29.
+static void pid_set(const char *c)
 {
     static const char *const nm[3] = { "KP", "TI", "KD" };
-    const char *form = pick ? "Expected: PIDS SET <set>,<kp>,<ti>[,<kd>]" : "Expected: PID SET <kp>,<ti>[,<kd>]";
+    const char *form = "Expected: PIDS SET <set>,<kp>,<ti>[,<kd>]";
     int32_t v[CFG_N] = { 0 };
     bool on[CFG_N] = { false }, same = true;
     char buf[LINK_LINE_MAX + 1], a[16], b[16];
-    int n = 0, set = valve_pid_set();
+    int n = 0, set;
     lv_strlcpy(buf, c, sizeof buf);
     char *p = buf, *e;
-    if (pick) {
-        int64_t x;
-        e = strchr(p, ',');
-        if (!e) {
-            refuse(101, form);
-            return;
-        }
-        *e = '\0';
-        if (!number(p, 0, &x)) {
-            refuse(101, form);
-            return;
-        }
-        if (x < 1 || x > 4) {
-            refuse(102, "Outside 1 to 4 for the set");
-            return;
-        }
-        set = (int)x;
-        p = e + 1;
+    int64_t x;
+    e = strchr(p, ',');
+    if (!e) {
+        refuse(101, form);
+        return;
     }
+    *e = '\0';
+    if (!number(p, 0, &x)) {
+        refuse(101, form);
+        return;
+    }
+    if (x < 1 || x > 4) {
+        refuse(102, "Outside 1 to 4 for the set");
+        return;
+    }
+    set = (int)x;
+    p = e + 1;
     for (; n <= 3; p = e + 1, n++) {
         e = strchr(p, ',');
         if (e)
             *e = '\0';
-        int64_t x;
         if (n == 3 || !number(p, 2, &x)) {
             refuse(101, form);
             return;
@@ -438,10 +408,8 @@ static bool set(const char *c)
             valve_event("OK", "Warning OK (link): %s", w);
             valve_warning_clear();
         }
-    } else if ((v_text = after(c, "PID SET")) != NULL) {
-        pid_set(v_text, false);
     } else if ((v_text = after(c, "PIDS SET")) != NULL) {
-        pid_set(v_text, true);
+        pid_set(v_text);
     } else if ((v_text = after(c, "SCHED SET")) != NULL) {
         sched_set(v_text);
     } else if ((v_text = after(c, "TIME SET")) != NULL) {

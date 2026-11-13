@@ -681,7 +681,7 @@ static void home_refresh(void)
     show_if(start_btn, !auto_on);
     ui_btn_enable(start_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
 
-    vt_fault = valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") || valve_fault_is("F-6");
+    vt_fault = valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-6");
     home_fast();
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
     // Where the valve is going, greyed when not editable; "----" while

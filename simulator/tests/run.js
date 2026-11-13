@@ -314,11 +314,41 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('W-2 to MANUAL', /W-2/.test(ev) && /^MODE MANUAL;ALARM W-2,1,/.test(st), ev + st);
   shot(s, 'w02');
 }
-{ // W-3: controller hot.
+{ // W-5 (0.16.29; F-5 before): a move that runs past its time is stopped and warned, nothing latches.
+  const s = homed(load());
+  s.cmd('VALVE SET 30', 60000);
+  s.set(24, 1);                       // the step interrupt does not run
+  s.cmd('VALVE SET 31', 1000); s.run(20000);
+  const ev = events(s, 5), st = s.cmd('MODE?;VALVE MOVING?;ALARM?');
+  check('W-5 in MANUAL: stopped, warned, no fault', /W-5,Move timed out at count/.test(ev) && !/F-5/.test(ev) &&
+    /^MODE MANUAL;VALVE MOVING 0;ALARM W-5,1,Move timed out, valve stopped\r\n$/.test(st), ev + st);
+  shot(s, 'w05');
+  s.set(24, 0);
+  check('W-5: the next move runs, no reset needed', s.cmd('VALVE SET 31', 60000) === '' && s.cmd('VALVE?') === 'VALVE 31.00 %\r\n', s.cmd('VALVE?'));
+  s.cmd('ALARM OK');
+  check('W-5: OK clears it', s.cmd('ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
+  s.cmd('SETPOINT 5;MODE AUTO', 1000); s.run(5000);
+  s.set(24, 1); s.run(120000);
+  const ev2 = events(s, 6), st2 = s.cmd('MODE?;ALARM?');
+  check('W-5 in AUTO: MANUAL, valve idle', /W-5,Move timed out/.test(ev2) && /MODE,Manual after W-5/.test(ev2) &&
+    /^MODE MANUAL;ALARM W-5,1,Move timed out: switched to MANUAL\r\n$/.test(st2), ev2 + st2);
+  s.set(24, 0);
+  check('W-5 after AUTO: Start AUTO again is allowed', s.cmd('MODE AUTO;MODE?') === 'MODE AUTO\r\n', s.cmd('MODE?'));
+}
+{ // W-5 while homing: the homing ends, not homed; homing again works.
+  const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
+  s.set(24, 1);
+  s.home(200000);
+  const ev = events(s, 6), st = s.cmd('MODE?;ALARM?');
+  check('W-5 while homing: homing aborted, NOT HOMED, no fault', /W-5,Move timed out/.test(ev) && /REF,Homing aborted \(W-5 move timed out\)/.test(ev) &&
+    /^MODE NOT HOMED;ALARM W-5,1,Move timed out, valve stopped\r\n$/.test(st), ev + st);
+  s.set(24, 0);
+  s.home();
+  check('W-5 while homing: homes at the next try', /Homed in/.test(events(s, 10)) && s.cmd('MODE?') === 'MODE MANUAL\r\n', events(s, 10));
+}
+{ // W-3 (controller hot) was removed in 0.16.29: a hot chip is no alarm.
   const s = homed(load()); s.set(13, 57); s.run(3000);
-  const ev = events(s, 3);
-  check('W-3 controller hot', /W-3,Controller hot/.test(ev) && /^ALARM W-3,0,Controller hot\r\n$/.test(s.cmd('ALARM?')), ev);
-  shot(s, 'w03');
+  check('no W-3 on a hot chip', !/W-3/.test(events(s, 5)) && s.cmd('ALARM?') === 'ALARM NONE\r\n', events(s, 5) + s.cmd('ALARM?'));
 }
 { // Settings and the saved position survive a power cycle (serial flash).
   const s = homed(load());
@@ -377,7 +407,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
   // R1, R2, R5: no echo; a query gives one line starting with its own words.
-  const qs = ['PRESSURE?', 'SETPOINT?', 'MODE?', 'VALVE?', 'VALVE MOVING?', 'BAROMETER?', 'ALARM?', 'NETWORK?', 'TIME?'];
+  const qs = ['PRESSURE?', 'SETPOINT?', 'MODE?', 'VALVE?', 'VALVE MOVING?', 'BAROMETER?', 'ALARM?', 'TIME?'];
   const bad = qs.map(q => [q, one(q)]).filter(([q, r]) => !(r.startsWith(q.slice(0, -1) + ' ') && /^[^\r\n]*\r\n$/.test(r)))
     .map(([q, r]) => q + ' -> ' + JSON.stringify(r));
   check('queries: one line, own words first', bad.length === 0, bad.join('\n     '));
@@ -390,7 +420,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('SETPOINT 5.04;SETPOINT? gives 5.0', one('SETPOINT 5.04;SETPOINT?') === 'SETPOINT 5.0 mbar\r\n', one('SETPOINT?'));
   const poll = one('PRESSURE?;SETPOINT?;MODE?;VALVE?;ALARM?');
   check('chained poll', /^PRESSURE \d+\.\d{3} mbar;SETPOINT 5\.0 mbar;MODE MANUAL;VALVE 30\.00 %;ALARM NONE\r\n$/.test(poll), poll);
-  check('BAROMETER? and NETWORK? in the simulator', one('BAROMETER?;NETWORK?') === 'BAROMETER 1013.20 mbar;NETWORK NONE\r\n', one('BAROMETER?;NETWORK?'));
+  check('BAROMETER? in the simulator', one('BAROMETER?') === 'BAROMETER 1013.20 mbar\r\n', one('BAROMETER?'));
+  // NETWORK?, PID? and PID SET were removed in 0.16.29 (PIDS? and PIDS SET stay).
+  const gone = ['NETWORK?', 'PID?', 'PID SET 3,0.5'].map(c => [c, one(c)]).filter(([, r]) => !/^ERR 100 /.test(r)).map(([c, r]) => c + ' -> ' + JSON.stringify(r));
+  check('NETWORK?, PID? and PID SET are unknown commands', gone.length === 0, gone.join('\n     '));
   check('*IDN?', /^MercShore,iPC,[0-9A-F]{24},\d+\.\d+\.\d+\r\n$/.test(one('*IDN?')), one('*IDN?'));
   // EVENT?: the count line, then that many lines, newest first.
   const ev = s.cmd('EVENT? 3', 2000).split('\r\n');
@@ -445,8 +478,6 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'system');
   s.tap(357, 72);
   check('switch Off again: refused', s.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n');
-  check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
-    s.cmd('PID?') === 'PID 0.06,0.60,0.00\r\n', s.cmd('PID?'));
   check('switch Off: PIDS SET and SCHED SET refused, PIDS? and SCHED? answer',
     s.cmd('PIDS SET 2,3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('SCHED SET PV,6,10,14,15') === 'ERR 211 Read only over the network\r\n' &&
@@ -647,28 +678,29 @@ let parkedFlash;
   const s = homed(load());
   check('at 0 %: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE 0.00 %\r\n', s.why() + s.cmd('MODE?;VALVE?'));
 }
-{ // PID? and PID SET (0.15.8): the PID tab's Save over the text port, also in AUTO.
+{ // PIDS SET on set 1 (PID SET of 0.15.8, removed in 0.16.29): the PID tab's Save over the text port, also in AUTO.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
-  check('PID? defaults', one('PID?') === 'PID 0.06,0.60,0.00\r\n', one('PID?'));
-  check('PID SET kp,ti silent, PID? confirms', one('PID SET 3.5,0.5') === '' && one('PID?') === 'PID 3.50,0.50,0.00\r\n', one('PID?'));
-  check('PID SET kp,ti,kd', one('PID SET 3.5, 0.5, 1.25;PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
-  check('PID SET saves the settings', s.setting(CFG.KP) === 350 && s.setting(CFG.TI) === 50 && s.setting(CFG.KD) === 125,
+  const set1 = () => one('PIDS?').trim().split(',').slice(1, 4).join();
+  check('PIDS? set 1 defaults', set1() === '0.06,0.60,0.00', one('PIDS?'));
+  check('PIDS SET kp,ti silent, PIDS? confirms', one('PIDS SET 1,3.5,0.5') === '' && set1() === '3.50,0.50,0.00', one('PIDS?'));
+  check('PIDS SET kp,ti,kd', one('PIDS SET 1, 3.5, 0.5, 1.25') === '' && set1() === '3.50,0.50,1.25', one('PIDS?'));
+  check('PIDS SET saves the settings', s.setting(CFG.KP) === 350 && s.setting(CFG.TI) === 50 && s.setting(CFG.KD) === 125,
     [s.setting(CFG.KP), s.setting(CFG.TI), s.setting(CFG.KD)].join());
-  const bad = [['PID SET', 101], ['PID SET 3', 101], ['PID SET 3,0.5,1,2', 101], ['PID SET x,1', 101], ['PID SET 3,,1', 101],
-    ['PID SET 0,0.5', 102], ['PID SET 101,0.5', 102], ['PID SET 3,-1', 102], ['PID SET 3,0.5,101', 102]];
+  const bad = [['PIDS SET 1', 101], ['PIDS SET 1,3', 101], ['PIDS SET 1,3,0.5,1,2', 101], ['PIDS SET 1,x,1', 101], ['PIDS SET 1,3,,1', 101],
+    ['PIDS SET 1,0,0.5', 102], ['PIDS SET 1,101,0.5', 102], ['PIDS SET 1,3,-1', 102], ['PIDS SET 1,3,0.5,101', 102]];
   const wrong = bad.map(([c, n]) => [c, n, one(c)]).filter(([c, n, r]) => !new RegExp('^ERR ' + n + ' [A-Z][^;\\r\\n]*\\r\\n$').test(r))
     .map(([c, n, r]) => c + ' -> ' + JSON.stringify(r) + ' (want ' + n + ')');
-  check('PID SET refusals', wrong.length === 0, wrong.join('\n     '));
-  check('PID SET range text', one('PID SET 0,0.5') === 'ERR 102 Outside 0.01 to 100.00 for KP\r\n', one('PID SET 0,0.5'));
-  check('refused PID SET changes nothing', one('PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
+  check('PIDS SET set 1 refusals', wrong.length === 0, wrong.join('\n     '));
+  check('PIDS SET range text', one('PIDS SET 1,0,0.5') === 'ERR 102 Outside 0.01 to 100.00 for KP\r\n', one('PIDS SET 1,0,0.5'));
+  check('refused PIDS SET changes nothing', set1() === '3.50,0.50,1.25', one('PIDS?'));
   s.cmd('VALVE SET 30', 60000);
   s.cmd('SETPOINT 3;MODE AUTO', 20000);
-  check('PID SET in AUTO, AUTO kept', one('PID SET 2,0.4;PID?;MODE?') === 'PID 2.00,0.40,1.25;MODE AUTO\r\n', one('PID?;MODE?'));
-  check('PID SET in AUTO saves', s.setting(CFG.KP) === 200 && s.setting(CFG.TI) === 40, s.setting(CFG.KP) + ' ' + s.setting(CFG.TI));
+  check('PIDS SET in AUTO, AUTO kept', one('PIDS SET 1,2,0.4;MODE?') === 'MODE AUTO\r\n' && set1() === '2.00,0.40,1.25', one('PIDS?;MODE?'));
+  check('PIDS SET in AUTO saves', s.setting(CFG.KP) === 200 && s.setting(CFG.TI) === 40, s.setting(CFG.KP) + ' ' + s.setting(CFG.TI));
 }
 { // Gain schedule (0.15.15, Ryan 5 Nov "build like industry ones"): PIDS?, PIDS SET, SCHED?, SCHED SET,
-  // PID? and PID SET on the set in use, and AUTO switching sets on the pressure with hysteresis.
+  // and AUTO switching sets on the pressure with hysteresis.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
   check('PIDS? defaults: the bench table (0.16.18)', one('PIDS?') === 'PIDS 1,0.06,0.60,0.00,0.12,0.82,0.00,0.80,0.94,0.00,0.40,0.25,0.00\r\n',
@@ -698,8 +730,7 @@ let parkedFlash;
     s.setting(CFG.SCHED) === 2 && s.setting(CFG.B1) === 60 && s.setting(CFG.B2) === 200 && s.setting(CFG.B3) === 0, one('SCHED?'));
   // The sim plant runs about 0.8 to 12.5 mbar (20 to 100 % open), so the
   // boundaries here are 3, 6 and 8 mbar with 10 %: up at 3.3, 6.6 and 8.8,
-  // down at 7.2, 5.4 and 2.7. Sim-plant gains, a different set each so PID?
-  // shows which is in use.
+  // down at 7.2, 5.4 and 2.7. Sim-plant gains, a different set each.
   one('SCHED SET PV,3,6,8,10;PIDS SET 1,6,0.25;PIDS SET 2,5,0.25,0');
   one('PIDS SET 3,4.5,0.25,0;PIDS SET 4,4,0.25,0');
   // The set changes so far, oldest first (EVENT? lists the newest first).
@@ -710,14 +741,13 @@ let parkedFlash;
   check('AUTO starts on the set for the lower of pressure and setpoint (3.8 mbar: set 2)', /Auto at setpoint 10\.0 mbar, valve [\d.]+ %, PID set 2/.test(events(s, 3)),
     events(s, 3));
   s.run(600000);
-  check('PV schedule: set 4 at 10 mbar', /^PIDS 4,/.test(one('PIDS?')) && one('PID?') === 'PID 4.00,0.25,0.00\r\n',
-    one('PRESSURE?;PIDS?;PID?'));
+  check('PV schedule: set 4 at 10 mbar', /^PIDS 4,/.test(one('PIDS?')), one('PRESSURE?;PIDS?'));
   const first = sws();
   check('then 2 to 3 over 6.6 and 3 to 4 over 8.8 mbar (B x 1.1), once each', first.length === 2 && first[0][0] === 2 &&
     first[0][1] === 3 && first[0][2] >= 6.6 && first[0][2] < 7.5 && first[1][0] === 3 && first[1][1] === 4 && first[1][2] >= 8.8 &&
     first[1][2] < 9.7, JSON.stringify(first));
-  // PID SET edits the set in use.
-  check('PID SET edits the set in use', one('PID SET 3.8,0.25;PID?') === 'PID 3.80,0.25,0.00\r\n' && s.setting(CFG.KP4) === 380 &&
+  // PIDS SET on the set in use, in AUTO.
+  check('PIDS SET edits the set in use', one('PIDS SET 4,3.8,0.25') === '' && /^PIDS 4,.*,3\.80,0\.25,0\.00\r\n$/.test(one('PIDS?')) && s.setting(CFG.KP4) === 380 &&
     s.setting(CFG.KP3) === 450 && s.setting(CFG.KP) === 600, [s.setting(CFG.KP4), s.setting(CFG.KP3), s.setting(CFG.KP)].join());
   s.cmd('SETPOINT 2', 1000);
   s.run(900000);
@@ -727,7 +757,7 @@ let parkedFlash;
   check('10 -> 2: set 4 to 1 at once, still at 10 mbar (the setpoint\'s set), no other change', sw.length === 1 && sw[0][0] === 4 &&
     sw[0][1] === 1 && sw[0][2] > 9, JSON.stringify(sw));
   check('10 -> 2: AUTO kept, near 2 mbar, set 1', one('MODE?') === 'MODE AUTO\r\n' && Math.abs(parseFloat(one('PRESSURE?').slice(9)) - 2) < 0.3 &&
-    /^PIDS 1,/.test(one('PIDS?')) && one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('MODE?;PRESSURE?;PIDS?;PID?'));
+    /^PIDS 1,6\.00,0\.25,0\.00,/.test(one('PIDS?')), one('MODE?;PRESSURE?;PIDS?'));
   s.cmd('SETPOINT 10', 1000);
   s.run(900000);
   const up = sws().slice(3);

@@ -86,7 +86,7 @@ static uint32_t v_fp;                   // current rate, steps/s * 256
 static volatile uint32_t v_run_fp, v_start_fp;
 static uint32_t n_acc;                  // steps spent accelerating
 static uint32_t move_rate;              // run rate of this move, steps/s
-static uint32_t deadline_ms;            // F-5: lv_tick_get() past this = timeout
+static uint32_t deadline_ms;            // W-5: lv_tick_get() past this = timeout
 static volatile uint32_t moves_ended;   // counts moves ended, for stepper3_move_seq()
 static int32_t move_from;                // last move: start position and times
 static uint32_t move_t0;
@@ -399,7 +399,7 @@ static void step_irq_release(uint32_t pm) { __asm volatile ("msr primask, %0" ::
 
 static int32_t abs32(int32_t v) { return v < 0 ? -v : v; }
 
-// F-5: the move should be done within |distance| / rate, plus the ramps
+// W-5 (F-5 to 0.16.28): the move should be done within |distance| / rate, plus the ramps
 // (counted twice over, for a turn round), plus 2 s.
 static void set_deadline(void)
 {
@@ -532,7 +532,7 @@ void stepper3_poll(void)
     if (run_state != ST_MOVING || (int32_t)(lv_tick_get() - deadline_ms) <= 0)
         return;
     stepper3_stop();
-    last_stop = STEPPER3_STOP_TIMEOUT;   // valve.c latches F-5 and logs it
+    last_stop = STEPPER3_STOP_TIMEOUT;   // valve.c logs W-5 (no latch)
 }
 
 // During a ramped stop (MOT STOP RAMP, a hold released, Switch to MANUAL)
@@ -748,7 +748,7 @@ const char *stepper3_stop_name(stepper3_stop_t s)
     case STEPPER3_STOP_DONE:  return "done";
     case STEPPER3_STOP_CMD:   return "stopped";
     case STEPPER3_STOP_LIMIT: return "LIMIT";
-    case STEPPER3_STOP_TIMEOUT: return "F-5 timeout";
+    case STEPPER3_STOP_TIMEOUT: return "timeout";
     case STEPPER3_STOP_REVERSED: return "switch while opening";
     case STEPPER3_STOP_STALL: return "main loop stalled";
     default:                  return "none";

@@ -212,9 +212,13 @@ ADC_TypeDef *sim_adc1_access(void)
 // One simulated millisecond of TIM7 (1 MHz count). Update events run the
 // step interrupt; EGR UG reloads at once; ARR takes effect at the next
 // update when ARPE is set.
+static bool tim7_lost;   // knob 24: the step interrupt does not run (a move then overruns its time, W-5)
+
 static void tim7_ms(void)
 {
     uint32_t left = 1000;
+    if (tim7_lost)
+        return;
     for (int guard = 0; guard < 2000; guard++) {
         if (sim_tim7.EGR & TIM_EGR_UG) {
             sim_tim7.EGR = 0;
@@ -323,6 +327,7 @@ EXPORT(sim_get) double sim_get(int id)
     case 21: return B.baro_err;
     case 22: return B.plant;
     case 23: return B.hx;
+    case 24: return tim7_lost;
     case 30: return stepper3_position();
     case 31: return valve_pct_milli();
     default: return 0;
@@ -348,6 +353,7 @@ EXPORT(sim_set) void sim_set(int id, double v)
     case 21: B.baro_err = v; break;
     case 22: bench_plant((int)v); break;
     case 23: bench_set_hx(v); break;
+    case 24: tim7_lost = v != 0; break;
     case 40: bench_set_pressure(v); break;
     case 41: B.T = v; break;
     case 42: B.mL = v; break;

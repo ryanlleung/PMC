@@ -35,7 +35,7 @@ The stand-ins are in `wasm/`: `include/` (register structs for GPIO, RCC, TIM7, 
 
 ## Not simulated
 
-- F-5 (motion timeout): the step interrupt is never late here, so a move cannot overrun its time.
+- W-5 (move timed out; F-5 to 0.16.28) cannot happen by itself: the step interrupt is never late here. The tests provoke it with bench value 24 (`sim_set(24, 1)`: the step interrupt does not run), which the page has no control for.
 - Ethernet / Modbus TCP (the build is the USB one, as `pmc_config.h`), the mikroBootloader, the watchdog's timing (an LVGL assert stops the page and restarts the firmware with reset reason watchdog).
 - Real speed: redraw times are the browser's, not the STM32's. `PERF?` is no longer a text-port command (ERR 100 with Remote control On). The simulator has the board's 64 KB LVGL heap from 0.16.28 (64 + 24 KB, the removed USB build's, before).
 - The Druck and Power Monitor are models. The bench cryostat is fitted to two days of one bench's logs: another cryostat, or this one on another day (heater power, helium level), will differ, and its noise and wander are only roughly the bench's.

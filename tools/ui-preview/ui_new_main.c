@@ -116,13 +116,13 @@ bool valve_motion_blocked(void) { return v_f12 || v_f16; }
 bool valve_fault_first(const char **tag, const char **text)
 {
     if (v_f01) { *tag = "F-1"; *text = "No pressure signal"; return true; }
-    if (v_f12) { *tag = "F-5"; *text = "Motion timeout"; return true; }
+    if (v_f12) { *tag = "F-4"; *text = "Limit pressed when it should be free"; return true; }
     if (v_f16) { *tag = "F-6"; *text = "No pressure response"; return true; }
     return false;
 }
 bool valve_fault_is(const char *tag)
 {
-    return (v_f01 && !strcmp(tag, "F-1")) || (v_f12 && !strcmp(tag, "F-5")) || (v_f16 && !strcmp(tag, "F-6"));
+    return (v_f01 && !strcmp(tag, "F-1")) || (v_f12 && !strcmp(tag, "F-4")) || (v_f16 && !strcmp(tag, "F-6"));
 }
 int valve_reset(char *left, size_t n) { int a = valve_fault_count(); v_f12 = v_f16 = false; if (n) strcpy(left, v_f01 ? "F-1" : ""); return a; }
 static bool v_q;
@@ -130,8 +130,8 @@ bool valve_question(int32_t *p) { if (v_q && p) *p = 187; return v_q; }
 bool valve_answer(bool z, const char **why) { (void)z; (void)why; v_q = false; return true; }
 bool valve_fault_get(int i, valve_fault_t *f)
 {
-    const char *tags[3] = { "F-1", "F-5", "F-6" },
-               *texts[3] = { "No pressure signal", "Motion timeout", "No pressure response" };
+    const char *tags[3] = { "F-1", "F-4", "F-6" },
+               *texts[3] = { "No pressure signal", "Limit pressed when it should be free", "No pressure response" };
     bool on[3] = { v_f01, v_f12, v_f16 };
     int k = 0;
     for (int j = 0; j < 3; j++) {
@@ -300,7 +300,7 @@ int main(int argc, char **argv)
     const char *st = argv[1];
     fake_hw_set_scenario(!strcmp(st, "nodruck") ? "nodruck" : !strcmp(st, "neg") ? "neg" : "cal");
     bool page = !strcmp(st, "valve") || !strcmp(st, "valvenc") || !strcmp(st, "limithit") ||
-                !strcmp(st, "calpage") || !strcmp(st, "calhelp") || !strcmp(st, "faults") || !strcmp(st, "detail") || !strcmp(st, "diag") || !strcmp(st, "hot") ||
+                !strcmp(st, "calpage") || !strcmp(st, "calhelp") || !strcmp(st, "faults") || !strcmp(st, "detail") || !strcmp(st, "diag") ||
                 !strcmp(st, "help") || !strcmp(st, "help2") || !strcmp(st, "help3") || !strcmp(st, "back") || !strcmp(st, "svc") ||
                 !strncmp(st, "set-", 4) || !strncmp(st, "cal", 3) || strstr(st, "trend");
     if (!strcmp(st, "manual") || !strcmp(st, "moving") || !strcmp(st, "stop") || !strcmp(st, "keypad") ||
@@ -320,7 +320,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "autoreg")) { extern bool fake_busy; fake_busy = moving = true; v_target10 = 356; v_reg = CTRL_REG_REGULATING; }
     if (!strcmp(st, "paused")) v_warn = "W-2 Not settling: switched to MANUAL, valve idle";   // shown until OK
     if (!strcmp(st, "warn4")) v_warn = "W-4 Switch pressed at 48.04 %: check the switch";
-    if (!strcmp(st, "warn5")) v_warn = "W-5 Pressure above the sensor range: switched to MANUAL";
+    if (!strcmp(st, "warn5")) v_warn = "W-5 Move timed out: switched to MANUAL";
     if (!strcmp(st, "f08")) v_f16 = true;
     if (!strcmp(st, "faults") || !strcmp(st, "detail")) { v_f01 = true; v_f12 = true; }
 
@@ -471,7 +471,6 @@ int main(int argc, char **argv)
                 a, b, c, d, f, (size_t)m.max_used, (size_t)m.total_size);
     }
     if (!strcmp(st, "calset")) v_ref = VALVE_REF_HAND;   // opens on Set position
-    if (!strcmp(st, "hot")) { extern bool fake_hot; fake_hot = true; }
     if (!strcmp(st, "handset")) { v_mode = VALVE_MANUAL; v_cal = true; v_pct10 = 342; v_ref = VALVE_REF_HAND; }
     if (!strcmp(st, "setpos")) { v_mode = VALVE_NOT_CAL; v_cal = false; tap(269, 184); tap(240, 146); }   // Home valve, Set position
     if (!strcmp(st, "bootpick")) { v_mode = VALVE_NOT_CAL; v_cal = false; vp_offer = true; }

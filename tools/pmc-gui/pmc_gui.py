@@ -7,8 +7,8 @@
 A small web server on this PC talks to the board's text port (TCP 8888), and
 to a Lake Shore 336 (TCP 7777) when one is given, and serves one page:
   Live      pressure, setpoint, valve and the 336 temperatures with charts;
-            setpoint, AUTO / MANUAL, Go to %, STOP; the PID gains (PID?,
-            PID SET); the logger; the 336 connection.
+            setpoint, AUTO / MANUAL, Go to %, STOP; the PID gains (PIDS?,
+            PIDS SET on the set in use); the logger; the 336 connection.
   Gains     the autotune for the board's PID table (pmc_autotune.py: a relay
             test per setpoint for Ku and Pu, first gains from a fit of the
             cryostat's response, a checking step that refines KP and TI, the
@@ -616,19 +616,21 @@ class Board:
             self.add_row([self.now(), None, None, None, '', '', self.phase] + vals)
 
     def poll(self):
-        # SCHED? and PIDS? last: firmware before 0.15.15 refuses them (ERR 100),
-        # which ends the line there.
-        r = self.ask('SETPOINT?;PRESSURE?;VALVE?;MODE?;ALARM?;PID?;SCHED?;PIDS?')
-        sp, p, v, m, a, pid, sch, pids = (r.split(';') + [''] * 8)[:8]
+        # The gains in use come from PIDS? (PID? went in firmware 0.16.29).
+        r = self.ask('SETPOINT?;PRESSURE?;VALVE?;MODE?;ALARM?;SCHED?;PIDS?')
+        sp, p, v, m, a, sch, pids = (r.split(';') + [''] * 7)[:7]
         row = [self.now(), num(sp), num(p), num(v), m[5:], a[6:], self.phase] + (self.ls.now() if self.ls else [])
         self.add_row(row)
-        if pid.startswith('PID '):
-            with self.lock:
-                self.state['pid'] = [float(x) for x in pid[4:].split(',')]
-        # The board's own gain schedule (0.15.15): which set PID? is, and on what.
+        try:
+            use, gains = pmc_autotune.pids_in_use(pids)
+        except (ValueError, IndexError):
+            use, gains = None, None
+        # The board's own gain schedule: which set is in use, and on what.
         with self.lock:
+            if gains:
+                self.state['pid'] = gains
             self.state['board_sched'] = sch[6:].split(',')[0] if sch.startswith('SCHED ') else None
-            self.state['pid_set'] = int(pids[5:].split(',')[0]) if pids.startswith('PIDS ') else None
+            self.state['pid_set'] = use
 
     def busy(self):
         return self.job
@@ -798,7 +800,7 @@ class Board:
         if not (pmc_autotune.KP_MIN <= kp0 <= pmc_autotune.KP_MAX and pmc_autotune.TI_MIN <= ti0 <= pmc_autotune.TI_MAX):
             return 'the first gains must be KP %g to %g and TI %g to %g min' % (
                 pmc_autotune.KP_MIN, pmc_autotune.KP_MAX, pmc_autotune.TI_MIN, pmc_autotune.TI_MAX)
-        r = self.raw('SETPOINT?;PRESSURE?;VALVE?;ALARM?;PID?')
+        r = self.raw('SETPOINT?;PRESSURE?;VALVE?;ALARM?;PIDS?')
         if r.startswith('LINK '):
             return r
         parts = (r.split(';') + [''] * 5)[:5]
@@ -808,9 +810,12 @@ class Board:
             return 'the valve is not homed: home it on the screen first'
         if 'F-' in parts[3]:
             return 'reset the fault first (Board tab): ' + parts[3][6:]
-        if not parts[4].startswith('PID '):
-            return 'this firmware has no PID SET (0.15.8 or later): ' + parts[4]
-        r = self.send('PID SET ' + parts[4][4:])   # the same gains, so nothing is written: ERR 211 when Remote control is Off
+        try:
+            use, gains = pmc_autotune.pids_in_use(parts[4])
+        except (ValueError, IndexError):
+            return 'this firmware has no PID sets (0.16.14 or later): ' + parts[4]
+        # The same gains, so nothing is written: ERR 211 when Remote control is Off.
+        r = self.send('PIDS SET %d,%.2f,%.2f,%.2f' % ((use,) + tuple(gains)))
         if r:
             return r
         a = SimpleNamespace(sps=sps, d=d, b1=b1, b2=b2, b3=b3, h=h, kp0=kp0, ti0=ti0, learned=start != 'fresh')
@@ -1069,13 +1074,11 @@ class Board:
                     t.log('command', 'put back as found: %s%s' % (c, ' (' + r + ')' if r else ''))
             # The gains in force at the end, from the board (with the PID
             # table back on, the set it picks).
-            pid = self.raw('PID?')
-            if pid.startswith('PID '):
-                try:
-                    new = [float(x) for x in pid[4:].split(',')][:3]
-                    t.set_gains(new, 'PID? at the end', 'the board after the put back')
-                except ValueError:
-                    pass
+            try:
+                new = pmc_autotune.pids_in_use(self.raw('PIDS?'))[1]
+                t.set_gains(new, 'PIDS? at the end', 'the board after the put back')
+            except (ValueError, IndexError):
+                pass
             t.log('end', 'PID autotune %s' % outcome)
             self.end(outcome)
             self.job = None

@@ -192,7 +192,6 @@ int main(int argc, char **argv)
     CHECK(!strcmp(ctrl_check(&C, &K, true, false, true, 1, FS), "Set a setpoint first"), "refused without a setpoint");
     CHECK(!ctrl_set_sp(&C, FS + 1, FS, 0), "target above the range rejected");
     ctrl_set_sp(&C, 5, FS, 0);
-    CHECK(!strcmp(ctrl_check(&C, &K, true, false, true, FS + 1, FS), "Pressure above the sensor range"), "refused above the range");
     ctrl_tune_t k0 = K; k0.kdir = 0;
     CHECK(!strcmp(ctrl_check(&C, &k0, true, false, true, 1, FS), "Pressure response not set"), "refused without KDIR");
     CHECK(ctrl_check(&C, &K, true, false, true, 1, FS) == NULL, "accepted when all set");

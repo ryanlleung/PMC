@@ -171,9 +171,6 @@ void fake_hw_rise(int t)
     fixed_fmt(value, sizeof value, fixed_round(st.p_mmbar, 1), 2);
 }
 
-// W-3 (sense.h): set by the "hot" scenario.
-bool fake_hot;
-bool sense_hot(int32_t *die_mc) { *die_mc = 57300; return fake_hot; }
 
 // No second finger in the previews.
 bool touch_second(int32_t *x, int32_t *y) { (void)x; (void)y; return false; }

@@ -86,12 +86,12 @@ The set in use changes in AUTO when the lower of the pressure and the setpoint (
 | --- | --- | --- |
 | 0 | F-1 No pressure signal | W-1 Switch hit early (Set as 0 % or Skip waiting) |
 | 1 | F-2 Excitation | W-2 Not settling |
-| 2 | F-3 Limit not found | W-3 Controller hot |
+| 2 | F-3 Limit not found | W-3 (removed in 0.16.29, always 0) |
 | 3 | F-4 Limit pressed when it should be free (stuck, or pressed during an opening move) | W-4 Switch pressed off the seat |
-| 4 | F-5 Motion timeout | W-5 Over range in AUTO |
+| 4 | F-5 (the warning W-5 from 0.16.29, always 0) | W-5 Move timed out |
 | 5 | F-6 No response | W-6 (removed in 0.15.11, always 0) |
 
-W-2, W-4 and W-5 show one at a time (the strip warning) until OK. W-1 clears when the question is answered on the screen, W-3 when the controller cools below 50 C.
+W-2, W-4 and W-5 show one at a time (the strip warning) until OK. W-1 clears when the question is answered on the screen.
 
 ## Coils (FC1; FC5 where marked W)
 

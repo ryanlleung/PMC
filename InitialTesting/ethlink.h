@@ -32,11 +32,6 @@ bool ethlink_take_new_client(void);
 // ID, the same every boot; "" if the Ethernet hardware did not start.
 const char *ethlink_mac(void);
 
-// IPv4 address as text, "" until one is set.
-const char *ethlink_ip(void);
-// Subnet mask as text, "" until an address is set (NETWORK?).
-const char *ethlink_mask(void);
-
 bool ethlink_client_connected(void);
 // Modbus TCP clients connected on PMC_MODBUS_PORT (modbus.h).
 int ethlink_modbus_clients(void);

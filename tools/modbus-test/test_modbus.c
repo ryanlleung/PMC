@@ -31,7 +31,7 @@ static int32_t sp = 0;
 static bool sp_set;
 static int32_t pos_milli = 14200, goto_milli = 14200;
 static const char *warn;
-static bool question, fault_f5, busy, limit_open;
+static bool question, fault_f6, busy, limit_open;
 static int resets, stops;
 static char last_event[160];
 static bool remote = true;   // the Remote control switch (0.13.4)
@@ -44,8 +44,8 @@ valve_ref_t valve_reference(void) { return VALVE_REF_HOMED; }
 bool valve_target(int32_t *m) { *m = sp; return sp_set; }
 int32_t valve_range_mmbar(void) { return 1034000; }
 ctrl_reg_t valve_regulation(void) { return CTRL_REG_BAND; }
-bool valve_fault_is(const char *t) { return fault_f5 && !strcmp(t, "F-5"); }
-int valve_fault_count(void) { return fault_f5; }
+bool valve_fault_is(const char *t) { return fault_f6 && !strcmp(t, "F-6"); }
+int valve_fault_count(void) { return fault_f6; }
 uint32_t valve_event_total(void) { return 70000; }
 const char *valve_warning(void) { return warn; }
 void valve_warning_clear(void) { warn = NULL; }
@@ -103,7 +103,6 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     return true;
 }
 int valve_pid_set(void) { return pid_set_now; }
-bool sense_hot(int32_t *d) { *d = cs.die_mc; return cs.die_mc >= 55000; }
 uint32_t lv_tick_get(void) { return 123456789u; }   // 123456 s up
 int lv_snprintf(char *b, size_t n, const char *fmt, ...)
 {
@@ -121,7 +120,7 @@ size_t lv_strlcpy(char *d, const char *s, size_t n)
 
 bool valve_set_target(int32_t m, const char **why)
 {
-    if (fault_f5) { *why = "fault"; return false; }
+    if (fault_f6) { *why = "fault"; return false; }
     sp = (int32_t)(lround(m / 100.0) * 100);
     sp_set = true;
     return true;
@@ -140,7 +139,7 @@ bool valve_start_auto(const char **why)
 }
 bool valve_to_manual(const char **why) { (void)why; mode = VALVE_MANUAL; return true; }
 void valve_stop(void) { stops++; if (mode == VALVE_AUTO) mode = VALVE_MANUAL; }
-int valve_reset(char *left, size_t n) { resets++; fault_f5 = false; if (n) left[0] = 0; return 1; }
+int valve_reset(char *left, size_t n) { resets++; fault_f6 = false; if (n) left[0] = 0; return 1; }
 void valve_event(const char *tag, const char *fmt, ...)
 {
     va_list a;
@@ -323,10 +322,10 @@ static void tests(void)
     REQ(0x05, 0, 1, 0, 0);   CHECK(rlen == 12 && stops == 0);
     REQ(0x05, 0, 1, 0xFF, 0); CHECK(stops == 1 && mode == VALVE_MANUAL);
     // RESET, and a target refused while a fault is latched.
-    fault_f5 = true;
-    REQ(0x03, 0, 5, 0, 1);   CHECK(r16(0) == 1u << 4);
+    fault_f6 = true;
+    REQ(0x03, 0, 5, 0, 1);   CHECK(r16(0) == 1u << 5);
     f32(5.0f, w + 6); req(sizeof w, w); CHECK(is_ex(0x10, MODBUS_EX_REFUSED));
-    REQ(0x05, 0, 2, 0xFF, 0); CHECK(resets == 1 && !fault_f5);
+    REQ(0x05, 0, 2, 0xFF, 0); CHECK(resets == 1 && !fault_f6);
     // Warning OK.
     warn = "W-2 Not settling: switched to MANUAL, valve idle";
     REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == 1u << 1);
@@ -343,9 +342,10 @@ static void tests(void)
     REQ(0x05, 0, 9, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_ADDRESS));
     remote = true;
     REQ(0x03, 0, 3, 0, 1);    CHECK(((r16(0) >> 8) & 1) == 1);
-    // Warning bits: W-1 question, W-3 hot, W-6 strip.
-    question = true; cs.die_mc = 56000; warn = "W-6 Valve driven the wrong way: check KDIR";
-    REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == ((1u << 0) | (1u << 2) | (1u << 5)));
+    // Warning bits: W-1 question, the strip warning by its number (W-5 move
+    // timed out, 0.16.29); bit 2 (W-3 controller hot, removed) stays 0.
+    question = true; cs.die_mc = 56000; warn = "W-5 Move timed out, valve stopped";
+    REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == ((1u << 0) | (1u << 4)));
     question = false; cs.die_mc = 31500; warn = NULL;
 }
 

@@ -34,7 +34,7 @@ The controller is one MikroE development board with a socket shield and four Cli
 | Pressure 21 Click | Pressure 21 Click | Bosch BMP581 barometric sensor | On top of the Adapter Click in S1 | Room (atmospheric) pressure. Used as the air point of the transducer calibration and shown on Diagnostics and `BAROMETER?` |
 | Stepper 3 Click | MIKROE-2035 | ULN2003 Darlington array | Socket S2 | Drives the valve's unipolar stepper motor from the 12 V motor supply |
 | Boost 10 Click | MIKROE-6927 | LT8337 boost converter, TPL0501 digital potentiometer | Socket S3 | Makes the 10 V excitation for the Druck transducer from the socket's 5 V |
-| Power Monitor Click | MIKROE-4810 | TI INA228 | Socket S4 | Measures the Druck output (shunt input, ±163.84 mV) and the excitation (bus input), so the firmware can use their ratio. Its die temperature drives the W-3 warning |
+| Power Monitor Click | MIKROE-4810 | TI INA228 | Socket S4 | Measures the Druck output (shunt input, ±163.84 mV) and the excitation (bus input), so the firmware can use their ratio. Its die temperature shows on Diagnostics |
 
 Off-board parts: the Druck UNIK 5000 transducer (PDCR50G1, 15 psia absolute, 10 mV/V, M12 4-pin), the existing Oxford Instruments needle valve (Portescap 26M048B2U or 35M048B2U unipolar stepper, PK22 344:1 gearbox, NC limit switch, Fischer 7-pin), and a PoE splitter giving regulated 12 V.
 
@@ -88,7 +88,7 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 | `clicks.c` | Boost 10 Click excitation set-up and 11.5 V trip, Power Monitor Click reads, Druck plausibility, pressure from the calibration |
 | `baro.c` | Pressure 21 Click room pressure: start-up, reads, plausibility window, retry when lost |
 | `cal.c` | Druck calibration table: ratio (mV/V) against pressure, linear between points; two-point calibration (vacuum and air) |
-| `sense.c` | The once-a-second read and the controller temperature warning |
+| `sense.c` | The once-a-second read |
 | `limit.c` | Limit switch input: a trip counts at once, the release is debounced (20 ms) |
 | `stepper3.c` | Step sequences (wave, full, half), ramps, absolute moves with retarget, the limit stop, motion timeout |
 | `valve.c` | Modes (NOT HOMED, HOMING, MANUAL, AUTO, SHUTDOWN, OFF), homing, Shut down, % position, STOP, fault latches, the event log (100 kept), runs AUTO |
@@ -123,8 +123,8 @@ Steps are timed by TIM7 interrupts, so the motor runs smoothly while the screen 
 - **Motor supply** is not measured by the firmware (sensing was removed in 0.14.3). Loss of the motor 12 V does not directly end AUTO or stop the step count; the count can then disagree with the valve. The legacy Modbus supply bit is always 1.
 - **STOP** stops and holds the valve with no latch; in AUTO it also drops to MANUAL.
 - **Shut down** (the power icon at the top left of Home): ends AUTO, moves the valve to 0 % at the run rate (not onto the limit switch), switches the coils off and turns the controller OFF. The question has a "Close the valve to 0 %" checkbox, ticked each time it opens; unticked, the controller turns OFF at once with the valve left where it is, its position kept as after a close. Not homed, it turns OFF without moving the valve; already at 0 %, at once. The whole screen is black while it moves (a bar empties, with the seconds left, and STOP cancels to MANUAL) and while OFF ("Double tap to turn on"; two taps anywhere within 0.6 s show the MercShore iPC logo and a bar for about 1.5 s, then Home). OFF refuses moves, AUTO and homing (`ERR 213`); the pressure is still read. The limit switch tripping on the way to 0 % stops it in MANUAL with the limit switch question. OFF writes a parked entry (homed or not) to the saved-position log at once; at the next start, if the switch reads released, the count is taken without asking (Valve position: "Kept at shut down", or "Last saved, not homed" if it was not homed) and the controller stays OFF until turned on; pressed means NOT HOMED and nothing offered. There is no remote Shut down or turn on.
-- **Faults** latch until Reset fault, which clears only those whose cause has gone: F-1 no pressure signal, F-2 excitation outside 9.5 to 10.5 V, F-3 switch not found while homing, F-4 switch still pressed after moving off it or pressed during an opening move, F-5 motion timeout, F-6 no pressure response in AUTO (five 30 s windows). F-3 to F-6 block moves until reset; F-1 and F-2 do not. Any fault in AUTO stops the valve and drops to MANUAL.
-- **Warnings**: W-1 the limit switch question; W-2 outside the target band for 30 min in AUTO; W-3 controller hot (board temperature 55 °C, clears below 50 °C); W-4 switch pressed away from the seat; W-5 pressure above the sensor range in AUTO. W-2, W-4 and W-5 end AUTO, MANUAL with the valve idle. W-6 (driven the wrong way) was removed in 0.15.11: it tripped at low pressure, where the valve rightly rests near closed; a wrong pressure response setting now shows as W-2.
+- **Faults** latch until Reset fault, which clears only those whose cause has gone: F-1 no pressure signal, F-2 excitation outside 9.5 to 10.5 V, F-3 switch not found while homing, F-4 switch still pressed after moving off it or pressed during an opening move, F-6 no pressure response in AUTO (five 30 s windows). There is no F-5: the motion timeout is the warning W-5 from 0.16.29. F-3, F-4 and F-6 block moves until reset; F-1 and F-2 do not. Any fault in AUTO stops the valve and drops to MANUAL.
+- **Warnings**: W-1 the limit switch question; W-2 outside the target band for 30 min in AUTO; W-4 switch pressed away from the seat; W-5 a move timed out (the valve is stopped, nothing latches; F-5 to 0.16.28). W-2, W-4 and W-5 end AUTO, MANUAL with the valve idle. W-3 (controller hot) and the over range warning were removed in 0.16.29. W-6 (driven the wrong way) was removed in 0.15.11: it tripped at low pressure, where the valve rightly rests near closed; a wrong pressure response setting now shows as W-2.
 
 ## Screens
 
@@ -169,7 +169,7 @@ The trend and the event log are in RAM and empty after a restart.
 
 ## Text port commands
 
-The text port and Modbus take the same operator command set, and nothing else: what an operator can use and judge away from the cryostat. The text port and Modbus also take the PID gains and the gain schedule (`PID?`, `PID SET`, `PIDS?`, `PIDS SET`, `SCHED?`, `SCHED SET`; Modbus registers 26 to 58). Homing, calibration, the other settings and the motor are on the touch screen. `InitialTesting/remote.c` is the text port; the Modbus registers and coils for the same commands are in `docs/modbus-register-map.md`.
+The text port and Modbus take the same operator command set, and nothing else: what an operator can use and judge away from the cryostat. The text port and Modbus also take the PID gains and the gain schedule (`PIDS?`, `PIDS SET`, `SCHED?`, `SCHED SET`; Modbus registers 26 to 58). Homing, calibration, the other settings and the motor are on the touch screen. `InitialTesting/remote.c` is the text port; the Modbus registers and coils for the same commands are in `docs/modbus-register-map.md`.
 
 Connect to TCP port 8888 (for example PuTTY in Raw mode). One client at a time; a new connection replaces the old. Send upper case ASCII, a line ending in LF or CR LF, at most 96 characters. Replies end in CR LF.
 
@@ -188,9 +188,8 @@ The command names are whole words from firmware 0.16.12. To 0.16.11 every first 
 | `STOP` | Stop the valve now; in AUTO it also ends AUTO. Cancels homing and a shut down. The only stop |
 | `ALARM RESET` / `ALARM OK` | Clear the latched faults whose cause has gone / acknowledge the warning, as the screen's OK |
 | `TIME SET <YYYY-MM-DD> <HH:MM:SS>` | Set the clock |
-| `PID SET <kp>,<ti>[,<kd>]` | Set and save the gains of the PID set in use (the PID table is always on from 0.16.20), as Save on the PID tuning page: KP in %/mB, TI in min (0 off), KD in %/(mB/s) (0 off, left as it is when not given), 2 dp. KP 0.01 to 100, TI and KD 0 to 100. Taken in AUTO too, at the next control step. Each change is a settings save in flash, so send it when the gains change, not every poll; gains equal to the present ones write nothing |
-| `PIDS SET <set>,<kp>,<ti>[,<kd>]` | As `PID SET`, for PID set 1 to 4 (set 4 from 0.16.14) |
-| `SCHED SET PV,<b1>,<b2>,<b3>,<h>` | The PID table (gain schedule), saved as `PID SET`: always on the pressure (`OFF`, set 1 always, removed in 0.16.20: `ERR 102`; `SP`, the setpoint, removed in 0.15.20: `ERR 101`); boundaries B1, B2 and B3 in mbar (1 dp, 0.1 to 1000; set 1 below B1, set 2 to B2, set 3 to B3, set 4 above; B3 0 for three sets), hysteresis H in % of the boundary (0 to 40). B2 must be above B1, and B3 (unless 0) above B2, by more than H either side (`ERR 102`). B3 from 0.16.14: the four-number form answers `ERR 101` |
+| `PIDS SET <set>,<kp>,<ti>[,<kd>]` | Set and save the gains of PID set 1 to 4, as Save on the PID tuning page: KP in %/mB, TI in min (0 off), KD in %/(mB/s) (0 off, left as it is when not given), 2 dp. KP 0.01 to 100, TI and KD 0 to 100. Taken in AUTO too, at the next control step. Each change is a settings save in flash, so send it when the gains change, not every poll; gains equal to the present ones write nothing |
+| `SCHED SET PV,<b1>,<b2>,<b3>,<h>` | The PID table (gain schedule), saved as `PIDS SET`: always on the pressure (`OFF`, set 1 always, removed in 0.16.20: `ERR 102`; `SP`, the setpoint, removed in 0.15.20: `ERR 101`); boundaries B1, B2 and B3 in mbar (1 dp, 0.1 to 1000; set 1 below B1, set 2 to B2, set 3 to B3, set 4 above; B3 0 for three sets), hysteresis H in % of the boundary (0 to 40). B2 must be above B1, and B3 (unless 0) above B2, by more than H either side (`ERR 102`). B3 from 0.16.14: the four-number form answers `ERR 101` |
 | `PRESSURE?` | `PRESSURE 4.625 mbar` or `PRESSURE NONE` |
 | `SETPOINT?` | `SETPOINT 5.0 mbar` or `SETPOINT NONE` |
 | `MODE?` | `MODE MANUAL`, `MODE AUTO`, `MODE HOMING`, `MODE NOT HOMED`, `MODE SHUTDOWN` (going to 0 % for Shut down) or `MODE OFF` |
@@ -198,9 +197,7 @@ The command names are whole words from firmware 0.16.12. To 0.16.11 every first 
 | `BAROMETER?` | `BAROMETER 1013.25 mbar` or `BAROMETER NONE` (Pressure 21 Click not fitted or not reading) |
 | `ALARM?` | `ALARM NONE`, or the active alarms joined by `\|`, faults first: `<tag>,<0\|1>,<text>`. For a fault, 1 when `ALARM RESET` clears it now; for a warning, 1 when `ALARM OK` clears it |
 | `EVENT? [<n>]` | `EVENT <n>`, then n lines `<age s>,<tag>,<text>`, newest first; default 1, at most 100 |
-| `NETWORK?` | `NETWORK STATIC,<address>,<mask>,<MAC>`; `NETWORK NONE` in the USB build |
 | `TIME?` | `TIME 2026-10-27 11:05:00` or `TIME NONE` |
-| `PID?` | `PID 0.12,0.82,0.00`: KP, TI, KD of the PID set in use (factory set 2, at 6 to 10 mbar) |
 | `PIDS?` | `PIDS 2,0.06,0.70,0.00,0.14,1.50,0.00,0.50,1.00,0.00,0.30,0.25,0.00`: the set in use (in AUTO the one the schedule has switched to, else the one AUTO would start with), then KP, TI, KD of sets 1 to 4 |
 | `SCHED?` | `SCHED PV,6.0,10.0,14.0,15`: the PID table (always `PV` from 0.16.20; `OFF` could show before), B1, B2, B3 in mbar, H in % |
 | `*IDN?` | `MercShore,iPC,<chip id>,<version>` |

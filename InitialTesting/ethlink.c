@@ -30,8 +30,6 @@ static Socket *client;
 static bool up;
 static int phy_addr = ETH_HW_NO_PHY;
 static uint32_t phy_id;
-static char ip_text[16] = "";
-static char mask_text[16] = "";
 static char mac_text[18] = "";
 static bool new_client;
 
@@ -268,17 +266,6 @@ void ethlink_task(void)
     }
 
     mb_task();
-
-    Ipv4Addr a = IPV4_UNSPECIFIED_ADDR;
-    ipv4GetHostAddr(ifc, &a);
-    if (a != IPV4_UNSPECIFIED_ADDR) {
-        Ipv4Addr m = IPV4_UNSPECIFIED_ADDR;
-        ipv4GetSubnetMask(ifc, &m);
-        ipv4AddrToString(a, ip_text);
-        ipv4AddrToString(m, mask_text);
-    } else {
-        ip_text[0] = mask_text[0] = '\0';
-    }
 }
 
 size_t ethlink_tx_room(void)
@@ -346,13 +333,6 @@ bool ethlink_take_new_client(void)
 const char *ethlink_mac(void)
 {
     return mac_text;
-}
-
-const char *ethlink_mask(void) { return mask_text; }
-
-const char *ethlink_ip(void)
-{
-    return ip_text;
 }
 
 bool ethlink_client_connected(void)

@@ -101,10 +101,9 @@ bool mbmap_writes_allowed(void)
 void mbmap_begin(void)
 {
     const clicks_state_t *s = clicks_state();
-    int32_t sp, die;
+    int32_t sp;
     bool sp_set = valve_target(&sp);
     const char *w = valve_warning();
-    bool hot = sense_hot(&die);
     uint32_t up_s = lv_tick_get() / 1000u;
 
     uint16_t st = 0;
@@ -116,24 +115,24 @@ void mbmap_begin(void)
     if (stepper3_busy())                       st |= 1u << ST_MOVING;
     if (stepper3_limit_open())                 st |= 1u << ST_SWITCH;
     if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 and F-2 too
-    if (w || hot || valve_question(NULL))      st |= 1u << ST_WARNING;
+    if (w || valve_question(NULL))             st |= 1u << ST_WARNING;
     if (sp_set)                                st |= 1u << ST_TARGET_SET;
     if (mbmap_writes_allowed())                st |= 1u << ST_WRITES;
     st |= 1u << ST_MOTOR_SUPPLY;   // no supply sense from 0.14.3: kept at 1 so the map does not change
 
-    static const char *const ftag[] = { "F-1", "F-2", "F-3", "F-4", "F-5", "F-6" };
+    // Bit 4 was F-5 (motion timeout): the warning W-5 from 0.16.29, so
+    // always 0 here.
+    static const char *const ftag[] = { "F-1", "F-2", "F-3", "F-4", NULL, "F-6" };
     uint16_t f = 0;
     for (int i = 0; i < 6; i++)
-        if (valve_fault_is(ftag[i]))
+        if (ftag[i] && valve_fault_is(ftag[i]))
             f |= (uint16_t)(1u << i);
 
-    // W-1 is the switch question, W-3 the temperature; the others are the
-    // strip warning, one at a time.
+    // W-1 is the switch question; the others are the strip warning, one at
+    // a time. Bit 2 was W-3 (controller hot, removed in 0.16.29): always 0.
     uint16_t wb = 0;
     if (valve_question(NULL))
         wb |= 1u << 0;
-    if (hot)
-        wb |= 1u << 2;
     if (w && w[0] == 'W' && w[1] == '-' && w[2] >= '1' && w[2] <= '6' && w[3] == ' ')
         wb |= (uint16_t)(1u << (w[2] - '1'));
 

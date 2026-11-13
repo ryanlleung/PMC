@@ -41,7 +41,7 @@ For each test point, in the order given (the GUI: as typed, 2 4 8 12 16 24 48 mb
 Whenever AUTO runs (reaching a point, holding it, the check steps), a
 watchdog looks for a sustained oscillation: two full cycles in a row (four
 swings), each swing more than 30 % of the setpoint. It then cuts KP at once (x 0.5, or
-x 0.25 when the swing is larger than the setpoint itself) with PID SET and
+x 0.25 when the swing is larger than the setpoint itself) with PIDS SET and
 carries on with the lower gain (Ryan, 9 Nov: "make sure it tunes down the
 gains when it oscillates like crazy"; at 2 mbar the 1 mbar gains swung the
 pressure 1 to 10 mbar every 14 s).
@@ -73,8 +73,9 @@ run's folder, one row per calculation, decision, gain change and board
 command, as it happens, each with the KP, TI and KD in force on the board
 after it (log_row, LOG_COLS).
 
-Python 3.8 or later, standard library only. Needs firmware 0.15.8 or later
-(PID SET); the sets need 0.16.14 or later (four sets, SCHED SET with B3).
+Python 3.8 or later, standard library only. Needs firmware 0.16.14 or later
+(four PID sets: PIDS?, PIDS SET, SCHED SET with B3). PID? and PID SET are not
+used: the firmware dropped them in 0.16.29.
 """
 import cmath
 import csv
@@ -1041,7 +1042,7 @@ class AutoTuner(Tuner):
 
     series = []     # (pressure, valve) of the check just run, one a second, for the fit
     held_rows = []  # the samples of the last hold(), for the same
-    n_sets = 0      # the board's PID sets (found()): the gains under test go in each; 0, PID SET
+    n_sets = 4      # the board's PID sets (found()): the gains under test go in each
 
     def stage(self, text, phase=None, most=None):
         if phase:
@@ -1136,13 +1137,10 @@ class AutoTuner(Tuner):
     def pid(self, kp, ti, why=''):
         if self.sample()[2] != 'AUTO':
             self.still()
-        if self.n_sets:   # every set, so the set in use never matters (one line each: 96 characters at most)
-            for n in range(1, self.n_sets + 1):
-                self.link.do('PIDS SET %d,%.2f,%.2f,0' % (n, kp, ti))
-            cmd = 'PIDS SET 1-%d,%.2f,%.2f,0' % (self.n_sets, kp, ti)
-        else:
-            cmd = 'PID SET %.2f,%.2f,0' % (kp, ti)
-            self.link.do(cmd)
+        # Every set, so the set in use never matters (one line each: 96 characters at most).
+        for n in range(1, self.n_sets + 1):
+            self.link.do('PIDS SET %d,%.2f,%.2f,0' % (n, kp, ti))
+        cmd = 'PIDS SET 1-%d,%.2f,%.2f,0' % (self.n_sets, kp, ti)
         self.set_gains([kp, ti, 0.0], cmd, why)
 
     def calm(self, sp, kp, ti, w):
@@ -1153,7 +1151,7 @@ class AutoTuner(Tuner):
                                % (sp, w.pp, kp))
         self.say('%g mbar: AUTO oscillating (swing %.2f mbar), KP x %.2f -> %.2f' % (sp, w.pp, w.cut(), new))
         self.decide('Oscillating: %d swings in a row, the smallest %.2f mbar, each over %.2f mbar (%d %% of %g mbar). '
-                  'KP x %.2f%s: %.2f x %.2f = %.2f (PID SET, AUTO carries on)' % (
+                  'KP x %.2f%s: %.2f x %.2f = %.2f (PIDS SET, AUTO carries on)' % (
                       2 * WILD_CYCLES, w.pp, w.big, WILD_PP * 100, sp, w.cut(),
                       ', the swing larger than the setpoint' if w.cut() == WILD_CUT_BIG else '', kp, w.cut(), new))
         self.pid(new, ti, 'watchdog: AUTO oscillating at %g mbar, KP x %.2f' % (sp, w.cut()))
@@ -1847,12 +1845,8 @@ class StepTest(Tuner):
         """(set in use or None, KP, TI) on the board now."""
         kp = ti = st = None
         try:
-            g = self.link.ask('PID?')[0]
-            kp, ti = (float(x) for x in g[4:].split(',')[:2])
-        except (Refused, ValueError):
-            pass
-        try:
-            st = int(self.link.ask('PIDS?')[0][5:].split(',')[0])
+            st, g = pids_in_use(self.link.ask('PIDS?')[0])
+            kp, ti = g[:2]
         except (Refused, ValueError, IndexError):
             pass
         return st, kp, ti
@@ -2020,30 +2014,36 @@ def next_d(sp, ku, first):
     return round(min(max(0.06 * sp * ku * math.pi / 4, 0.2), D_MAX), 1)
 
 
+def pids_in_use(reply):
+    """(set in use, [KP, TI, KD] of that set) from a PIDS? reply:
+    'PIDS <set in use>,<kp1>,<ti1>,<kd1>,...' (PID? went in firmware 0.16.29)."""
+    if not reply.startswith('PIDS '):
+        raise ValueError(reply)
+    g = reply[5:].split(',')
+    n = int(g[0])
+    v = [float(x) for x in g[3 * n - 2:3 * n + 1]]
+    if n < 1 or len(v) != 3:
+        raise ValueError(reply)
+    return n, v
+
+
 def found(link):
     """What to put back: setpoint, mode, valve and the PID sets."""
     sp = value(link.ask('SETPOINT?')[0], 'SETPOINT')
     p, x, mode = link.ask('PRESSURE?;VALVE?;MODE?')
-    out = {'sp': sp, 'mode': mode.partition(' ')[2], 'valve': value(x, 'VALVE'), 'sched': None, 'sets': None}
-    pid = link.ask('PID?')[0]
-    out['pid'] = [float(v) for v in pid[4:].split(',')]
-    try:
-        s = link.ask('SCHED?')[0]
-        out['sched'] = s[6:]
-        g = link.ask('PIDS?')[0][5:].split(',')
-        out['sets'] = [[float(v) for v in g[1 + 3 * k:4 + 3 * k]] for k in range((len(g) - 1) // 3)]
-    except Refused:
-        pass                     # firmware before 0.15.15: one set
+    out = {'sp': sp, 'mode': mode.partition(' ')[2], 'valve': value(x, 'VALVE')}
+    out['sched'] = link.ask('SCHED?')[0][6:]
+    pids = link.ask('PIDS?')[0]
+    g = pids[5:].split(',')
+    out['sets'] = [[float(v) for v in g[1 + 3 * k:4 + 3 * k]] for k in range((len(g) - 1) // 3)]
+    out['pid'] = pids_in_use(pids)[1]   # the set in use
     return out
 
 
 def put_back_lines(f, x_last=None):
     """The lines that put the board back as found (each tried on its own)."""
     out = []
-    if f.get('sets'):
-        out += ['PIDS SET %d,%.2f,%.2f,%.2f' % ((n,) + tuple(g)) for n, g in enumerate(f['sets'], 1)]
-    elif f.get('pid'):
-        out.append('PID SET %.2f,%.2f,%.2f' % tuple(f['pid']))
+    out += ['PIDS SET %d,%.2f,%.2f,%.2f' % ((n,) + tuple(g)) for n, g in enumerate(f.get('sets') or [], 1)]
     if f.get('sp') is not None:
         out.append('SETPOINT %.1f' % f['sp'])
     if f.get('mode') == 'AUTO':
