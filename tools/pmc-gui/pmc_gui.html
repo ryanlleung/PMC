@@ -149,7 +149,7 @@
       <div class="reading"><h2>Pressure</h2><span class="v" id="p">--</span> <span class="u">mbar</span></div>
       <div class="reading"><h2>Setpoint</h2><span class="v" id="sp">--</span> <span class="u">mbar</span></div>
       <div class="reading"><h2>Valve</h2><span class="v" id="v">--</span> <span class="u">%</span></div>
-      <div class="reading corr" title="Estimated from the pressure, setpoint, valve and the gains in use (PID?): P = KP x (setpoint - pressure); I = valve - P, the integral that holds the valve where it is; it moves KP x error / TI per minute"><h2>Valve from KP, TI</h2><span class="u">KP</span> <span class="v" id="cP">--</span> <span class="u">TI</span> <span class="v" id="cI">--</span> <span class="u">%</span><div class="sub" id="cSub">AUTO only</div></div>
+      <div class="reading corr" title="Estimated from the pressure, setpoint, valve and the gains in use (PIDS?): P = KP x (setpoint - pressure); I = valve - P, the integral that holds the valve where it is; it moves KP x error / TI per minute"><h2>Valve from KP, TI</h2><span class="u">KP</span> <span class="v" id="cP">--</span> <span class="u">TI</span> <span class="v" id="cI">--</span> <span class="u">%</span><div class="sub" id="cSub">AUTO only</div></div>
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between">
@@ -298,7 +298,7 @@
       <div class="card">
         <h2>Command</h2>
         <div class="row"><input id="raw" type="text" class="wide" placeholder="e.g. PRESSURE?;MODE?" onkeydown="if(event.key==='Enter')$('rawBtn').click()"><button id="rawBtn" onclick="sendRaw(this)">Send</button></div>
-        <div class="hint">Any text port command. Commands share a line with ;. NETWORK? and *IDN? identify the board.</div>
+        <div class="hint">Any text port command. Commands share a line with ;. *IDN? identifies the board.</div>
       </div>
     </div>
   </div>
@@ -389,7 +389,8 @@ async function fillRandom(btn) {
 document.addEventListener('change', e => { if (e.target.id === 'sTable') $('sTableBox').style.display = val('sTable') === 'write' ? '' : 'none'; });
 function setPid(btn) {
   const kd = val('kd');
-  cmd('PID SET ' + val('kp') + ',' + val('ti') + (kd !== '' ? ',' + kd : ''), btn).then(r => { if (!r) pidLoaded = false; });
+  if (!S || !S.pid_set) { toast('No PID set read from the board yet'); return; }
+  cmd('PIDS SET ' + S.pid_set + ',' + val('kp') + ',' + val('ti') + (kd !== '' ? ',' + kd : ''), btn).then(r => { if (!r) pidLoaded = false; });
 }
 function readBack(btn) { pidLoaded = false; toast(hhmmss() + '  PID boxes read back from the board'); refresh(); }
 const startAuto = btn => post('/api/autotune', { sps: val('aSps'), d: +val('aD'), b1: +val('aB1'), b2: +val('aB2'), b3: +val('aB3'), h: +val('aH'), kp0: +val('aKp'), ti0: +val('aTi'), start: val('aStart') }, btn, 'Autotune', 'started');

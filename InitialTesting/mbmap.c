@@ -20,11 +20,11 @@
  * target set).
  *
  * Writes go through the same calls as the screen buttons, so every check
- * and refusal is the same; they are refused while PMC_MODBUS_WRITE is 0.
+ * and refusal is the same; they are refused while Remote control is Off.
  * Each accepted write is logged as a NET event with the client's address.
  * ------------------------------------------------------------------------ */
 
-#define MAP_VERSION 3
+#define MAP_VERSION 4
 
 enum {
     HR_VERSION = 0, HR_HEARTBEAT, HR_MODE, HR_STATUS, HR_REGULATION,
@@ -41,10 +41,13 @@ enum {
 };
 
 // The settings behind the writable schedule registers: the key, 0.01 or
-// 0.1 per unit (the cfg scale), and whether it is a float.
+// 0.1 per unit (the cfg scale), and whether it is a float. Register 27, the
+// schedule type, has no setting behind it from 0.16.30 (key CFG_N): it
+// reads 2, on the pressure, and takes only 2.
+#define SCHED_PV 2
 static bool sched_reg(uint16_t a, cfg_key_t *key, int *dec, bool *flt)
 {
-    if (a == HR_SCHED) { *key = CFG_SCHED; *dec = 0; *flt = false; return true; }
+    if (a == HR_SCHED) { *key = CFG_N; *dec = 0; *flt = false; return true; }
     if (a == HR_HYST)  { *key = CFG_HYST; *dec = 0; *flt = false; return true; }
     if (a == HR_B1)    { *key = CFG_B1; *dec = 1; *flt = true; return true; }
     if (a == HR_B2)    { *key = CFG_B2; *dec = 1; *flt = true; return true; }
@@ -92,20 +95,18 @@ static float get_f32(const uint16_t *v)
     return f;
 }
 
-// PMC_MODBUS_WRITE 0 refuses writes whatever the Remote control switch
-// says; with 1, writes need the switch On (0.13.4).
+// Writes need the Remote control switch On (0.13.4).
 bool mbmap_writes_allowed(void)
 {
-    return PMC_MODBUS_WRITE != 0 && cfg_remote();
+    return cfg_remote();
 }
 
 void mbmap_begin(void)
 {
     const clicks_state_t *s = clicks_state();
-    int32_t sp, die;
+    int32_t sp;
     bool sp_set = valve_target(&sp);
     const char *w = valve_warning();
-    bool hot = sense_hot(&die);
     uint32_t up_s = lv_tick_get() / 1000u;
 
     uint16_t st = 0;
@@ -116,25 +117,25 @@ void mbmap_begin(void)
         st |= 1u << ST_HOMED;
     if (stepper3_busy())                       st |= 1u << ST_MOVING;
     if (stepper3_limit_open())                 st |= 1u << ST_SWITCH;
-    if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 and F-2 too
-    if (w || hot || valve_question(NULL))      st |= 1u << ST_WARNING;
+    if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 too
+    if (w || valve_question(NULL))             st |= 1u << ST_WARNING;
     if (sp_set)                                st |= 1u << ST_TARGET_SET;
     if (mbmap_writes_allowed())                st |= 1u << ST_WRITES;
     st |= 1u << ST_MOTOR_SUPPLY;   // no supply sense from 0.14.3: kept at 1 so the map does not change
 
-    static const char *const ftag[] = { "F-1", "F-2", "F-3", "F-4", "F-5", "F-6" };
+    // Map version 4 (0.16.33, the codes renumbered): bit 0 F-1, bit 1 F-2
+    // limit not found, bit 2 F-3 limit pressed; bits 3 to 5 always 0.
+    static const char *const ftag[] = { "F-1", "F-2", "F-3" };
     uint16_t f = 0;
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < 3; i++)
         if (valve_fault_is(ftag[i]))
             f |= (uint16_t)(1u << i);
 
-    // W-1 is the switch question, W-3 the temperature; the others are the
-    // strip warning, one at a time.
+    // Bit 0 W-1, the switch question; bit 1 W-2, no pressure response (the
+    // strip warning, by its number). Bits 2 to 5 always 0 from version 4.
     uint16_t wb = 0;
     if (valve_question(NULL))
         wb |= 1u << 0;
-    if (hot)
-        wb |= 1u << 2;
     if (w && w[0] == 'W' && w[1] == '-' && w[2] >= '1' && w[2] <= '6' && w[3] == ' ')
         wb |= (uint16_t)(1u << (w[2] - '1'));
 
@@ -167,7 +168,7 @@ void mbmap_begin(void)
         if (flt)
             put_f32(a, (float)cfg_tune(key) / (dec == 2 ? 100.0f : 10.0f));
         else
-            reg[a] = (uint16_t)cfg_tune(key);
+            reg[a] = key == CFG_N ? SCHED_PV : (uint16_t)cfg_tune(key);
     }
 }
 
@@ -226,6 +227,12 @@ static uint8_t write_sched(uint16_t addr, uint16_t n, const uint16_t *v)
         bool flt;
         if (!sched_reg((uint16_t)(addr + i), &key, &dec, &flt) || (flt && i + 1 >= n))
             return MODBUS_EX_ADDRESS;
+        if (key == CFG_N) {   // the schedule type: 2 only (1, the setpoint, removed in 0.15.20; 0, Off, in 0.16.20)
+            if (v[i] != SCHED_PV)
+                return MODBUS_EX_VALUE;
+            i++;
+            continue;
+        }
         int32_t x, lo, hi;
         if (flt) {
             float f = get_f32(v + i);
@@ -236,7 +243,7 @@ static uint8_t write_sched(uint16_t addr, uint16_t n, const uint16_t *v)
             x = v[i];
         }
         cfg_range(key, &lo, &hi);
-        if (x < lo || x > hi)   // the schedule register takes 2 only: 1, the setpoint, removed in 0.15.20, 0, Off, in 0.16.20
+        if (x < lo || x > hi)
             return MODBUS_EX_VALUE;
         val[key] = x;
         on[key] = true;

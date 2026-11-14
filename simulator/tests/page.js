@@ -32,7 +32,7 @@ const path = require('path');
   await p.waitForTimeout(500);
   const text = await p.locator('#console').textContent();
   const ok1 = homed && /> VALVE\?\nVALVE \d+\.\d\d %/.test(text);
-  // Save settings with KP 3.00 (the test hook, as Review and save), reload, read it back.
+  // Save with KP 3.00 (the test hook, as Save on a settings page), reload, read it back.
   await p.evaluate(() => x.sim_save(9, 300));
   await p.waitForTimeout(1500);
   await p.reload(); await p.waitForTimeout(1500);

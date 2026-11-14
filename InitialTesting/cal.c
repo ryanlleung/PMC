@@ -7,35 +7,20 @@
 #include "cal.h"
 #include "cfg.h"
 #include "fixed.h"
-#include "rtclock.h"
-#include "pmc_config.h"   // PMC_DRUCK_SERIAL
 #include "clicks.h"   // live ratio for CAL VAC / CAL AIR
 #include "valve.h"    // valve_auto: no cal changes under AUTO
 
-/* --------------------------------------------------------------------------
- * Old stand-alone record (0.3.x to 0.5.x), read at start-up only. From 0.6.0
- * the table is saved inside the settings record (cfg.c); this sector is left
- * as it was, so flashing an older firmware still finds its cal.
- * ------------------------------------------------------------------------ */
-#define CAL_FLASH_ADDR  0x7FF000UL
-
 // Nominal: 0 mV and 100 mV at 10 V = 0 and 10 mV/V over the sensor's range
-// (15 psia, 1034.214 mbar, unless cal_set_sensor() says otherwise).
-static cal_rec_t cal_default = {
-    .magic = CAL_MAGIC, .version = CAL_VERSION, .npts = 2,
-    .id = "nominal",
+// (15 psia, 1034.214 mbar).
+static const cal_rec_t cal_default = {
+    .magic = CAL_MAGIC, .version = CAL_VERSION,
     .r_ppb = { 0, 10000000 },
-    .p_mmbar = { 0, 1034214 },
-    .kind = CAL_KIND_TABLE,
+    .p_mmbar = { 0, CAL_FS_MMBAR },
 };
-static char sensor_serial[12] = PMC_DRUCK_SERIAL;
 
 static cal_rec_t active;
 static bool active_is_default = true;
 static bool active_saved;          // active matches what is in flash
-static bool flash_ok;
-static uint32_t old_version;       // version of a stored record not loaded, 0 = none
-static bool from_old;              // active came from the old record at start-up
 
 /*
  * Bench two-point capture. Each point is the mean of CAPTURE_N readings
@@ -63,48 +48,37 @@ static uint32_t rec_crc(const cal_rec_t *r)
     return crc32_ieee(r, offsetof(cal_rec_t, crc));
 }
 
-// NULL if the table is usable, else the reason.
-static const char *rec_check(const cal_rec_t *r)
+// The header is right and the air ratio is above the vacuum ratio.
+static bool rec_check(const cal_rec_t *r)
 {
-    if (r->magic != CAL_MAGIC || r->version < 1 || r->version > CAL_VERSION)
-        return "bad header";
-    if (r->npts < 2 || r->npts > CAL_MAX_POINTS)
-        return "need 2 to 32 points";
-    for (uint32_t i = 1; i < r->npts; i++)
-        if (r->r_ppb[i] <= r->r_ppb[i - 1])
-            return "ratios must be strictly ascending";
-    return NULL;
+    return r->magic == CAL_MAGIC && r->version == CAL_VERSION && r->r_ppb[1] > r->r_ppb[0];
 }
 
 void cal_init(void)
 {
-    cal_rec_t r;
-
     active = cal_default;
     active_is_default = true;
-
-    flash_ok = extflash_init();
-    if (!flash_ok)
-        return;
-
-    extflash_read(CAL_FLASH_ADDR, &r, sizeof r);
-    if (r.magic == CAL_MAGIC && r.version >= 1 && r.version < CAL_VERSION) {
-        // CAL ATM era (cert table scaled at one point). Not loaded: redo the
-        // bench cal. CAL? reports it until a new table is saved or erased.
-        old_version = r.version;
-        return;
-    }
-    if (rec_check(&r) == NULL && r.crc == rec_crc(&r)) {
-        cal_set_record(&r, true);
-        from_old = true;
-    }
+    active_saved = false;
+    memset(&bench, 0, sizeof bench);
 }
-
-bool cal_from_old_record(void) { return from_old; }
 
 bool cal_record_ok(const cal_rec_t *r)
 {
-    return r->version == CAL_VERSION && rec_check(r) == NULL && r->crc == rec_crc(r);
+    return rec_check(r) && r->crc == rec_crc(r);
+}
+
+bool cal_from_v4(const cal_rec_v4_t *o, cal_rec_t *r)
+{
+    if (o->magic != CAL_MAGIC || o->version != 4 || o->npts != 2 || o->r_ppb[1] <= o->r_ppb[0] ||
+        o->crc != crc32_ieee(o, offsetof(cal_rec_v4_t, crc)))
+        return false;
+    memset(r, 0, sizeof *r);
+    r->magic = CAL_MAGIC;
+    r->version = CAL_VERSION;
+    r->r_ppb[0] = o->r_ppb[0]; r->p_mmbar[0] = o->p_mmbar[0];
+    r->r_ppb[1] = o->r_ppb[1]; r->p_mmbar[1] = o->p_mmbar[1];
+    r->crc = rec_crc(r);
+    return true;
 }
 
 void cal_get_record(cal_rec_t *r)
@@ -118,16 +92,11 @@ bool cal_set_record(const cal_rec_t *r, bool saved)
     if (!cal_record_ok(r))
         return false;
     active = *r;
-    active.id[CAL_ID_LEN - 1] = '\0';
     active_is_default = false;
     active_saved = saved;
-    old_version = 0;
-    memset(&bench, 0, sizeof bench);
-    if (r->kind == CAL_KIND_BENCH) {
-        bench.have_vac = bench.have_air = true;
-        bench.r_vac = r->r_ppb[0]; bench.p_vac = r->p_mmbar[0];
-        bench.r_air = r->r_ppb[1]; bench.p_air = r->p_mmbar[1];
-    }
+    bench.have_vac = bench.have_air = true;
+    bench.r_vac = r->r_ppb[0]; bench.p_vac = r->p_mmbar[0];
+    bench.r_air = r->r_ppb[1]; bench.p_air = r->p_mmbar[1];
     return true;
 }
 
@@ -141,22 +110,10 @@ void cal_set_default(bool saved)
 
 void cal_set_saved(bool saved) { active_saved = saved; }
 
-void cal_set_sensor(const char *serial, int32_t fs_mmbar)
-{
-    lv_strlcpy(sensor_serial, serial, sizeof sensor_serial);
-    cal_default.p_mmbar[1] = fs_mmbar;
-    if (active_is_default)
-        active = cal_default;
-    cap.what = 0;
-}
-
 int64_t cal_pressure_with(const cal_rec_t *c, int64_t r)
 {
-    uint32_t i = 0;
-    while (i + 2 < c->npts && r > c->r_ppb[i + 1])
-        i++;
-    int64_t r0 = c->r_ppb[i], r1 = c->r_ppb[i + 1];
-    int64_t p0 = c->p_mmbar[i], p1 = c->p_mmbar[i + 1];
+    int64_t r0 = c->r_ppb[0], r1 = c->r_ppb[1];
+    int64_t p0 = c->p_mmbar[0], p1 = c->p_mmbar[1];
     return p0 + (r - r0) * (p1 - p0) / (r1 - r0);
 }
 
@@ -168,7 +125,7 @@ void cal_points(cal_point_t *vac, cal_point_t *air)
 
 int cal_capturing(void) { return cap.what; }
 
-// The end segments extend past the table.
+// The line through the two points, past them too.
 int64_t cal_pressure_mmbar(int64_t r)
 {
     return cal_pressure_with(&active, r);
@@ -179,25 +136,9 @@ bool cal_is_default(void)
     return active_is_default;
 }
 
-const char *cal_id(void)
-{
-    return active.id;
-}
-
 bool cal_saved(void)
 {
     return active_saved;
-}
-
-uint32_t cal_old_version(void) { return old_version; }
-
-bool cal_bench(int32_t *r_vac, int32_t *p_vac, int32_t *r_air, int32_t *p_air)
-{
-    if (active_is_default || active.kind != CAL_KIND_BENCH)
-        return false;
-    *r_vac = active.r_ppb[0]; *p_vac = active.p_mmbar[0];
-    *r_air = active.r_ppb[1]; *p_air = active.p_mmbar[1];
-    return true;
 }
 
 int cal_capture_left(void) { return cap.what ? CAPTURE_N - cap.n : 0; }
@@ -249,17 +190,9 @@ static void bench_apply(void)
     memset(&r, 0, sizeof r);
     r.magic = CAL_MAGIC;
     r.version = CAL_VERSION;
-    r.kind = CAL_KIND_BENCH;
-    r.npts = 2;
-    // "5880156 bench 26-10-16": the date for the screens, when the clock is set.
-    const char *iso = rtclock_iso();
-    if (iso[0])
-        lv_snprintf(r.id, CAL_ID_LEN, "%s bench %.8s", sensor_serial, iso + 2);
-    else
-        lv_snprintf(r.id, CAL_ID_LEN, "%s bench", sensor_serial);
     r.r_ppb[0] = bench.r_vac; r.p_mmbar[0] = bench.p_vac;
     r.r_ppb[1] = bench.r_air; r.p_mmbar[1] = bench.p_air;
-    if (rec_check(&r) != NULL) {
+    if (!rec_check(&r)) {
         valve_event("CAL", "Air ratio not above vacuum ratio: check the pump-down and venting, redo both");
         return;
     }

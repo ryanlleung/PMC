@@ -47,7 +47,5 @@ void baro_init(void);
 void baro_poll(void);
 // Latest reading: true while fitted, answering and plausible.
 bool baro_reading(int32_t *p_mmbar, int32_t *t_mc);
-bool baro_fitted(void);        // found at start-up
-const char *baro_status(void); // one line, for BARO STATUS?
 
 #endif // _BARO_H_

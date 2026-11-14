@@ -20,6 +20,10 @@
  * for the Druck excitation, and drops to ~5 V if VBUS reads over 11.5 V.
  */
 
+// The Druck gives no reading with the excitation below this (datasheet
+// supply range 7-12 V); valve.c names it as the cause of F-1.
+#define DRUCK_VEXC_MIN_MV    7000
+
 // Latest readings for the UI, valid after clicks_init(), updated by clicks_poll().
 typedef struct {
     bool pm_found;        // INA228 answering
@@ -44,18 +48,6 @@ void clicks_init(void);
 
 // Re-reads every board. Call about once a second.
 void clicks_poll(void);
-
-// One status line per board, valid after clicks_init().
-const char *clicks_stepper3_status(void);
-
-const char *clicks_boost10_status(void);
-const char *clicks_powermonitor_status(void);
-const char *clicks_druck_status(void);
-
-// Druck pressure in mbar absolute as text ("1013.25"), "----" if no reading.
-const char *clicks_druck_value(void);
-// True while the calibration is the nominal 0 mV / 100 mV, not the cert.
-bool clicks_druck_cal_nominal(void);
 
 const clicks_state_t *clicks_state(void);
 

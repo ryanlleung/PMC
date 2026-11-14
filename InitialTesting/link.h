@@ -8,15 +8,20 @@
 #include "pmc_config.h"
 
 /**
- * @brief Text link to the PC: the USB COM port or Ethernet (TCP), chosen by
- * PMC_LINK_ETHERNET in pmc_config.h. Same DATA lines and CAL commands
- * either way.
+ * @brief Text link to the PC over Ethernet (TCP port PMC_TCP_PORT).
+ *
+ * The transport (link_init, link_task, link_getline, link_tx_room,
+ * link_client and link_send) is ethlink.c on the board. A host build with
+ * PMC_LINK_ETHERNET 0 (the simulator) supplies those six itself.
  */
 
 void link_init(void);
 
 // Call often from the main loop.
 void link_task(void);
+
+// Sends s to the client, for link_write only.
+void link_send(const char *s);
 
 /*
  * Output. The board never sends a line by itself: the remote command set
@@ -32,13 +37,6 @@ size_t link_tx_room(void);
 bool link_getline(char *buf, size_t n);
 
 
-// Header chip: short text and whether the link is usable / in use.
-const char *link_chip_text(void);
-bool link_chip_ok(void);
-
-// One-line state for the status lines.
-const char *link_status(void);
-
 /*
  * Remote traffic, for the header's remote light (0.15.14, Ryan 5 Nov):
  * requests in and replies out, text port and Modbus, counted since start.
@@ -49,11 +47,11 @@ void link_count(bool out);
 void link_traffic(uint32_t *in, uint32_t *out);
 // Milliseconds since the last request or reply; UINT32_MAX before the first.
 uint32_t link_quiet_ms(void);
-// A remote client is connected (Ethernet: the text port or Modbus). USB: false.
+// A remote client is connected (the text port or Modbus).
 bool link_client(void);
 
 /*
- * Line assembly, shared by the USB and Ethernet code. CR, LF or CRLF end a
+ * Line assembly. CR, LF or CRLF end a
  * line (terminals differ) and empty lines are ignored. A line of up to
  * LINK_LINE_MAX characters is taken; a longer one comes out as
  * LINK_LINE_LONG (ERR 103), so nothing cut short is run.
@@ -64,13 +62,10 @@ typedef struct {
     char text[LINK_LINE_MAX + 1];
     size_t len;
     bool over;           // characters were dropped
-    uint32_t last_ms;    // lv_tick_get() at the last character that was not CR/LF
 } link_line_t;
 
 // Adds one received character. True with the line (no CR/LF) in out when it
 // ends one; out needs LINK_LINE_MAX + 1 bytes.
 bool link_line_feed(link_line_t *l, char c, char *out, size_t n);
-// Ends a pending line once nothing has arrived for idle_ms. True with the line in out.
-bool link_line_idle(link_line_t *l, uint32_t idle_ms, char *out, size_t n);
 
 #endif // _LINK_H_

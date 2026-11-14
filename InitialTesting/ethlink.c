@@ -19,7 +19,7 @@
 
 /* --------------------------------------------------------------------------
  * One TCP server on PMC_TCP_PORT, one client at a time (a new connection
- * replaces the old one). Text lines both ways, as on the USB COM port.
+ * replaces the old one). Text lines both ways.
  * CycloneTCP runs without an RTOS: ethlink_task() calls netTask() from the
  * main loop and every socket call uses a zero timeout.
  * ------------------------------------------------------------------------ */
@@ -30,11 +30,7 @@ static Socket *client;
 static bool up;
 static int phy_addr = ETH_HW_NO_PHY;
 static uint32_t phy_id;
-static char ip_text[16] = "";
-static char mask_text[16] = "";
 static char mac_text[18] = "";
-static char status_text[112] = "Ethernet: not started";
-static const char *chip_err = "NET";   // short fault for the header
 static bool new_client;
 
 // Line assembly for client input; reset when a new client connects.
@@ -68,27 +64,19 @@ void ethlink_init(void)
     uint8_t uid[12];
 
     if (!eth_hw_clock_50mhz()) {
-        lv_strlcpy(status_text, "Ethernet: HSE crystal did not start", sizeof status_text);
-        chip_err = "NET HSE";
-        return;
+        return;   // the HSE crystal did not start
     }
     eth_hw_init_pins();
     phy_addr = eth_hw_probe(&phy_id);
     if (phy_addr == ETH_HW_NO_REFCLK) {
-        lv_strlcpy(status_text, "Ethernet: no 50 MHz RMII clock (MAC reset stuck)", sizeof status_text);
-        chip_err = "NET NO CLK";
-        return;
+        return;   // no 50 MHz RMII clock (MAC reset stuck)
     }
     if (phy_addr == ETH_HW_NO_PHY) {
-        lv_strlcpy(status_text, "Ethernet: PHY not answering on MDIO", sizeof status_text);
-        chip_err = "NET NO PHY";
-        return;
+        return;   // the PHY does not answer on MDIO
     }
 
     if (netInit() != NO_ERROR) {
-        lv_strlcpy(status_text, "Ethernet: stack init failed", sizeof status_text);
-        chip_err = "NET ERR";
-        return;
+        return;   // stack init failed
     }
     ifc = netGetDefaultInterface();
 
@@ -117,9 +105,7 @@ void ethlink_init(void)
     netSetPhyDriver(ifc, &lan8720PhyDriver);
     netSetPhyAddr(ifc, (uint8_t)phy_addr);
     if (netConfigInterface(ifc) != NO_ERROR) {
-        lv_strlcpy(status_text, "Ethernet: interface config failed", sizeof status_text);
-        chip_err = "NET ERR";
-        return;
+        return;   // interface config failed
     }
 
     // A static address only, no DHCP (0.14.9): the one saved under
@@ -137,9 +123,7 @@ void ethlink_init(void)
     if (listener == NULL ||
         socketBind(listener, &IP_ADDR_ANY, PMC_TCP_PORT) != NO_ERROR ||
         socketListen(listener, 1) != NO_ERROR) {
-        lv_strlcpy(status_text, "Ethernet: TCP listen failed", sizeof status_text);
-        chip_err = "NET ERR";
-        return;
+        return;   // TCP listen failed
     }
     socketSetTimeout(listener, 0);
 
@@ -282,17 +266,6 @@ void ethlink_task(void)
     }
 
     mb_task();
-
-    Ipv4Addr a = IPV4_UNSPECIFIED_ADDR;
-    ipv4GetHostAddr(ifc, &a);
-    if (a != IPV4_UNSPECIFIED_ADDR) {
-        Ipv4Addr m = IPV4_UNSPECIFIED_ADDR;
-        ipv4GetSubnetMask(ifc, &m);
-        ipv4AddrToString(a, ip_text);
-        ipv4AddrToString(m, mask_text);
-    } else {
-        ip_text[0] = mask_text[0] = '\0';
-    }
 }
 
 size_t ethlink_tx_room(void)
@@ -357,51 +330,14 @@ bool ethlink_take_new_client(void)
     return v;
 }
 
-const char *ethlink_chip_text(void)
-{
-    if (!up)
-        return chip_err;
-    if (!netGetLinkState(ifc))
-        return "NO CABLE";
-    return ip_text[0] ? ip_text : "NET";
-}
-
 const char *ethlink_mac(void)
 {
     return mac_text;
 }
 
-const char *ethlink_mask(void) { return mask_text; }
-
-const char *ethlink_ip(void)
-{
-    return ip_text;
-}
-
-bool ethlink_link_up(void)
-{
-    return up && netGetLinkState(ifc);
-}
-
 bool ethlink_client_connected(void)
 {
     return client != NULL;
-}
-
-const char *ethlink_status(void)
-{
-    if (!up)
-        return status_text;
-    if (!netGetLinkState(ifc))
-        lv_snprintf(status_text, sizeof status_text, "Ethernet: no cable link (PHY %d)", phy_addr);
-    else if (!ip_text[0])
-        lv_snprintf(status_text, sizeof status_text, "Ethernet: link up, no address set");
-    else
-        lv_snprintf(status_text, sizeof status_text, "Ethernet: %s port %d, %s; Modbus %d: %d",
-                    ip_text, PMC_TCP_PORT,
-                    client ? "client connected" : "no client", PMC_MODBUS_PORT,
-                    ethlink_modbus_clients());
-    return status_text;
 }
 
 #endif // PMC_LINK_ETHERNET

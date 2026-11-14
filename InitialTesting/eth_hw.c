@@ -17,7 +17,7 @@
  * (or HSE, 25 MHz). 168 MHz / 3 = 56 MHz is out of spec, so the PLL is run
  * at HSE 25 / 13 * 156 = 300 MHz VCO, SYSCLK 150 MHz, MCO1 = 150 / 3 = 50 MHz.
  * 50 MHz and USB's 48 MHz cannot both come from one VCO (<= 432 MHz), so
- * the USB COM port is off in the Ethernet build.
+ * there is no USB COM port (its code went in 0.16.28).
  * ------------------------------------------------------------------------ */
 
 #define SYSCLK_HZ 150000000UL

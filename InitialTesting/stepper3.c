@@ -43,9 +43,10 @@ static const out_pin_t out_pins[4] = {
 
 static digital_out_t sdk_pins[4];
 
-// Half-step sequence, bit n = coil n on. Even entries one coil (wave),
-// odd entries two coils (full step).
-static const uint8_t seq[8] = { 0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9 };
+// Full-step sequence, two coils on, bit n = coil n on. The only step mode
+// from 0.16.30 (Ryan 13 Nov: "only keep full"): WAVE (one coil) and HALF
+// (the two alternating) were the entries between these.
+static const uint8_t seq[4] = { 0x3, 0x6, 0xC, 0x9 };
 
 #define TICK_HZ        1000000UL
 #define SETTLE_US      20000UL    // coils stay on this long after the last step
@@ -63,7 +64,6 @@ static const uint8_t seq[8] = { 0x1, 0x3, 0x2, 0x6, 0x4, 0xC, 0x8, 0x9 };
 static uint32_t rate_run   = 400;    // steps/s
 static uint32_t rate_start = 200;    // steps/s, ramp starts and ends here
 static uint32_t accel      = 3200;   // steps/s^2
-static stepper3_mode_t mode = STEPPER3_FULL;
 static bool hold;                    // coils on when idle
 static bool reverse;                // flips the sequence direction. Normal (0) is the direction that was
                                     // "Reversed" before 0.11.19, the factory default (Ryan, 22 Oct)
@@ -75,7 +75,7 @@ static uint8_t order[4] = { 0, 2, 1, 3 };   // coil n -> output order[n]; 0213 f
 typedef enum { ST_IDLE, ST_MOVING, ST_SETTLE } run_state_t;
 
 static volatile run_state_t run_state = ST_IDLE;
-static volatile int32_t position;       // steps of the current mode
+static volatile int32_t position;       // full steps
 static volatile int32_t target;         // where the running move ends
 static volatile bool stop_ramp;         // ramp down to the start rate, then stop
 static volatile stepper3_stop_t last_stop = STEPPER3_STOP_NONE;
@@ -86,7 +86,7 @@ static uint32_t v_fp;                   // current rate, steps/s * 256
 static volatile uint32_t v_run_fp, v_start_fp;
 static uint32_t n_acc;                  // steps spent accelerating
 static uint32_t move_rate;              // run rate of this move, steps/s
-static uint32_t deadline_ms;            // F-5: lv_tick_get() past this = timeout
+static uint32_t deadline_ms;            // lv_tick_get() past this = the move has timed out
 static volatile uint32_t moves_ended;   // counts moves ended, for stepper3_move_seq()
 static int32_t move_from;                // last move: start position and times
 static uint32_t move_t0;
@@ -103,7 +103,6 @@ static volatile bool reversed_hit, stall_hit;   // latched for valve.c (stepper3
 static volatile uint32_t alive_ms;      // the main loop's last pass (stepper3_poll)
 #define STALL_MS       1000             // no pass for this long: the step interrupt stops the move
 
-static char status_text[160];
 
 /* --------------------------------------------------------------------------
  * Limit switch (one NC dry contact at the closed end of travel), read by
@@ -296,7 +295,7 @@ void TIM7_IRQHandler(void)
     // valve has: once it has read released for FREE_ARM steps, pressed again
     // during an opening move means the valve is in fact closing (Direction
     // or coil order wrong, a count saved under another one) or the switch is
-    // failing. Stopped at once, and valve.c latches F-4; otherwise it would
+    // failing. Stopped at once, and valve.c latches F-3; otherwise it would
     // drive the needle into the seat with nothing to stop it.
     // The pin itself, in steps: PRESSED_N in a row once armed (one glitch on
     // a long pulled-up line is not a press).
@@ -324,10 +323,8 @@ void TIM7_IRQHandler(void)
         return;
     }
 
-    int8_t inc = (mode == STEPPER3_HALF) ? 1 : 2;
-    if (reverse == (dir < 0))
-        inc = -inc;
-    phase = (uint8_t)(phase + inc) & 7;
+    const int8_t inc = reverse == (dir < 0) ? -1 : 1;
+    phase = (uint8_t)(phase + inc) & 3;
     write_coils(seq[phase]);
     position += dir;
 
@@ -400,7 +397,8 @@ static void step_irq_release(uint32_t pm) { __asm volatile ("msr primask, %0" ::
 
 static int32_t abs32(int32_t v) { return v < 0 ? -v : v; }
 
-// F-5: the move should be done within |distance| / rate, plus the ramps
+// The motion timeout (an event only from 0.16.33; W-5, and F-5 to 0.16.28,
+// before): the move should be done within |distance| / rate, plus the ramps
 // (counted twice over, for a turn round), plus 2 s.
 static void set_deadline(void)
 {
@@ -479,11 +477,6 @@ from_rest:
         override_active = dist < 0;
     }
 
-    // Wave uses the one-coil entries, full the two-coil entries.
-    if (mode == STEPPER3_WAVE)
-        phase &= ~1u;
-    else if (mode == STEPPER3_FULL)
-        phase |= 1u;
     write_coils(seq[phase]);
     energised = true;
 
@@ -533,7 +526,7 @@ void stepper3_poll(void)
     if (run_state != ST_MOVING || (int32_t)(lv_tick_get() - deadline_ms) <= 0)
         return;
     stepper3_stop();
-    last_stop = STEPPER3_STOP_TIMEOUT;   // valve.c latches F-5 and logs it
+    last_stop = STEPPER3_STOP_TIMEOUT;   // valve.c logs a SYS event (no latch, no warning)
 }
 
 // During a ramped stop (MOT STOP RAMP, a hold released, Switch to MANUAL)
@@ -622,33 +615,6 @@ static void ref_changed(const char *why)
         ref_cb(why);
 }
 
-void stepper3_zero(void)
-{
-    if (run_state != ST_IDLE)
-        return;
-    if (position != 0)
-        ref_changed("motor count zeroed");
-    position = 0;
-}
-
-const char *stepper3_status(void)
-{
-    const char *st = run_state == ST_MOVING ? (dir > 0 ? "opening" : "closing")
-                   : energised ? "idle, coils on" : "idle, coils off";
-    char to[24] = "";
-    if (run_state == ST_MOVING)
-        lv_snprintf(to, sizeof to, " to %ld", (long)target);
-    lv_snprintf(status_text, sizeof status_text,
-                "S2 Stepper 3: %s, pos %ld%s, %s %lu sps, limit %s",
-                st, (long)position, to, stepper3_mode_name(mode),
-                (unsigned long)(run_state == ST_MOVING ? move_rate : rate_run),
-                !LIMIT_FITTED ? "stop off (PMC_LIMIT_STOP 0)"
-                : stepper3_override() ? (limit_open_now() ? "pressed, override" : "free, override armed")
-                : stepper3_limit_ignored() && limit_open_now() ? "pressed, passed (pass band)"
-                : stepper3_limit_open() ? "pressed" : "free");
-    return status_text;
-}
-
 /* --------------------------------------------------------------------------
  * Settings, shared by the MOT commands and the motor screen. Each setter
  * refuses (returns false) while a move is running or for a value out of
@@ -675,28 +641,6 @@ bool stepper3_set_accel(uint32_t sps2)
     if (run_state != ST_IDLE || sps2 < ACCEL_MIN || sps2 > ACCEL_MAX)
         return false;
     accel = sps2;
-    return true;
-}
-
-int32_t stepper3_scale(void) { return mode == STEPPER3_HALF ? 2 : 1; }
-
-bool stepper3_set_mode(stepper3_mode_t nm)
-{
-    // Refused in AUTO and while homing (lock_why): the controller and the
-    // homing hold positions in the old step size.
-    if (run_state != ST_IDLE || nm > STEPPER3_HALF || lock_why)
-        return false;
-    // Keep the position in the new step size; the homing stays (since
-    // 0.11.33, Ryan 23 Oct), the valve settings being in full steps. HALF to
-    // FULL or WAVE drops an odd half step, and WAVE and FULL rest half a
-    // step apart: at most one half step, against 16512 full steps a turn.
-    if (mode == STEPPER3_HALF && nm != STEPPER3_HALF)
-        position /= 2;
-    else if (mode != STEPPER3_HALF && nm == STEPPER3_HALF)
-        position *= 2;
-    mode = nm;
-    if (energised)
-        coils_off();     // re-energised on the right entry at the next move
     return true;
 }
 
@@ -751,23 +695,18 @@ bool stepper3_last_move(int32_t *from, uint32_t *ms)
 uint32_t stepper3_rate(void)            { return rate_run; }
 uint32_t stepper3_start_rate(void)      { return rate_start; }
 uint32_t stepper3_accel(void)           { return accel; }
-stepper3_mode_t stepper3_mode(void)     { return mode; }
 bool stepper3_hold(void)                { return hold; }
 bool stepper3_reverse(void)             { return reverse; }
 bool stepper3_energised(void)           { return energised; }
 int8_t stepper3_direction(void)         { return run_state == ST_MOVING ? dir : 0; }
 void stepper3_order(uint8_t o[4])       { memcpy(o, order, sizeof order); }
-const char *stepper3_mode_name(stepper3_mode_t m)
-{
-    return m == STEPPER3_WAVE ? "WAVE" : m == STEPPER3_FULL ? "FULL" : "HALF";
-}
 const char *stepper3_stop_name(stepper3_stop_t s)
 {
     switch (s) {
     case STEPPER3_STOP_DONE:  return "done";
     case STEPPER3_STOP_CMD:   return "stopped";
     case STEPPER3_STOP_LIMIT: return "LIMIT";
-    case STEPPER3_STOP_TIMEOUT: return "F-5 timeout";
+    case STEPPER3_STOP_TIMEOUT: return "timeout";
     case STEPPER3_STOP_REVERSED: return "switch while opening";
     case STEPPER3_STOP_STALL: return "main loop stalled";
     default:                  return "none";

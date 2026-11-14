@@ -355,15 +355,6 @@ void ui_btn_enable(lv_obj_t *b, bool on)
         lv_obj_set_style_text_color(lv_obj_get_child(b, 1), on ? UI_CHEV : UI_IDLE, 0);
 }
 
-void ui_btn_blue(lv_obj_t *b)
-{
-    // A navigation tile filled dark blue with white lettering, the colour of
-    // Start AUTO (0.15.23: Settings on the Menu, Review and save).
-    ui_btn_primary(b, true);
-    for (uint32_t c = 0; c < lv_obj_get_child_count(b); c++)
-        lv_obj_set_style_text_color(lv_obj_get_child(b, (int32_t)c), lv_color_white(), 0);
-}
-
 void ui_btn_primary(lv_obj_t *b, bool on)
 {
     if (on == lv_obj_has_flag(b, LV_OBJ_FLAG_USER_2))
@@ -517,7 +508,7 @@ static void unsaved_event(lv_event_t *e)
         dim_back();   // greyed under a popup, as Home
         return;
     }
-    ui_open(&ui_scr_review);
+    ui_unsaved_ask();
 }
 
 // The strip under a popup is greyed: a tap on it closes the popup.
@@ -784,7 +775,7 @@ static void build_frame(void)
     lv_obj_set_ext_click_area(unsaved_btn, 6);
     lv_obj_add_flag(unsaved_btn, LV_OBJ_FLAG_HIDDEN);
     // The remote light: shown while a remote client is connected, or for
-    // 10 s after a message (the USB build has no client to see). Grey
+    // 10 s after a message. Grey
     // arrows, each white for a moment with every request in or reply out.
     // A tap opens System setup.
     comm_obj = plain(hdr);
@@ -881,8 +872,6 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
     lv_strlcpy(line_text, text, sizeof line_text);
     phrase(line_text);
 }
-
-void ui_strip_width(int32_t w) { strip_w = w; }
 
 void ui_strip_action(const char *text, const char *small, lv_event_cb_t cb)
 {
@@ -1083,7 +1072,7 @@ static void frame_refresh(void)
     show(comm_obj, comm_shown);
     if (comm_shown && lv_obj_get_x(comm_obj) != cx)
         lv_obj_set_x(comm_obj, cx);
-    bool uns = cfg_unsaved() > 0 && cur != &ui_scr_review;
+    bool uns = cfg_unsaved() > 0;
     int32_t ux = cx - 48;
     show(unsaved_btn, uns);
     if (uns) {
@@ -1148,9 +1137,7 @@ static void frame_refresh(void)
     }
     nf_seen = nf;
     // The keypad uses the strip's row; an empty line (Home, idle) hides it.
-    int32_t die_mc;
-    bool hot = sense_hot(&die_mc);
-    bool quiet = !msg_until && !nf && !stepper3_override() && !hot && !line_text[0];
+    bool quiet = !msg_until && !nf && !stepper3_override() && !line_text[0];
     show(strip, !(overlay && (kp_open || overlay_full)) && !quiet);
     char buf[96];
     if (msg_until) {
@@ -1172,10 +1159,6 @@ static void frame_refresh(void)
         strip_draw(UI_STRIP_WARN, NULL, stepper3_busy() ? "Limit override: closing past the switch"
                                                         : "Limit override armed: the next close ignores the switch",
                    false, false);
-    } else if (hot) {
-        char v[16];
-        lv_snprintf(buf, sizeof buf, "W-3 Controller hot, %s \xC2\xB0" "C", ui_fmt1(v, sizeof v, die_mc));
-        strip_draw(UI_STRIP_WARN, NULL, buf, false, false);
     } else {
         strip_draw(line_kind, line_icon, line_text, false, act_cb != NULL);
     }
@@ -1356,8 +1339,6 @@ void ui_overlay_close(void)
     overlay_full = false;
     kp_open = false;
 }
-
-lv_obj_t *ui_overlay(void) { return overlay_new(); }
 
 lv_obj_t *ui_overlay_full(void)
 {

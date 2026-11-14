@@ -105,7 +105,7 @@ select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; ba
         <input type="number" id="room" step="0.1" value="1013.2"> mbar</div>
       <div class="row"><label>Power Monitor answering</label><button class="tg" data-id="9">Yes</button></div>
       <div class="row"><label>Druck excitation</label>
-        <select id="exc"><option value="10.051">10.05 V (normal)</option><option value="9.2">9.2 V (low)</option><option value="0">None (Boost 10 off)</option></select></div>
+        <select id="exc"><option value="10.051">10.05 V (normal)</option><option value="9.2">9.2 V (low, still reads)</option><option value="6.5">6.5 V (under 7 V, no reading)</option><option value="0">None (Boost 10 off)</option></select></div>
       <div class="row"><label>Controller temperature</label>
         <input type="range" id="die" min="15" max="70" step="0.5" value="31"><span class="val" id="dieval"></span></div>
       <p class="note">The Druck reads about 5 % low through the Power Monitor input, as on the bench, until it is calibrated (Calibrate sensor: vacuum with the valve closed, then room air).</p>
@@ -129,7 +129,7 @@ select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; ba
         <input type="number" id="needleset" step="100" value="20000"><button id="turn">Turn by hand to</button></div>
       <div class="row"><label>Switch / coils</label><span class="val" id="lim"></span></div>
       <div class="row"><label>Steps lost</label><span class="val" id="lost"></span></div>
-      <p class="note">Full steps from the switch point; the needle seats 30 steps past the switch, 16512 steps a turn. The motor follows the four Stepper 3 outputs, so MOT MODE, DIR and ORDER act as on the bench, and below 8 V it does not turn.</p>
+      <p class="note">Full steps from the switch point; the needle seats 30 steps past the switch, 16512 steps a turn. The motor follows the four Stepper 3 outputs, so DIR and ORDER act as on the bench, and below 8 V it does not turn.</p>
     </div>
   </section>
 </main>

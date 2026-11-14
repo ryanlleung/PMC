@@ -27,13 +27,13 @@ typedef struct {
     int32_t early_half;       // LIMFAULT_EARLY: trips this far above the seat
     // sensors
     bool druck, pm;           // Druck plugged in, INA228 answering
-    double exc_v;             // Druck excitation from the Boost 10 (F-02 outside 9.5-10.5 V)
+    double exc_v;             // Druck excitation from the Boost 10 (F-1 under 7 V; the reading is a ratio)
     bool vent;                // Druck open to room air (bench calibration)
     double room_mbar;
     bool baro;                // Pressure 21 fitted (0.14.0); it reads room_mbar + baro_err
     double baro_err;
     double supply_v;          // motor 12 V supply
-    double die_c;             // INA228 die temperature (W-03 at 55 C)
+    double die_c;             // INA228 die temperature (no alarm from 0.16.29)
 } bench_t;
 
 extern bench_t B;

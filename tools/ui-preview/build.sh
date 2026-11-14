@@ -26,11 +26,11 @@ gcc $CFLAGS -DREAL_CAL -o "$OUT/ui_new" "$HERE/ui_new_main.c" "$HERE/fake_hw.c" 
   "$PROJ/cfg.c" "$PROJ/cal.c" "$PROJ/ui_font_12.c" "$PROJ/ui_font_16.c" "$PROJ/ui_font_26.c" "$PROJ/ui_font_40.c" "$PROJ/ui_img_logo.c" \
   "$PROJ/fixed.c" "$OUT/liblvgl.a" -lm
 for s in splash notcal manual calib moving nodruck stop neg menu keypad confirm setpos \
-         valve valvenc limithit calpage calpage2 calhelp calset handset bootpick hot faults detail diag help help3 back bootask bootmove \
+         valve valvenc limithit calpage calpage2 calhelp calset handset bootpick faults detail diag help help3 back bootask bootmove \
          set-valve set-valve2 set-valve3 set-valvepos \
-         set-tune set-tuneset3 set-tunetable set-tuneauto set-tunehelp set-tunekp set-tunedraft set-saveask set-saved set-review set-load motor motor-speed motor-coils set-override set-overhelp motor-ask motor-held motor-moving motor-steps set-name set-named set-net set-remote set-netaddr set-netaddr2 set-netused \
+         set-tune set-tuneset3 set-tunetable set-tuneauto set-tunehelp set-tunekp set-tunedraft set-saved set-tuneundo reset-ask reset-done motor motor-speed motor-coils set-override set-overhelp motor-ask motor-held motor-moving motor-steps set-name set-named set-net set-remote set-netaddr set-netaddr2 set-netused \
          overon calsensor calvac trend trend1h trend1m notrend \
-         auto autosched autostable autoreg autofirst autoask autosp automan autovalve paused warn4 warn5 f16 trendauto \
+         auto autosched autostable autoreg autofirst autoask autosp automan autovalve paused f16 trendauto \
          shutask shutclose shutleave shutting off; do
   "$OUT/ui_new" "$s" "$OUT/new-$s.raw"
   python3 "$HERE/render.py" "$OUT/new-$s.raw" "$OUT/new-$s.png"

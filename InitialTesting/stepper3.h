@@ -33,7 +33,6 @@
  *   MOT RATE <sps>        run rate, steps/s
  *   MOT START <sps>       start/stop rate of the ramp, steps/s
  *   MOT ACCEL <sps/s>     ramp acceleration
- *   MOT MODE WAVE|FULL|HALF
  *   MOT HOLD 0|1          keep the coils on when idle
  *   MOT DIR 0|1           1 reverses the direction
  *   MOT ORDER <abcd>      coil order on the outputs, e.g. 0123 or 0213
@@ -41,31 +40,25 @@
  */
 
 typedef enum {
-    STEPPER3_WAVE,   // one coil on at a time
-    STEPPER3_FULL,   // two coils on, full torque
-    STEPPER3_HALF    // alternates one and two coils, half-size steps
-} stepper3_mode_t;
-
-typedef enum {
     STEPPER3_STOP_NONE,     // no move yet
     STEPPER3_STOP_DONE,     // reached the target
     STEPPER3_STOP_CMD,      // MOT STOP / MOT OFF / stepper3_stop()
     STEPPER3_STOP_LIMIT,    // limit input open during a closing move
-    STEPPER3_STOP_TIMEOUT,  // F-5: still moving after |distance| / rate + 2 s
-    STEPPER3_STOP_REVERSED, // the switch pressed again during an opening move (F-4)
+    STEPPER3_STOP_TIMEOUT,  // still moving after |distance| / rate + 2 s (an event in the log)
+    STEPPER3_STOP_REVERSED, // the switch pressed again during an opening move (F-3)
     STEPPER3_STOP_STALL     // the main loop stopped for over 1 s (a hang; the watchdog follows)
 } stepper3_stop_t;
 
 // Pins low (coils off). Does not move the motor.
 void stepper3_init(void);
 
-// Moves to an absolute position (steps of the current mode) at sps steps/s
+// Moves to an absolute position (full steps) at sps steps/s
 // (0 = the MOT RATE setting). During a move this retargets it: a target
 // further on extends it; a target behind ramps down to the start rate, then
 // turns. Returns false for a rate out of range, a target more than
 // STEPPER3_MAX_MOVE from here, or (from rest) a closing move with the limit
 // open. A target equal to the position returns true without moving.
-#define STEPPER3_MAX_MOVE 700000   // > 1.1 x the largest POS_MAX (300000 full steps) in half steps
+#define STEPPER3_MAX_MOVE 700000   // > 1.1 x the largest POS_MAX (300000 steps), with margin
 #define STEPPER3_TIMEOUT_MARGIN_MS 2000
 bool stepper3_goto_rate(int32_t target, uint32_t sps);
 bool stepper3_goto(int32_t target);
@@ -78,7 +71,7 @@ int32_t stepper3_target(void);
 void stepper3_stop(void);
 // Ramps down at the normal deceleration, then stops (last stop "stopped").
 void stepper3_stop_ramped(void);
-// From the main loop: F-5 motion timeout, stops at once.
+// From the main loop: the motion timeout, stops at once.
 void stepper3_poll(void);
 // Goes up by one each time a move ends (done, stopped, limit, timeout);
 // stepper3_last_stop() then says why.
@@ -101,9 +94,6 @@ void stepper3_off(void);
 
 bool stepper3_busy(void);
 int32_t stepper3_position(void);
-void stepper3_zero(void);
-// Motor counts per full step: 2 in HALF, else 1.
-int32_t stepper3_scale(void);
 #define STEPPER3_STEPS_PER_TURN 16512   // full steps per output turn: 48 x 344 (bench, 22 Oct)
 // Called when the step count stops matching the valve's homing: MOT ZERO,
 // a change of direction or coil order (from the link, the motor
@@ -144,7 +134,6 @@ bool stepper3_limit_fitted(void);
 bool stepper3_set_rate(uint32_t sps);
 bool stepper3_set_start(uint32_t sps);
 bool stepper3_set_accel(uint32_t sps2);
-bool stepper3_set_mode(stepper3_mode_t mode);   // converts the position count
 bool stepper3_set_hold(bool on);
 bool stepper3_set_reverse(bool on);
 bool stepper3_set_order(const uint8_t order[4]); // each of 0-3 once
@@ -152,17 +141,12 @@ bool stepper3_set_order(const uint8_t order[4]); // each of 0-3 once
 uint32_t stepper3_rate(void);
 uint32_t stepper3_start_rate(void);
 uint32_t stepper3_accel(void);
-stepper3_mode_t stepper3_mode(void);
 bool stepper3_hold(void);
 bool stepper3_reverse(void);
 bool stepper3_energised(void);
 int8_t stepper3_direction(void);      // +1 opening, -1 closing, 0 idle
 void stepper3_order(uint8_t order[4]);
-const char *stepper3_mode_name(stepper3_mode_t mode);
 const char *stepper3_stop_name(stepper3_stop_t stop);
-
-// Short status line for the screen and the link.
-const char *stepper3_status(void);
 
 
 #endif // _STEPPER3_H_

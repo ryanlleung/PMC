@@ -31,7 +31,6 @@
  */
 #define PMC_LIMIT_PORT      GPIOD
 #define PMC_LIMIT_PIN       5
-#define PMC_LIMIT_PIN_NAME  "PD5 (S1 TX)"
 
 #define SAMPLE_MS   5
 #define STABLE_N    4          // 20 ms of closed samples before a release counts
@@ -96,13 +95,4 @@ bool limit_open_now(void)
 }
 
 bool limit_pin_open(void) { return read_open(); }
-
-const char *limit_text(void)
-{
-    switch (state) {
-    case LIMIT_CLOSED: return "free";
-    case LIMIT_OPEN:   return "pressed";
-    default:           return "unknown";
-    }
-}
 

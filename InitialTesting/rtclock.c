@@ -62,16 +62,6 @@ static void read_now(int *y, int *mo, int *d, int *h, int *mi, int *s)
     *d  = bcd2(dr & 0x3F);
 }
 
-const char *rtclock_screen_text(void)
-{
-    int y, mo, d, h, mi, s;
-    if (!rtclock_valid())
-        return "time not set";
-    read_now(&y, &mo, &d, &h, &mi, &s);
-    lv_snprintf(text, sizeof text, "%02d/%02d/%02d %02d:%02d", d, mo, y % 100, h, mi);   // DD/MM/YY
-    return text;
-}
-
 const char *rtclock_iso(void)
 {
     int y, mo, d, h, mi, s;

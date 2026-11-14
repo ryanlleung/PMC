@@ -74,7 +74,7 @@ firmware 0.12.21 and earlier does not answer these commands.
   the board's text, for example `Switch to MANUAL first`.
 - From firmware 0.13.4 the board takes set commands over the network only
   while Menu > System > Remote control is On (On on a new
-  board from 0.13.7, kept by Save settings). While Off, the readings still update and
+  board from 0.13.7, saved as it is set). While Off, the readings still update and
   every change (target, mode, valve, stop, alarm reset) comes back as
   `Read only over the network` (ERR 211).
 - The driver has been tested against `tests/fake_mm4.py` only, not yet

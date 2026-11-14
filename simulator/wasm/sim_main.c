@@ -16,7 +16,6 @@ static inline void timerInit(void) {}
 #include <stdarg.h>
 #include <time.h>
 
-#include "usb_serial.h"
 #include "extflash.h"
 #include "bench.h"
 
@@ -69,7 +68,7 @@ bool extflash_write(uint32_t addr, const void *buf, size_t len)
     return true;
 }
 
-/* ---- USB serial: the page's console -------------------------------------- */
+/* ---- the text link: the page's console (link.h) ---------------------------- */
 #define TX_SIZE 65536
 static char tx[TX_SIZE];
 static uint32_t tx_len;
@@ -78,25 +77,18 @@ static uint32_t rx_head, rx_tail;
 static link_line_t rx_line;
 static uint32_t rx_bytes;
 
-void usb_serial_init(void) {}
-void usb_serial_task(void) {}
-const char *usb_serial_status(void) { return "USB: port open (simulator console)"; }
-size_t usb_serial_tx_room(void) { return TX_SIZE - tx_len; }
-uint32_t usb_serial_rx_bytes(void) { return rx_bytes; }
-void usb_serial_printf(const char *fmt, ...)
+void link_init(void) {}
+void link_task(void) {}
+size_t link_tx_room(void) { return TX_SIZE - tx_len; }
+bool link_client(void) { return false; }
+void link_send(const char *s)
 {
-    char buf[256];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = lv_vsnprintf(buf, sizeof buf, fmt, ap);
-    va_end(ap);
-    if (n < 0) return;
-    if ((size_t)n >= sizeof buf) n = sizeof buf - 1;
-    if (tx_len + (uint32_t)n > TX_SIZE) return;   // the page has not read: dropped, as a full USB buffer
-    memcpy(tx + tx_len, buf, (size_t)n);
+    size_t n = strlen(s);
+    if (tx_len + n > TX_SIZE) return;   // the page has not read: dropped, as a full send buffer
+    memcpy(tx + tx_len, s, n);
     tx_len += (uint32_t)n;
 }
-bool usb_serial_getline(char *buf, size_t n)
+bool link_getline(char *buf, size_t n)
 {
     while (rx_tail != rx_head) {
         char c = rx[rx_tail];
@@ -123,12 +115,9 @@ static void flush_cb(lv_display_t *d, const lv_area_t *a, uint8_t *px)
     for (int y = a->y1; y <= a->y2; y++)
         for (int x = a->x1; x <= a->x2; x++)
             fb[y * W + x] = *p++;
-    disp_flush_px += (uint32_t)lv_area_get_size(a);
     frames++;
     lv_display_flush_ready(d);
 }
-
-uint32_t disp_flush_ms, disp_flush_px;
 
 void lv_port_disp_init(void)
 {
@@ -223,9 +212,13 @@ ADC_TypeDef *sim_adc1_access(void)
 // One simulated millisecond of TIM7 (1 MHz count). Update events run the
 // step interrupt; EGR UG reloads at once; ARR takes effect at the next
 // update when ARPE is set.
+static bool tim7_lost;   // knob 24: the step interrupt does not run (a move then overruns its time: a SYS event)
+
 static void tim7_ms(void)
 {
     uint32_t left = 1000;
+    if (tim7_lost)
+        return;
     for (int guard = 0; guard < 2000; guard++) {
         if (sim_tim7.EGR & TIM_EGR_UG) {
             sim_tim7.EGR = 0;
@@ -334,6 +327,7 @@ EXPORT(sim_get) double sim_get(int id)
     case 21: return B.baro_err;
     case 22: return B.plant;
     case 23: return B.hx;
+    case 24: return tim7_lost;
     case 30: return stepper3_position();
     case 31: return valve_pct_milli();
     default: return 0;
@@ -359,6 +353,7 @@ EXPORT(sim_set) void sim_set(int id, double v)
     case 21: B.baro_err = v; break;
     case 22: bench_plant((int)v); break;
     case 23: bench_set_hx(v); break;
+    case 24: tim7_lost = v != 0; break;
     case 40: bench_set_pressure(v); break;
     case 41: B.T = v; break;
     case 42: B.mL = v; break;
@@ -414,9 +409,7 @@ EXPORT(sim_run) void sim_run(int ms)
         }
         if (link_getline(line, sizeof line))
             remote_line(line);
-        uint32_t t0 = lv_tick_get();
         lv_timer_handler();
-        perf_note(t0);
         coils_from_pins();   // a stop or coils-off from the main loop
     }
 }
@@ -441,7 +434,7 @@ EXPORT(sim_cal) int sim_cal(int what, double mbar)
     const char *w = NULL;
     return hook(cal_capture(what, mbar < 0 ? CAL_P_BARO : (int32_t)(mbar * 1000.0 + 0.5), &w), w);
 }
-// Save settings with one value changed (key < 0: none), as Review and save.
+// Save with one value changed (key < 0: none), as the settings pages.
 EXPORT(sim_save) int sim_save(int key, int value)
 {
     int32_t v[CFG_N] = {0};

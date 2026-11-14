@@ -31,7 +31,7 @@ static int32_t sp = 0;
 static bool sp_set;
 static int32_t pos_milli = 14200, goto_milli = 14200;
 static const char *warn;
-static bool question, fault_f5, busy, limit_open;
+static bool question, fault_f3, busy, limit_open;
 static int resets, stops;
 static char last_event[160];
 static bool remote = true;   // the Remote control switch (0.13.4)
@@ -44,9 +44,8 @@ valve_ref_t valve_reference(void) { return VALVE_REF_HOMED; }
 bool valve_target(int32_t *m) { *m = sp; return sp_set; }
 int32_t valve_range_mmbar(void) { return 1034000; }
 ctrl_reg_t valve_regulation(void) { return CTRL_REG_BAND; }
-bool valve_fault_latched(void) { return fault_f5; }
-bool valve_fault_is(const char *t) { return fault_f5 && !strcmp(t, "F-5"); }
-int valve_fault_count(void) { return fault_f5; }
+bool valve_fault_is(const char *t) { return fault_f3 && !strcmp(t, "F-3"); }
+int valve_fault_count(void) { return fault_f3; }
 uint32_t valve_event_total(void) { return 70000; }
 const char *valve_warning(void) { return warn; }
 void valve_warning_clear(void) { warn = NULL; }
@@ -64,8 +63,8 @@ static int saves, pid_set_now = 1;
 static void tune_reset(void)
 {
     static const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KD, CFG_KP2, CFG_TI2, CFG_KD2, CFG_KP3, CFG_TI3, CFG_KD3,
-                                   CFG_KP4, CFG_TI4, CFG_KD4, CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
-    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 400, 25, 0, 2, 60, 100, 140, 15 };
+                                   CFG_KP4, CFG_TI4, CFG_KD4, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    static const int32_t v[] = { 400, 25, 0, 400, 25, 0, 400, 25, 0, 400, 25, 0, 60, 100, 140, 15 };
     for (size_t i = 0; i < sizeof k / sizeof k[0]; i++)
         tune[k[i]] = v[i];
 }
@@ -81,7 +80,6 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
     *lo = 0;
     *hi = 10000;
     if (k == CFG_KP || k == CFG_KP2 || k == CFG_KP3 || k == CFG_KP4 || k == CFG_B1 || k == CFG_B2) *lo = 1;
-    if (k == CFG_SCHED) *lo = *hi = 2;   // the PID table always on (0.16.20)
     if (k == CFG_HYST) *hi = 40;
 }
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
@@ -104,7 +102,6 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
     return true;
 }
 int valve_pid_set(void) { return pid_set_now; }
-bool sense_hot(int32_t *d) { *d = cs.die_mc; return cs.die_mc >= 55000; }
 uint32_t lv_tick_get(void) { return 123456789u; }   // 123456 s up
 int lv_snprintf(char *b, size_t n, const char *fmt, ...)
 {
@@ -122,7 +119,7 @@ size_t lv_strlcpy(char *d, const char *s, size_t n)
 
 bool valve_set_target(int32_t m, const char **why)
 {
-    if (fault_f5) { *why = "fault"; return false; }
+    if (fault_f3) { *why = "fault"; return false; }
     sp = (int32_t)(lround(m / 100.0) * 100);
     sp_set = true;
     return true;
@@ -141,7 +138,7 @@ bool valve_start_auto(const char **why)
 }
 bool valve_to_manual(const char **why) { (void)why; mode = VALVE_MANUAL; return true; }
 void valve_stop(void) { stops++; if (mode == VALVE_AUTO) mode = VALVE_MANUAL; }
-int valve_reset(char *left, size_t n) { resets++; fault_f5 = false; if (n) left[0] = 0; return 1; }
+int valve_reset(char *left, size_t n) { resets++; fault_f3 = false; if (n) left[0] = 0; return 1; }
 void valve_event(const char *tag, const char *fmt, ...)
 {
     va_list a;
@@ -194,11 +191,11 @@ static void tests(void)
     // Read the version 1 map.
     REQ(0x03, 0, 0, 0, 26);
     CHECK(rlen == 9 + 52 && rsp[7] == 3 && rsp[8] == 52 && rsp[5] == 3 + 52 && rsp[6] == 0x11);
-    CHECK(r16(0) == 3);                         // map version (2 from 0.15.15, 3 from 0.16.14)
+    CHECK(r16(0) == 4);                         // map version (2 from 0.15.15, 3 from 0.16.14, 4 from 0.16.33)
     CHECK(r16(1) == (uint16_t)123456);          // heartbeat
     CHECK(r16(2) == VALVE_MANUAL);
     CHECK(r16(3) & 1);                          // reading OK
-    CHECK(((r16(3) >> 8) & 1) == (PMC_MODBUS_WRITE != 0));
+    CHECK(((r16(3) >> 8) & 1) == 1);                // remote writes on
     CHECK(r16(8) == (uint16_t)70000);
     CHECK(fabsf(rf(10) - 4.625f) < 1e-6f);
     CHECK(isnan(rf(12)));                       // no target yet
@@ -253,7 +250,6 @@ static void tests(void)
     uint8_t w[] = { 0x10, 0, 12, 0, 2, 4, 0, 0, 0, 0 };
     f32(4.8f, w + 6);
     req(sizeof w, w);
-#if PMC_MODBUS_WRITE
     CHECK(rlen == 12 && rsp[7] == 0x10 && rsp[9] == 12 && rsp[11] == 2);
     CHECK(sp_set && sp == 4800);
     CHECK(strstr(last_event, "target 4.8 mbar") != NULL);
@@ -271,7 +267,7 @@ static void tests(void)
         f32(6.5f, q + 8); f32(11.0f, q + 12);
         int s0 = saves;
         req(sizeof q, q);
-        CHECK(rlen == 12 && rsp[9] == 27 && rsp[11] == 6 && tune[CFG_SCHED] == 2 && tune[CFG_B1] == 65 &&
+        CHECK(rlen == 12 && rsp[9] == 27 && rsp[11] == 6 && tune[CFG_B1] == 65 &&
               tune[CFG_B2] == 110 && tune[CFG_HYST] == 10 && saves == s0 + 1);
         CHECK(strstr(last_event, "gain schedule") != NULL);
         req(sizeof q, q);   // the same again: nothing saved
@@ -299,10 +295,12 @@ static void tests(void)
         uint8_t k0[] = { 0x10, 0, 33, 0, 2, 4, 0, 0, 0, 0 };
         f32(0.0f, k0 + 6); req(sizeof k0, k0);       CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_KP] == 400);
         f32(NAN, k0 + 6); req(sizeof k0, k0);        CHECK(is_ex(0x10, MODBUS_EX_VALUE));
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_VALUE));
         REQ(0x10, 0, 32, 0, 1, 2, 0, 41);            CHECK(is_ex(0x10, MODBUS_EX_VALUE));
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 1);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);   // 1, the setpoint, removed in 0.15.20
-        REQ(0x10, 0, 27, 0, 1, 2, 0, 0);             CHECK(is_ex(0x10, MODBUS_EX_VALUE) && tune[CFG_SCHED] == 2);   // 0, Off, removed in 0.16.20
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 1);             CHECK(is_ex(0x10, MODBUS_EX_VALUE));   // 1, the setpoint, removed in 0.15.20
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 0);             CHECK(is_ex(0x10, MODBUS_EX_VALUE));   // 0, Off, removed in 0.16.20
+        REQ(0x10, 0, 27, 0, 1, 2, 0, 2);             CHECK(rlen == 12);                     // 2: taken, nothing behind it (0.16.30)
+        REQ(0x03, 0, 27, 0, 1);                      CHECK(r16(0) == 2);
         REQ(0x10, 0, 28, 0, 1, 2, 0x40, 0xD0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 26, 0, 1, 2, 0, 3);             CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));
         REQ(0x10, 0, 29, 0, 2, 4, 0, 0, 0, 0);       CHECK(is_ex(0x10, MODBUS_EX_ADDRESS));   // the second half of B1
@@ -325,12 +323,12 @@ static void tests(void)
     REQ(0x05, 0, 1, 0, 0);   CHECK(rlen == 12 && stops == 0);
     REQ(0x05, 0, 1, 0xFF, 0); CHECK(stops == 1 && mode == VALVE_MANUAL);
     // RESET, and a target refused while a fault is latched.
-    fault_f5 = true;
-    REQ(0x03, 0, 5, 0, 1);   CHECK(r16(0) == 1u << 4);
+    fault_f3 = true;
+    REQ(0x03, 0, 5, 0, 1);   CHECK(r16(0) == 1u << 2);   // F-3 limit pressed is bit 2 (map version 4)
     f32(5.0f, w + 6); req(sizeof w, w); CHECK(is_ex(0x10, MODBUS_EX_REFUSED));
-    REQ(0x05, 0, 2, 0xFF, 0); CHECK(resets == 1 && !fault_f5);
+    REQ(0x05, 0, 2, 0xFF, 0); CHECK(resets == 1 && !fault_f3);
     // Warning OK.
-    warn = "W-2 Not settling: switched to MANUAL, valve idle";
+    warn = "W-2 No pressure response: switched to MANUAL";
     REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == 1u << 1);
     REQ(0x05, 0, 3, 0xFF, 0); CHECK(warn == NULL);
     // Status coils are read only.
@@ -340,19 +338,14 @@ static void tests(void)
     f32(6.0f, w + 6); req(sizeof w, w); CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && sp != 6000);
     REQ(0x05, 0, 1, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && stops == 1);
     REQ(0x03, 0, 3, 0, 1);    CHECK(rlen == 11 && ((r16(0) >> 8) & 1) == 0);
-    remote = true;
-    REQ(0x03, 0, 3, 0, 1);    CHECK(((r16(0) >> 8) & 1) == 1);
-#else
-    CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && !sp_set);
-    REQ(0x10, 0, 27, 0, 1, 2, 0, 2);   CHECK(is_ex(0x10, MODBUS_EX_FUNCTION) && tune[CFG_SCHED] == 2);
-    REQ(0x05, 0, 0, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && mode == VALVE_MANUAL);
-    REQ(0x05, 0, 1, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION) && stops == 0);
+    REQ(0x05, 0, 0, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_FUNCTION));
     // Outside the map is still an address error, not a write refusal.
     REQ(0x05, 0, 9, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_ADDRESS));
-#endif
-    // Warning bits: W-1 question, W-3 hot, W-6 strip.
-    question = true; cs.die_mc = 56000; warn = "W-6 Valve driven the wrong way: check KDIR";
-    REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == ((1u << 0) | (1u << 2) | (1u << 5)));
+    remote = true;
+    REQ(0x03, 0, 3, 0, 1);    CHECK(((r16(0) >> 8) & 1) == 1);
+    // Warning bits (map version 4): W-1 the question, W-2 the strip warning.
+    question = true; cs.die_mc = 56000; warn = "W-2 No pressure response: switched to MANUAL";
+    REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == ((1u << 0) | (1u << 1)));
     question = false; cs.die_mc = 31500; warn = NULL;
 }
 
@@ -393,9 +386,11 @@ static void serve(int port)
 int main(int argc, char **argv)
 {
     tests();
-    printf("modbus test, writes %s: %d checks, %d failed\n", PMC_MODBUS_WRITE ? "on" : "off", checks, fails);
-    if (argc == 3 && !strcmp(argv[1], "serve")) {
+    printf("modbus test: %d checks, %d failed\n", checks, fails);
+    // serve <port> [off]: off serves with Remote control Off (writes refused).
+    if (argc >= 3 && !strcmp(argv[1], "serve")) {
         sp = 0; sp_set = false; mode = VALVE_MANUAL;
+        remote = !(argc == 4 && !strcmp(argv[3], "off"));
         serve(atoi(argv[2]));
     }
     return fails != 0;

@@ -61,7 +61,7 @@ typedef struct {
 
 static tile_t pt, vt;
 static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn;
-static bool vt_fault;   // a valve fault (F-3 to F-6): the Valve tile's red edge, over the limit's yellow
+static bool vt_fault;   // a valve fault (F-2, F-3): the Valve tile's red edge, over the limit's yellow
 
 static void show_if(lv_obj_t *o, bool on)
 {
@@ -96,15 +96,6 @@ static int32_t log2_q8(uint32_t v)
 static int32_t p_shown(int32_t p_mmbar)
 {
     return p_mmbar < 0 ? 0 : (p_mmbar + 50) / 100 * 100;
-}
-
-int32_t ui_log_px(int32_t p_mmbar, int32_t w)
-{
-    const int32_t lo = log2_q8(100), hi = log2_q8(1000000);   // 0.1, 1000 mbar
-    p_mmbar = p_shown(p_mmbar);
-    int32_t l = log2_q8(p_mmbar > 1 ? (uint32_t)p_mmbar : 1);
-    int32_t x = (l - lo) * w / (hi - lo);
-    return x < 0 ? 0 : x > w ? w : x;
 }
 
 // Pressure bar end lines, the same distance in from each end: half the
@@ -365,27 +356,10 @@ static void set_closed(void)
         ui_msg("Position set to 0 %. Not verified by homing.");
 }
 
-static bool set_position(int32_t v100, const char **why)
-{
-    if (!valve_set_position(v100, why)) {
-        if (valve_motion_blocked()) *why = "Reset the fault first";
-        return false;
-    }
-    char v[16], t[64];
-    lv_snprintf(t, sizeof t, "Position set to %s %%. Not verified by homing.", ui_fmt2(v, sizeof v, (int64_t)v100 * 10));
-    ui_msg(t);
-    return true;
-}
-
 /* Home and Set position are two jobs, kept apart on every screen (Ryan,
  * 23 Oct): Home finds the limit switch (0 % is the back-off above it); Set position takes the
- * position from the operator (closed, a typed %, or the saved position),
- * not verified by homing. */
-static void set_position_ask(void)
-{
-    ui_keypad("Set position, %", NULL, 0, 10000, NULL, NULL, set_position);
-}
-
+ * position from the operator (closed, or the saved position), not
+ * verified by homing. A typed % (Set as other %) went in 0.16.32. */
 static void set_closed_ask(void)
 {
     ui_confirm("Set the present position as 0 %? Not verified by homing.",
@@ -403,27 +377,28 @@ void ui_set_position_pick(int i)
 {
     if (i == 0)
         set_closed_ask();
-    else if (i == 1)
-        set_position_ask();
     else
         use_saved();
 }
 
-// The ways to set it: closed, a typed %, the saved position when offered.
+// The ways to set it: closed, or the saved position when offered (then a
+// list of the two).
 void ui_set_position_ask(void)
 {
     static char saved[32];
-    static const char *items[3] = { "Set as 0 %", "Set as other %", saved };
+    static const char *items[2] = { "Set as 0 %", saved };
     int32_t q;
-    int n = 2;
-    if (valvepos_offer(&q)) {
+    if (!valvepos_offer(&q)) {
+        set_closed_ask();
+        return;
+    }
+    {
         char v[16];
         int32_t pm = valve_pos_max();
         ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
         lv_snprintf(saved, sizeof saved, "Use last saved, %s %%", v);
-        n = 3;
     }
-    ui_pick("Set position (not verified by homing)", items, n, -1, ui_set_position_pick);
+    ui_pick("Set position (not verified by homing)", items, 2, -1, ui_set_position_pick);
 }
 
 static char home_q[128];
@@ -595,14 +570,10 @@ static int ip_prefix(const char *m)
 
 static void ip_refresh(void)
 {
-#if PMC_REMOTE_SWITCH
     char ip[16], mask[16], t[24];
     cfg_net_boot(ip, mask);
     lv_snprintf(t, sizeof t, "%s/%d", ip, ip_prefix(mask));
     ui_set_text(ip_val, t);
-#else
-    ui_set_text(ip_val, "USB build");
-#endif
 }
 
 void ui_reset_fault_event(lv_event_t *e)
@@ -683,7 +654,7 @@ static void home_refresh(void)
     ui_set_text(pt.reading, ok ? ui_fmt1(buf, sizeof buf, s->p_mmbar) : "----");
     ui_set_color(pt.reading, ok ? UI_TEXT : UI_FAULT);
     bar_set(&pt, ok ? pbar_x(s->p_mmbar) : -1);
-    alarm_set(&pt, !ok || valve_fault_is("F-1") || valve_fault_is("F-2"));
+    alarm_set(&pt, !ok || valve_fault_is("F-1"));
     int32_t sp;
     bool auto_on = valve_auto();
     box_set(&pt, auto_on, valve_target(&sp) ? ui_fmt1(buf, sizeof buf, sp) : "Not set");
@@ -694,7 +665,7 @@ static void home_refresh(void)
     show_if(start_btn, !auto_on);
     ui_btn_enable(start_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
 
-    vt_fault = valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-5") || valve_fault_is("F-6");
+    vt_fault = valve_fault_is("F-2") || valve_fault_is("F-3");
     home_fast();
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
     // Where the valve is going, greyed when not editable; "----" while
@@ -736,8 +707,8 @@ void ui_status_line(void)
                                              "Homing 4 of 4: return" };
         ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_REFRESH, what[step < 0 ? 0 : step]);
     } else if (m == VALVE_MANUAL && valve_warning()) {
-        // No PAUSED state (Ryan, 22 Oct): W-2, W-4 and W-5 drop to
-        // MANUAL; shown until OK.
+        // No PAUSED state (Ryan, 22 Oct): W-2 drops to MANUAL; shown
+        // until OK.
         if (!nf)
             ui_strip_action("OK", NULL, warn_ok_event);
         ui_strip_set(UI_STRIP_WARN, NULL, valve_warning());
@@ -766,23 +737,16 @@ const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
  * everything in the menu. remove the labels on the menu. show some icons
  * for each button"). Every page is one tap away:
  *   Trend           Events          PID tuning
- *   Motor settings  Valve position  Pressure setup
- *   System          Diagnostics     Review and save
+ *   Motor settings  Valve position  Pressure sensor
+ *   System          Diagnostics     Reset to factory
  * Valve position and PID tuning swapped places in 0.16.3 (Ryan 9 Nov, PR #43:
  * "swap location of valve position and pid tuning"): the two valve tiles
- * side by side in the middle row. Calibration was renamed Pressure setup in
- * 0.16.7 (Ryan 10 Nov, PR #43: "something with pressure in the name and
- * doesnt overflow the line"): "Pressure settings" is 141 px and wraps.
- * Review and save is filled dark blue, as Ryan asked for it and Settings on
- * 6 Nov (0.15.23); with Settings gone it is the one dark tile, bottom right
- * where Settings was. Diagnostics stays on System too (0.15.19) and fills
- * the ninth slot. To 0.16.1: six tiles in captioned rows Records (Trend,
- * Events), Service (Valve position, Calibration), Setup (System, Settings),
- * with Choose sensor, Valve setup, PID tuning and Review and save a tap
- * further on Settings.
- * Three columns of 148 (x 10, 166, 322): "Review and save" at 16 px is 136
- * wide, too wide for the template's 109 columns, and Ryan does not want
- * two-line tile names (6 Nov).
+ * side by side in the middle row. The ninth tile was Review and save, filled
+ * dark blue, to 0.16.30; from 0.16.31 (Ryan 13 Nov: "just a save an undo,
+ * and a reset to factory is enough") it is Reset to factory, which opens
+ * no page: it asks, then resets (ui_factory_reset_ask, ui_settings.c).
+ * Three columns of 148 (x 10, 166, 322): the template's 109 columns are too
+ * narrow for the names, and Ryan does not want two-line tile names (6 Nov).
  * ------------------------------------------------------------------------ */
 typedef struct {
     const char *name, *icon;
@@ -798,12 +762,16 @@ static const menu_item_t menu_items[9] = {
     { "Pressure sensor", UI_ICON_TARGET, &ui_scr_sensor_cal },  // Sensor calibration (Pressure setup to 0.16.26)
     { "System", LV_SYMBOL_SETTINGS, &ui_scr_namenet },
     { "Diagnostics", LV_SYMBOL_EYE_OPEN, &ui_scr_diag },
-    { "Review and save", LV_SYMBOL_SAVE, &ui_scr_review },     // the header's unsaved icon
+    { "Reset to factory", LV_SYMBOL_REFRESH, NULL },           // no page: asks, then resets
 };
 
 static void menu_tile_event(lv_event_t *e)
 {
-    ui_open(lv_event_get_user_data(e));
+    const ui_screen_t *scr = lv_event_get_user_data(e);
+    if (scr)
+        ui_open(scr);
+    else
+        ui_factory_reset_ask();
 }
 
 static void menu_build(lv_obj_t *scr)
@@ -814,8 +782,6 @@ static void menu_build(lv_obj_t *scr)
         lv_obj_t *b = ui_btn(scr, 10 + (i % 3) * 156, 48 + (i / 3) * 56, 148, 48, UI_SECONDARY, m->name,
                              menu_tile_event, (void *)m->scr);
         ui_btn_icon(b, m->icon);
-        if (m->scr == &ui_scr_review)
-            ui_btn_blue(b);
     }
 }
 

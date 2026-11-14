@@ -52,10 +52,4 @@ size_t modbus_handle(const uint8_t *in, size_t n, uint8_t *out);
  */
 size_t modbus_frame_len(const uint8_t *buf, size_t n);
 
-// Counters for the link status and MB? (since boot).
-typedef struct {
-    uint32_t requests, exceptions, writes, bad_frames;
-} modbus_stats_t;
-const modbus_stats_t *modbus_stats(void);
-
 #endif // _MODBUS_H_

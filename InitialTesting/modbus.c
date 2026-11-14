@@ -18,8 +18,6 @@
 #define READ_MAX      125
 #define WRITE_MAX     123
 
-static modbus_stats_t stats;
-
 static uint16_t get16(const uint8_t *p) { return (uint16_t)(p[0] << 8 | p[1]); }
 
 static void put16(uint8_t *p, uint16_t v)
@@ -44,7 +42,6 @@ static size_t ex(uint8_t *pdu, uint8_t fc, uint8_t exc)
 {
     pdu[0] = fc | 0x80;
     pdu[1] = exc;
-    stats.exceptions++;
     return 2;
 }
 
@@ -104,7 +101,6 @@ static size_t pdu(const uint8_t *q, size_t len, uint8_t *r)
         uint8_t e = mbmap_write_coil(addr, v == 0xFF00);
         if (e)
             return ex(r, fc, e);
-        stats.writes++;
         memcpy(r, q, 5);   // the reply echoes the request
         return 5;
     }
@@ -132,7 +128,6 @@ static size_t pdu(const uint8_t *q, size_t len, uint8_t *r)
         uint8_t e = mbmap_write_regs(addr, n, v);
         if (e)
             return ex(r, fc, e);
-        stats.writes++;
         memcpy(r, q, 5);   // function, address, count
         return 5;
     }
@@ -146,17 +141,11 @@ size_t modbus_handle(const uint8_t *in, size_t n, uint8_t *out)
 {
     size_t total = modbus_frame_len(in, n);
     if (total == 0 || total == (size_t)-1 || total != n) {
-        stats.bad_frames++;
         return 0;
     }
-    stats.requests++;
     memcpy(out, in, MBAP_LEN);   // transaction id, protocol id, unit id
     size_t plen = pdu(in + MBAP_LEN, n - MBAP_LEN, out + MBAP_LEN);
     put16(out + 4, (uint16_t)(plen + 1));
     return MBAP_LEN + plen;
 }
 
-const modbus_stats_t *modbus_stats(void)
-{
-    return &stats;
-}

@@ -1,8 +1,8 @@
 /* The bench side of the simulator: what the firmware's pins and sensors
  * see. The cryostat flow line is the simulator v63 model (as ported to
  * tools/ctrl-test/model.c); the needle is turned by whatever the firmware
- * writes to the four Stepper 3 outputs, so step mode, direction and coil
- * order settings act as they do on the bench. Not firmware. */
+ * writes to the four Stepper 3 outputs, so the direction and coil order
+ * settings act as they do on the bench. Not firmware. */
 #include <math.h>
 #include <string.h>
 

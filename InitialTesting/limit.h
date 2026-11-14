@@ -25,6 +25,5 @@ bool limit_open_now(void);
 // The pin alone, no debounce: the step interrupt's opening check counts
 // steps of it itself, so one glitch (held 20 ms by limit_poll) is not a press.
 bool limit_pin_open(void);
-const char *limit_text(void);    // "closed", "OPEN" or "unknown"
 
 #endif // _LIMIT_H_

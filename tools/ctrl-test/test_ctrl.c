@@ -1,8 +1,9 @@
 /* Host test of ctrl.c (stage 8) against the C port of the simulator's flow
  * line (model.c). Runs the porting plan's cases and checks them:
  *   closed to 5 mB, 4.5 to 10 mB, targets 5, 7, 3, 5 with no false trip,
- *   helium off -> F-6, pump off -> W-2 to MANUAL (no wrong-way fault since 0.11.20),
- *   slipping drive -> F-6, AUTO min 0 closing to the seat without a fault, and the
+ *   helium off -> W-2 (no pressure response; F-6 to 0.16.32), pump off -> AUTO stays on
+ *   (no convergence timeout from 0.16.33), slipping drive -> W-2, AUTO min 0 closing
+ *   to the seat without a trip, and the
  *   entry refusals. -v prints a line a second. */
 #include <math.h>
 #include <stdio.h>
@@ -17,12 +18,16 @@ static int fails;
 #define CHECK(c, ...) do { bool ok_ = (c); printf("%s ", ok_ ? "PASS" : "FAIL"); printf(__VA_ARGS__); printf("\n"); if (!ok_) fails++; } while (0)
 
 // The simulator's DEF_P, as the firmware defaults (cfg.c): KP 4, TI 0.25,
-// OUTMIN 14, DB 8, KDIR +1, BAND 0.1; POS_MAX as the model (6 turns).
-static ctrl_tune_t K = { 4.0f, 0.25f, 8, 1, 0.1f, 14.0f, 99072 };
+// OUTMIN 14, DB 8, BAND 0.1; POS_MAX as the model (6 turns). The PID table is
+// always on (0.16.30): boundary 1 is out of reach here, so set 1 runs at
+// every pressure, and the cases that test the table set their own.
+#define B_NEVER 1e9f
+static ctrl_tune_t K = { .kp = 4.0f, .ti = 0.25f, .db = 8, .band = 0.1f, .outmin = 14.0f, .pos_max = 99072,
+                         .sets = { { 4.0f, 0.25f, 0 }, { 4.0f, 0.25f, 0 }, { 4.0f, 0.25f, 0 } },
+                         .b1 = B_NEVER, .b2 = 2 * B_NEVER };
 #define FS 1034.0f
 
 typedef enum { MANUAL, AUTO } mode_t_;
-static bool w02;
 static mode_t_ mode;
 static ctrl_t C;
 static ctrl_result_t fault;   // last fault, CTRL_RUN if none
@@ -30,8 +35,8 @@ static double fault_t;
 
 static uint32_t ms(void) { return (uint32_t)llround(M.t * 1000); }
 
-// false: no pressure filter and no reversal hold, as the simulator v63 (the
-// reference cases). fresh() applies it.
+// false: no reversal hold, as the simulator v63 (the reference cases).
+// fresh() applies it.
 static bool smooth = true;
 static long n_starts, n_rev;   // moves sent and reversals among them
 static int last_way;
@@ -70,7 +75,7 @@ static void ctrl_tick(void)
     const ctrl_t before = C;
     ctrl_result_t r = ctrl_step(&C, &K, &in);
     if (C.set != before.set && before.set && sw_n < SW_MAX) {
-        const float e = (float)K.kdir * (C.sp - in.pv);
+        const float e = C.sp - in.pv;
         const float dkp = (ctrl_set_gains(&K, C.set).kp - ctrl_set_gains(&K, before.set).kp) / 100.0f * (float)K.pos_max;
         sw_from[sw_n] = before.set;
         sw_to[sw_n] = C.set;
@@ -84,7 +89,7 @@ static void ctrl_tick(void)
         // The integral is skipped while the valve still travels to the last
         // command (travel anti-windup), so either is right.
         const float lo = K.outmin / 100.0f * (float)K.pos_max;
-        const float kick = (float)before.pos_cmd + kpn * (e - (float)K.kdir * before.e_last - (float)K.kdir * (C.sp - before.sp_used));
+        const float kick = (float)before.pos_cmd + kpn * (e - before.e_last - (C.sp - before.sp_used));
         const float want = kick + (g.ti > 0 ? kpn / (60.0f * g.ti) * e : 0);
         sw_int[sw_n] = lroundf((want < lo ? lo : want > (float)K.pos_max ? (float)K.pos_max : want) - (float)before.pos_cmd);
         sw_kpe[sw_n] = lroundf((kick < lo ? lo : kick > (float)K.pos_max ? (float)K.pos_max : kick) - (float)before.pos_cmd);
@@ -93,10 +98,6 @@ static void ctrl_tick(void)
     if (r == CTRL_RUN) {
         if (C.move && request_move(C.move_to))
             ctrl_sent(&C);
-    } else if (r == CTRL_W02) {
-        model_stop();
-        mode = MANUAL;
-        w02 = true;
     } else {
         model_stop();
         fault = r;
@@ -136,7 +137,7 @@ static met_t run(double s, float sp)
 
 static bool to_auto(void)
 {
-    const char *why = ctrl_check(&C, &K, true, fault != CTRL_RUN, true, (float)M.pv, FS);
+    const char *why = ctrl_check(&C, &K, true, fault != CTRL_RUN, true, FS);
     if (why) { printf("     refused: %s\n", why); return false; }
     ctrl_start(&C, &K, ms(), (float)M.pv, M.pos);
     mode = AUTO;
@@ -149,13 +150,10 @@ static void fresh(void)
 {
     model_init();
     ctrl_init(&C);
-    if (!smooth) {
-        C.pv_tau = C.rev_pct = 0;
-        C.sp_kick = true;   // the reference's PI kicks on a setpoint step (P on setpoint and pressure)
-    }
+    if (!smooth)
+        C.rev_pct = 0;
     mode = MANUAL;
     fault = CTRL_RUN;
-    w02 = false;
     run(120, 0);
 }
 
@@ -168,15 +166,22 @@ static const ref_t REF_SEQ[4] = { { 3759.9, 2.934, -0.765, 5.027 }, { 4636.9, 0.
                                   { 5561.9, 1.964, -0.683, 3.004 }, { 6435.9, 0.448, -0.996, 5.000 } };
 
 // Matches the simulator: in band within 5 s of it, excursions within 0.02 mB.
-static bool same(met_t m, ref_t r)
+// That holds for the start from closed only. The simulator's PI kicks on a
+// setpoint step (P on the setpoint and the pressure); the firmware's has not
+// since 0.16.15, and the kick option went in 0.16.30. After a setpoint step
+// (step true) the run is in band within 60 s of the simulator's and ends
+// where it does; the excursions on the way differ.
+static bool same(met_t m, ref_t r, bool step)
 {
+    if (step)
+        return m.t_band > 0 && fabs(m.t_band - r.t_band) <= 60 && fabs(m.end - r.end) <= 0.02;
     return fabs(m.t_band - r.t_band) <= 5 && fabs(m.over - r.over) <= 0.02 && fabs(m.under - r.under) <= 0.02 &&
            fabs(m.end - r.end) <= 0.02;
 }
 
-static void report(const char *what, met_t m, ref_t r)
+static void report(const char *what, met_t m, ref_t r, bool step)
 {
-    CHECK(same(m, r), "%s: in band at %.0f s (sim %.0f), then %+.3f / %+.3f mB (sim %+.3f / %+.3f), end %.3f (sim %.3f)",
+    CHECK(same(m, r, step), "%s: in band at %.0f s (sim %.0f), then %+.3f / %+.3f mB (sim %+.3f / %+.3f), end %.3f (sim %.3f)",
           what, m.t_band, r.t_band, m.over, m.under, r.over, r.under, m.end, r.end);
 }
 
@@ -186,16 +191,13 @@ int main(int argc, char **argv)
 
     // Entry refusals (the simulator's toAuto order).
     ctrl_init(&C);
-    CHECK(!strcmp(ctrl_check(&C, &K, false, false, true, 1, FS), "Home the valve first"), "refused unhomed");
-    CHECK(!strcmp(ctrl_check(&C, &K, true, true, true, 1, FS), "Reset the fault first"), "refused with a fault");
-    CHECK(!strcmp(ctrl_check(&C, &K, true, false, false, 1, FS), "No valid pressure"), "refused without a reading");
-    CHECK(!strcmp(ctrl_check(&C, &K, true, false, true, 1, FS), "Set a setpoint first"), "refused without a setpoint");
+    CHECK(!strcmp(ctrl_check(&C, &K, false, false, true, FS), "Home the valve first"), "refused unhomed");
+    CHECK(!strcmp(ctrl_check(&C, &K, true, true, true, FS), "Reset the fault first"), "refused with a fault");
+    CHECK(!strcmp(ctrl_check(&C, &K, true, false, false, FS), "No valid pressure"), "refused without a reading");
+    CHECK(!strcmp(ctrl_check(&C, &K, true, false, true, FS), "Set a setpoint first"), "refused without a setpoint");
     CHECK(!ctrl_set_sp(&C, FS + 1, FS, 0), "target above the range rejected");
     ctrl_set_sp(&C, 5, FS, 0);
-    CHECK(!strcmp(ctrl_check(&C, &K, true, false, true, FS + 1, FS), "Pressure above the sensor range"), "refused above the range");
-    ctrl_tune_t k0 = K; k0.kdir = 0;
-    CHECK(!strcmp(ctrl_check(&C, &k0, true, false, true, 1, FS), "Pressure response not set"), "refused without KDIR");
-    CHECK(ctrl_check(&C, &K, true, false, true, 1, FS) == NULL, "accepted when all set");
+    CHECK(ctrl_check(&C, &K, true, false, true, FS) == NULL, "accepted when all set");
 
     // Bumpless entry: the first output is the position in force.
     fresh();
@@ -207,19 +209,19 @@ int main(int argc, char **argv)
     CHECK(C.pos_cmd == at && C.last_sent == at, "bumpless: command %ld = position %ld", (long)C.pos_cmd, (long)at);
 
     // The reference sequence (also run in the simulator, sim_ref.js), with
-    // the pressure filter and the reversal hold off, as there.
+    // the reversal hold off, as there.
     smooth = false;
     fresh();
     set_sp(5);
     to_auto();
     met_t a = run(1500, 5);
-    report("closed to 5", a, REF_5);
+    report("closed to 5", a, REF_5, false);
     CHECK(a.step <= 0.05 && fault == CTRL_RUN && mode == AUTO, "closed to 5 mB: overshoot %.3f mB <= 0.05 (sim 0.038)", a.step);
     set_sp(4.5f);
-    report("5 to 4.5", run(900, 4.5f), REF_45);
+    report("5 to 4.5", run(900, 4.5f), REF_45, true);
     set_sp(10);
     met_t b2 = run(1200, 10);
-    report("4.5 to 10", b2, REF_10);
+    report("4.5 to 10", b2, REF_10, true);
     CHECK(fabs(b2.step - 0.362) <= 0.02 && fault == CTRL_RUN && mode == AUTO,
           "4.5 to 10 mB: overshoot %.3f mB (sim 0.362; the +15 mB later is the pot filling, in both)", b2.step);
     const float seq[] = { 5, 7, 3, 5 };
@@ -229,7 +231,7 @@ int main(int argc, char **argv)
         met_t m = run(900, seq[i]);
         char what[20];
         snprintf(what, sizeof what, "target %.0f", seq[i]);
-        report(what, m, REF_SEQ[i]);
+        report(what, m, REF_SEQ[i], true);
         trip |= fault != CTRL_RUN || mode != AUTO;
         settle &= m.t_band > 0 && fabs(m.end - seq[i]) <= K.band;
     }
@@ -240,10 +242,9 @@ int main(int argc, char **argv)
     run(2000, 5);
     // No wrong-way fault: with the valve pinned open and the pressure flat,
     // the response monitor catches it instead.
-    CHECK(fault == CTRL_F06 && mode == MANUAL && !M.moving, "helium off: F-6 after %.0f s, MANUAL, valve idle", fault_t - t0);
+    CHECK(fault == CTRL_NORESP && mode == MANUAL && !M.moving, "helium off: W-2 after %.0f s, MANUAL, valve idle", fault_t - t0);
 
-    // The same targets as the firmware runs, with the reversal hold (and the
-    // pressure filter if on, 0.12.12) and P on the pressure only (0.16.15): in
+    // The same targets as the firmware runs, with the reversal hold: in
     // band no later than 60 s after the reference, and the last 60 s within
     // the band on average (one sample wanders 0.1 mB with the hold).
     {
@@ -296,22 +297,34 @@ int main(int argc, char **argv)
     run(1500, 5);
     M.pump = false;
     t0 = M.t;
-    run(2000, 5);
-    CHECK(fault == CTRL_RUN && w02 && mode == MANUAL, "pump off: no fault, W-2 to MANUAL (t %.0f s)", M.t - t0);
+    run(3600, 5);
+    // No convergence timeout from 0.16.33 (W-2 to 0.16.32 ended AUTO after
+    // 30 min off the setpoint): the loop stays on, the valve at AUTO min,
+    // and takes over again when the pump is back.
+    {
+        const ctrl_reg_t reg = ctrl_regulation(&C, &K, ms(), true, (float)M.pv);
+        CHECK(fault == CTRL_RUN && mode == AUTO && reg == CTRL_REG_REGULATING,
+              "pump off: still AUTO after %.0f min at %.1f mB, nothing raised, reads Regulating", (M.t - t0) / 60, M.pv);
+    }
+    M.pump = true;
+    {
+        met_t m = run(1500, 5);
+        CHECK(fault == CTRL_RUN && mode == AUTO && fabs(m.tail - 5) <= K.band,
+              "pump back: AUTO settles at 5 mB again by itself (last 60 s %.3f)", m.tail);
+    }
 
     // A setpoint band of 0 (0.16.16, Ryan 12 Nov): In band and Stable never
-    // show, but a steady hold is not ended by W-2, which still judges
-    // against CTRL_TCONV_BAND.
+    // show, and a steady hold stays in AUTO.
     {
         const ctrl_tune_t kk = K;
         K.band = 0;
         fresh();
         set_sp(5);
         to_auto();
-        run(CTRL_TCONV_S + 1200, 5);
+        run(3000, 5);
         const ctrl_reg_t reg = ctrl_regulation(&C, &K, ms(), true, 5.04f);
-        CHECK(fault == CTRL_RUN && !w02 && mode == AUTO && reg == CTRL_REG_REGULATING,
-              "band 0: %.0f min in AUTO at 5 mB, no W-2, reads Regulating (%d)", (CTRL_TCONV_S + 1200) / 60.0, (int)reg);
+        CHECK(fault == CTRL_RUN && mode == AUTO && reg == CTRL_REG_REGULATING,
+              "band 0: %.0f min in AUTO at 5 mB, nothing raised, reads Regulating (%d)", 3000 / 60.0, (int)reg);
         K = kk;
     }
 
@@ -324,7 +337,7 @@ int main(int argc, char **argv)
     set_sp(7);
     t0 = M.t;
     run(900, 7);
-    CHECK(fault == CTRL_F06 && mode == MANUAL && fabs(fault_t - t0 - 150) <= 2, "slipping drive: F-6 after %.0f s (sim 150)", fault_t - t0);
+    CHECK(fault == CTRL_NORESP && mode == MANUAL && fabs(fault_t - t0 - 150) <= 2, "slipping drive: W-2 after %.0f s (sim 150)", fault_t - t0);
 
     // Room air, target above the reading (the bench test with no process).
     fresh();
@@ -334,7 +347,7 @@ int main(int argc, char **argv)
     to_auto();
     t0 = M.t;
     run(400, 1030);
-    CHECK(fault == CTRL_F06, "room air, target above: F-6 after %.0f s", fault_t - t0);
+    CHECK(fault == CTRL_NORESP, "room air, target above: W-2 after %.0f s", fault_t - t0);
 
     // AUTO min 0 (the factory value since 0.11.33; the cases above keep the
     // simulator's 14 to match its references): a target the closed valve
@@ -353,7 +366,7 @@ int main(int argc, char **argv)
           "AUTO min 0, target 0: closes to %ld steps (%.2f mB), no fault", (long)M.pos, M.pv);
     K.outmin = outmin;
 
-    // A live KP or KDIR change in AUTO keeps the output where it is (0.11.38).
+    // A live KP change in AUTO keeps the output where it is (0.11.38).
     fresh();
     model_start_move(33000);
     run(120, 0);
@@ -366,12 +379,7 @@ int main(int argc, char **argv)
         K.kp *= 2;
         ctrl_tick();
         int32_t d_kp = C.pos_cmd - before;
-        before = C.pos_cmd;
-        K.kdir = -K.kdir;
-        ctrl_tick();
-        int32_t d_dir = C.pos_cmd - before;
-        CHECK(labs(d_kp) < 60 && labs(d_dir) < 60,
-              "KP doubled and KDIR flipped in AUTO: command moves %ld and %ld steps (no jump)", (long)d_kp, (long)d_dir);
+        CHECK(labs(d_kp) < 60, "KP doubled in AUTO: command moves %ld steps (no jump)", (long)d_kp);
         K = kk;
     }
 
@@ -384,22 +392,6 @@ int main(int argc, char **argv)
     run(30, 500);
     CHECK(C.pos_cmd == K.pos_max && fault == CTRL_RUN,
           "Target 500 mB from %.1f mB: command %ld of %ld steps (fully open)", M.pv, (long)C.pos_cmd, (long)K.pos_max);
-
-    // KDIR the wrong way round: W-6 is gone (0.15.11, it tripped at low
-    // pressure), so AUTO carries on at the wrong end until W-2 ends it.
-    {
-        fresh();
-        model_start_move(K.pos_max / 3);
-        run(300, 0);
-        set_sp(2);
-        K.kdir = -K.kdir;
-        to_auto();
-        t0 = M.t;
-        run(CTRL_TCONV_S + 120, 2);
-        CHECK(w02 && mode == MANUAL && fault == CTRL_RUN,
-              "KDIR wrong, target 2 mB: W-2 ends AUTO (%.2f mB, valve at %ld steps)", M.pv, (long)M.pos);
-        K.kdir = -K.kdir;
-    }
 
     // KD (0.14.21, a setting): the D term works on the measured pressure's
     // rate and against it; KD 0 is the PI as before.
@@ -426,29 +418,20 @@ int main(int argc, char **argv)
     {
         ctrl_tune_t k = K;
         k.b1 = 8; k.b2 = 30; k.hyst = 0.15f;
-        k.sched = CTRL_SCHED_OFF;
-        bool off = ctrl_pick_set(&k, 0, 2) == 1 && ctrl_pick_set(&k, 3, 50) == 1;
-        k.sched = (ctrl_sched_t)1;   // the setpoint schedule, removed in 0.15.20: set 1, as Off
-        bool sp = ctrl_pick_set(&k, 0, 20) == 1 && ctrl_pick_set(&k, 3, 50) == 1;
-        k.sched = CTRL_SCHED_PV;
         // Up: 1 to 2 past 9.2, 2 to 3 past 34.5. Down: 3 to 2 under 25.5, 2 to 1 under 6.8.
         bool pv = ctrl_pick_set(&k, 0, 8.5f) == 2 && ctrl_pick_set(&k, 1, 9.1f) == 1 && ctrl_pick_set(&k, 1, 9.3f) == 2 &&
                   ctrl_pick_set(&k, 2, 34.4f) == 2 && ctrl_pick_set(&k, 2, 34.6f) == 3 &&
                   ctrl_pick_set(&k, 3, 25.6f) == 3 && ctrl_pick_set(&k, 3, 25.4f) == 2 &&
                   ctrl_pick_set(&k, 2, 6.9f) == 2 && ctrl_pick_set(&k, 2, 6.7f) == 1 &&
                   ctrl_pick_set(&k, 1, 50) == 3 && ctrl_pick_set(&k, 3, 2) == 1;
-        CHECK(off && sp && pv, "schedule: Off (and 1, the old SP) set 1; PV 1>2 past 9.2, 2>3 past 34.5, 3>2 under 25.5, "
-              "2>1 under 6.8 mB, both at once on a large move");
+        CHECK(pv, "PID table: 1>2 past 9.2, 2>3 past 34.5, 3>2 under 25.5, 2>1 under 6.8 mB, both at once on a large move");
         k.sets[1].kp = 0;
-        CHECK(!strcmp(ctrl_check(&C, &k, true, false, true, 5, FS), "Tuning not set"), "schedule on: a set with KP 0 refused");
-        k.sched = CTRL_SCHED_OFF;
-        CHECK(ctrl_check(&C, &k, true, false, true, 5, FS) == NULL, "schedule Off: sets 2 and 3 not checked");
+        CHECK(!strcmp(ctrl_check(&C, &k, true, false, true, FS), "Tuning not set"), "PID table: a set with KP 0 refused");
     }
     // Four sets (0.16.14): boundary 3 above boundary 2 adds set 4; not above
     // it (0, initialisers without it), three sets as before.
     {
         ctrl_tune_t k = K;
-        k.sched = CTRL_SCHED_PV;
         k.b1 = 6; k.b2 = 10; k.b3 = 14; k.hyst = 0.1f;
         for (int s = 0; s < 3; s++)
             k.sets[s] = (ctrl_pid_t){ 0.5f, 1.0f, 0 };
@@ -461,45 +444,19 @@ int main(int argc, char **argv)
             ctrl_pick_set(&k, 3, 9.1f) == 3 && ctrl_pick_set(&k, 3, 8.9f) == 2 &&
             ctrl_pick_set(&k, 1, 50) == 4 && ctrl_pick_set(&k, 4, 2) == 1;
         k.sets[2].kp = 0;
-        const bool check4 = ctrl_check(&C, &k, true, false, true, 5, FS) != NULL;
+        const bool check4 = ctrl_check(&C, &k, true, false, true, FS) != NULL;
         k.b3 = 0;
         const bool three = ctrl_sets(&k) == 3 && ctrl_pick_set(&k, 0, 20) == 3 && ctrl_pick_set(&k, 3, 500) == 3 &&
-                           ctrl_check(&C, &k, true, false, true, 5, FS) == NULL;
+                           ctrl_check(&C, &k, true, false, true, FS) == NULL;
         CHECK(four && check4 && three, "four sets: 6, 10 and 14 mB with 10 %%: 1>2>3>4 past 6.6, 11 and 15.4, back under "
               "12.6, 9 and 5.4, all at once on a large move; set 4 with KP 0 refused; boundary 3 0 keeps three sets");
     }
-    // Schedule Off runs exactly as before, whatever sets 2 and 3 hold.
-    {
-        const ctrl_tune_t kk = K;
-        double pv[2];
-        int32_t cmd[2];
-        for (int f = 0; f < 2; f++) {
-            K = kk;
-            if (f) {
-                K.sets[0] = (ctrl_pid_t){ 1.0f, 0.5f, 0 };
-                K.sets[1] = (ctrl_pid_t){ 9.0f, 0.1f, 0.5f };
-                K.b1 = 6; K.b2 = 8; K.hyst = 0.1f;
-            }
-            fresh();
-            set_sp(5);
-            to_auto();
-            run(900, 5);
-            set_sp(10);
-            run(900, 10);
-            pv[f] = M.pv;
-            cmd[f] = C.pos_cmd;
-        }
-        K = kk;
-        CHECK(pv[0] == pv[1] && cmd[0] == cmd[1], "schedule Off: the same run with other sets 2 and 3 (%.4f mB, %ld steps)",
-              pv[1], (long)cmd[1]);
-    }
-    // Schedule on the pressure, 5 to 10 to 5 mB on the model: going up each
+    // The PID table, 5 to 10 to 5 mB on the model: going up each
     // set change past its boundary by the hysteresis; going down (0.16.9:
     // the lower of pressure and setpoint) straight to the setpoint's set as
     // the setpoint changes. Every change bumpless.
     {
         const ctrl_tune_t kk = K;
-        K.sched = CTRL_SCHED_PV;
         K.b1 = 6; K.b2 = 8.5f; K.hyst = 0.1f;   // up past 6.6 and 9.35, down under 7.65 and 5.4
         K.sets[0] = (ctrl_pid_t){ 3.0f, 0.25f, 0 };
         K.sets[1] = (ctrl_pid_t){ 2.0f, 0.30f, 0 };
@@ -532,13 +489,13 @@ int main(int argc, char **argv)
         // Down: one change, 3 to 1, on the first step after the setpoint
         // went to 5, with the pressure still near 10.
         const bool back = sw_n == n_up + 1 && sw_from[n_up] == 3 && sw_to[n_up] == 1 && sw_pv[n_up] > K.b2 * 1.1f;
-        CHECK(set0 == 1 && order && back && where, "schedule PV: set 1 at 5 mB, 1>2>3 going to 10 each past its boundary by "
+        CHECK(set0 == 1 && order && back && where, "PID table: set 1 at 5 mB, 1>2>3 going to 10 each past its boundary by "
               "the hysteresis; back to 5, 3>1 at once at %.2f mB (the lower of pressure and setpoint) (%d changes)",
               sw_n > n_up ? sw_pv[n_up] : 0.0f, sw_n);
-        CHECK(smooth_, "schedule PV: each change bumpless, the command moves by the step's integral and the new KP x the "
+        CHECK(smooth_, "PID table: each change bumpless, the command moves by the step's integral and the new KP x the "
               "error's change since the last step (%ld steps off)", worst);
         CHECK(fault == CTRL_RUN && mode == AUTO && up.t_band > 0 && down.t_band > 0 && fabs(down.end - 5) <= K.band,
-              "schedule PV: settles at 10 and back at 5 mB, no trip (end %.3f)", down.end);
+              "PID table: settles at 10 and back at 5 mB, no trip (end %.3f)", down.end);
         K = kk;
     }
     // The set from the lower of pressure and setpoint (0.16.9): going up the
@@ -546,7 +503,6 @@ int main(int argc, char **argv)
     // AUTO's start too.
     {
         ctrl_tune_t k = K;
-        k.sched = CTRL_SCHED_PV;
         k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
         k.sets[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
         k.sets[1] = (ctrl_pid_t){ 0.20f, 0.25f, 0 };
@@ -582,11 +538,10 @@ int main(int argc, char **argv)
     // and the bounce as the kick was given back is what Ryan did not want.)
     {
         ctrl_tune_t k = K;
-        k.sched = CTRL_SCHED_PV;
         k.b1 = 6; k.b2 = 14; k.hyst = 0.1f;
         k.sets[0] = (ctrl_pid_t){ 0.14f, 1.5f, 0 };
         k.sets[1] = (ctrl_pid_t){ 0.30f, 0.25f, 0 };
-        k.db = k.db_close = 1;
+        k.db = 1;
         const float per = 0.14f / 100.0f * (float)k.pos_max;   // set 2's KP, steps per mB
         long kick[2];
         int sets[2][2];
@@ -594,7 +549,6 @@ int main(int argc, char **argv)
         for (int f = 0; f < 2; f++) {
             ctrl_t c;
             ctrl_init(&c);
-            c.pv_tau = 0;
             ctrl_set_sp(&c, sps[f][0], FS, 0);
             ctrl_start(&c, &k, 0, sps[f][0], 30000);
             ctrl_in_t in = { .t_ms = 1000, .pv = sps[f][0], .pos = 30000, .fs = FS };
@@ -624,10 +578,9 @@ int main(int argc, char **argv)
             ctrl_tune_t k = K;
             k.kp = kps[f];
             k.ti = 0;                                       // P alone: the command is KP x e from the start
-            k.db = k.db_close = 1;
+            k.db = 1;
             ctrl_t c;
             ctrl_init(&c);
-            c.pv_tau = 0;
             ctrl_set_sp(&c, 5, FS, 0);
             ctrl_start(&c, &k, 0, 5, 30000);
             c.last_dir = 1;                                 // the last move sent was opening
@@ -639,16 +592,14 @@ int main(int argc, char **argv)
         CHECK(sent[0] == -59 && sent[1] == 0, "reversal hold with KP: a 59-step closing turn round sent at KP 0.06 (%ld), "
               "held at KP 4 (%ld)", sent[0], sent[1]);
     }
-    // Deadbands (0.15.15): opening moves wait for DB open, closing ones for DB close.
+    // Deadband (one setting from 0.16.32): moves either way wait for it.
     {
         ctrl_tune_t k = K;
         k.db = 200;
-        k.db_close = 8;
         k.kp = 1.0f;          // 990.72 steps/mB
         k.ti = 1.6512f;       // 10 steps/s at 1 mB of error
         ctrl_t c;
         ctrl_init(&c);
-        c.pv_tau = 0;
         ctrl_set_sp(&c, 6, FS, 0);
         ctrl_start(&c, &k, 0, 5, 30000);
         int first = 0;
@@ -658,22 +609,24 @@ int main(int argc, char **argv)
             if (c.move) first = i;
         }
         CHECK(first == 20 && c.move_to - 30000 >= 200 && c.move_to - 30000 < 210,
-              "DB open 200: the creep sends nothing for 19 s, then one move of %ld steps at %d s", (long)(c.move_to - 30000), first);
-        ctrl_t d;
-        ctrl_init(&d);
-        d.pv_tau = 0;
-        ctrl_set_sp(&d, 6, FS, 0);
-        ctrl_start(&d, &k, 0, 6, 30000);
-        ctrl_in_t in = { .t_ms = 1000, .pv = 6.01f, .pos = 30000, .fs = FS };
-        ctrl_step(&d, &k, &in);
-        const bool closed_now = d.move && d.move_to < 30000;
-        ctrl_init(&d);
-        d.pv_tau = 0;
-        ctrl_set_sp(&d, 6, FS, 0);
-        ctrl_start(&d, &k, 0, 6, 30000);
-        in.pv = 5.99f;
-        ctrl_step(&d, &k, &in);
-        CHECK(closed_now && !d.move, "DB close 8: a 10-step closing move goes at once, the same opening is held");
+              "DB 200: the creep sends nothing for 19 s, then one move of %ld steps at %d s", (long)(c.move_to - 30000), first);
+        // A 10-step correction, closing then opening: held at DB 200, sent at DB 8.
+        bool sent[2][2];
+        for (int w = 0; w < 2; w++) {
+            k.db = w ? 8 : 200;
+            for (int dir = 0; dir < 2; dir++) {
+                ctrl_t d;
+                ctrl_init(&d);
+                ctrl_set_sp(&d, 6, FS, 0);
+                ctrl_start(&d, &k, 0, 6, 30000);
+                ctrl_in_t in = { .t_ms = 1000, .pv = dir ? 5.99f : 6.01f, .pos = 30000, .fs = FS };
+                ctrl_step(&d, &k, &in);
+                sent[w][dir] = d.move && (dir ? d.move_to > 30000 : d.move_to < 30000);
+            }
+        }
+        CHECK(!sent[0][0] && !sent[0][1] && sent[1][0] && sent[1][1],
+              "one deadband both ways: a 10-step move is held at DB 200 (%d %d) and sent at DB 8 (%d %d)",
+              sent[0][0], sent[0][1], sent[1][0], sent[1][1]);
     }
 
     printf(fails ? "%d failed\n" : "all passed\n", fails);

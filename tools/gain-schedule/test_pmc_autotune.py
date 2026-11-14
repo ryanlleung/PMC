@@ -367,8 +367,14 @@ class Rules(unittest.TestCase):
                                                 'PIDS SET 3,0.80,0.94,0.00', 'PIDS SET 4,0.40,0.25,0.00',
                                                 'SETPOINT 8.0', 'MODE AUTO'])
         f.update(mode='MANUAL', sched=None, sets=None)
-        self.assertEqual(at.put_back_lines(f), ['PID SET 0.10,0.40,0.00', 'SETPOINT 8.0', 'MODE MANUAL',
-                                                'VALVE SET 4.2'])
+        self.assertEqual(at.put_back_lines(f), ['SETPOINT 8.0', 'MODE MANUAL', 'VALVE SET 4.2'])
+
+    def test_pids_in_use(self):
+        r = 'PIDS 3,0.06,0.60,0.00,0.12,0.82,0.00,0.80,0.94,0.10,0.40,0.25,0.00'
+        self.assertEqual(at.pids_in_use(r), (3, [0.8, 0.94, 0.1]))
+        for bad in ('PID 0.06,0.60,0.00', 'PIDS 5,0.06,0.60,0.00', 'PIDS 0,0.06,0.60,0.00', 'ERR 100 Unknown command'):
+            with self.assertRaises(ValueError):
+                at.pids_in_use(bad)
 
 
 class Watchdog(unittest.TestCase):
@@ -477,8 +483,6 @@ class FakeBoard:
             return 'VALVE MOVING %d' % (abs(P.cmd - P.v) > 1e-6)
         if c == 'MODE?':
             return 'MODE ' + self.mode
-        if c == 'PID?':
-            return 'PID %.2f,%.2f,%.2f' % tuple(self.sets[self.use()])
         if c == 'SCHED?':
             return 'SCHED ' + self.table if self.sched else 'ERR 100 Unknown command'
         if c == 'PIDS?':
@@ -502,14 +506,6 @@ class FakeBoard:
             if self.mode != 'MANUAL':
                 return 'ERR 211 not in MANUAL'
             P.cmd = float(c[9:])
-            return None
-        if c.startswith('PID SET '):
-            if self.mode == 'MANUAL' and abs(P.cmd - P.v) > 1e-6:
-                return 'ERR 212 wait for the valve to stop'
-            v = [float(x) for x in c[8:].split(',')]
-            e = self.sp - P.p()
-            self.i += (self.sets[self.use()][0] - v[0]) * e      # bumpless
-            self.sets[self.use()][:len(v)] = v
             return None
         if c.startswith('PIDS SET '):
             v = c[9:].split(',')
@@ -578,7 +574,7 @@ class Sequence(unittest.TestCase):
         for k in range(0, len(sets_sent), 4):
             self.assertEqual([x[:11] for x in sets_sent[k:k + 4]], ['PIDS SET %d,' % n for n in (1, 2, 3, 4)])
             self.assertEqual(len({x[11:] for x in sets_sent[k:k + 4]}), 1, sets_sent[k:k + 4])
-        self.assertFalse(any(x.startswith(('PID SET', 'SCHED SET')) for x in b.log))   # the table left as it was
+        self.assertFalse(any(x.startswith(('PID SET', 'PID?', 'SCHED SET')) for x in b.log))   # no removed command; the table left as it was
         run_log = list(b.log)
         for line in at.put_back_lines(f):
             b.do(line)
@@ -698,12 +694,12 @@ class LogHelpers(unittest.TestCase):
     def test_unchanged_gains_are_not_logged_again(self):
         d = tempfile.mkdtemp()
         t = at.AutoTuner(None, None, SimpleNamespace(d=0.4), d)
-        t.set_gains([0.3, 0.4, 0], 'PID SET 0.30,0.40,0', 'one')
-        t.set_gains([0.3, 0.4, 0], 'PID SET 0.30,0.40,0', 'two')
-        t.set_gains([0.24, 0.4, 0], 'PID SET 0.24,0.40,0', 'three')
+        t.set_gains([0.3, 0.4, 0], 'PIDS SET 1-4,0.30,0.40,0', 'one')
+        t.set_gains([0.3, 0.4, 0], 'PIDS SET 1-4,0.30,0.40,0', 'two')
+        t.set_gains([0.24, 0.4, 0], 'PIDS SET 1-4,0.24,0.40,0', 'three')
         with open(os.path.join(d, at.LOG_FILE), newline='') as fh:
             got = list(csv.reader(fh))[1:]
-        self.assertEqual([r[9] for r in got], ['PID SET 0.30,0.40,0: one', 'PID SET 0.24,0.40,0: three'])
+        self.assertEqual([r[9] for r in got], ['PIDS SET 1-4,0.30,0.40,0: one', 'PIDS SET 1-4,0.24,0.40,0: three'])
         self.assertEqual(got[1][5:9], ['0.24', '0.40', '0.00', 'KP 0.30 -> 0.24'])
 
 

@@ -2,14 +2,16 @@
  * Host test of the settings store (cfg.c, cal.c) and the saved valve
  * position (valvepos.c) against a serial flash held in RAM. Run with run.sh.
  *
- * Covers: a version 1 record (0.6.0 to 0.8.x) loading as one sensor; a save
- * from the screens (cfg_save_with) going to the other sector as version 2;
- * a restart; Load settings > Previous save; the IP address (version 4); a combination refused as a
- * whole; a record with several sensors (0.9.0 to 0.16.1) loading as the one
- * in use at the 15 psia range and saving as one (0.16.2); a motor
- * direction change clearing the calibration; a spoiled record; and the
- * saved valve position written at standstill, withdrawn by a move, and
- * found again after the log wraps to the next sector.
+ * Covers: a blank flash; a version 10 record (0.16.21 to 0.16.29) loading
+ * and converting, with what it held that is not kept (a step mode, a
+ * reversed pressure response, several sensors, a cal that is not two points)
+ * said in the events; versions 1 to 9 not read; a save from the screens
+ * (cfg_save_with) going to the other sector as version 11; a restart; Undo
+ * and Reset to factory; the cryostat name, the IP address and Remote
+ * control saved as they are set; a combination refused as a whole; a motor direction change
+ * clearing the calibration; a spoiled record; and the saved valve position
+ * written at standstill, withdrawn by a move, and found again after the log
+ * wraps to the next sector.
  */
 #include <assert.h>
 #include <stdarg.h>
@@ -61,16 +63,12 @@ const clicks_state_t *clicks_state(void) { return &cs; }
 
 /* Stepper 3 */
 static uint32_t m_rate = 400, m_start = 200, m_accel = 3200;
-static stepper3_mode_t m_mode = STEPPER3_FULL;
 static bool m_hold, m_rev, m_busy;
 static int32_t m_pos;
 static uint8_t m_order[4] = { 0, 2, 1, 3 };
 bool stepper3_set_rate(uint32_t v) { m_rate = v; return true; }
 bool stepper3_set_start(uint32_t v) { m_start = v; return true; }
 bool stepper3_set_accel(uint32_t v) { m_accel = v; return true; }
-static const char *m_lock;   // stepper3_lock(): set by the valve layer, e.g. a latched fault
-bool stepper3_set_mode(stepper3_mode_t m) { if (m_lock) return false; m_mode = m; return true; }
-const char *stepper3_locked(void) { return m_lock; }
 bool stepper3_set_hold(bool on) { m_hold = on; return true; }
 // As stepper3.c: a change of direction clears the homing through the
 // valve layer's stepper3_on_reference_change callback.
@@ -85,8 +83,6 @@ bool stepper3_set_order(const uint8_t o[4]) { memcpy(m_order, o, 4); return true
 uint32_t stepper3_rate(void) { return m_rate; }
 uint32_t stepper3_start_rate(void) { return m_start; }
 uint32_t stepper3_accel(void) { return m_accel; }
-stepper3_mode_t stepper3_mode(void) { return m_mode; }
-int32_t stepper3_scale(void) { return m_mode == STEPPER3_HALF ? 2 : 1; }
 bool stepper3_hold(void) { return m_hold; }
 bool stepper3_reverse(void) { return m_rev; }
 void stepper3_order(uint8_t o[4]) { memcpy(o, m_order, 4); }
@@ -107,16 +103,14 @@ static bool start_move(int32_t to)
     m_pos = to;
     return true;
 }
-const char *stepper3_mode_name(stepper3_mode_t m) { return m == STEPPER3_WAVE ? "WAVE" : m == STEPPER3_FULL ? "FULL" : "HALF"; }
 
 /* Valve */
-static int32_t v_set[VALVE_N_SETTINGS] = { 99072, 400, 25, 400, 800, 0, 400 };
-static const char *const v_name[VALVE_N_SETTINGS] = { "POSMAX", "FHOME", "FCREEP", "BACKOFF", "CLEAR", "OFFSET", "RETURN" };
-static const int32_t v_lo[VALVE_N_SETTINGS] = { 1000, 16, 16, 10, 10, 0, 10 }, v_hi[VALVE_N_SETTINGS] = { 300000, 1000, 1000, 5000, 10000, 5000, 5000 };
+static int32_t v_set[VALVE_N_SETTINGS] = { 99072, 400, 25, 400, 800, 400 };
+static const char *const v_name[VALVE_N_SETTINGS] = { "POSMAX", "FHOME", "FCREEP", "BACKOFF", "CLEAR", "RETURN" };
+static const int32_t v_lo[VALVE_N_SETTINGS] = { 1000, 16, 16, 10, 10, 10 }, v_hi[VALVE_N_SETTINGS] = { 300000, 1000, 1000, 5000, 10000, 5000 };
 static valve_mode_t v_mode = VALVE_NOT_CAL;
 static bool v_cal;
 static int uncal_calls;
-const char *valve_setting_name(int i) { return v_name[i]; }
 void valve_settings(int32_t v[VALVE_N_SETTINGS]) { memcpy(v, v_set, sizeof v_set); }
 const char *valve_settings_check(const int32_t v[VALVE_N_SETTINGS])
 {
@@ -160,16 +154,20 @@ bool valve_restore_parked(int32_t count, bool homed, const char **why)
     parked_calls++;
     return true;
 }
+// The events since the last reboot(), one a line, for the checks.
+static char evlog[4096];
 void valve_event(const char *tag, const char *fmt, ...)
 {
     va_list a;
-    if (quiet) return;
-    printf("EVT %s ", tag);
+    const size_t n = strlen(evlog);
+    if (n > sizeof evlog - 300) return;
     va_start(a, fmt);
-    vprintf(fmt, a);
+    vsnprintf(evlog + n, 256, fmt, a);
     va_end(a);
-    printf("\n");
+    if (!quiet) printf("EVT %s %s\n", tag, evlog + n);
+    strcat(evlog, "\n");
 }
+static bool said(const char *what) { return strstr(evlog, what) != NULL; }
 
 /* Records ----------------------------------------------------------------- */
 static uint32_t crc32(const void *data, size_t len)
@@ -184,123 +182,108 @@ static uint32_t crc32(const void *data, size_t len)
     return ~c;
 }
 
-// A version 10 record (0.16.21) in buf made a version 9 one: tune[22..23],
-// the Ignore switch edges, taken out (after the 16-byte header, mot[7],
-// valve[7] and tune[0..21]). Returns the version 9 size; the CRC is left for
-// the caller.
-static uint32_t as_v9(uint8_t *buf, uint32_t size10)
-{
-    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 22 * 4, nine = 9, size9 = size10 - 2 * 4;
-    memmove(buf + at, buf + at + 2 * 4, size10 - at - 2 * 4);
-    memcpy(buf + 4, &nine, 4);
-    memcpy(buf + 8, &size9, 4);
-    return size9;
-}
-
-// A version 10 record in buf made a version 8 one: as_v9, then tune[18..21],
-// PID set 4 and boundary 3, taken out (after the 16-byte header, mot[7],
-// valve[7] and tune[0..17]). Returns the version 8 size; the CRC is left
-// for the caller.
-static uint32_t as_v8(uint8_t *buf, uint32_t size10)
-{
-    const uint32_t size9 = as_v9(buf, size10);
-    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 18 * 4, eight = 8, size8 = size9 - 4 * 4;
-    memmove(buf + at, buf + at + 4 * 4, size9 - at - 4 * 4);
-    memcpy(buf + 4, &eight, 4);
-    memcpy(buf + 8, &size8, 4);
-    return size8;
-}
-
-// A version 9 record in buf made a version 7 one: as_v8, then tune[7..17],
-// the PID sets 2 and 3, the schedule and the closing deadband, taken out
-// (after the 16-byte header, mot[7], valve[7] and tune[0..6]). Returns the
-// version 7 size; the CRC is left for the caller.
-static uint32_t as_v7(uint8_t *buf, uint32_t size9)
-{
-    const uint32_t size8 = as_v8(buf, size9);
-    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 7 * 4, seven = 7, size7 = size8 - 11 * 4;
-    memmove(buf + at, buf + at + 11 * 4, size8 - at - 11 * 4);
-    memcpy(buf + 4, &seven, 4);
-    memcpy(buf + 8, &size7, 4);
-    return size7;
-}
-
-// A version 9 record in buf made a version 6 one: as_v7, then tune[6], KD,
-// taken out (after the 16-byte header, mot[7], valve[7] and tune[0..5]).
-// Returns the version 6 size; the CRC is left for the caller.
-static uint32_t as_v6(uint8_t *buf, uint32_t size9)
-{
-    const uint32_t size7 = as_v7(buf, size9);
-    const uint32_t at = 16 + 7 * 4 + 7 * 4 + 6 * 4, six = 6, size6 = size7 - 4;
-    memmove(buf + at, buf + at + 4, size7 - at - 4);
-    memcpy(buf + 4, &six, 4);
-    memcpy(buf + 8, &size6, 4);
-    return size6;
-}
-
-// A version 6 record (0.13.6) in buf made a version 5 one: valve[6], the
-// return, taken out (after the 16-byte header, mot[7] and valve[0..5]).
-// Returns the version 5 size; the CRC is left for the caller.
-static uint32_t as_v5(uint8_t *buf, uint32_t size6)
-{
-    const uint32_t at = 16 + 7 * 4 + 6 * 4, five = 5, size5 = size6 - 4;
-    memmove(buf + at, buf + at + 4, size6 - at - 4);
-    memcpy(buf + 4, &five, 4);
-    memcpy(buf + 8, &size5, 4);
-    return size5;
-}
-
-// The 0.6.0 to 0.8.x layout, as cfg.c reads it.
+// The version 10 layout (0.16.21 to 0.16.29), byte for byte as 0.16.29 wrote
+// it: declared here again, so a slip in cfg.c's copy shows.
+typedef struct {
+    uint32_t serial;
+    int32_t psi10;
+    uint32_t has_cal;
+    cal_rec_v4_t cal;
+} sens_v10_t;
 typedef struct {
     uint32_t magic, version, size, rev;
-    int32_t mot[7];
-    int32_t valve[6];
-    uint32_t has_cal;
-    cal_rec_t cal;
+    int32_t mot[7];              // RATE, START, ACCEL, MODE, HOLD, DIR, ORDER
+    int32_t valve[7];            // POSMAX, FHOME, FCREEP, BACKOFF, CLEAR, the zero offset, RETURN
+    int32_t tune[24];            // KP, TI, OUTMIN, DB, KDIR, BAND, KD, sets 2 and 3, SCHED, B1, B2, HYST, DBC, set 4, B3, PASSLO, PASSHI
+    uint32_t nsens, active;
+    sens_v10_t sens[4];
+    char saved_at[20];
+    char name[CFG_NAME_LEN + 4];
+    uint32_t net_ip, net_mask;
+    uint32_t remote;
     uint32_t crc;
-} rec_v1_t;
+} rec_v10_t;
+_Static_assert(sizeof(rec_v10_t) == 1508, "the version 10 record is 1508 bytes");
+_Static_assert(offsetof(rec_v10_t, nsens) == 168 && offsetof(rec_v10_t, sens) == 176 &&
+               offsetof(rec_v10_t, crc) == 1504, "version 10 offsets");
 
-static cal_rec_t bench_cal(const char *id, int32_t r_vac, int32_t r_air, int32_t p_air)
+// A version 4 cal record: n points (2 for the bench cal), the first at vacuum.
+static cal_rec_v4_t cal_v4(int n, int32_t r_vac, int32_t r_air, int32_t p_air)
 {
-    cal_rec_t c;
+    cal_rec_v4_t c;
     memset(&c, 0, sizeof c);
     c.magic = CAL_MAGIC;
-    c.version = CAL_VERSION;
-    c.npts = 2;
-    strncpy(c.id, id, CAL_ID_LEN - 1);
+    c.version = 4;
+    c.npts = (uint32_t)n;
+    strcpy(c.id, "5880156 bench 26-10-24");
     c.r_ppb[0] = r_vac; c.p_mmbar[0] = 0;
-    c.r_ppb[1] = r_air; c.p_mmbar[1] = p_air;
-    c.kind = CAL_KIND_BENCH;
-    c.crc = crc32(&c, offsetof(cal_rec_t, crc));
+    c.r_ppb[n - 1] = r_air; c.p_mmbar[n - 1] = p_air;
+    for (int i = 1; i < n - 1; i++) {   // a typed table: points between, on the line
+        c.r_ppb[i] = r_vac + (r_air - r_vac) / (n - 1) * i;
+        c.p_mmbar[i] = p_air / (n - 1) * i;
+    }
+    c.kind = n == 2;   // 1: CAL VAC + CAL AIR
+    c.crc = crc32(&c, offsetof(cal_rec_v4_t, crc));
     return c;
 }
 
-static void write_v1(uint32_t addr, uint32_t rev)
+// The record a 0.16.29 board holds: the values of
+// simulator/tests/fixtures/flash-0.16.29.json, rev 5.
+static rec_v10_t v10(void)
 {
-    rec_v1_t r;
+    rec_v10_t r;
     memset(&r, 0, sizeof r);
     r.magic = 0x47464350UL;
-    r.version = 1;
+    r.version = 10;
     r.size = sizeof r;
-    r.rev = rev;
-    int32_t mot[7] = { 350, 180, 3000, STEPPER3_FULL, 0, 0, 213 };
+    r.rev = 5;
+    const int32_t mot[7] = { 350, 180, 3000, 1, 0, 0, 213 };
+    const int32_t valve[7] = { 60000, 380, 30, 300, 800, 0, 350 };
+    const int32_t tune[24] = { 7, 61, 5, 9, 1, 12, 3, 13, 83, 4, 81, 95, 5, 2, 55, 95, 12, 9, 41, 26, 6, 135, 4, 45 };
     memcpy(r.mot, mot, sizeof mot);
-    int32_t valve[6] = { 99072, 400, 25, 400, 800, 0 };
     memcpy(r.valve, valve, sizeof valve);
-    r.has_cal = 1;
-    r.cal = bench_cal("5880156 bench", 48000, 9300000, 1013200);
-    r.crc = crc32(&r, offsetof(rec_v1_t, crc));
+    memcpy(r.tune, tune, sizeof tune);
+    r.nsens = 1;
+    r.sens[0].serial = 5880156;
+    r.sens[0].psi10 = 150;
+    r.sens[0].has_cal = 1;
+    r.sens[0].cal = cal_v4(2, 48000, 9300000, 1013200);
+    strcpy(r.saved_at, "2026-10-24 14:04:08");
+    strcpy(r.name, "CF-10");
+    r.remote = 1;
+    return r;
+}
+
+// Save with no drafts: the settings in use, as the screens' Save.
+static bool save_all(void)
+{
+    int32_t v[CFG_N] = { 0 };
+    bool set[CFG_N] = { false };
+    const char *why;
+    return cfg_save_with(v, set, &why);
+}
+
+static void put_v10(uint32_t addr, rec_v10_t *r)
+{
+    r->crc = crc32(r, offsetof(rec_v10_t, crc));
     extflash_erase_4k(addr);
-    extflash_write(addr, &r, sizeof r);
+    extflash_write(addr, r, sizeof *r);
+}
+
+static void wipe(void)
+{
+    extflash_erase_4k(0x7FD000);
+    extflash_erase_4k(0x7FE000);
 }
 
 static void reboot(void)
 {
     // What main.c does at start-up, with every live value back to factory.
     m_rate = 400; m_start = 200; m_accel = 3200; m_rev = false;
-    int32_t valve[VALVE_N_SETTINGS] = { 99072, 400, 25, 400, 800, 0, 400 };
+    int32_t valve[VALVE_N_SETTINGS] = { 99072, 400, 25, 400, 800, 400 };
     memcpy(v_set, valve, sizeof valve);
     v_cal = false; v_mode = VALVE_NOT_CAL;
+    evlog[0] = '\0';
     cal_init();
     cfg_init();
 }
@@ -320,41 +303,143 @@ static void corrupt_newest(void)
         flash[0x7FD000 + sl * 0x1000 + 12] ^= 0x5A;   // the rev: the CRC no longer matches
 }
 
-// nsens in a version 10 record: after the header, mot[7], valve[7], tune[24].
-#define REC_NSENS_AT (16 + 7 * 4 + 7 * 4 + 24 * 4)
-
-// Makes the version 10 record at addr one with three sensors, as 0.9.0 to
-// 0.16.1 could save: the one it holds (slot 0), then s/n 1234567 at 30 psi
-// and s/n 7654321 at 15 psi, both uncalibrated, with slot active in use.
-static void three_sensors(uint32_t addr, uint32_t active)
-{
-    static uint8_t rec[4096];
-    const uint8_t *r = flash + addr;
-    uint32_t size, nsens = 3, crc, zero = 0;
-    const uint32_t sens_sz = 12 + sizeof(cal_rec_t);
-    memcpy(&size, r + 8, 4);
-    memcpy(rec, r, size);
-    memcpy(rec + REC_NSENS_AT, &nsens, 4);
-    memcpy(rec + REC_NSENS_AT + 4, &active, 4);
-    const uint32_t sn[2] = { 1234567, 7654321 }, psi[2] = { 300, 150 };
-    for (int i = 0; i < 2; i++) {
-        uint8_t *q = rec + REC_NSENS_AT + 8 + (i + 1) * sens_sz;
-        memset(q, 0, sens_sz);
-        memcpy(q, &sn[i], 4);
-        memcpy(q + 4, &psi[i], 4);
-        memcpy(q + 8, &zero, 4);
-    }
-    crc = crc32(rec, size - 4);
-    memcpy(rec + size - 4, &crc, 4);
-    extflash_erase_4k(addr);
-    extflash_write(addr, rec, size);
-}
-
 static int32_t val(cfg_from_t f, cfg_key_t k)
 {
     int32_t v = -999999;
     cfg_value(f, k, &v);
     return v;
+}
+
+// The tuning of v10(), by key, as it must load.
+static const cfg_key_t TK[] = { CFG_KP, CFG_TI, CFG_OUTMIN, CFG_DB, CFG_BAND, CFG_KD, CFG_KP2, CFG_TI2, CFG_KD2,
+                                CFG_KP3, CFG_TI3, CFG_KD3, CFG_B1, CFG_B2, CFG_HYST, CFG_KP4, CFG_TI4, CFG_KD4,
+                                CFG_B3, CFG_PASS_LO, CFG_PASS_HI };
+static const int32_t TV[] = { 7, 61, 5, 9, 12, 3, 13, 83, 4, 81, 95, 5, 55, 95, 12, 41, 26, 6, 135, 4, 45 };
+static bool tune_as_v10(cfg_key_t but)
+{
+    bool all = true;
+    for (size_t i = 0; i < sizeof TK / sizeof TK[0]; i++)
+        all &= TK[i] == but || cfg_tune(TK[i]) == TV[i];
+    return all;
+}
+static bool motor_valve_as_v10(void)
+{
+    static const int32_t valve[VALVE_N_SETTINGS] = { 60000, 380, 30, 300, 800, 350 };
+    static const uint8_t order[4] = { 0, 2, 1, 3 };
+    return m_rate == 350 && m_start == 180 && m_accel == 3000 && !m_hold && !m_rev && !memcmp(m_order, order, 4) &&
+           !memcmp(v_set, valve, sizeof valve);
+}
+
+// What a version 10 record held that 0.16.30 does not keep, and the records
+// that are not read.
+static void test_v10(void)
+{
+    uint32_t rev, ip, mask;
+    const char *at;
+    rec_v10_t o;
+
+    // Half step, with an address, Remote control Off: the settings were in
+    // full steps in every mode, so they load as they are; the mode is said.
+    o = v10();
+    o.mot[3] = 2;
+    o.net_ip = 0xC0A80132UL; o.net_mask = 0xFFFFFF00UL; o.remote = 0;
+    put_v10(0x7FD000, &o);
+    reboot();
+    cfg_net(&ip, &mask);
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 5 && motor_valve_as_v10() && tune_as_v10(CFG_N));
+    CHECK(said("Step mode in the saved settings not kept: full step only") && !said("Pressure response"));
+    CHECK(ip == 0xC0A80132UL && mask == 0xFFFFFF00UL && !cfg_remote() && strcmp(cfg_name(), "CF-10") == 0);
+    CHECK(cfg_unsaved() == 0);
+
+    // Pressure response Reversed.
+    o = v10();
+    o.tune[4] = -1;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && tune_as_v10(CFG_N) && cfg_remote());
+    CHECK(said("Pressure response Reversed in the saved settings not kept") && !said("Step mode"));
+
+    // A closing deadband of its own (0.15.15 to 0.16.31): the opening one is
+    // kept, for both ways, and the events say so.
+    o = v10();
+    o.tune[17] = 7;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && tune_as_v10(CFG_N) && cfg_tune(CFG_DB) == 9);
+    CHECK(said("Deadband close in the saved settings not kept: one deadband, 9 steps") && !said("Step mode"));
+
+    // Three sensors (0.9.0 to 0.16.1 could save them), the second (30 psi,
+    // uncalibrated) in use: it loads as that sensor at the 15 psia range,
+    // nothing counts as unsaved, and the next save writes the one.
+    o = v10();
+    o.nsens = 3; o.active = 1;
+    o.sens[1].serial = 1234567; o.sens[1].psi10 = 300;
+    o.sens[2].serial = 7654321; o.sens[2].psi10 = 150;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 5 && said("Several sensors in the saved settings"));
+    CHECK(cal_is_default() && cfg_sensor_range_mmbar() == 1034214 && cal_pressure_mmbar(10000000) == 1034214);   // 15 psia, not 30
+    CHECK(cfg_unsaved() == 0 && cal_saved());
+    const cal_rec_t *sv;
+    CHECK(cfg_saved_cal(&sv) && sv == NULL);   // saved without a cal
+    CHECK(save_all());
+    {
+        uint32_t ver, size;
+        memcpy(&ver, flash + 0x7FE004, 4);
+        memcpy(&size, flash + 0x7FE008, 4);
+        CHECK(ver == 11 && size < 300 && cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
+    }
+    // The same with the bench Druck (the first, calibrated) in use.
+    wipe();
+    o.active = 0;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(said("Several sensors") && !cal_is_default() && cal_saved() && cal_pressure_mmbar(9300000) == 1013200);
+
+    // A typed table of three points (the engineering commands, to 0.15.x):
+    // not loaded, the nominal cal, and said.
+    o = v10();
+    o.sens[0].cal = cal_v4(3, 48000, 9300000, 1013200);
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && tune_as_v10(CFG_N) && cal_is_default());
+    CHECK(said("Saved calibration is not a two-point one: not loaded, calibrate the sensor"));
+    // A cal record that does not check: the same.
+    o = v10();
+    o.sens[0].cal.r_ppb[1]++;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(cal_is_default() && said("not a two-point one"));
+
+    // Not read: a spoiled record, one with no sensor in use, one of another
+    // size, and versions 1 to 9 (0.6.0 to 0.16.20). Factory settings, said.
+    o = v10();
+    put_v10(0x7FD000, &o);
+    flash[0x7FD000 + 100] ^= 1;
+    reboot();
+    CHECK(!cfg_rev(CFG_FROM_SAVED, &rev, &at) && said("Record in A not used: CRC mismatch") && said("No saved settings"));
+    o = v10();
+    o.active = 1;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(!cfg_rev(CFG_FROM_SAVED, &rev, &at) && said("Record in A not used: value out of range"));
+    o = v10();
+    o.size = sizeof o - 8;
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(!cfg_rev(CFG_FROM_SAVED, &rev, &at) && said("Record in A not used: not a settings record of this version"));
+    for (uint32_t ver = 1; ver <= 9; ver++) {
+        o = v10();
+        o.version = ver;
+        put_v10(0x7FD000, &o);
+        reboot();
+        CHECK(!cfg_rev(CFG_FROM_SAVED, &rev, &at) && said("Record in A not used: saved before 0.16.21, no longer read") &&
+              said("No saved settings"));
+        CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && cal_is_default());
+    }
+    // A save from there is the first of a new board.
+    CHECK(save_all() && cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 1);
+    wipe();
 }
 
 static void test_cfg(void)
@@ -365,44 +450,59 @@ static void test_cfg(void)
     uint32_t rev;
     const char *at;
 
-    // A 0.8.x board: one version 1 record in A.
-    write_v1(0x7FD000, 5);
+    // A new board: nothing saved, the factory settings and the nominal cal.
     reboot();
-    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 5);
-    CHECK(!cfg_rev(CFG_FROM_PREVIOUS, &rev, &at));
-    CHECK(m_rate == 350 && m_start == 180);
-    CHECK(cfg_sensor_range_mmbar() == 1034214 && strncmp(cal_id(), "5880156 bench", 13) == 0);
-    CHECK(cal_saved() && !cal_is_default());
-    CHECK(!cfg_value(CFG_FROM_LIVE, (cfg_key_t)CFG_N, &v[0]) && !cfg_value(CFG_FROM_LIVE, (cfg_key_t)-1, &v[0]));   // CFG_SENSOR, gone in 0.16.2
-    CHECK(val(CFG_FROM_LIVE, CFG_KP) == 6 && val(CFG_FROM_LIVE, CFG_BAND) == 10);   // the factory's (KP 0.06 from 0.16.18)
+    CHECK(!cfg_rev(CFG_FROM_SAVED, &rev, &at) && said("No saved settings"));
+    CHECK(m_rate == 400 && val(CFG_FROM_LIVE, CFG_KP) == 6 && val(CFG_FROM_LIVE, CFG_BAND) == 10);   // the factory's (KP 0.06 from 0.16.18)
+    CHECK(cal_is_default() && cfg_sensor_range_mmbar() == 1034214 && cal_pressure_mmbar(10000000) == 1034214);
+    CHECK(!cfg_value(CFG_FROM_LIVE, (cfg_key_t)CFG_N, &v[0]) && !cfg_value(CFG_FROM_LIVE, (cfg_key_t)-1, &v[0]));
+
+    // A 0.16.29 board: one version 10 record in A. Every setting 0.16.30
+    // still has loads as it was saved, with the two-point cal.
+    rec_v10_t o = v10();
+    put_v10(0x7FD000, &o);
+    reboot();
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 5 && strcmp(at, "2026-10-24 14:04:08") == 0);
+    CHECK(said("Settings saved 2026-10-24 14:04:08 loaded from A (saved by 0.16.29 or earlier)"));
+    CHECK(!said("not kept") && !said("Several sensors") && !said("two-point"));
+    CHECK(motor_valve_as_v10() && tune_as_v10(CFG_N));
+    CHECK(strcmp(cfg_name(), "CF-10") == 0 && cfg_remote());
+    CHECK(cal_saved() && !cal_is_default() && cal_pressure_mmbar(9300000) == 1013200 && cal_pressure_mmbar(48000) == 0);
     CHECK(cfg_unsaved() == 0);
 
-    // Save from the screens: gain 2.50, run speed 500.
+    // Save from the screens: gain 2.50, run speed 500. Written as version 11
+    // to B; the version 10 record in A is kept, so 0.16.29 flashed back
+    // still finds its settings.
     v[CFG_KP] = 250; set[CFG_KP] = true;
     v[CFG_RATE] = 500; set[CFG_RATE] = true;
     CHECK(cfg_save_with(v, set, &why));
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6 && strcmp(at, "2026-10-16 08:15:00") == 0);
-    CHECK(cfg_rev(CFG_FROM_PREVIOUS, &rev, &at) && rev == 5);
     uint32_t ver;
     memcpy(&ver, flash + 0x7FE004, 4);
-    CHECK(ver == 10);   // the save went to B, the v1 record in A is kept
+    CHECK(ver == 11);
     memcpy(&ver, flash + 0x7FD004, 4);
-    CHECK(ver == 1);
+    CHECK(ver == 10);
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
 
-    // Restart.
+    // Restart: the version 11 record, with everything else as it was.
     reboot();
-    CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250);
-    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
-    CHECK(!cal_is_default());
+    CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && tune_as_v10(CFG_KP));
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6 && said("loaded from B") && !said("0.16.29"));
+    CHECK(!cal_is_default() && cal_pressure_mmbar(9300000) == 1013200 && strcmp(cfg_name(), "CF-10") == 0);
 
-    // Load settings > Previous save: the version 1 record in A is from
-    // before 0.12.13 (its Direction bit is from either side of 0.11.19), so
-    // it is not loaded and nothing changes (to 0.13.28 it loaded).
-    CHECK(!cfg_load_live(CFG_FROM_PREVIOUS, &why) && strstr(why, "0.12.13"));
-    CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
-    CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
-    CHECK(cfg_unsaved() == 0);
+    // Undo (0.16.31): a change in use but not saved (Motor override sets the
+    // run speed live) goes back to the last save. Refused while the valve
+    // moves; with nothing unsaved it changes nothing.
+    stepper3_set_rate(450);
+    stepper3_set_hold(true);
+    CHECK(cfg_unsaved() == 2);
+    m_busy = true;
+    CHECK(!cfg_undo(&why) && strstr(why, "wait for the valve") && m_rate == 450);
+    m_busy = false;
+    CHECK(cfg_undo(&why) && m_rate == 500 && !m_hold && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
+    CHECK(said("Undo: settings saved 2026-10-16 08:15:00 back in use"));
+    CHECK(cfg_undo(&why) && m_rate == 500 && cfg_unsaved() == 0);
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);   // Undo saves nothing
 
     // A combination refused as a whole: start above run.
     memset(set, 0, sizeof set);
@@ -432,60 +532,24 @@ static void test_cfg(void)
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
 
-    // A record from 0.9.0 to 0.16.1 with three sensors, the second (30 psi,
-    // uncalibrated) in use: one sensor per board from 0.16.2, so it loads
-    // as that sensor at the 15 psia range, nothing counts as unsaved, and
-    // the next save writes it alone.
-    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
-    three_sensors(0x7FE000, 1);   // the newest, rev 6, version 9, in B
-    reboot();
-    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
-    CHECK(cal_is_default());   // the sensor in use is uncalibrated (the nominal id, not its serial, until a capture)
-    CHECK(cfg_sensor_range_mmbar() == 1034214 && cal_pressure_mmbar(10000000) == 1034214);   // 15 psia, not 30
-    CHECK(cfg_unsaved() == 0 && cal_saved());
-    const cal_rec_t *sv;
-    CHECK(cfg_saved_cal(&sv) && sv == NULL);   // saved without a cal
-    CHECK(cfg_save());
-    {
-        uint32_t nsens, active, ver;
-        memcpy(&nsens, flash + 0x7FD000 + REC_NSENS_AT, 4);
-        memcpy(&active, flash + 0x7FD000 + REC_NSENS_AT + 4, 4);
-        memcpy(&ver, flash + 0x7FD004, 4);
-        CHECK(ver == 10 && nsens == 1 && active == 0);   // written as one sensor, rev 7 in A
-    }
-    // The same record with the bench Druck (s/n 5880156, calibrated) in use,
-    // as the previous save: loading it brings that cal.
-    three_sensors(0x7FE000, 0);
-    reboot();
-    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 7 && cal_is_default());
-    CHECK(cfg_load_live(CFG_FROM_PREVIOUS, &why));
-    CHECK(strncmp(cal_id(), "5880156 bench", 13) == 0 && !cal_is_default() && cal_pressure_mmbar(9300000) == 1013200);
-    CHECK(cfg_unsaved() == 1 && !cal_saved());   // the calibration differs from the newest save
-    CHECK(cfg_save());
-    CHECK(cfg_unsaved() == 0 && cal_saved());
-
-    // Factory defaults keep the sensor's calibration.
-    CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why));
-    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && !cal_is_default());
-    // The factory PID table (0.16.18, Ryan 12 Nov): On by the pressure, B 6/10/14 mbar, 15 %; sets 0.06/0.60,
-    // 0.12/0.82, 0.80/0.94, 0.40/0.25, KD 0.
-    CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140 &&
-          cfg_tune(CFG_HYST) == 15);
+    // Reset to factory (0.16.31): the motor, valve and tuning settings to
+    // factory, saved at once (rev 7 in A); the calibration, the name, the
+    // address and Remote control stay. Refused while the valve moves.
+    m_busy = true;
+    CHECK(!cfg_reset_factory(&why) && m_rate == 500);
+    m_busy = false;
+    CHECK(cfg_reset_factory(&why) && said("Reset to factory"));
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 7 && cfg_unsaved() == 0);
+    CHECK(m_rate == 400 && m_start == 200 && v_set[0] == 99072 && cfg_tune(CFG_KP) == 6);
+    CHECK(!cal_is_default() && cal_saved() && cal_pressure_mmbar(9300000) == 1013200 && strcmp(cfg_name(), "CF-10") == 0);
+    // The factory PID table (0.16.18, Ryan 12 Nov): B 6/10/14 mbar, 15 %;
+    // sets 0.06/0.60, 0.12/0.82, 0.80/0.94, 0.40/0.25, KD 0.
+    CHECK(cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140 && cfg_tune(CFG_HYST) == 15);
     CHECK(cfg_tune(CFG_TI) == 60 && cfg_tune(CFG_KD) == 0 && cfg_tune(CFG_KP2) == 12 && cfg_tune(CFG_TI2) == 82 &&
           cfg_tune(CFG_KP3) == 80 && cfg_tune(CFG_TI3) == 94 && cfg_tune(CFG_KP4) == 40 && cfg_tune(CFG_TI4) == 25 &&
           cfg_tune(CFG_KD2) == 0 && cfg_tune(CFG_KD3) == 0 && cfg_tune(CFG_KD4) == 0);
-    CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
-
-    // A latched fault locks the step mode: a load that would change it is
-    // refused whole, nothing applied; without the lock it loads.
-    m_mode = STEPPER3_HALF;
-    m_rate = 450;
-    m_lock = "Reset the fault first";
-    CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "fault") && m_rate == 450 &&
-          m_mode == STEPPER3_HALF);
-    m_lock = NULL;
-    CHECK(cfg_load_live(CFG_FROM_DEFAULTS, &why) && m_rate == 400 && m_mode == STEPPER3_FULL);
-    CHECK(cfg_load_live(CFG_FROM_SAVED, &why));
+    reboot();            // the factory table is what the tests below start from
+    CHECK(m_rate == 400 && cfg_tune(CFG_KP) == 6 && !cal_is_default() && cfg_unsaved() == 0);
 
     // Motor direction: saving it clears the calibration.
     v_cal = true; v_mode = VALVE_MANUAL;
@@ -500,10 +564,10 @@ static void test_cfg(void)
     corrupt_newest();
     reboot();
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == newest - 1);
-    CHECK(!m_rev);
+    CHECK(!m_rev && said("CRC mismatch"));
 }
 
-// Calibrate sensor on the screen: vacuum, then air, then Save settings.
+// Calibrate sensor on the screen: vacuum, then air, then Save.
 static void test_capture(void)
 {
     const char *why;
@@ -519,77 +583,63 @@ static void test_capture(void)
         cal_update(&cs);
     CHECK(cal_capturing() == 0);
     cal_points(&vac, &air);
-    CHECK(vac.have && vac.r_ppb == 51000 && air.have);   // air kept from the table
+    CHECK(vac.have && vac.r_ppb == 51000 && air.have);   // air kept from the saved cal
+    CHECK(!cal_saved() && cfg_unsaved() == 1);
+    // The name saved meanwhile (System saves at once, 0.16.31) does not save
+    // the new calibration by the way.
+    CHECK(cfg_set_name("TEST", &why) && cfg_unsaved() == 2 && cfg_save_system(&why));
+    CHECK(!cal_saved() && cfg_unsaved() == 1);
+    CHECK(cfg_set_name("CF-10", &why) && cfg_save_system(&why) && !cal_saved() && cfg_unsaved() == 1);
+    // Undo puts the saved calibration back; captured again for the rest.
+    CHECK(cfg_undo(&why) && cal_saved() && cfg_unsaved() == 0 && cal_pressure_mmbar(9300000) == 1013200);
+    CHECK(cal_capture(1, 0, &why));
+    for (int i = 0; i < 10; i++)
+        cal_update(&cs);
     CHECK(!cal_saved() && cfg_unsaved() == 1);
     cs.r_ppb = 9310000;
     CHECK(cal_capture(2, 1012000, &why));
     for (int i = 0; i < 10; i++)
         cal_update(&cs);
     CHECK(cal_pressure_mmbar(9310000) == 1012000 && cal_pressure_mmbar(51000) == 0);
-    CHECK(strncmp(cal_id(), "5880156 bench 26-10-16", 22) == 0);
+    // Past the two points the line carries on: full scale and below vacuum.
+    CHECK(cal_pressure_mmbar(2 * 9310000 - 51000) == 2024000 && cal_pressure_mmbar(0) < 0);
     const cal_rec_t *sv;
     CHECK(cfg_saved_cal(&sv) && sv && cal_pressure_with(sv, 9300000) == 1013200);
     CHECK(cfg_save_with(v, set, &why) && cal_saved() && cfg_unsaved() == 0);
+    reboot();
+    CHECK(cal_saved() && !cal_is_default() && cal_pressure_mmbar(9310000) == 1012000 && cal_pressure_mmbar(51000) == 0);
+    cal_points(&vac, &air);
+    CHECK(vac.have && vac.r_ppb == 51000 && vac.p_mmbar == 0 && air.have && air.r_ppb == 9310000 && air.p_mmbar == 1012000);
 }
 
-
-// Cryostat name (version 3) and a version 2 record loading.
+// Cryostat name: too long refused; set live and saved with cfg_save_system
+// (0.16.31), which leaves a setting in use but unsaved as it is.
 static void test_name(void)
 {
-    int32_t v[CFG_N] = { 0 };
-    bool set[CFG_N] = { 0 };
     const char *why;
-    uint32_t rev;
+    uint32_t rev, rev0;
     const char *at;
     reboot();
-    uint32_t r0 = 0;
-    CHECK(cfg_rev(CFG_FROM_SAVED, &r0, &at));
-
-
-    // A new name is live
-    // and unsaved, too long is refused, and it survives a save and restart.
-        CHECK(!cfg_set_name("ABCDEFGHIJKLM", &why) && strcmp(cfg_name(), "CF-11") == 0);
-    CHECK(cfg_set_name("HM-2", &why) && cfg_unsaved() == 1);
-    CHECK(cfg_save_with(v, set, &why) && cfg_unsaved() == 0);
+    cfg_rev(CFG_FROM_SAVED, &rev0, &at);
+    CHECK(!cfg_set_name("ABCDEFGHIJKLM", &why) && strcmp(cfg_name(), "CF-10") == 0);
+    stepper3_set_rate(444);   // Motor override
+    CHECK(cfg_set_name("HM-2", &why) && cfg_unsaved() == 2);
+    CHECK(cfg_save_system(&why) && cfg_unsaved() == 1 && m_rate == 444);
+    CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == rev0 + 1);
     reboot();
-    CHECK(strcmp(cfg_name(), "HM-2") == 0);
-    // The same record rewritten as version 2 (0.9.x): loads, name "CF-11".
-    {
-        uint32_t size4, a3 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r3;
-            memcpy(&r3, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            uint32_t v3;
-            memcpy(&v3, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (v3 == 10 && r3 >= a3) { a3 = r3; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000;
-        memcpy(&size4, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size4);
-        size4 = as_v5(buf, as_v6(buf, size4));
-        uint32_t size2 = size4 - 4 - 8 - (CFG_NAME_LEN + 4);   // size4: the version 5 size
-        uint32_t two = 2;
-        memcpy(buf + 4, &two, 4);
-        memcpy(buf + 8, &size2, 4);
-        uint32_t c = crc32(buf, size2 - 4);
-        memcpy(buf + size2 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size2);
-        reboot();
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a3);
-        CHECK(strcmp(cfg_name(), "CF-11") == 0 );
-    }
+    CHECK(strcmp(cfg_name(), "HM-2") == 0 && m_rate != 444 && cfg_unsaved() == 0);
+    // A failed write: the name stays in use, unsaved.
+    write_fails = 1;
+    CHECK(cfg_set_name("AVM-1", &why) && !cfg_save_system(&why) && strstr(why, "flash") && cfg_unsaved() == 1);
+    write_fails = 0;
+    CHECK(cfg_set_name("HM-2", &why) && cfg_save_system(&why) && cfg_unsaved() == 0);
 }
 
-// IP address (version 4, 0.12.13; the DHCP fallback until 0.14.9): parsing, checks, unsaved until a
-// save, used after a restart, and a version 3 record loading with the
-// build default.
+// IP address (0.12.13; the DHCP fallback until 0.14.9): parsing, checks,
+// unsaved until a save, used after a restart. Remote control and the homing
+// return.
 static void test_net(void)
 {
-    int32_t v[CFG_N] = { 0 };
-    bool set[CFG_N] = { 0 };
     const char *why;
     uint32_t ip, mask;
     char a[16], m[16], t[48];
@@ -608,82 +658,28 @@ static void test_net(void)
     CHECK(cfg_set_net(0xC0A80132UL, 0xFFFFFF00UL, &why) && cfg_unsaved() == u0 + 1 && cfg_net_restart_due());
     cfg_net_boot(a, m);
     CHECK(strcmp(a, "192.168.1.100") == 0);   // not until a restart
-    CHECK(cfg_save_with(v, set, &why) && cfg_unsaved() == 0);
+    CHECK(cfg_save_system(&why) && cfg_unsaved() == 0);
     reboot();
     cfg_net(&ip, &mask);
     cfg_net_boot(a, m);
     CHECK(ip == 0xC0A80132UL && mask == 0xFFFFFF00UL && strcmp(a, "192.168.1.50") == 0 &&
           strcmp(m, "255.255.255.0") == 0 && !cfg_net_restart_due());
     CHECK(strcmp(cfg_net_text(t, sizeof t, ip, mask), "192.168.1.50 255.255.255.0") == 0);
-    // The record rewritten as version 3 (0.10.9 to 0.12.12): the build default.
-    {
-        uint32_t size4, a4 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a4) { a4 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000, three = 3;
-        memcpy(&size4, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size4);
-        size4 = as_v5(buf, as_v6(buf, size4));
-        uint32_t size3 = size4 - 4 - 8;   // size4: the version 5 size
-        memcpy(buf + 4, &three, 4);
-        memcpy(buf + 8, &size3, 4);
-        uint32_t c = crc32(buf, size3 - 4);
-        memcpy(buf + size3 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size3);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        cfg_net(&ip, &mask);
-        cfg_net_boot(a, m);
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a4 && ip == 0 && mask == 0 &&
-              strcmp(a, "192.168.1.100") == 0 && strcmp(cfg_name(), "CF-11") == 0);
-    }
-    CHECK(cfg_set_net(0, 0, &why));   // back to the build default
+    CHECK(cfg_set_net(0, 0, &why) && cfg_save_system(&why));   // back to the build default
 
     // Remote control (0.13.4): On by default (0.13.7), live at once and
-    // unsaved, Off kept by a save, On again from a version 4 record.
+    // saved with cfg_save_system.
     CHECK(cfg_remote());
     int u1 = cfg_unsaved();
     cfg_set_remote(false);
     CHECK(!cfg_remote() && cfg_unsaved() == u1 + 1);
-    CHECK(cfg_save_with(v, set, &why) && cfg_unsaved() == 0);
+    CHECK(cfg_save_system(&why) && cfg_unsaved() == 0);
     reboot();
     CHECK(!cfg_remote());
-    {
-        uint32_t size5, a5 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a5) { a5 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000, four = 4;
-        memcpy(&size5, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size5);
-        size5 = as_v5(buf, as_v6(buf, size5));
-        uint32_t size4 = size5 - 4;
-        memcpy(buf + 4, &four, 4);
-        memcpy(buf + 8, &size4, 4);
-        uint32_t c = crc32(buf, size4 - 4);
-        memcpy(buf + size4 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size4);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a5 && cfg_remote());
-    }
+    cfg_set_remote(true);
+    CHECK(cfg_save_system(&why) && cfg_remote() && cfg_unsaved() == 0);
 
-    // Homing return (0.13.6): a version 5 record loads it as its back-off.
+    // Homing return (0.13.6): its own setting beside the back-off.
     {
         int32_t bo = 0, rt = 0;
         CHECK(cfg_value(CFG_FROM_LIVE, CFG_BACKOFF, &bo) && cfg_value(CFG_FROM_LIVE, CFG_RETURN, &rt) && rt == 400);
@@ -694,33 +690,10 @@ static void test_net(void)
         CHECK(cfg_save_with(v2, set2, &why));
         reboot();
         CHECK(cfg_value(CFG_FROM_LIVE, CFG_BACKOFF, &bo) && bo == 300 && cfg_value(CFG_FROM_LIVE, CFG_RETURN, &rt) && rt == 250);
-        uint32_t size6, a6 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a6) { a6 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000;
-        memcpy(&size6, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size6);
-        uint32_t size5 = as_v5(buf, as_v6(buf, size6));
-        uint32_t c = crc32(buf, size5 - 4);
-        memcpy(buf + size5 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size5);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a6);
-        CHECK(cfg_value(CFG_FROM_LIVE, CFG_BACKOFF, &bo) && bo == 300 && cfg_value(CFG_FROM_LIVE, CFG_RETURN, &rt) && rt == 300);
     }
 }
 
-// KD (0.14.21): a saved setting from version 7; a version 6 record loads
-// KD 0 (the loop as it ran) and keeps the rest of its tuning.
+// KD (0.14.21): a saved setting.
 static void test_kd(void)
 {
     int32_t v[CFG_N] = { 0 }, lo, hi;
@@ -735,224 +708,74 @@ static void test_kd(void)
     CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_KD) == 150);
     reboot();
     CHECK(cfg_tune(CFG_KD) == 150 && cfg_tune(CFG_KP) == 40);
-    {
-        uint32_t size7, a7 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a7) { a7 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000;
-        memcpy(&size7, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size7);
-        uint32_t size6 = as_v6(buf, size7);   // size7: the version 9 record's
-        uint32_t c = crc32(buf, size6 - 4);
-        memcpy(buf + size6 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size6);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a7);
-        CHECK(cfg_tune(CFG_KD) == 0 && cfg_tune(CFG_KP) == 40);
-    }
     v[CFG_KD] = 10001;
     set[CFG_KP] = false;
     CHECK(!cfg_save_with(v, set, &why));
-    CHECK(cfg_tune(CFG_KD) == 0);
+    CHECK(cfg_tune(CFG_KD) == 150);
 }
 
-// Gain schedule (0.15.15, version 8): PID sets 2 and 3, the schedule and
-// the closing deadband are saved settings; a version 7 record loads with
-// sets 2 and 3 as set 1, the schedule on (Off to 0.16.19; with every set
-// the same AUTO runs as it did) and the closing deadband as the deadband.
-static void test_sched(void)
+// The PID table (0.15.15; four sets from 0.16.14; always on from 0.16.20):
+// the sets, the boundaries, the hysteresis and the closing deadband are
+// saved settings. Boundary 3 at 0 is three sets.
+static void test_table(void)
 {
     int32_t v[CFG_N] = { 0 }, lo, hi;
     bool set[CFG_N] = { false };
     const char *why;
     CHECK(cfg_pid_key(1, 0) == CFG_KP && cfg_pid_key(2, 1) == CFG_TI2 && cfg_pid_key(3, 2) == CFG_KD3);
-    cfg_range(CFG_SCHED, &lo, &hi);
-    CHECK(lo == 2 && hi == 2);   // always on the pressure from 0.16.20
+    CHECK(cfg_pid_key(4, 0) == CFG_KP4 && cfg_pid_key(4, 1) == CFG_TI4 && cfg_pid_key(4, 2) == CFG_KD4);
+    CHECK(cfg_pid_key(5, 0) == CFG_KP);
     cfg_range(CFG_HYST, &lo, &hi);
     CHECK(lo == 0 && hi == 40);
+    cfg_range(CFG_B3, &lo, &hi);
+    CHECK(lo == 0 && hi == 10000);
+    CHECK(cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140);
     // Boundaries too close for the hysteresis: refused, nothing changes.
     v[CFG_B1] = 200; set[CFG_B1] = true;
     v[CFG_B2] = 250; set[CFG_B2] = true;
     v[CFG_HYST] = 15; set[CFG_HYST] = true;
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B2 must be above B1"));
     CHECK(cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_B3) == 140);
-    // The 5 Nov proposal for CF-11, on the pressure: B2 20 mbar is above
-    // the factory B3 (14), so refused unless B3 is 0 (three sets) or above.
+    // The 5 Nov proposal for CF-11: B2 20 mbar is above the factory B3 (14),
+    // so refused unless B3 is 0 (three sets) or above.
     memset(set, 0, sizeof set);
-    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_SCHED, CFG_B1, CFG_B2, CFG_HYST, CFG_DB, CFG_DBC,
-                            CFG_B3 };
-    const int32_t x[] = { 10, 40, 80, 30, 120, 30, 2, 60, 200, 15, 200, 8, 0 };
-    for (int i = 0; i < 12; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
+    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_B1, CFG_B2, CFG_HYST, CFG_DB, CFG_B3 };
+    const int32_t x[] = { 10, 40, 80, 30, 120, 30, 60, 200, 15, 200, 0 };
+    for (int i = 0; i < 10; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B3 must be above B2"));
     v[CFG_B3] = 0; set[CFG_B3] = true;
     CHECK(cfg_save_with(v, set, &why));
     reboot();
     bool all = true;
-    for (int i = 0; i < 13; i++) all &= cfg_tune(k[i]) == x[i];
+    for (int i = 0; i < 11; i++) all &= cfg_tune(k[i]) == x[i];
     CHECK(all && cfg_unsaved() == 0);
-    // In AUTO the PID table is tuning too: taken without leaving AUTO. Off
-    // (0) is refused from 0.16.20 (Ryan 12 Nov: "always has pid table").
+    // In AUTO the PID table is tuning too: taken without leaving AUTO.
     v_auto = true;
     memset(set, 0, sizeof set);
-    v[CFG_SCHED] = 0; set[CFG_SCHED] = true;
     v[CFG_KP3] = 150; set[CFG_KP3] = true;
-    CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 120);
-    v[CFG_SCHED] = 2;
-    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150);
+    CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_KP3) == 150);
     v_auto = false;
-    // 1, the setpoint schedule (0.15.15 to 0.15.19), removed in 0.15.20:
-    // refused on save; a saved record holding it, or 0 (Off, to 0.16.19),
-    // loads with the PID table on the pressure and the sets as saved.
-    memset(set, 0, sizeof set);
-    v[CFG_SCHED] = 1; set[CFG_SCHED] = true;
-    CHECK(!cfg_save_with(v, set, &why) && cfg_tune(CFG_SCHED) == 2);
-    {
-        uint32_t size8, a8 = 0, one = 1;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a8) { a8 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000;
-        memcpy(&size8, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size8);
-        memcpy(buf + 16 + 7 * 4 + 7 * 4 + 13 * 4, &one, 4);   // tune[T_SCHED]
-        uint32_t c = crc32(buf, size8 - 4);
-        memcpy(buf + size8 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size8);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
-        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
-        uint32_t off = 0;                                       // the same with 0, Off
-        memcpy(buf + 16 + 7 * 4 + 7 * 4 + 13 * 4, &off, 4);
-        c = crc32(buf, size8 - 4);
-        memcpy(buf + size8 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size8);
-        reboot();
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
-        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_KP3) == 150 && cfg_tune(CFG_KP) == 10);
-    }
-    // The same record as version 7.
-    {
-        uint32_t size8, a8 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a8) { a8 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000;
-        memcpy(&size8, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size8);
-        uint32_t size7 = as_v7(buf, size8);
-        uint32_t c = crc32(buf, size7 - 4);
-        memcpy(buf + size7 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size7);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a8);
-        CHECK(cfg_tune(CFG_KP) == 10 && cfg_tune(CFG_TI) == 40 && cfg_tune(CFG_DB) == 200);
-        CHECK(cfg_tune(CFG_KP2) == 10 && cfg_tune(CFG_TI2) == 40 && cfg_tune(CFG_KP3) == 10 && cfg_tune(CFG_TI3) == 40 &&
-              cfg_tune(CFG_KD2) == cfg_tune(CFG_KD) && cfg_tune(CFG_KD3) == cfg_tune(CFG_KD));
-        CHECK(cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B1) == 60 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_HYST) == 15 &&
-              cfg_tune(CFG_DBC) == 200);   // on, every set set 1's: as it ran
-        CHECK(cfg_tune(CFG_KP4) == 10 && cfg_tune(CFG_TI4) == 40 && cfg_tune(CFG_KD4) == cfg_tune(CFG_KD) &&
-              cfg_tune(CFG_B3) == 140);
-        CHECK(cfg_unsaved() == 0);
-    }
-}
-
-// Fourth PID set (0.16.14, version 9): set 4 and boundary 3 are saved
-// settings, B3 0 is three sets; a version 8 record loads with set 4 as set
-// 3 and B3 0, its three sets as they ran.
-static void test_set4(void)
-{
-    int32_t v[CFG_N] = { 0 }, lo, hi;
-    bool set[CFG_N] = { false };
-    const char *why;
-    CHECK(cfg_pid_key(4, 0) == CFG_KP4 && cfg_pid_key(4, 1) == CFG_TI4 && cfg_pid_key(4, 2) == CFG_KD4);
-    CHECK(cfg_pid_key(5, 0) == CFG_KP);
-    cfg_range(CFG_B3, &lo, &hi);
-    CHECK(lo == 0 && hi == 10000);
     // The 11 Nov four-set table: 0.06/0.70, 0.14/1.50, 0.50/1.00, 0.30/0.25
     // at 6, 10 and 14 mbar, hysteresis 10 %.
-    const cfg_key_t k[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_KP4, CFG_TI4,
-                            CFG_SCHED, CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
-    const int32_t x[] = { 6, 70, 14, 150, 50, 100, 30, 25, 2, 60, 100, 140, 10 };
-    for (int i = 0; i < 13; i++) { v[k[i]] = x[i]; set[k[i]] = true; }
+    const cfg_key_t k4[] = { CFG_KP, CFG_TI, CFG_KP2, CFG_TI2, CFG_KP3, CFG_TI3, CFG_KP4, CFG_TI4,
+                             CFG_B1, CFG_B2, CFG_B3, CFG_HYST };
+    const int32_t x4[] = { 6, 70, 14, 150, 50, 100, 30, 25, 60, 100, 140, 10 };
+    memset(set, 0, sizeof set);
+    for (int i = 0; i < 12; i++) { v[k4[i]] = x4[i]; set[k4[i]] = true; }
     CHECK(cfg_save_with(v, set, &why));
     reboot();
-    bool all = true;
-    for (int i = 0; i < 13; i++) all &= cfg_tune(k[i]) == x[i];
+    all = true;
+    for (int i = 0; i < 12; i++) all &= cfg_tune(k4[i]) == x4[i];
     CHECK(all && cfg_unsaved() == 0);
     // B3 within the hysteresis of B2: refused, nothing changes.
     memset(set, 0, sizeof set);
     v[CFG_B3] = 110; set[CFG_B3] = true;
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "B3 must be above B2"));
     CHECK(cfg_tune(CFG_B3) == 140);
-    // As version 8: the three sets kept, set 4 = set 3, B3 0.
-    {
-        uint32_t size9, a9 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a9) { a9 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000;
-        memcpy(&size9, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size9);
-        uint32_t size8 = as_v8(buf, size9);
-        uint32_t c = crc32(buf, size8 - 4);
-        memcpy(buf + size8 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size8);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a9);
-        CHECK(cfg_tune(CFG_KP) == 6 && cfg_tune(CFG_KP2) == 14 && cfg_tune(CFG_KP3) == 50 && cfg_tune(CFG_TI3) == 100);
-        CHECK(cfg_tune(CFG_KP4) == 50 && cfg_tune(CFG_TI4) == 100 && cfg_tune(CFG_KD4) == cfg_tune(CFG_KD3));
-        CHECK(cfg_tune(CFG_B3) == 0 && cfg_tune(CFG_SCHED) == 2 && cfg_tune(CFG_B2) == 100 && cfg_tune(CFG_HYST) == 10);
-        CHECK(cfg_unsaved() == 0);
-        // The next save writes version 10.
-        CHECK(cfg_save());
-        uint32_t ver = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, vv;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&vv, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (r == a9 + 1) ver = vv;
-        }
-        CHECK(ver == 10);
-    }
 }
 
-// Disable switch edges (0.16.21, version 10, Ryan 12 Nov "make the boundary
-// editable"): saved settings, From 0 to 99 and To 1 to 100 % open (0.16.22), From
-// below To; a version 9 record loads them at 5 and 50, the band before.
+// Disable switch edges (0.16.21, Ryan 12 Nov "make the boundary editable"):
+// saved settings, From 0 to 99 and To 1 to 100 % open (0.16.22), From below To.
 static void test_pass(void)
 {
     int32_t v[CFG_N] = { 0 }, lo, hi;
@@ -981,34 +804,6 @@ static void test_pass(void)
     CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 0 && cfg_tune(CFG_PASS_HI) == 100);
     v[CFG_PASS_LO] = 10; v[CFG_PASS_HI] = 30;
     CHECK(cfg_save_with(v, set, &why) && cfg_tune(CFG_PASS_LO) == 10 && cfg_tune(CFG_PASS_HI) == 30);
-    // As version 9: the rest kept, the edges 5 and 50.
-    {
-        uint32_t size10, a10 = 0;
-        int sl = 0;
-        for (int i = 0; i < 2; i++) {
-            uint32_t r, ver;
-            memcpy(&r, flash + 0x7FD000 + i * 0x1000 + 12, 4);
-            memcpy(&ver, flash + 0x7FD000 + i * 0x1000 + 4, 4);
-            if (ver == 10 && r >= a10) { a10 = r; sl = i; }
-        }
-        uint32_t base = 0x7FD000 + sl * 0x1000;
-        memcpy(&size10, flash + base + 8, 4);
-        static uint8_t buf[4096];
-        memcpy(buf, flash + base, size10);
-        int32_t b3;
-        memcpy(&b3, buf + 16 + 7 * 4 + 7 * 4 + 21 * 4, 4);
-        uint32_t size9 = as_v9(buf, size10);
-        uint32_t c = crc32(buf, size9 - 4);
-        memcpy(buf + size9 - 4, &c, 4);
-        extflash_erase_4k(base);
-        extflash_write(base, buf, size9);
-        reboot();
-        uint32_t rev;
-        const char *at;
-        CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == a10);
-        CHECK(cfg_tune(CFG_PASS_LO) == 5 && cfg_tune(CFG_PASS_HI) == 50 && cfg_tune(CFG_B3) == b3);
-        CHECK(cfg_unsaved() == 0);
-    }
 }
 
 static void tick(uint32_t ms)
@@ -1312,7 +1107,8 @@ static void test_auto(void)
     v[CFG_KP] = 320;
     CHECK(!cfg_save_with(v, set, &why) && strstr(why, "Stop AUTO"));
     CHECK(cfg_tune(CFG_KP) == 300 && m_rate == rate);
-    CHECK(!cfg_load_live(CFG_FROM_DEFAULTS, &why) && strstr(why, "Stop AUTO"));
+    CHECK(!cfg_reset_factory(&why) && strstr(why, "Stop AUTO"));
+    CHECK(!cfg_undo(&why) && strstr(why, "Stop AUTO"));
     clicks_state_t q = { .pm_found = true, .reading_ok = true, .p_mmbar = 5100 };
     trend_pt_t o;
     lv_tick_inc(1000); trend_second(&q);
@@ -1328,13 +1124,13 @@ int main(int argc, char **argv)
     flash = malloc(FLASH_SIZE);
     memset(flash, 0xFF, FLASH_SIZE);
     lv_init();
+    test_v10();
     test_cfg();
     test_capture();
     test_name();
     test_net();
     test_kd();
-    test_sched();
-    test_set4();
+    test_table();
     test_pass();
     test_valvepos();
     test_trend();

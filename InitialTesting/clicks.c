@@ -5,20 +5,13 @@
 #include "board.h"
 #include "drv_digital_in.h"
 #include "drv_digital_out.h"
-#include "lvgl.h"  // lv_snprintf
 #include "clicks.h"
 #include "cal.h"
-#include "fixed.h"
 #include "drv_i2c_master.h"
 #include "stepper3.h"
 #include "pmc_config.h"
 #include "baro.h"
 
-#define STATUS_LEN 192
-
-static char boost10_status[STATUS_LEN];
-static char powermonitor_status[STATUS_LEN];
-static char druck_status[STATUS_LEN];
 static clicks_state_t state;
 
 /* --------------------------------------------------------------------------
@@ -119,19 +112,6 @@ static void boost10_poll(void)
     state.boost_tripped = boost10_tripped;
     state.boost_trip_mv = boost10_trip_mv;
     state.boost_set_mv = boost10_wiper_to_mv(boost10_wiper);
-
-    const char *pg = state.boost_pg ? "PG high = regulating" : "PG low = NOT regulating";
-    if (boost10_tripped)
-        lv_snprintf(boost10_status, STATUS_LEN,
-                    "S3 Boost 10: TRIPPED at %ld mV, now ~5 V, %s",
-                    (long)boost10_trip_mv, pg);
-    else
-    {
-        char v[16];
-        fixed_fmt(v, sizeof v, fixed_round(boost10_wiper_to_mv(boost10_wiper), 1), 2);
-        lv_snprintf(boost10_status, STATUS_LEN,
-                    "S3 Boost 10: wiper %u (%s V nom), %s", boost10_wiper, v, pg);
-    }
 }
 
 /* --------------------------------------------------------------------------
@@ -143,18 +123,16 @@ static void boost10_poll(void)
  * The driver (mikroSDK 2.19.3, STM32F4 hal_ll) returns from any failed
  * transfer without sending STOP or clearing the NACK flag, so I2C2 stays
  * BUSY and every later transfer fails too. After a failure pm_recover()
- * sends STOP, closes the driver, resets I2C2 and opens it again. This is
- * what made it look dead before: a scan from 0x40 left I2C2 stuck at the
- * first empty address, so the INA228 at 0x4A was never reached.
+ * sends STOP, closes the driver, resets I2C2 and opens it again.
  * The timeout is the driver default, 10000 status reads (a few ms); a short
  * one (100) times out before the 90 us address byte is even sent.
  *
- * Real detection: manufacturer ID 0x5449 ("TI") and device ID 0x228x. The
- * address depends on the A0/A1 jumpers (0x40-0x4F): 0x4A, the one fitted,
- * is tried first, then the rest.
+ * Real detection: manufacturer ID 0x5449 ("TI") and device ID 0x228x, at
+ * 0x4A, the address the A0/A1 jumpers are fitted for. No other address is
+ * tried (0.16.28): each one that does not answer costs a timeout and a bus
+ * reset in the main loop.
  * ------------------------------------------------------------------------ */
 #define PM_SCL_PIN 1  // PF1, read directly to spot a bus held low
-#define PM_SDA_PIN 0  // PF0
 #define PM_ADDR_FITTED 0x4A
 
 #define INA228_REG_ADC_CONFIG 0x01
@@ -176,17 +154,7 @@ static void boost10_poll(void)
 
 static i2c_master_t pm_i2c;
 static bool pm_open;
-static uint8_t pm_addr;  // 0 = not found
-
-// Scan diagnostics: first address that answered and the ID it returned.
-static uint8_t pm_ack_addr;
-static uint16_t pm_ack_mfr;
-
-// While not found, the fitted address is tried every second and the rest
-// of 0x40-0x4F (a moved jumper) only every PM_RESCAN_S seconds: each address
-// that does not answer costs a timeout and a bus reset in the main loop.
-#define PM_RESCAN_S 10
-static uint8_t pm_rescan_wait;   // seconds to the next full scan; 0 = this one
+static uint8_t pm_addr;  // 0 = not found; tried every second until it is
 
 static void pm_spin(uint32_t n)
 {
@@ -222,7 +190,7 @@ static void pm_recover(void)
 static bool pm_read_at(uint8_t addr, uint8_t reg, uint8_t *buf, size_t len)
 {
     if (!pm_open)
-        pm_i2c_open();   // retried at each scan if it failed before
+        pm_i2c_open();   // retried at each probe if it failed before
     if (!pm_open)
         return false;
     i2c_master_set_slave_address(&pm_i2c, addr);
@@ -280,10 +248,6 @@ static bool pm_probe(uint8_t addr)
 
     if (!pm_read_at(addr, INA228_REG_MFR_ID, buf, 2))
         return false;
-    if (pm_ack_addr == 0) {
-        pm_ack_addr = addr;
-        pm_ack_mfr = (uint16_t)((buf[0] << 8) | buf[1]);
-    }
     if (((buf[0] << 8) | buf[1]) != INA228_MFR_TI)
         return false;
     if (!pm_read_at(addr, INA228_REG_DEV_ID, buf, 2))
@@ -318,7 +282,6 @@ static void powermonitor_init(void)
  * Integer maths: r in ppb (1 mV/V = 1 000 000 ppb).
  *   r = raw_shunt * 312.5 nV / (raw_bus * 195.3125 uV) = raw_shunt / raw_bus * 1.6e6 ppb
  * ------------------------------------------------------------------------ */
-#define DRUCK_VEXC_MIN_MV    7000      // datasheet supply range 7-12 V
 
 /* A connected Druck gives about 0.01-0.13 mV/V at vacuum (cert 13825224
  * zero 1.337 mV at 10 V; the bench unit 5880156 gives 0.13 mV, 0.013 mV/V)
@@ -333,8 +296,6 @@ static void powermonitor_init(void)
 #define DRUCK_R_MAX_PPB      11000000  // 11 mV/V
 
 // The ratio-to-pressure table lives in cal.c (stored in serial flash).
-static char druck_value[24];
-
 // Pressure in 0.001 mbar from the INA228 raw readings.
 static int64_t druck_pressure_mmbar(int32_t raw_shunt, int32_t raw_bus, int64_t *r_ppb)
 {
@@ -346,35 +307,18 @@ static void druck_update(int32_t raw_shunt, int32_t raw_bus, int32_t bus_mv)
 {
     state.reading_ok = false;
     state.druck_absent = false;
-    if (bus_mv < DRUCK_VEXC_MIN_MV) {
-        lv_snprintf(druck_value, sizeof druck_value, "----");
-        lv_snprintf(druck_status, STATUS_LEN,
-                    "Druck: excitation %ld mV, below 7 V (VBUS not wired?)", (long)bus_mv);
-        return;
-    }
+    if (bus_mv < DRUCK_VEXC_MIN_MV)
+        return;   // excitation below 7 V (VBUS not wired?)
 
     int64_t r_ppb;
     int64_t p = druck_pressure_mmbar(raw_shunt, raw_bus, &r_ppb);
     state.r_ppb = (int32_t)r_ppb;
     if (r_ppb < DRUCK_R_MIN_PPB || r_ppb > DRUCK_R_MAX_PPB) {
-        char r[16];
-        state.druck_absent = true;
-        lv_snprintf(druck_value, sizeof druck_value, "----");
-        lv_snprintf(druck_status, STATUS_LEN,
-                    "Druck: signal %s mV/V, outside 0.005-11 mV/V (not connected?)",
-                    fixed_fmt(r, sizeof r, r_ppb / 100, 4));
+        state.druck_absent = true;   // outside 0.005 to 11 mV/V: not connected?
         return;
     }
     state.reading_ok = true;
     state.p_mmbar = (int32_t)p;
-
-    // Pressure rounded to 0.01 mbar; r in mV/V cut to 5 decimals.
-    char r[16];
-    fixed_fmt(druck_value, sizeof druck_value, fixed_round(p, 1), 2);
-    lv_snprintf(druck_status, STATUS_LEN,
-                "Druck: %s mbar abs  r %s mV/V  exc %ld mV  %s",
-                druck_value, fixed_fmt(r, sizeof r, r_ppb / 10, 5),
-                (long)bus_mv, cal_is_default() ? "nominal cal" : cal_id());
 }
 
 static void powermonitor_poll(void)
@@ -382,48 +326,16 @@ static void powermonitor_poll(void)
     uint8_t b[3];
 
     if (pm_addr == 0) {
-        pm_ack_addr = 0;
-        // With SCL held low (wiring fault) every probe would time out and
-        // recover, 16 times a second, starving the UI and network.
-        if (!((GPIOF->IDR >> PM_SCL_PIN) & 1)) {
-            lv_snprintf(powermonitor_status, STATUS_LEN,
-                        "S4 Power Monitor: SCL held low (I2C wiring fault?)");
-            lv_snprintf(druck_value, sizeof druck_value, "----");
-            lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor not found)");
-            state.pm_found = false;
-            state.reading_ok = false;
-            return;
-        }
-        if (pm_probe(PM_ADDR_FITTED))
+        // With SCL held low (wiring fault) the probe would time out and
+        // recover every second, starving the UI and network: not tried.
+        bool scl_low = !((GPIOF->IDR >> PM_SCL_PIN) & 1);
+        if (!scl_low && pm_probe(PM_ADDR_FITTED))
             pm_addr = PM_ADDR_FITTED;
-        if (pm_addr != 0 || pm_rescan_wait == 0) {
-            // 0x46 is the Pressure 21 (baro.c) when PMC_BARO is on.
-            for (uint8_t a = 0x40; a <= 0x4F && pm_addr == 0; a++)
-                if (a != PM_ADDR_FITTED && !(PMC_BARO && a == BARO_ADDR) && pm_probe(a))
-                    pm_addr = a;
-            pm_rescan_wait = pm_addr ? 0 : PM_RESCAN_S - 1;
-        } else {
-            pm_rescan_wait--;
-        }
         // Continuous readings, 128 averages over 600 ms. Default is
         // 0xFB68, no averaging.
         if (pm_addr != 0 && !pm_write16(INA228_REG_ADC_CONFIG, INA228_ADC_CONFIG_RUN))
             pm_addr = 0;
         if (pm_addr == 0) {
-            if (pm_ack_addr)
-                lv_snprintf(powermonitor_status, STATUS_LEN,
-                            "S4 Power Monitor: 0x%02X answered but ID 0x%04X is not an INA228",
-                            pm_ack_addr, pm_ack_mfr);
-            else if (!pm_open)
-                lv_snprintf(powermonitor_status, STATUS_LEN,
-                            "S4 Power Monitor: I2C2 open failed");
-            else
-                lv_snprintf(powermonitor_status, STATUS_LEN,
-                            "S4 Power Monitor: NOT FOUND (no reply at 0x40-0x4F,\n"
-                            "   SCL %d SDA %d)", (int)((GPIOF->IDR >> PM_SCL_PIN) & 1),
-                            (int)((GPIOF->IDR >> PM_SDA_PIN) & 1));
-            lv_snprintf(druck_value, sizeof druck_value, "----");
-            lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor not found)");
             state.pm_found = false;
             state.reading_ok = false;
             return;
@@ -442,11 +354,7 @@ static void powermonitor_poll(void)
     if (!pm_read(INA228_REG_DIETEMP, b, 2)) goto lost;
     raw_temp = (int16_t)((b[0] << 8) | b[1]);
 
-    // Integer formatting (lv_snprintf has no float): shunt in 0.1 uV,
-    // bus in mV, temperature in 0.1 degC.
-    int32_t shunt_0u1 = (raw_shunt * 3125) / 1000;  // 3.125 x 0.1 uV per LSB
     int32_t bus_mv = (int32_t)(((int64_t)raw_bus * 1953125) / 10000000);
-    int32_t temp_d1 = (raw_temp * 5) / 64;           // 0.078125 x 0.1 C per LSB
 
     state.pm_found = true;
     state.shunt_nv = (int32_t)(((int64_t)raw_shunt * 3125) / 10);
@@ -454,21 +362,10 @@ static void powermonitor_poll(void)
     state.die_mc = (raw_temp * 125) / 16;   // 7.8125 m degC per LSB
     boost10_check(bus_mv);
     druck_update(raw_shunt, raw_bus, bus_mv);
-
-    char sh[16], tc[16];
-    lv_snprintf(powermonitor_status, STATUS_LEN,
-                "S4 Power Monitor: INA228 found @0x%02X\n"
-                "   Vshunt %s uV   Vbus %ld mV   die %s C",
-                pm_addr, fixed_fmt(sh, sizeof sh, shunt_0u1, 1), (long)bus_mv,
-                fixed_fmt(tc, sizeof tc, temp_d1, 1));
     return;
 
 lost:
-    pm_addr = 0;
-    lv_snprintf(powermonitor_status, STATUS_LEN,
-                "S4 Power Monitor: lost (I2C read failed)");
-    lv_snprintf(druck_value, sizeof druck_value, "----");
-    lv_snprintf(druck_status, STATUS_LEN, "Druck: no reading (Power Monitor lost)");
+    pm_addr = 0;   // an I2C read failed: probed again next second
     state.pm_found = false;
     state.reading_ok = false;
 }
@@ -493,12 +390,6 @@ void clicks_poll(void)
     state.baro_ok = baro_reading(&state.baro_mmbar, &state.baro_mc);
 }
 
-const char *clicks_stepper3_status(void)     { return stepper3_status(); }
-const char *clicks_boost10_status(void)      { return boost10_status; }
-const char *clicks_powermonitor_status(void) { return powermonitor_status; }
-const char *clicks_druck_status(void)        { return druck_status; }
-const char *clicks_druck_value(void)         { return druck_value; }
-bool clicks_druck_cal_nominal(void)          { return cal_is_default(); }
 const clicks_state_t *clicks_state(void)
 {
     state.cal_nominal = cal_is_default();

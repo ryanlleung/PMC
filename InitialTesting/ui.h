@@ -58,12 +58,11 @@ void ui_btn_text(lv_obj_t *btn, const char *text, const char *small);
 void ui_btn_enable(lv_obj_t *btn, bool on);
 // Filled (primary) or plain, for a button whose role changes with the state.
 void ui_btn_primary(lv_obj_t *btn, bool on);
-void ui_btn_blue(lv_obj_t *btn);   // nav tile filled dark blue, white lettering
 void ui_btn_outline(lv_obj_t *btn, bool on);   // white, blue edge and word
 bool ui_btn_disabled(lv_event_t *e);
 void ui_btn_arrow(lv_obj_t *btn, bool up);       // a drawn 21 x 12 Up or Down chevron in place of the label
 // An icon (a font symbol or a UI_ICON_ below) centred over the label, which
-// moves to the bottom: the Menu's tiles (0.16.2). After ui_btn, before ui_btn_blue.
+// moves to the bottom: the Menu's tiles (0.16.2). After ui_btn.
 void ui_btn_icon(lv_obj_t *btn, const char *icon);
 
 lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h);
@@ -124,8 +123,6 @@ void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text);
 // rather than at the next 0.5 s refresh; for a state the strip must show
 // at once.
 void ui_refresh_soon(void);
-// Strip width for this screen (343 unless a screen sets it in build()).
-void ui_strip_width(int32_t w);
 void ui_strip_action(const char *text, const char *small, lv_event_cb_t cb);   // NULL text: none
 
 // Keypad over the screen. on_set gets the value in 0.01 units (two
@@ -165,13 +162,11 @@ void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), cons
              void (*on_mid)(void), const char *mid2, void (*on_mid2)(void), const char *ok, void (*on_ok)(void));
 void ui_ask3(const char *text, const char *cancel, void (*on_cancel)(void), const char *mid,
              void (*on_mid)(void), const char *ok, void (*on_ok)(void));
-// A list to pick one of (Sensor in use, Load settings); sel -1 for none.
+// A list to pick one of; sel -1 for none.
 // Tapping outside closes it.
 void ui_pick(const char *title, const char *const *items, int n, int sel, void (*on_pick)(int i));
 // Scrolling text over the screen (Help); header Back closes it.
 void ui_text_view(const char *title, const char *text);
-// Empty overlay over 0,40 480x232 (STOP stays on top) for a screen's own dialog.
-lv_obj_t *ui_overlay(void);
 // The same, for a dialog with buttons on the bottom row (left of STOP): the
 // status strip is hidden while it is open, as for the keypad.
 lv_obj_t *ui_overlay_full(void);
@@ -189,9 +184,8 @@ void ui_reset_fault_event(lv_event_t *e);   // the strip's Reset fault (ui_home.
 // valve on Home's Valve tile while not homed).
 void ui_home_ask(void);
 void ui_set_position_ask(void);
-void ui_set_position_pick(int i);   // 0 closed, 1 enter %, 2 saved
+void ui_set_position_pick(int i);   // 0 closed, 1 saved
 void ui_position_ask(void);
-int32_t ui_log_px(int32_t p_mmbar, int32_t w);   // 0.1-1000 mbar on a log scale, 0 to w px
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
 // Trend and the Home sparklines (ui_trend.c). A sparkline redraws when
 // invalidated (Home does it once a second); a tap opens Trend.
@@ -201,8 +195,11 @@ lv_obj_t *ui_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
 extern const ui_screen_t ui_scr_calib, ui_scr_faults, ui_scr_diag;
 // The settings pages, all on the Menu from 0.16.2 (no Settings page, no
 // Choose sensor): System and its two pages, Motor settings, PID tuning,
-// Review and save, Calibrate sensor (ui_settings.c).
-extern const ui_screen_t ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_valve_set, ui_scr_tune, ui_scr_review,
-                         ui_scr_sensor_cal;
+// Sensor calibration (ui_settings.c).
+extern const ui_screen_t ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_valve_set, ui_scr_tune, ui_scr_sensor_cal;
+// The header's unsaved icon: asks to save what is in use and not saved.
+void ui_unsaved_ask(void);
+// The Menu's Reset to factory tile: asks, then resets (cfg_reset_factory).
+void ui_factory_reset_ask(void);
 
 #endif // _UI_H_

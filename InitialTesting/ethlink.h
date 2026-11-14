@@ -22,30 +22,18 @@ void ethlink_printf(const char *fmt, ...);
 // (output is dropped at once then).
 size_t ethlink_tx_room(void);
 
-// Non-blocking line input from the client, as usb_serial_getline().
+// Non-blocking line input from the client: true with one complete line.
 bool ethlink_getline(char *buf, size_t n);
 
 // True once after a new client connects (so status lines can be resent).
 bool ethlink_take_new_client(void);
 
-// Header text: the IP, or a short fault ("NO CABLE", "NET NO CLK", ...).
-const char *ethlink_chip_text(void);
-
 // MAC address as text ("02:3A:91:C4:5E:07"), made from the chip's unique
 // ID, the same every boot; "" if the Ethernet hardware did not start.
 const char *ethlink_mac(void);
 
-// IPv4 address as text, "" until one is set.
-const char *ethlink_ip(void);
-// Subnet mask as text, "" until an address is set (NETWORK?).
-const char *ethlink_mask(void);
-
-bool ethlink_link_up(void);
 bool ethlink_client_connected(void);
 // Modbus TCP clients connected on PMC_MODBUS_PORT (modbus.h).
 int ethlink_modbus_clients(void);
-
-// Short text describing the link state.
-const char *ethlink_status(void);
 
 #endif // _ETHLINK_H_

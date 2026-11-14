@@ -98,7 +98,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Home IP tile opens System', hdr(a) === hdr(b) && hdr(a) !== home);
 }
 { // The Menu (0.16.2, Ryan 9 Nov: no Settings page, no row captions, an icon on every tile): nine tiles in three
-  // rows of three, each opening its page in one tap; Review and save bottom right, dark blue (0.15.23).
+  // rows of three, each opening its page in one tap; the ninth, Reset to factory, asks (0.16.31; Review and save before).
   const s = homed(load());
   const screen = () => { const m = new Uint8Array(s.x.memory.buffer); let p = s.x.sim_screen(), e = p; while (m[e]) e++;
     return Buffer.from(m.subarray(p, e)).toString(); };
@@ -108,27 +108,24 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Menu opens', screen() === 'Menu', screen());
   shot(s, 'menu');
   const tiles = [[84, 72, 'Trend'], [240, 72, 'Events'], [396, 72, 'PID tuning'], [84, 128, 'Motor settings'],
-    [240, 128, 'Valve position'], [396, 128, 'Sensor calibration'], [84, 184, 'System'], [240, 184, 'Diagnostics'],
-    [396, 184, 'Review and save']];
+    [240, 128, 'Valve position'], [396, 128, 'Sensor calibration'], [84, 184, 'System'], [240, 184, 'Diagnostics']];
   const wrong = tiles.map(([x, y, t]) => { menu(); s.tap(x, y); return [t, screen()]; })
     .filter(([t, got]) => t !== got).map(([t, got]) => t + ' -> ' + got);
   check('every Menu tile opens its page', wrong.length === 0, wrong.join(', '));
-  menu(); s.tap(396, 184); const review = screen(); s.tap(66, 20);
-  check('Back from a page returns to the Menu', review === 'Review and save' && screen() === 'Menu', review + ' then ' + screen());
-  // Review and save is the one dark blue tile: white lettering on the Start AUTO blue, the others white cards.
+  menu(); s.tap(240, 184); const diag = screen(); s.tap(66, 20);
+  check('Back from a page returns to the Menu', diag === 'Diagnostics' && screen() === 'Menu', diag + ' then ' + screen());
+  // No dark blue tile from 0.16.31 (Review and save was): every tile a white card.
   const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
-  check('Review and save tile dark blue, the others white', px(330, 168) !== 0xFFFF && px(18, 168) === 0xFFFF && px(174, 168) === 0xFFFF,
+  check('every Menu tile white', px(330, 168) === 0xFFFF && px(18, 168) === 0xFFFF && px(174, 168) === 0xFFFF,
     [px(330, 168), px(18, 168), px(174, 168)].join());
   s.tap(240, 128); shot(s, 'valve-position'); s.tap(66, 20);
   s.tap(84, 128); shot(s, 'valve-settings'); s.tap(66, 20);
   // Choose sensor is gone (one sensor per board): no CFG_SENSOR key (27 to 0.16.13; set 4's KP from 0.16.14, the
-  // Disable switch edges 31 and 32 from 0.16.21, the keys end at 33), the sensor range is the 15 psia Druck's, and
-  // the old Settings slot now opens Review and save.
-  check('no sensor-in-use setting', s.setting(33) === -2147483648 && s.setting(CFG.DBC) === 8 && s.setting(CFG.B3) === 140 &&
+  // Disable switch edges from 0.16.21; the keys end at 30 from 0.16.32) and the sensor range is the 15 psia Druck's.
+  check('no sensor-in-use setting', s.setting(30) === -2147483648 && s.setting(CFG.DB) === 8 && s.setting(CFG.B3) === 140 &&
     s.setting(CFG.PASS_LO) === 5 && s.setting(CFG.PASS_HI) === 50,
-    [33, CFG.DBC, CFG.B3, CFG.PASS_LO, CFG.PASS_HI].map(k => s.setting(k)).join(' '));
+    [30, CFG.DB, CFG.B3, CFG.PASS_LO, CFG.PASS_HI].map(k => s.setting(k)).join(' '));
   check('setpoint limit is the 15 psia range', s.cmd('SETPOINT 1035') === 'ERR 102 Outside 0 to 1034.2 mbar\r\n', s.cmd('SETPOINT 1035'));
-  menu(); s.tap(386, 184); check('old Settings slot opens Review and save', screen() === 'Review and save', screen());
   // Motor override moved from Valve position to Motor settings' fourth tab, Override (0.16.17, Ryan 12 Nov: "it
   // doesnt feel right to be in valve position"): asked first, and Back returns to Motor settings on that tab.
   // Its button is at the right of the second row from 0.16.21 (the Disable switch toggle and edges before it).
@@ -144,19 +141,19 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'home-pid');
   s.tap(415, 72); shot(s, 'pid-tuning');
   s.tap(298, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // set 1's KD (the set row), 1.5, Set
-  s.tap(415, 128); s.tap(319, 138);   // Save settings, then Save in the question
+  s.tap(415, 128);   // Save: at once (0.16.31; Save settings then Save in a question before)
   check('KD saves from the PID tuning page', s.setting(CFG.KD) === 150, 'KD ' + s.setting(CFG.KD));
   // Gain schedule on (0.15.15): the PID tab (Gains from 0.16.25) shows the set row; Set 3's KP from its card. Four
   // sets from 0.16.14; from 0.16.25 four cards of 82 px at x 10, 97, 184 and 271.
   s.cmd('SCHED SET PV,6,10,14,15', 1000); s.run(1000);
   shot(s, 'pid-tuning-sets');
   s.tap(221, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(110, 183); s.tap(320, 212);   // Set 3, KP 1.5, Set
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   check('Set 3 KP saves from the set row', s.setting(CFG.KP3) === 150 && s.setting(CFG.KP) === 6 && s.setting(CFG.KP2) === 12 &&
     s.setting(CFG.KP4) === 40, [s.setting(CFG.KP), s.setting(CFG.KP2), s.setting(CFG.KP3), s.setting(CFG.KP4)].join());
   shot(s, 'pid-tuning-set3');
   s.tap(304, 128); s.tap(62, 184); s.tap(40, 239); s.tap(250, 239); s.tap(320, 212);   // Set 4, KP 1., Set
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   check('Set 4 KP saves from the set row', s.setting(CFG.KP4) === 100 && s.setting(CFG.KP3) === 150,
     [s.setting(CFG.KP3), s.setting(CFG.KP4)].join());
   shot(s, 'pid-tuning-set4');
@@ -165,14 +162,14 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(182, 72); s.run(500);
   shot(s, 'pid-tuning-table');
   s.tap(65, 128); s.tap(110, 183); s.tap(320, 212);   // Set 1 | 2 (B1), 5, Set
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   check('Set ranges: B1 saves from the first card', s.setting(CFG.B1) === 50 && s.setting(CFG.B2) === 100, s.setting(CFG.B1));
-  // AUTO (AUTO limits to 0.16.24): AUTO min and Pressure response, the setpoint band under AUTO min.
+  // AUTO (AUTO limits to 0.16.24): AUTO min and the setpoint band beside it (Pressure response went in 0.16.30).
   s.tap(291, 72); s.run(500);
   shot(s, 'pid-tuning-auto');
-  s.tap(65, 184); s.tap(40, 239); s.tap(320, 212);   // SP band, 1, Set
-  s.tap(415, 128); s.tap(319, 138);
-  check('AUTO: the setpoint band saves from the second row', s.setting(CFG.BAND) === 100, s.setting(CFG.BAND));
+  s.tap(180, 128); s.tap(40, 239); s.tap(320, 212);   // SP band, 1, Set
+  s.tap(415, 128);
+  check('AUTO: the setpoint band saves from the second card', s.setting(CFG.BAND) === 100, s.setting(CFG.BAND));
 }
 { // A tap on anything greyed round a popup closes it, as Back (0.15.16, Ryan 5 Nov: "Make popups exitable when
   // tapping the greyed out areas"): the dimmed page, the greyed strip, the greyed header icons. A tap on the box does not.
@@ -195,12 +192,12 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(24, 20); s.tap(24, 20); const se = !s.popup();              // the greyed power icon
   check('Shut down question: closes on the dimmed page, the greyed strip and the greyed power icon, not on its box; nothing done',
     sa && sb && sc && sd && se && s.cmd('MODE?') === 'MODE MANUAL\r\n', [sa, sb, sc, sd, se].join() + ' ' + s.cmd('MODE?'));
-  s.tap(415, 72); s.tap(182, 72); s.tap(94, 128); const pa = s.popup();   // PID tuning > Schedule > Schedule on: the list
+  s.tap(415, 72); s.tap(182, 72); s.tap(94, 128); const pa = s.popup();   // PID tuning > Set ranges > Boundary 1: its keypad
   s.tap(100, 54); const pb = s.popup();                             // its caption
-  shot(s, 'popup-pick');
+  shot(s, 'popup-card-keypad');
   s.tap(415, 200);                                                  // the dimmed page (Discard changes under it)
-  check('pick list: stays on a tap on its caption, closes on the dimmed page; nothing picked',
-    pa && pb && !s.popup() && s.setting(CFG.SCHED) === 2, [pa, pb, s.popup(), s.setting(CFG.SCHED)].join());
+  check('keypad of a settings card: stays on a tap on its caption, closes on the dimmed page; nothing set',
+    pa && pb && !s.popup() && s.setting(CFG.B1) === 60, [pa, pb, s.popup(), s.setting(CFG.B1)].join());
   s.tap(415, 72); const ha = s.popup();                             // Help
   s.tap(100, 240); const hb = !s.popup();                           // the greyed strip under it
   check('Help: closes on a tap on the greyed strip', ha && hb, [ha, hb].join());
@@ -245,22 +242,36 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('F-1 Druck unplugged', /F-1/.test(ev), ev);
   shot(s, 'f01');
 }
-{ // F-2: excitation out of 9.5-10.5 V.
-  const s = homed(load()); s.set(10, 9.2); s.run(5000);
-  const ev = events(s, 5);
-  check('F-2 excitation low', /F-2/.test(ev), ev);
+{ // The excitation is a cause of F-1 from 0.16.33 (its own fault F-2 before, outside 9.5-10.5 V): the reading is a
+  // ratio, so 9.2 V raises nothing and reads the same pressure; under 7 V there is no reading, which is F-1.
+  const s = homed(load()); s.run(3000);
+  const p0 = s.cmd('PRESSURE?');
+  s.set(10, 9.2); s.run(5000);
+  const p1 = s.cmd('PRESSURE?'), a1 = s.cmd('ALARM?');
+  const mb = t => parseFloat(t.replace(/^PRESSURE /, ''));
+  check('excitation 9.2 V: no fault, the pressure reads the same', a1 === 'ALARM NONE\r\n' && Math.abs(mb(p1) - mb(p0)) <= 0.05,
+    [p0.trim(), p1.trim(), a1.trim()].join(' | '));
+  s.set(10, 6.5); s.run(5000);
+  const ev = events(s, 5), a2 = s.cmd('ALARM?');
+  check('excitation 6.5 V: F-1 names it, no F-2', /F-1,No pressure signal \(excitation 6\d\d\d mV, under 7000 mV\)/.test(ev) &&
+    /^ALARM F-1,0,No pressure signal\r\n$/.test(a2), ev + a2);
+  s.set(10, 10); s.run(3000);
+  check('excitation back: F-1 can be reset', /^ALARM F-1,1,/.test(s.cmd('ALARM?')) && s.cmd('ALARM RESET;ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
 }
-{ // F-3: the switch never trips during homing.
+{ // F-2 (F-3 to 0.16.32): the switch never trips during homing.
   const s = load(); s.boot(); s.set(5, 40000); s.set(7, 2); s.run(2000);
   s.home(400000);
   const out = events(s, 5);
-  check('F-3 limit not found', /F-3/.test(out), out.slice(-600));
+  check('F-2 limit not found', /F-2,Homing: switch not found/.test(out) && /^ALARM F-2,1,Limit not found while homing\r\n$/.test(s.cmd('ALARM?')),
+    out.slice(-600) + s.cmd('ALARM?'));
 }
-{ // F-4: homing from the switch, which stays pressed after the clearance move.
+{ // F-3 (F-4 to 0.16.32): homing from the switch, which stays pressed after the clearance move.
   const s = homed(load()); s.set(7, 1);
   s.home(60000);
   const out = events(s, 5);
-  check('F-4 limit stuck', /F-4/.test(out), out.slice(-600));
+  check('F-3 limit stuck', /F-3,Switch still active/.test(out) && /^ALARM F-3,1,Limit pressed when it should be free\r\n$/.test(s.cmd('ALARM?')),
+    out.slice(-600) + s.cmd('ALARM?'));
+  shot(s, 'f03');
 }
 { // AUTO at 5 mbar settles.
   const s = oldGains(homed(load()));
@@ -291,34 +302,123 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('motor power loss does not directly end AUTO', s.cmd('MODE?;ALARM?') === 'MODE AUTO;ALARM NONE\r\n');
   check('unpowered motor stays still while the step count advances', s.get(5) === needle && s.get(30) !== count);
 }
-{ // F-6: the needle slips in AUTO, so the pressure does not follow.
+{ // W-2 from 0.16.33 (the fault F-6 before): the needle slips in AUTO, so the pressure does not follow. AUTO ends,
+  // nothing latches, the strip says so until OK, and Start AUTO is allowed again without a reset.
   const s = oldGains(homed(load()));
   s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
   s.set(6, 0); s.cmd('SETPOINT 8');
   s.run(600000);
-  const ev = events(s, 10);
-  check('F-6 no response', /F-6/.test(ev), ev);
-  shot(s, 'f06');
-  // Fault detail: its buttons sit in the strip's row, so the strip hides (0.14.13).
-  s.tap(415, 184); s.tap(240, 72); s.tap(180, 72);   // Menu > Events (0.16.2), the fault
-  shot(s, 'f06-detail');
-  s.tap(181, 240);   // Reset fault
-  check('fault detail Reset fault works', s.cmd('ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
+  const ev = events(s, 10), st = s.cmd('MODE?;ALARM?');
+  check('W-2 no pressure response: MANUAL, a warning, no fault', /W-2,No pressure response in 5 windows of 30 s/.test(ev) &&
+    /MODE,Manual after W-2/.test(ev) && !/F-\d,/.test(ev) &&
+    /^MODE MANUAL;ALARM W-2,1,No pressure response: switched to MANUAL\r\n$/.test(st), ev + st);
+  shot(s, 'w02');
+  s.set(6, 1);
+  check('W-2: Start AUTO again is allowed, and it clears the strip', s.cmd('MODE AUTO;MODE?;ALARM?') === 'MODE AUTO;ALARM NONE\r\n', s.cmd('MODE?;ALARM?'));
+  s.cmd('MODE MANUAL');
 }
-{ // W-2: the rotary pump stops in AUTO; the pressure never comes back into band.
+{ // No convergence timeout from 0.16.33 (W-2 to 0.16.32 ended AUTO after 30 min outside the band): the rotary pump
+  // stops in AUTO, the pressure stays off the setpoint, and AUTO stays on with nothing raised.
   const s = oldGains(homed(load()));
   s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
   s.set(4, 0);
   s.run(1900000);
   const ev = events(s, 10), st = s.cmd('MODE?;ALARM?');
-  check('W-2 to MANUAL', /W-2/.test(ev) && /^MODE MANUAL;ALARM W-2,1,/.test(st), ev + st);
-  shot(s, 'w02');
+  check('pump off for 32 min: still AUTO, nothing raised', !/W-\d,/.test(ev) && st === 'MODE AUTO;ALARM NONE\r\n', ev + st);
+  shot(s, 'pump-off-auto');
 }
-{ // W-3: controller hot.
+{ // A move that runs past its time is stopped and logged, and that is all (0.16.33; the warning W-5 to 0.16.32, the
+  // fault F-5 to 0.16.28): no warning, nothing latched, the next move runs.
+  const s = homed(load());
+  s.cmd('VALVE SET 30', 60000);
+  s.set(24, 1);                       // the step interrupt does not run
+  s.cmd('VALVE SET 31', 1000); s.run(20000);
+  const ev = events(s, 5), st = s.cmd('MODE?;VALVE MOVING?;ALARM?');
+  check('move timed out in MANUAL: stopped, a SYS event, no warning', /SYS,Move stopped at count \d+ \(30\.0 %\): it ran past its time/.test(ev) &&
+    !/[WF]-\d,/.test(ev) && st === 'MODE MANUAL;VALVE MOVING 0;ALARM NONE\r\n', ev + st);
+  s.set(24, 0);
+  check('move timed out: the next move runs', s.cmd('VALVE SET 31', 60000) === '' && s.cmd('VALVE?') === 'VALVE 31.00 %\r\n', s.cmd('VALVE?'));
+  s.cmd('SETPOINT 5;MODE AUTO', 1000); s.run(5000);
+  s.set(24, 1); s.run(120000);
+  const ev2 = events(s, 30), st2 = s.cmd('MODE?;ALARM?');
+  const said = (ev2.match(/ran past its time/g) || []).length;
+  check('move timed out in AUTO: AUTO stays on, said once', st2 === 'MODE AUTO;ALARM NONE\r\n' && said === 2, said + ' ' + ev2 + st2);
+  s.set(24, 0);
+}
+{ // A move timed out while homing: the homing ends, not homed; homing again works.
+  const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
+  s.set(24, 1);
+  s.home(200000);
+  const ev = events(s, 6), st = s.cmd('MODE?;ALARM?');
+  check('move timed out while homing: homing aborted, NOT HOMED, nothing raised', /SYS,Move stopped at count/.test(ev) &&
+    /REF,Homing aborted \(move timed out\)/.test(ev) && st === 'MODE NOT HOMED;ALARM NONE\r\n', ev + st);
+  s.set(24, 0);
+  s.home();
+  check('move timed out while homing: homes at the next try', /Homed in/.test(events(s, 10)) && s.cmd('MODE?') === 'MODE MANUAL\r\n', events(s, 10));
+}
+{ // A board that ran 0.16.29 (fixtures/flash-0.16.29.json, a flash image that firmware wrote): its version 10
+  // settings record loads converted (0.16.30), the saved valve position is still offered, the two-point cal
+  // still reads, and the first save writes version 11 to the other sector.
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'flash-0.16.29.json')));
+  const crc32 = b => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xEDB88320 & -(c & 1)); } return ~c >>> 0; };
+  const NEW = 0x7fe000, OLD = 0x7fd000;   // rev 30 (loaded) and rev 29
+  // The image, with patch(dv, at) applied to the newest record and its CRC redone.
+  const image = patch => {
+    const f = new Uint8Array(8 << 20).fill(0xff);
+    for (const [a, b] of Object.entries(fx.sectors)) f.set(Buffer.from(b, 'base64'), Number(a));
+    if (patch) {
+      const dv = new DataView(f.buffer);
+      patch(dv, NEW);
+      dv.setUint32(NEW + 1504, crc32(f.subarray(NEW, NEW + 1504)), true);
+    }
+    return f;
+  };
+  const start = flash => { const t = load(); t.x.sim_bench_init(); t.boot(flash); t.set(5, fx.needle_half); t.run(3000); return t; };
+  const ver = (f, at) => new DataView(f.buffer, f.byteOffset).getUint32(at + 4, true);
+  const t = start(image());
+  const ev = events(t, 20);
+  check('0.16.29 flash: the version 10 record loads, and says which firmware saved it',
+    /Settings saved 2026-10-24 14:04:08 loaded from B \(saved by 0\.16\.29 or earlier\)/.test(ev) && /Deadband close in the saved settings not kept: one deadband, 9 steps/.test(ev) &&
+    !/Step mode|Pressure response|Several sensors|two-point|not used/.test(ev), ev);
+  const tbl = t.cmd('PIDS?;SCHED?');
+  check('0.16.29 flash: the PID table as saved', tbl ===
+    'PIDS 1,0.07,0.61,0.03,0.13,0.83,0.04,0.81,0.95,0.05,0.41,0.26,0.06;SCHED PV,5.5,9.5,13.5,12\r\n', tbl);
+  const want = { POSMAX: 60000, REVERSE: 0, BACKOFF: 300, RETURN: 350, FHOME: 380, FCREEP: 30, RATE: 350, START: 180, ACCEL: 3000,
+    OUTMIN: 5, DB: 9, BAND: 12, PASS_LO: 4, PASS_HI: 45 };
+  const got = Object.keys(want).filter(k => t.setting(CFG[k]) !== want[k]).map(k => k + ' ' + t.setting(CFG[k]) + ' (want ' + want[k] + ')');
+  check('0.16.29 flash: the motor, homing and AUTO settings as saved', got.length === 0, got.join(', '));
+  check('0.16.29 flash: the valve position saved at 12.50 % is offered', t.offer() === 7500, 'offer ' + t.offer());
+  t.set(11, 1); t.run(60000);
+  const air = parseFloat(t.cmd('PRESSURE?').split(' ')[1]);
+  check('0.16.29 flash: the two-point cal reads room air as it was calibrated (1009.8 mbar; the nominal cal reads about 964)',
+    Math.abs(air - 1009.8) < 0.5, 'PRESSURE ' + air);
+  t.set(11, 0);
+  const saved = t.save(), f2 = t.flash();
+  check('0.16.29 flash: a save writes version 11 over the older record; the newest version 10 record stays',
+    saved && ver(f2, OLD) === 11 && ver(f2, NEW) === 10, [saved, ver(f2, OLD), ver(f2, NEW), t.why()].join());
+  const u = start(f2), ev2 = events(u, 20), tbl2 = u.cmd('PIDS?;SCHED?');
+  check('0.16.29 flash: after the save and a power cycle the version 11 record loads, the same settings',
+    /Settings saved [-0-9: ]+ loaded from A\r?\n/.test(ev2.replace(/;/g, '\n')) && !/0\.16\.29/.test(ev2) && tbl2 === tbl && u.setting(CFG.POSMAX) === 60000 &&
+    u.offer() === 7500, ev2 + tbl2 + u.offer());
+  // What the record held that is not kept is said once, at start-up.
+  const notes = [
+    ['half step (MOT MODE HALF)', (dv, at) => dv.setInt32(at + 16 + 3 * 4, 2, true), /Step mode in the saved settings not kept: full step only/],
+    ['Pressure response Reversed', (dv, at) => dv.setInt32(at + 72 + 4 * 4, -1, true), /Pressure response Reversed in the saved settings not kept/],
+    ['a cal table of three points', (dv, at) => dv.setUint32(at + 196, 3, true), /Saved calibration is not a two-point one: not loaded, calibrate the sensor/],
+  ];
+  for (const [what, patch, re] of notes) {
+    const n = start(image(patch)), e = events(n, 20);
+    check('0.16.29 flash with ' + what + ': loads, and the events say what is not kept',
+      /loaded from B \(saved by 0\.16\.29 or earlier\)/.test(e) && re.test(e) && n.setting(CFG.POSMAX) === 60000 && n.offer() === 7500, e);
+  }
+  // A record of version 9 (0.16.14 to 0.16.20) is not read: the older version 10 one loads.
+  const v9 = start(image((dv, at) => dv.setUint32(at + 4, 9, true))), e9 = events(v9, 20);
+  check('0.16.29 flash with the newest record of version 9: not read, said, the other record loads',
+    /Record in B not used: saved before 0\.16\.21, no longer read/.test(e9) && /loaded from A \(saved by 0\.16\.29 or earlier\)/.test(e9), e9);
+}
+{ // W-3 (controller hot) was removed in 0.16.29: a hot chip is no alarm.
   const s = homed(load()); s.set(13, 57); s.run(3000);
-  const ev = events(s, 3);
-  check('W-3 controller hot', /W-3,Controller hot/.test(ev) && /^ALARM W-3,0,Controller hot\r\n$/.test(s.cmd('ALARM?')), ev);
-  shot(s, 'w03');
+  check('no W-3 on a hot chip', !/W-3/.test(events(s, 5)) && s.cmd('ALARM?') === 'ALARM NONE\r\n', events(s, 5) + s.cmd('ALARM?'));
 }
 { // Settings and the saved position survive a power cycle (serial flash).
   const s = homed(load());
@@ -343,7 +443,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const over = (d) => s.x.sim_touch(64, 184, d), second = (px, d) => s.x.sim_touch2(px, 184, d);
   over(1); s.run(2000); const alone = s.get(30);
   check('limit override alone does nothing', blocked && alone === c0 && !s.busy(), 'count ' + alone);
-  second(415, 1); s.run(1000); second(415, 0); s.run(200);              // second finger on Set zero
+  s.x.sim_touch2(120, 72, 1); s.run(1000); s.x.sim_touch2(120, 72, 0); s.run(200);   // second finger on the tabs (no Set zero from 0.16.32)
   check('second finger elsewhere does nothing', s.get(30) === c0, 'count ' + s.get(30));
   second(186, 1); s.run(3000); const held = s.get(30);
   check('override + Close closes past the switch', held < -500, 'count ' + held);
@@ -356,9 +456,32 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   second(186, 0); s.run(300);
   s.x.sim_touch(186, 184, 1); s.run(1000); s.x.sim_touch(186, 184, 0); s.run(500);
   check('Close alone still refused after', s.get(30) === rel2, 'count ' + s.get(30));
-  over(1); s.run(200); second(298, 1); s.run(2000); const opened = s.get(30);
-  second(298, 0); over(0); s.run(2000);
+  over(1); s.run(200); second(396, 1); s.run(2000); const opened = s.get(30);
+  second(396, 0); over(0); s.run(2000);
+  // Close and Open are hold to run only (0.16.32): Open moves while pressed and ramps down on release.
+  const p0 = s.get(30); s.x.sim_touch(396, 130, 1); s.run(2000); const p1 = s.get(30); s.x.sim_touch(396, 130, 0); s.run(3000);
+  const p2 = s.get(30); s.run(1000);
+  shot(s, 'motor-override-move');
+  check('Motor override: Open runs while held and stops on release', p1 > p0 + 300 && p2 >= p1 && p2 < p1 + 400 && s.get(30) === p2 && !s.busy(),
+    [p0, p1, p2, s.get(30)].join());
   check('override + Open opens', opened > rel2 + 300, opened + ' vs ' + rel2);
+}
+{ // W-1 and Limit override (0.16.33): while the override is held the question is not asked, so it cannot take the
+  // buttons from under two fingers; a press still there when the override ends is asked then.
+  const s = homed(load()); s.cmd('VALVE SET 30', 60000);
+  s.set(7, 1); s.run(1000);                                             // the switch reads pressed at 30 %
+  const asked = s.popup() && /W-1/.test(s.cmd('ALARM?'));
+  s.tap(160, 147);                                                      // Skip
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(298, 184); s.tap(318, 147);   // Menu > Motor settings > Override > Motor override > Open
+  const over = (d) => s.x.sim_touch(64, 184, d), second = (px, d) => s.x.sim_touch2(px, 184, d);
+  const c0 = s.get(30);
+  over(1); s.run(300); second(186, 1); s.run(1000);
+  s.set(7, 0); s.run(300); s.set(7, 1); s.run(1700);                    // released and pressed again: a new press, mid-hold
+  const held = s.get(30), quiet = !s.popup() && s.cmd('ALARM?', 100) === 'ALARM NONE\r\n';
+  second(186, 0); over(0); s.run(1000);
+  const after = s.popup() && /W-1/.test(s.cmd('ALARM?'));
+  check('W-1 waits while Limit override is held, and asks when it ends', asked && held < c0 - 300 && quiet && after,
+    [asked, c0, held, quiet, after, s.cmd('ALARM?').trim()].join(' '));
 }
 { // Pressure 21: the air point at the room sensor's reading.
   const s = load(); s.boot(); s.run(3000);
@@ -377,7 +500,7 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
   // R1, R2, R5: no echo; a query gives one line starting with its own words.
-  const qs = ['PRESSURE?', 'SETPOINT?', 'MODE?', 'VALVE?', 'VALVE MOVING?', 'BAROMETER?', 'ALARM?', 'NETWORK?', 'TIME?'];
+  const qs = ['PRESSURE?', 'SETPOINT?', 'MODE?', 'VALVE?', 'VALVE MOVING?', 'BAROMETER?', 'ALARM?', 'TIME?'];
   const bad = qs.map(q => [q, one(q)]).filter(([q, r]) => !(r.startsWith(q.slice(0, -1) + ' ') && /^[^\r\n]*\r\n$/.test(r)))
     .map(([q, r]) => q + ' -> ' + JSON.stringify(r));
   check('queries: one line, own words first', bad.length === 0, bad.join('\n     '));
@@ -390,7 +513,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('SETPOINT 5.04;SETPOINT? gives 5.0', one('SETPOINT 5.04;SETPOINT?') === 'SETPOINT 5.0 mbar\r\n', one('SETPOINT?'));
   const poll = one('PRESSURE?;SETPOINT?;MODE?;VALVE?;ALARM?');
   check('chained poll', /^PRESSURE \d+\.\d{3} mbar;SETPOINT 5\.0 mbar;MODE MANUAL;VALVE 30\.00 %;ALARM NONE\r\n$/.test(poll), poll);
-  check('BAROMETER? and NETWORK? in the simulator', one('BAROMETER?;NETWORK?') === 'BAROMETER 1013.20 mbar;NETWORK NONE\r\n', one('BAROMETER?;NETWORK?'));
+  check('BAROMETER? in the simulator', one('BAROMETER?') === 'BAROMETER 1013.20 mbar\r\n', one('BAROMETER?'));
+  // NETWORK?, PID? and PID SET were removed in 0.16.29 (PIDS? and PIDS SET stay).
+  const gone = ['NETWORK?', 'PID?', 'PID SET 3,0.5'].map(c => [c, one(c)]).filter(([, r]) => !/^ERR 100 /.test(r)).map(([c, r]) => c + ' -> ' + JSON.stringify(r));
+  check('NETWORK?, PID? and PID SET are unknown commands', gone.length === 0, gone.join('\n     '));
   check('*IDN?', /^MercShore,iPC,[0-9A-F]{24},\d+\.\d+\.\d+\r\n$/.test(one('*IDN?')), one('*IDN?'));
   // EVENT?: the count line, then that many lines, newest first.
   const ev = s.cmd('EVENT? 3', 2000).split('\r\n');
@@ -445,8 +571,10 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   shot(s, 'system');
   s.tap(357, 72);
   check('switch Off again: refused', s.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n');
-  check('switch Off: PID SET refused, PID? answers', s.cmd('PID SET 3,0.5') === 'ERR 211 Read only over the network\r\n' &&
-    s.cmd('PID?') === 'PID 0.06,0.60,0.00\r\n', s.cmd('PID?'));
+  // The switch saves as it is set (0.16.31): Off is still Off after a power cycle.
+  { const t = load(); t.x.sim_bench_init(); t.boot(s.flash()); t.set(5, 40000); t.run(2000);
+    check('Remote control Off from the screen is saved at once: Off after a power cycle',
+      t.cmd('SETPOINT 6') === 'ERR 211 Read only over the network\r\n' && /Settings saved/.test(events(s, 8)), t.cmd('SETPOINT 6') + events(s, 8)); }
   check('switch Off: PIDS SET and SCHED SET refused, PIDS? and SCHED? answer',
     s.cmd('PIDS SET 2,3,0.5') === 'ERR 211 Read only over the network\r\n' &&
     s.cmd('SCHED SET PV,6,10,14,15') === 'ERR 211 Read only over the network\r\n' &&
@@ -498,6 +626,68 @@ let parkedFlash;
   const n = homed(load());
   n.tap(415, 184); n.tap(84, 184); n.tap(120, 128); const ip = hdr(n); shot(n, 'system-ip');
   check('System: IP address on the second row left opens its page', ip !== sys);
+}
+{ // Save, Undo and Reset to factory (0.16.31, Ryan 13 Nov: "saving is too clunky, maybe just a save an undo, and
+  // a reset to factory is enough"). Save and Undo act in one tap; Undo asks only when something in use would go.
+  const s = homed(load());
+  const screen = () => { const m = new Uint8Array(s.x.memory.buffer); let p = s.x.sim_screen(), e = p; while (m[e]) e++;
+    return Buffer.from(m.subarray(p, e)).toString(); };
+  const home = () => { if (screen() !== 'Home') s.tap(22, 20); }, menu = () => { home(); s.tap(415, 184); };
+  const kp = d => { s.tap(65, 184); s.tap(230, 183); s.tap(230, 239); s.tap(d === 5 ? 110 : 170, 183); s.tap(320, 212); };   // KP 1: 0 . d Set
+  menu(); s.tap(396, 72); s.run(300);                                  // PID tuning
+  kp(5);
+  const draft = s.setting(CFG.KP);                                     // a draft is not in use
+  shot(s, 'save-draft');
+  s.tap(415, 184); const noQ = !s.popup();                             // Undo
+  shot(s, 'save-undone');
+  s.tap(415, 128);                                                     // Save: nothing to save
+  check('Undo drops a draft at once, no question; nothing is saved', draft === 6 && noQ && s.setting(CFG.KP) === 6 &&
+    !/Settings saved/.test(events(s, 5)), [draft, noQ, s.setting(CFG.KP)].join());
+  kp(5); s.tap(415, 128); const noQ2 = !s.popup();
+  shot(s, 'save-saved');
+  check('Save applies and saves at once, no question', noQ2 && s.setting(CFG.KP) === 50 && /Settings saved/.test(events(s, 3)),
+    [noQ2, s.setting(CFG.KP)].join() + events(s, 3));
+  // Reset to factory on the Menu: asks; Cancel leaves everything; Reset puts factory in use and saves it.
+  menu(); s.tap(396, 184); const asked = s.popup();
+  shot(s, 'reset-ask');
+  s.tap(161, 155); const cancelled = !s.popup() && s.setting(CFG.KP) === 50;
+  s.tap(396, 184); s.tap(319, 155);
+  shot(s, 'reset-done');
+  const t = load(); t.x.sim_bench_init(); t.boot(s.flash()); t.set(5, 40000); t.run(2000);
+  check('Reset to factory: asks, Cancel changes nothing, Reset puts the factory settings in use and saves them',
+    asked && cancelled && !s.popup() && s.setting(CFG.KP) === 6 && /Reset to factory/.test(events(s, 4)) && t.setting(CFG.KP) === 6,
+    [asked, cancelled, s.popup(), s.setting(CFG.KP), t.setting(CFG.KP)].join() + events(s, 4));
+  // A new calibration is in use at once and not saved. Undo on its page asks, then puts the saved one back.
+  let calWhy = '';
+  const calibrate = () => { s.set(11, 0); s.set(40, 0.02); s.run(5000); const a = s.cal(1, 0); calWhy = s.why() + ' ' + s.cmd('PRESSURE?'); s.set(11, 1); s.run(60000); const b = s.cal(2, 1009.8); return a && b; };
+  const air = () => parseFloat(s.cmd('PRESSURE?').split(' ')[1]);
+  const nominal = (s.set(11, 1), s.run(60000), air());
+  const cal1 = calibrate(), new1 = air();
+  menu(); s.tap(396, 128); s.run(500);                                 // Pressure sensor
+  shot(s, 'save-cal-unsaved');
+  s.tap(415, 184); const undoQ = s.popup();                            // Undo: asks
+  shot(s, 'save-undo-ask');
+  s.tap(320, 147); s.run(1500);
+  check('Undo with a new calibration in use asks, then puts the saved one back',
+    cal1 && Math.abs(new1 - 1009.8) < 0.5 && undoQ && !s.popup() && Math.abs(air() - nominal) < 0.5 && Math.abs(nominal - 1009.8) > 5 &&
+    /Undo: settings saved/.test(events(s, 4)), [cal1, calWhy, new1, undoQ, s.popup(), air(), nominal].join() + events(s, 4));
+  // The header's unsaved icon (left of the remote light) asks to save what is in use.
+  const cal2 = calibrate();
+  home(); s.run(4000);
+  shot(s, 'save-unsaved-icon');
+  let iconQ = false;
+  for (const x of [287, 325]) { if (!iconQ) { s.tap(x, 20); iconQ = s.popup(); } }
+  shot(s, 'save-unsaved-ask');
+  s.tap(320, 147); s.run(1500);
+  const u = load(); u.x.sim_bench_init(); u.boot(s.flash()); u.set(5, 40000); u.set(11, 1); u.run(60000);
+  const kept = parseFloat(u.cmd('PRESSURE?').split(' ')[1]);
+  check('the unsaved icon asks to save; Save keeps the new calibration over a power cycle',
+    cal2 && iconQ && !s.popup() && Math.abs(kept - 1009.8) < 0.5, [cal2, iconQ, s.popup(), kept].join() + events(s, 4));
+  s.set(11, 0); s.run(120000);
+  // In AUTO the reset is refused: no question.
+  s.cmd('SETPOINT 5;MODE AUTO', 3000);
+  menu(); s.tap(396, 184);
+  check('Reset to factory in AUTO: refused, no question', !s.popup() && s.cmd('MODE?') === 'MODE AUTO\r\n', s.popup() + s.cmd('MODE?'));
 }
 { // Sensor calibration (0.16.27, Fable's review; Calibrate sensor to 0.16.26): a captured point gets the draft edge.
   const s = homed(load());
@@ -647,28 +837,29 @@ let parkedFlash;
   const s = homed(load());
   check('at 0 %: OFF at once', s.shutdown(300) && s.cmd('MODE?;VALVE?') === 'MODE OFF;VALVE 0.00 %\r\n', s.why() + s.cmd('MODE?;VALVE?'));
 }
-{ // PID? and PID SET (0.15.8): the PID tab's Save over the text port, also in AUTO.
+{ // PIDS SET on set 1 (PID SET of 0.15.8, removed in 0.16.29): the PID tab's Save over the text port, also in AUTO.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
-  check('PID? defaults', one('PID?') === 'PID 0.06,0.60,0.00\r\n', one('PID?'));
-  check('PID SET kp,ti silent, PID? confirms', one('PID SET 3.5,0.5') === '' && one('PID?') === 'PID 3.50,0.50,0.00\r\n', one('PID?'));
-  check('PID SET kp,ti,kd', one('PID SET 3.5, 0.5, 1.25;PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
-  check('PID SET saves the settings', s.setting(CFG.KP) === 350 && s.setting(CFG.TI) === 50 && s.setting(CFG.KD) === 125,
+  const set1 = () => one('PIDS?').trim().split(',').slice(1, 4).join();
+  check('PIDS? set 1 defaults', set1() === '0.06,0.60,0.00', one('PIDS?'));
+  check('PIDS SET kp,ti silent, PIDS? confirms', one('PIDS SET 1,3.5,0.5') === '' && set1() === '3.50,0.50,0.00', one('PIDS?'));
+  check('PIDS SET kp,ti,kd', one('PIDS SET 1, 3.5, 0.5, 1.25') === '' && set1() === '3.50,0.50,1.25', one('PIDS?'));
+  check('PIDS SET saves the settings', s.setting(CFG.KP) === 350 && s.setting(CFG.TI) === 50 && s.setting(CFG.KD) === 125,
     [s.setting(CFG.KP), s.setting(CFG.TI), s.setting(CFG.KD)].join());
-  const bad = [['PID SET', 101], ['PID SET 3', 101], ['PID SET 3,0.5,1,2', 101], ['PID SET x,1', 101], ['PID SET 3,,1', 101],
-    ['PID SET 0,0.5', 102], ['PID SET 101,0.5', 102], ['PID SET 3,-1', 102], ['PID SET 3,0.5,101', 102]];
+  const bad = [['PIDS SET 1', 101], ['PIDS SET 1,3', 101], ['PIDS SET 1,3,0.5,1,2', 101], ['PIDS SET 1,x,1', 101], ['PIDS SET 1,3,,1', 101],
+    ['PIDS SET 1,0,0.5', 102], ['PIDS SET 1,101,0.5', 102], ['PIDS SET 1,3,-1', 102], ['PIDS SET 1,3,0.5,101', 102]];
   const wrong = bad.map(([c, n]) => [c, n, one(c)]).filter(([c, n, r]) => !new RegExp('^ERR ' + n + ' [A-Z][^;\\r\\n]*\\r\\n$').test(r))
     .map(([c, n, r]) => c + ' -> ' + JSON.stringify(r) + ' (want ' + n + ')');
-  check('PID SET refusals', wrong.length === 0, wrong.join('\n     '));
-  check('PID SET range text', one('PID SET 0,0.5') === 'ERR 102 Outside 0.01 to 100.00 for KP\r\n', one('PID SET 0,0.5'));
-  check('refused PID SET changes nothing', one('PID?') === 'PID 3.50,0.50,1.25\r\n', one('PID?'));
+  check('PIDS SET set 1 refusals', wrong.length === 0, wrong.join('\n     '));
+  check('PIDS SET range text', one('PIDS SET 1,0,0.5') === 'ERR 102 Outside 0.01 to 100.00 for KP\r\n', one('PIDS SET 1,0,0.5'));
+  check('refused PIDS SET changes nothing', set1() === '3.50,0.50,1.25', one('PIDS?'));
   s.cmd('VALVE SET 30', 60000);
   s.cmd('SETPOINT 3;MODE AUTO', 20000);
-  check('PID SET in AUTO, AUTO kept', one('PID SET 2,0.4;PID?;MODE?') === 'PID 2.00,0.40,1.25;MODE AUTO\r\n', one('PID?;MODE?'));
-  check('PID SET in AUTO saves', s.setting(CFG.KP) === 200 && s.setting(CFG.TI) === 40, s.setting(CFG.KP) + ' ' + s.setting(CFG.TI));
+  check('PIDS SET in AUTO, AUTO kept', one('PIDS SET 1,2,0.4;MODE?') === 'MODE AUTO\r\n' && set1() === '2.00,0.40,1.25', one('PIDS?;MODE?'));
+  check('PIDS SET in AUTO saves', s.setting(CFG.KP) === 200 && s.setting(CFG.TI) === 40, s.setting(CFG.KP) + ' ' + s.setting(CFG.TI));
 }
 { // Gain schedule (0.15.15, Ryan 5 Nov "build like industry ones"): PIDS?, PIDS SET, SCHED?, SCHED SET,
-  // PID? and PID SET on the set in use, and AUTO switching sets on the pressure with hysteresis.
+  // and AUTO switching sets on the pressure with hysteresis.
   const s = homed(load());
   const one = c => s.cmd(c, 1000);
   check('PIDS? defaults: the bench table (0.16.18)', one('PIDS?') === 'PIDS 1,0.06,0.60,0.00,0.12,0.82,0.00,0.80,0.94,0.00,0.40,0.25,0.00\r\n',
@@ -695,11 +886,10 @@ let parkedFlash;
   check('refusals change nothing', one('SCHED?;PIDS?') ===
     'SCHED PV,6.0,10.0,14.0,15;PIDS 1,0.06,0.60,0.00,5.00,0.30,0.00,6.00,0.35,0.50,7.00,0.40,0.00\r\n', one('SCHED?;PIDS?'));
   check('SCHED SET PV, B3 0: three sets', one('SCHED SET PV,6,20,0,15') === '' && one('SCHED?') === 'SCHED PV,6.0,20.0,0.0,15\r\n' &&
-    s.setting(CFG.SCHED) === 2 && s.setting(CFG.B1) === 60 && s.setting(CFG.B2) === 200 && s.setting(CFG.B3) === 0, one('SCHED?'));
+    s.setting(CFG.B1) === 60 && s.setting(CFG.B2) === 200 && s.setting(CFG.B3) === 0, one('SCHED?'));
   // The sim plant runs about 0.8 to 12.5 mbar (20 to 100 % open), so the
   // boundaries here are 3, 6 and 8 mbar with 10 %: up at 3.3, 6.6 and 8.8,
-  // down at 7.2, 5.4 and 2.7. Sim-plant gains, a different set each so PID?
-  // shows which is in use.
+  // down at 7.2, 5.4 and 2.7. Sim-plant gains, a different set each.
   one('SCHED SET PV,3,6,8,10;PIDS SET 1,6,0.25;PIDS SET 2,5,0.25,0');
   one('PIDS SET 3,4.5,0.25,0;PIDS SET 4,4,0.25,0');
   // The set changes so far, oldest first (EVENT? lists the newest first).
@@ -710,14 +900,13 @@ let parkedFlash;
   check('AUTO starts on the set for the lower of pressure and setpoint (3.8 mbar: set 2)', /Auto at setpoint 10\.0 mbar, valve [\d.]+ %, PID set 2/.test(events(s, 3)),
     events(s, 3));
   s.run(600000);
-  check('PV schedule: set 4 at 10 mbar', /^PIDS 4,/.test(one('PIDS?')) && one('PID?') === 'PID 4.00,0.25,0.00\r\n',
-    one('PRESSURE?;PIDS?;PID?'));
+  check('PV schedule: set 4 at 10 mbar', /^PIDS 4,/.test(one('PIDS?')), one('PRESSURE?;PIDS?'));
   const first = sws();
   check('then 2 to 3 over 6.6 and 3 to 4 over 8.8 mbar (B x 1.1), once each', first.length === 2 && first[0][0] === 2 &&
     first[0][1] === 3 && first[0][2] >= 6.6 && first[0][2] < 7.5 && first[1][0] === 3 && first[1][1] === 4 && first[1][2] >= 8.8 &&
     first[1][2] < 9.7, JSON.stringify(first));
-  // PID SET edits the set in use.
-  check('PID SET edits the set in use', one('PID SET 3.8,0.25;PID?') === 'PID 3.80,0.25,0.00\r\n' && s.setting(CFG.KP4) === 380 &&
+  // PIDS SET on the set in use, in AUTO.
+  check('PIDS SET edits the set in use', one('PIDS SET 4,3.8,0.25') === '' && /^PIDS 4,.*,3\.80,0\.25,0\.00\r\n$/.test(one('PIDS?')) && s.setting(CFG.KP4) === 380 &&
     s.setting(CFG.KP3) === 450 && s.setting(CFG.KP) === 600, [s.setting(CFG.KP4), s.setting(CFG.KP3), s.setting(CFG.KP)].join());
   s.cmd('SETPOINT 2', 1000);
   s.run(900000);
@@ -727,7 +916,7 @@ let parkedFlash;
   check('10 -> 2: set 4 to 1 at once, still at 10 mbar (the setpoint\'s set), no other change', sw.length === 1 && sw[0][0] === 4 &&
     sw[0][1] === 1 && sw[0][2] > 9, JSON.stringify(sw));
   check('10 -> 2: AUTO kept, near 2 mbar, set 1', one('MODE?') === 'MODE AUTO\r\n' && Math.abs(parseFloat(one('PRESSURE?').slice(9)) - 2) < 0.3 &&
-    /^PIDS 1,/.test(one('PIDS?')) && one('PID?') === 'PID 6.00,0.25,0.00\r\n', one('MODE?;PRESSURE?;PIDS?;PID?'));
+    /^PIDS 1,6\.00,0\.25,0\.00,/.test(one('PIDS?')), one('MODE?;PRESSURE?;PIDS?'));
   s.cmd('SETPOINT 10', 1000);
   s.run(900000);
   const up = sws().slice(3);
@@ -744,22 +933,61 @@ let parkedFlash;
     one('SCHED SET OFF,6,10,14,15') + one('SCHED?'));
 }
 { // The limit switch pressed away from the seat (0.16.4, Ryan PR #43): a yellow edge round Home's Valve tile at
-  // once (the "Limit" tag of 0.16.1 gone) and W-4 within 0.3 s (two 1 s reads to 0.16.3); released, the edge goes.
+  // once (the "Limit" tag of 0.16.1 gone) and, within 0.3 s, W-1 and its question (0.16.33; the warning W-4 before,
+  // two 1 s reads to 0.16.3); released, the edge goes and the question waits for its answer.
   const s = homed(load()); s.cmd('VALVE SET 20', 60000);
   const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
   const before = px(187, 100);
-  s.set(7, 1); s.run(200);   // the wire open: the NC contact reads pressed
-  const edge = px(187, 100), al = s.cmd('ALARM?', 100);
+  s.set(7, 1); s.run(100);   // the wire open: the NC contact reads pressed
+  const edge = px(187, 100);  // before the question covers the tile
   shot(s, 'limit-edge');
+  s.run(100);
+  const al = s.cmd('ALARM?', 100);
+  check('limit pressed with the valve still: yellow edge on the Valve tile, W-1 within 0.3 s', before === 0xFFFF && edge === 0xF606 &&
+    al === 'ALARM W-1,0,Limit-switch question waiting at the screen\r\n', [before.toString(16), edge.toString(16), al.trim()].join(' '));
+  s.run(1000);
+  const ev = events(s, 5), asked = s.popup();
+  shot(s, 'w01-still');
+  check('W-1 with the valve still: one event, the question on the screen, no W-4', asked &&
+    (ev.match(/W-1,Limit switch pressed at count/g) || []).length === 1 && !/W-4/.test(ev), asked + ' ' + ev);
+  s.tap(160, 147); s.run(3000);   // Skip, the switch still pressed: not asked again
+  const skipped = s.cmd('ALARM?'), ev2 = events(s, 3);
+  check('W-1 Skip: count kept, not asked again while the switch stays pressed', skipped === 'ALARM NONE\r\n' && !s.popup() &&
+    /W-1,Zero skipped/.test(ev2) && /^VALVE 20\.00 %/.test(s.cmd('VALVE?')), skipped + ev2 + s.cmd('VALVE?'));
   s.set(7, 0); s.run(300);
   const after = px(187, 100);
-  check('limit pressed: yellow edge on the Valve tile, W-4 within 0.3 s', before === 0xFFFF && edge === 0xF606 && /W-4/.test(al) &&
-    after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
+  s.set(7, 1); s.run(1000);       // released and pressed again: a new press, asked again
+  check('W-1: the edge goes when released; a new press asks again', after === 0xFFFF && s.popup() && /W-1/.test(s.cmd('ALARM?')),
+    [after.toString(16), s.popup(), s.cmd('ALARM?').trim()].join(' '));
+}
+{ // W-1 in AUTO (0.16.33; W-4 before): the switch pressed away from the seat ends AUTO, MANUAL with the valve
+  // idle, and the question waits. Start AUTO is refused while it waits.
+  const s = oldGains(homed(load()));
+  s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
+  const at = s.cmd('VALVE?');
+  s.set(7, 1); s.run(2000);
+  const ev = events(s, 5), st = s.cmd('MODE?;ALARM?');
+  check('W-1 in AUTO, away from the seat: MANUAL, the question, one W-1 event', /MODE,Manual after W-1/.test(ev) &&
+    (ev.match(/W-1,Limit switch pressed at count/g) || []).length === 1 &&
+    st === 'MODE MANUAL;ALARM W-1,0,Limit-switch question waiting at the screen\r\n' && s.popup(), at.trim() + ' | ' + ev + st);
+  const refused = s.cmd('MODE AUTO');
+  check('W-1: Start AUTO refused while the switch is pressed away from the seat', /^ERR \d+ /.test(refused) && s.cmd('MODE?') === 'MODE MANUAL\r\n', refused);
+}
+{ // A closing move that reaches the switch away from the seat raises W-1 once (W-1 and W-4 for the same press to 0.16.32).
+  const s = homed(load()); s.cmd('VALVE SET 30', 60000);
+  s.set(18, 12000); s.set(7, 3);   // trips 6000 full steps above the seat
+  s.cmd('VALVE SET 2', 90000); s.run(2000);
+  const ev = events(s, 6), st = s.cmd('MODE?;ALARM?');
+  check('closing onto an early switch: one W-1, the question, no second warning', (ev.match(/W-1,Limit switch pressed at count/g) || []).length === 1 &&
+    !/W-4/.test(ev) && st === 'MODE MANUAL;ALARM W-1,0,Limit-switch question waiting at the screen\r\n', ev + st);
+  s.tap(318, 147); s.run(500);     // Set as seat
+  check('W-1 Set as seat: the count becomes the seat, nothing left showing', /W-1,Point set as the seat/.test(events(s, 3)) &&
+    s.cmd('ALARM?') === 'ALARM NONE\r\n' && /^VALVE -0\./.test(s.cmd('VALVE?')), events(s, 3) + s.cmd('ALARM?') + s.cmd('VALVE?'));
 }
 { // Disable switch (Ignore switch in 0.16.21), the pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): a
   // toggle on Motor settings > Override (0.16.19; Motor override > Switch to 0.16.18; "Switch pass" to 0.16.20);
   // between From and To, 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11), the pressed switch neither
-  // stops closing nor raises W-4; below From it stops.
+  // stops closing nor raises W-1; below From it stops.
   const s = homed(load()); s.cmd('VALVE SET 40', 150000);
   s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128);   // Menu > Motor settings > Override, Disable switch on
   shot(s, 'override-switch');
@@ -774,18 +1002,18 @@ let parkedFlash;
   const at6 = s.cmd('VALVE?'), a6 = s.cmd('ALARM?');
   s.cmd('VALVE SET 2', 30000);
   const at5 = s.cmd('VALVE?'), ev = events(s, 5);
-  check('pass band: no W-4 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
+  check('pass band: no W-1 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
     /VALVE 6\.0/.test(at6) && a6 === 'ALARM NONE\r\n' && /VALVE (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
     [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
 }
 { // The Disable switch edges are saved settings (0.16.21, Ryan 12 Nov: "make the boundary editable"): From 10 from
-  // its card's keypad and Save settings, and closing past the pressed switch then stops at 10 %. From at or above
+  // its card's keypad and Save, and closing past the pressed switch then stops at 10 %. From at or above
   // To is refused and nothing is saved.
   const s = homed(load()); s.cmd('VALVE SET 40', 150000);
   s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128);   // Menu > Motor settings > Override, Disable switch on
   s.tap(65, 184); s.tap(40, 239); s.tap(230, 183); s.tap(320, 212);   // From: 1 0, Set
   shot(s, 'override-from-draft');
-  s.tap(415, 128); s.tap(319, 138);                                    // Save settings, Save
+  s.tap(415, 128);                                                     // Save
   const saved = s.setting(CFG.PASS_LO);
   s.set(7, 1); s.run(1000);                                            // the switch reads pressed at 40 %
   s.cmd('VALVE SET 2', 120000);
@@ -793,7 +1021,7 @@ let parkedFlash;
   s.set(7, 0); s.run(1000);
   s.tap(415, 184); s.tap(84, 128); s.tap(305, 72);
   s.tap(65, 184); s.tap(170, 183); s.tap(230, 183); s.tap(320, 212);  // From: 6 0, above To 50
-  s.tap(415, 128); s.tap(319, 138);
+  s.tap(415, 128);
   const kept = s.setting(CFG.PASS_LO);
   check('Disable switch: From saved as 10 stops closing at 10 %; From over To refused', saved === 10 &&
     /VALVE (9\.9|10\.0)/.test(at) && /W-1/.test(ev) && kept === 10,

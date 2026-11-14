@@ -18,8 +18,6 @@ static float steps_of(float pct, const ctrl_tune_t *k) { return pct / 100.0f * (
 
 int ctrl_pick_set(const ctrl_tune_t *k, int now, float x)
 {
-    if (k->sched != CTRL_SCHED_PV)
-        return 1;
     // Four sets when boundary 3 is above boundary 2 (0.16.14), else three.
     const int top = ctrl_sets(k);
     // With no set yet, straight from the boundaries.
@@ -55,7 +53,6 @@ void ctrl_init(ctrl_t *c)
 {
     memset(c, 0, sizeof *c);
     c->sp = 5.0f;   // not shown until a target is set (sp_set)
-    c->pv_tau = CTRL_PV_TAU_S;
     c->rev_pct = CTRL_REV_PCT;
 }
 
@@ -70,17 +67,15 @@ void ctrl_track(ctrl_t *c, int32_t pos, bool lagged)
 }
 
 const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool fault,
-                       bool pv_ok, float pv, float fs)
+                       bool pv_ok, float fs)
 {
     if (!homed)                     return "Home the valve first";
     if (fault)                      return "Reset the fault first";
     if (!pv_ok)                     return "No valid pressure";
     if (!c->sp_set)                 return "Set a setpoint first";
     if (c->sp < 0 || c->sp > fs)    return "Setpoint outside the sensor range";
-    if (pv > fs)                    return "Pressure above the sensor range";
-    if (!k->kdir)                   return "Pressure response not set";
-    // Set 1 always; sets 2 to 4 when the schedule can pick them.
-    for (int s = 1; s <= (k->sched == CTRL_SCHED_OFF ? 1 : ctrl_sets(k)); s++) {
+    // Every set the PID table can pick.
+    for (int s = 1; s <= ctrl_sets(k); s++) {
         const ctrl_pid_t g = ctrl_set_gains(k, s);
         if (!(g.kp > 0) || g.ti < 0)
             return "Tuning not set";
@@ -90,7 +85,8 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
 
 void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_t now_pos)
 {
-    float e = (float)k->kdir * (c->sp - pv);
+    (void)t_ms;   // no timer starts with AUTO from 0.16.33 (the convergence timeout is gone)
+    float e = c->sp - pv;
     c->set = ctrl_pick_set(k, 0, fminf(pv, c->sp));   // the lower of the two (0.16.9, ctrl.h)
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     c->i = (float)now_pos - steps_of(g.kp, k) * e;   // bumpless: first output is the position in force
@@ -100,12 +96,9 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
     c->win_pos = c->pos_f;
     c->win_pv = pv;
     c->noresp = 0;
-    c->conv_ms = t_ms;
     c->move = false;
     c->kp_used = steps_of(g.kp, k);
     c->kd_used = steps_of(g.kd, k);
-    c->kdir_used = k->kdir;
-    c->pv_f = pv;
     c->last_dir = 0;
     c->e_last = c->sp - pv;
     c->sp_used = c->sp;
@@ -113,12 +106,12 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
 
 bool ctrl_set_sp(ctrl_t *c, float sp, float fs, uint32_t t_ms)
 {
+    (void)t_ms;   // no timer starts at a new target from 0.16.33 (the convergence timeout is gone)
     sp = roundf(sp * 10.0f) / 10.0f;   // targets are 0.1 mbar everywhere
     if (!(sp >= 0 && sp <= fs))
         return false;
     c->sp = sp;
     c->sp_set = true;
-    c->conv_ms = t_ms;
     c->in_band = false;
     return true;
 }
@@ -147,31 +140,22 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->in_band_ms = in->t_ms;
     }
 
-    // The PI works on the filtered pressure: the reading's second-to-second
-    // noise otherwise moves the command tens of steps each way.
-    if (c->pv_tau > 0)
-        c->pv_f += (pv - c->pv_f) * CTRL_TS_S / (c->pv_tau + CTRL_TS_S);
-    else
-        c->pv_f = pv;
-    const float pf = c->pv_f;
-    const float e = (float)k->kdir * (c->sp - pf);
-    c->set = ctrl_pick_set(k, c->set, fminf(pf, c->sp));   // the lower of the two (0.16.9, ctrl.h)
+    const float e = c->sp - pv;
+    c->set = ctrl_pick_set(k, c->set, fminf(pv, c->sp));   // the lower of the two (0.16.9, ctrl.h)
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
     const float kp = steps_of(g.kp, k), ki = g.ti > 0 ? kp / (60.0f * g.ti) : 0, kd = steps_of(g.kd, k);
-    const float d = -kd * (float)k->kdir * (pf - c->prev_pv) / CTRL_TS_S;
-    c->prev_pv = pf;
-    if (kp != c->kp_used || kd != c->kd_used || k->kdir != c->kdir_used) {
+    const float d = -kd * (pv - c->prev_pv) / CTRL_TS_S;
+    c->prev_pv = pv;
+    if (kp != c->kp_used || kd != c->kd_used) {
         // Tuning or PID set changed in AUTO: keep the output where it was at
         // the last step's error, as on entry, rather than stepping by the
         // change in KP x e (or in D). The last step's error, not this one's,
         // so a setpoint step that also changes the set (the lower of pressure
         // and setpoint picks it) is handled below like one within a set
-        // (0.16.13). The last error is kept without KDIR, so a KDIR change
-        // stays bumpless.
-        c->i = (float)c->pos_cmd - kp * (float)k->kdir * c->e_last - d;
+        // (0.16.13).
+        c->i = (float)c->pos_cmd - kp * c->e_last - d;
         c->kp_used = kp;
         c->kd_used = kd;
-        c->kdir_used = k->kdir;
     }
     // The proportional part acts on the pressure only (0.16.15, Ryan 12 Nov):
     // a setpoint change moves the integral by KP x the change the other way,
@@ -181,11 +165,10 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     // it back as the pressure arrived: a bounce on the way in (simulator,
     // 16 to 12 mbar on set 3, 11 Nov).
     if (c->sp != c->sp_used) {
-        if (!c->sp_kick)
-            c->i -= kp * (float)k->kdir * (c->sp - c->sp_used);
+        c->i -= kp * (c->sp - c->sp_used);
         c->sp_used = c->sp;
     }
-    c->e_last = c->sp - pf;
+    c->e_last = e;
     float i_new = c->i + ki * e * CTRL_TS_S;
     const float raw = kp * e + i_new + d;
     const float lo = k->outmin / 100.0f * pos_max;   // AUTO min
@@ -197,10 +180,8 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     if (raw > pos_max && e > 0) i_new = fmaxf(c->i, pos_max - kp * e - d);
     if (raw < lo && e < 0) i_new = fminf(c->i, lo - kp * e - d);
     if (in->limit && raw < (float)c->pos_cmd) integrate = false;   // closing blocked by the switch
-    // The step constants are full steps; the counts are half steps in HALF.
-    const int32_t fs = k->steps > 1 ? k->steps : 1;
     const float lead = (float)(c->pos_cmd - in->pos);   // valve still travelling to the last command
-    if (CTRL_LEAD_MAX > 0 && fabsf(lead) > (float)(CTRL_LEAD_MAX * fs) && sgnf(ki * e) == sgnf(lead))
+    if (CTRL_LEAD_MAX > 0 && fabsf(lead) > (float)CTRL_LEAD_MAX && sgnf(ki * e) == sgnf(lead))
         integrate = false;   // travel anti-windup
     if (integrate)
         c->i = i_new;
@@ -208,12 +189,11 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     if (in->limit && cmd < (float)c->pos_cmd)
         cmd = (float)c->pos_cmd;
     c->pos_cmd = (int32_t)lroundf(cmd);
-    // Deadbands: opening (counts up) and closing; a closing one of 0 is the
-    // opening one (initialisers from before 0.15.15).
-    const int32_t db_open = k->db > 1 ? k->db : 1;
-    const int32_t db_close = k->db_close > 1 ? k->db_close : k->db_close == 1 ? 1 : db_open;
+    // Deadband: a correction waits until it adds up to this many steps,
+    // either way (one setting from 0.16.32; opening and closing before).
+    const int32_t db = k->db > 1 ? k->db : 1;
     int32_t step = c->pos_cmd - c->last_sent;
-    if (step >= db_open || step <= -db_close) {
+    if (step >= db || step <= -db) {
         // Reversal hysteresis: turning round for less than this is lost in
         // the drive's backlash and only makes the motor hunt. CTRL_REV_MBAR
         // of error at this set's KP, at most rev_pct (0.16.9, ctrl.h).
@@ -231,7 +211,7 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
     c->win_t += CTRL_TS_S;
     if (c->win_t >= CTRL_TCHECK_S - 1e-6f) {
         const float moved = c->pos_f - c->win_pos, dp = pv - c->win_pv;
-        const float err = (float)k->kdir * (c->sp - pv), tol = 0.01f * pos_max;
+        const float err = c->sp - pv, tol = 0.01f * pos_max;
         const float p = (float)in->pos;
 #define AT(x, v) (fabsf((x) - (v)) <= tol)
         // Pinned: the lagged position sat at the limit for the whole window,
@@ -239,16 +219,15 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         const bool pin_open = err > 0 && AT(p, pos_max) && AT(c->pos_f, pos_max) && AT(c->win_pos, pos_max);
         const bool pin_min = err < 0 && AT(p, lo) && AT(c->pos_f, lo) && AT(c->win_pos, lo);
 #undef AT
-        const int32_t db_max = db_open > db_close ? db_open : db_close;
-        const float judge = (float)(db_max > CTRL_CHECKMIN * fs ? db_max : CTRL_CHECKMIN * fs);
+        const float judge = (float)(db > CTRL_CHECKMIN ? db : CTRL_CHECKMIN);
         const bool judged = fabsf(moved) >= judge;
         const int way = judged ? sgnf(moved) : !in->moving && pin_open ? 1 : !in->moving && pin_min ? -1 : 0;
         if (way) {
-            // A wrong-way change is a response too: no fault for it (Ryan, 22 Oct;
-            // on the model a lost helium supply shows as F-6, a stopped pump as W-2).
+            // A wrong-way change is a response too: nothing raised for it (Ryan,
+            // 22 Oct; on the model a lost helium supply shows as W-2).
             if (judged && fabsf(dp) < CTRL_DPMIN) {
                 if (++c->noresp >= CTRL_NRESP)
-                    return CTRL_F06;
+                    return CTRL_NORESP;
             } else {
                 c->noresp = 0;
             }
@@ -260,19 +239,8 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->win_pv = pv;
     }
 
-    // W-6 (pinned at the wrong end for 60 s) removed in 0.15.11 (Ryan 5 Nov):
-    // at low pressure the valve rightly sits within 1 % of closed with the
-    // pressure under the band for minutes, and it tripped there. A KDIR the
-    // wrong way round still ends AUTO by W-2 (CTRL_TCONV_S).
-
-    // W-2 convergence timeout. The setpoint band can be 0 (0.16.16, Ryan
-    // 12 Nov): In band and Stable then never show, but W-2 still judges
-    // against 0.10 mbar, the old least band, or a steady hold would end AUTO
-    // after CTRL_TCONV_S for not reading the setpoint exactly.
-    if (fabsf(c->sp - pv) <= fmaxf(k->band, CTRL_TCONV_BAND))
-        c->conv_ms = in->t_ms;
-    else if (since(in->t_ms, c->conv_ms) > CTRL_TCONV_S * 1000u)
-        return CTRL_W02;
+    // No convergence timeout from 0.16.33 (ctrl.h): AUTO stays on however
+    // long the pressure is off the setpoint.
     return CTRL_RUN;
 }
 
