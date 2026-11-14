@@ -387,7 +387,7 @@ static void test_v10(void)
         uint32_t ver, size;
         memcpy(&ver, flash + 0x7FE004, 4);
         memcpy(&size, flash + 0x7FE008, 4);
-        CHECK(ver == 11 && size < 300 && cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
+        CHECK(ver == 12 && size < 300 && cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6);
     }
     // The same with the bench Druck (the first, calibrated) in use.
     wipe();
@@ -479,7 +479,7 @@ static void test_cfg(void)
     CHECK(cfg_rev(CFG_FROM_SAVED, &rev, &at) && rev == 6 && strcmp(at, "2026-10-16 08:15:00") == 0);
     uint32_t ver;
     memcpy(&ver, flash + 0x7FE004, 4);
-    CHECK(ver == 11);
+    CHECK(ver == 12);
     memcpy(&ver, flash + 0x7FD004, 4);
     CHECK(ver == 10);
     CHECK(m_rate == 500 && cfg_tune(CFG_KP) == 250 && cfg_unsaved() == 0);
