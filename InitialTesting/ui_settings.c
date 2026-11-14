@@ -968,6 +968,47 @@ static void ranges_make(lv_obj_t *b)
         fcard(b, 10 + i * 117, RY[2], 109, caption(cap, sizeof cap, k[i]), k[i]);
 }
 
+/* Where the Ranges bar draws its boundaries: x[0] to x[n], n ranges. To
+ * scale, except that every range keeps at least SEG_MIN px for its "Set n"
+ * label (0.17.0, Ryan 14 Nov: with boundaries 2, 5 and 12 below a fourth at
+ * 900 mB the labels ran together). A range under that gets SEG_MIN and the
+ * rest share what is left, to scale. */
+#define SEG_MIN 44
+
+static void ranges_x(const float *edge, int n, int32_t *x)
+{
+    const int32_t W = BAR_W - 2;
+    bool fixed[4] = { false, false, false, false };
+    int32_t w[4] = { 0, 0, 0, 0 };
+    for (int pass = 0; pass < 4; pass++) {
+        int nf = 0;
+        float sum = 0;
+        for (int i = 0; i < n; i++) {
+            if (fixed[i]) nf++;
+            else sum += edge[i + 1] - edge[i];
+        }
+        int32_t room = W - nf * SEG_MIN;
+        bool again = false;
+        for (int i = 0; i < n; i++) {
+            if (fixed[i]) {
+                w[i] = SEG_MIN;
+                continue;
+            }
+            float len = edge[i + 1] - edge[i];
+            w[i] = sum > 0 ? (int32_t)((float)room * len / sum + 0.5f) : room / (n - nf);
+            if (w[i] < SEG_MIN) {
+                fixed[i] = true;
+                again = true;
+            }
+        }
+        if (!again)
+            break;
+    }
+    x[0] = BAR_X;
+    for (int i = 0; i < n; i++)
+        x[i + 1] = i + 1 == n ? BAR_X + W : x[i] + w[i];   // the last ends at the bar's end
+}
+
 static void ranges_refresh(void)
 {
     // 0 to 20 mB, or past the last boundary when it is above 16 mB.
@@ -980,19 +1021,20 @@ static void ranges_refresh(void)
     lv_snprintf(t, sizeof t, "%d mB", (int)max);
     ui_set_text(pid.bar.hi, t);
     ui_set_text(pid.bar.lo, "0");
-    int use = valve_pid_set();
+    int use = valve_pid_set(), n = four ? 4 : 3;
     float edge[5] = { 0, bnd[0], bnd[1], four ? bnd[2] : max, max };
+    int32_t x[5];
+    ranges_x(edge, n, x);
     for (int i = 0; i < 3; i++) {
         bool on = i < 2 || four;
         show_obj(pid.bar.mark[i], on);
-        if (on)
-            lv_obj_set_x(pid.bar.mark[i], bar_x(bnd[i], max) - 1);
+        if (on && lv_obj_get_x(pid.bar.mark[i]) != x[i + 1] - 1)
+            lv_obj_set_x(pid.bar.mark[i], x[i + 1] - 1);
     }
     for (int i = 0; i < 4; i++) {
         char s[8];
         lv_snprintf(s, sizeof s, "Set %d", i + 1);
-        int32_t x = (bar_x(edge[i], max) + bar_x(edge[i + 1], max)) / 2;
-        label_at(pid.bar.top[i], s, x, i < 3 || four);
+        label_at(pid.bar.top[i], s, i < n ? (x[i] + x[i + 1]) / 2 : 0, i < n);
         int32_t bw = i + 1 == use ? 1 : 0;
         if (lv_obj_get_style_border_width(pid.bar.top[i], 0) != bw)
             lv_obj_set_style_border_width(pid.bar.top[i], bw, 0);
