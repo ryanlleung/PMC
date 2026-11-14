@@ -1200,9 +1200,14 @@ static void frame_refresh(void)
     } else if (stepper3_override()) {
         // While the Limit override button is held (or MOT OVERRIDE armed it):
         // no Cancel, releasing the button ends it (0.13.2, Ryan 28 Oct).
-        strip_draw(UI_STRIP_WARN, NULL, stepper3_busy() ? "Limit override: closing past the switch"
-                                                        : "Limit override armed: the next close ignores the switch",
-                   false, false);
+        // A white line with the triangle (0.17.0, Ryan 14 Nov: the dark one
+        // "no one can read it and it causes confusion").
+        char ov[64];
+        if (stepper3_busy())
+            lv_snprintf(ov, sizeof ov, "%ld steps. Closing past the switch", (long)stepper3_position());
+        else
+            lv_strlcpy(ov, "Limit override held: press Close or Open", sizeof ov);
+        strip_draw(UI_STRIP_INFO, LV_SYMBOL_WARNING, ov, false, false);
     } else {
         strip_draw(line_kind, line_icon, line_text, false, act_cb != NULL);
     }

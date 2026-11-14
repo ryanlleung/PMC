@@ -335,7 +335,8 @@ void motor_jog_strip(void)
         lv_strlcpy(t, "Limit override held: press Close or Open", sizeof t);
         warn = true;
     }
-    ui_strip_set(warn ? UI_STRIP_WARN : UI_STRIP_INFO, UI_ICON_VALVE, t);
+    // The override lines white with the triangle, as the frame's (0.17.0).
+    ui_strip_set(UI_STRIP_INFO, warn ? LV_SYMBOL_WARNING : UI_ICON_VALVE, t);
 }
 
 // Full travel (POS_MAX steps) at the start, run and accel rates in use: up
