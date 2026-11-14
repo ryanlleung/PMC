@@ -17,8 +17,7 @@
  * Home is kept; other screens are created on open and deleted on leave.
  * A keypad or confirm dialog covers 0,40 480x232 except the STOP slot.
  *
- * Motor settings > Override > Motor override (motor_screen.c; on Valve position to
- * 0.16.16) is a framework screen too.
+ * Motor > Jog (motor_screen.c makes its row) is a framework screen too.
  */
 
 LV_FONT_DECLARE(ui_font_12)
@@ -103,7 +102,7 @@ bool ui_showing(const ui_screen_t *s);   // that screen is up
 const char *ui_screen_title(void);       // the screen up (the simulator's tests)
 void ui_home(void);            // back to Home (deletes the screen left)
 void ui_back(void);            // as the header Back
-void ui_service(void);         // Motor settings > Override > Motor override (motor_screen.c)
+void ui_service(void);         // Motor (its Jog tab)
 
 // Status strip. A message shows for 5 s with an OK, over the screen's own
 // line; refusals use it. The strip's action button is Home's.
@@ -118,6 +117,9 @@ typedef enum { UI_STRIP_INFO, UI_STRIP_PROMPT, UI_STRIP_WARN, UI_STRIP_FAULT } u
 #define UI_ICON_VALVE  "\x01v"
 #define UI_ICON_TARGET "\x01t"
 #define UI_ICON_TREND  "\x01p"   // a chart with a pressure line (the Menu's Trend tile, 0.16.2)
+#define UI_ICON_MOTOR  "\x01o"   // body, end plate and shaft (the Menu's Motor tile, 0.17.0)
+#define UI_ICON_PID    "\x01k"   // two sliders (the Menu's PID tile, 0.17.0)
+#define UI_ICON_GAUGE  "\x01g"   // a dial and needle (the Menu's Pressure sensor tile, 0.17.0)
 void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text);
 // Redraws the frame (header, strip, the screen's refresh) within 0.1 s
 // rather than at the next 0.5 s refresh; for a state the strip must show
@@ -150,9 +152,9 @@ void ui_keypad_ex(const ui_kp_t *k);
 // Confirm dialog: Cancel and OK (OK primary). Buttons sit inside x70-410,
 // clear of the Home mode button.
 void ui_confirm(const char *text, const char *ok, void (*on_ok)(void));
-// The Restart question (System, and the power icon in the template).
-void ui_restart_ask(void);
-// The power icon's Shut down question (also System > Shut down, 0.16.24).
+// Restart at once (the Power options question's Restart, 0.17.0).
+void ui_restart_now(void);
+// The Power options question (the power icon, and System's Power button).
 void ui_shutdown_ask(void);
 // Same with a named cancel button and its own action.
 void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void));
@@ -180,23 +182,21 @@ extern const ui_screen_t ui_scr_home, ui_scr_menu;
 void ui_status_line(void);     // mode/move line, in a screen's refresh()
 void ui_reset_fault_event(lv_event_t *e);   // the strip's Reset fault (ui_home.c)
 // Home and Set position (ui_home.c): ui_home_ask the Home confirm,
-// ui_set_position_ask the Set position list, ui_position_ask both (Home
-// valve on Home's Valve tile while not homed).
+// ui_set_position_ask the Set position as keypad, ui_position_ask both
+// (Home valve on Home's Valve tile while not homed).
 void ui_home_ask(void);
 void ui_set_position_ask(void);
-void ui_set_position_pick(int i);   // 0 closed, 1 saved
 void ui_position_ask(void);
 int32_t ui_pct_shown(int32_t milli);   // valve % as shown (2 dp), in 0.01 %, 0 to 10000
 // Trend and the Home sparklines (ui_trend.c). A sparkline redraws when
 // invalidated (Home does it once a second); a tap opens Trend.
 extern const ui_screen_t ui_scr_trend;
 lv_obj_t *ui_spark(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h, bool valve);
-// Valve position, Events, Diagnostics (ui_valve.c).
-extern const ui_screen_t ui_scr_calib, ui_scr_faults, ui_scr_diag;
-// The settings pages, all on the Menu from 0.16.2 (no Settings page, no
-// Choose sensor): System and its two pages, Motor settings, PID tuning,
-// Sensor calibration (ui_settings.c).
-extern const ui_screen_t ui_scr_name, ui_scr_namenet, ui_scr_netaddr, ui_scr_valve_set, ui_scr_tune, ui_scr_sensor_cal;
+// Events, Diagnostics (ui_valve.c).
+extern const ui_screen_t ui_scr_faults, ui_scr_diag;
+// The settings pages on the Menu (ui_settings.c): System and its IP page,
+// Valve, Motor, PID, Pressure sensor.
+extern const ui_screen_t ui_scr_namenet, ui_scr_netaddr, ui_scr_valve_set, ui_scr_motor, ui_scr_tune, ui_scr_sensor_cal;
 // The header's unsaved icon: asks to save what is in use and not saved.
 void ui_unsaved_ask(void);
 // The Menu's Reset to factory tile: asks, then resets (cfg_reset_factory).

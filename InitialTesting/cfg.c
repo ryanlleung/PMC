@@ -26,8 +26,13 @@
  * points of its bench cal, and no sensor serial or range (nothing showed
  * the serial; the range is the 15 psia Druck's).
  *
+ * Version 12 (0.17.0) adds the motor's steps per output turn (mot[M_SPT],
+ * Motor > Settings > Steps/turn): the turns shown, not the travel, which
+ * stays in steps. Version 11 records (0.16.30 to 0.16.33) are read and
+ * converted with the factory 16512 (from_v11).
+ *
  * Version 10 records (0.16.21 to 0.16.29) are read and converted
- * (from_v10); the first save writes version 11 to the other sector, so an
+ * (from_v10); the first save writes version 12 to the other sector, so an
  * older firmware flashed back still finds its version 10 record. Versions 1
  * to 9 (0.6.0 to 0.16.20) are no longer read: a board that still holds one
  * starts on the factory defaults and says so in the events. Flash 0.16.29
@@ -36,9 +41,11 @@
 #define CFG_ADDR_A   0x7FD000UL
 #define CFG_ADDR_B   0x7FE000UL
 #define CFG_MAGIC    0x47464350UL   // "PCFG"
-#define CFG_VERSION  11
+#define CFG_VERSION  12
 
-enum { M_RATE, M_START, M_ACCEL, M_HOLD, M_DIR, M_ORDER, M_N };
+enum { M_RATE, M_START, M_ACCEL, M_HOLD, M_DIR, M_ORDER, M_SPT, M_N };   // M_SPT from version 12
+#define SPT_MIN 100
+#define SPT_MAX 1000000
 enum { V_POSMAX, V_FHOME, V_FCREEP, V_BACKOFF, V_CLEAR, V_RETURN };   // valve.c settings[]
 _Static_assert(VALVE_N_SETTINGS == V_RETURN + 1, "valve[] indices");
 
@@ -115,6 +122,26 @@ typedef struct {
 } cfg_rec_v10_t;
 _Static_assert(sizeof(cfg_rec_v10_t) == 1508, "the version 10 record as 0.16.29 wrote it");
 
+// Version 11 (0.16.30 to 0.16.33), read only: version 12 without M_SPT.
+typedef struct {
+    uint32_t magic, version, size, rev;
+    int32_t mot[6];
+    int32_t valve[VALVE_N_SETTINGS];
+    int32_t tune[T_N];
+    uint32_t has_cal;
+    cal_rec_t cal;
+    char saved_at[20];
+    char name[CFG_NAME_LEN + 4];
+    uint32_t net_ip, net_mask;
+    uint32_t remote;
+    uint32_t crc;
+} cfg_rec_v11_t;
+
+// Live steps per output turn (0.17.0), as the newest record says once one
+// is loaded.
+static int32_t spt = STEPPER3_STEPS_PER_TURN;
+int32_t cfg_steps_per_turn(void) { return spt; }
+
 // Live cryostat name, in the header ("CF-11 pressure controller").
 #define FACTORY_NAME "CF-11"
 static char cname[CFG_NAME_LEN + 1] = FACTORY_NAME;
@@ -177,6 +204,7 @@ static void capture(cfg_rec_t *r)
     r->mot[M_DIR] = stepper3_reverse();
     stepper3_order(o);
     r->mot[M_ORDER] = o[0] * 1000 + o[1] * 100 + o[2] * 10 + o[3];
+    r->mot[M_SPT] = spt;
     valve_settings(r->valve);
     memcpy(r->tune, tune, sizeof r->tune);
     lv_strlcpy(r->name, cname, sizeof r->name);
@@ -202,7 +230,7 @@ static const char *bounds_why(const int32_t *t)
 // Disable switch: From below To.
 static const char *pass_why(const int32_t *t)
 {
-    return t[T_PLO] < t[T_PHI] ? NULL : "Disable switch: From must be below To";
+    return t[T_PLO] < t[T_PHI] ? NULL : "Ignore: From must be below To";
 }
 
 // NULL if every value can be applied, else the first that cannot.
@@ -216,6 +244,7 @@ static const char *values_why(const cfg_rec_t *r)
     if (m[M_HOLD] < 0 || m[M_HOLD] > 1) return "MOT HOLD";
     if (m[M_DIR] < 0 || m[M_DIR] > 1) return "MOT DIR";
     if (m[M_ORDER] < 0 || m[M_ORDER] > 3333) return "MOT ORDER";
+    if (m[M_SPT] < SPT_MIN || m[M_SPT] > SPT_MAX) return "MOT SPT";
     order_digits(m[M_ORDER], o);
     for (int i = 0; i < 4; i++) {
         if (o[i] > 3 || (seen & (1u << o[i])))
@@ -264,6 +293,7 @@ static const char *from_v10(const cfg_rec_v10_t *o, cfg_rec_t *r, uint32_t *note
     r->mot[M_HOLD] = o->mot[4];
     r->mot[M_DIR] = o->mot[5];
     r->mot[M_ORDER] = o->mot[6];
+    r->mot[M_SPT] = STEPPER3_STEPS_PER_TURN;
     for (int i = V_POSMAX; i <= V_CLEAR; i++)
         r->valve[i] = o->valve[i];
     r->valve[V_RETURN] = o->valve[6];    // [5] was the zero offset, 0 since 0.13.31
@@ -296,10 +326,32 @@ static const char *from_v10(const cfg_rec_v10_t *o, cfg_rec_t *r, uint32_t *note
 _Static_assert(sizeof ((cfg_rec_t *)0)->saved_at == sizeof ((cfg_rec_v10_t *)0)->saved_at &&
                sizeof ((cfg_rec_t *)0)->name == sizeof ((cfg_rec_v10_t *)0)->name, "from_v10 copies these whole");
 
+// A version 11 record as version 12: the same with the factory steps per turn.
+static void from_v11(const cfg_rec_v11_t *o, cfg_rec_t *r)
+{
+    memset(r, 0, sizeof *r);
+    r->magic = CFG_MAGIC;
+    r->version = CFG_VERSION;
+    r->size = sizeof *r;
+    r->rev = o->rev;
+    memcpy(r->mot, o->mot, sizeof o->mot);
+    r->mot[M_SPT] = STEPPER3_STEPS_PER_TURN;
+    memcpy(r->valve, o->valve, sizeof r->valve);
+    memcpy(r->tune, o->tune, sizeof r->tune);
+    r->has_cal = o->has_cal;
+    r->cal = o->cal;
+    memcpy(r->saved_at, o->saved_at, sizeof r->saved_at);
+    memcpy(r->name, o->name, sizeof r->name);
+    r->net_ip = o->net_ip;
+    r->net_mask = o->net_mask;
+    r->remote = o->remote;
+}
+
 // Reads one sector into slot[i]; NULL if usable, else why not.
 static const char *read_slot(int i)
 {
     static cfg_rec_v10_t old;      // a version 10 record, while it is converted
+    static cfg_rec_v11_t old11;    // a version 11 record, while it is converted
     cfg_rec_t *r = &slot[i];
     uint32_t head[3];              // magic, version, size
     slot_note[i] = 0;
@@ -316,6 +368,11 @@ static const char *read_slot(int i)
         const char *why = from_v10(&old, r, &slot_note[i]);
         if (why)
             return why;
+    } else if (head[1] == 11 && head[2] == sizeof old11) {
+        extflash_read(slot_addr[i], &old11, sizeof old11);
+        if (old11.crc != crc32_ieee(&old11, offsetof(cfg_rec_v11_t, crc)))
+            return "CRC mismatch";
+        from_v11(&old11, r);
     } else if (head[1] >= 1 && head[1] < 10) {
         return "saved before 0.16.21, no longer read";
     } else if (head[1] != CFG_VERSION || head[2] != sizeof *r) {
@@ -406,6 +463,7 @@ static bool apply(const cfg_rec_t *r)
     stepper3_set_reverse(r->mot[M_DIR] != 0);
     order_digits(r->mot[M_ORDER], o);
     stepper3_set_order(o);
+    spt = r->mot[M_SPT];
     valve_set_settings(r->valve);
     memcpy(tune, r->tune, sizeof tune);
     lv_strlcpy(cname, r->name, sizeof cname);
@@ -413,7 +471,7 @@ static bool apply(const cfg_rec_t *r)
     net_mask = r->net_mask;
     if ((r->remote != 0) != remote_on) {
         remote_on = r->remote != 0;
-        valve_event("NET", remote_on ? "Remote control on (settings loaded)" : "Remote control off (settings loaded)");
+        valve_event("NET", remote_on ? "Network control on (settings loaded)" : "Network control off (settings loaded)");
     }
     if (r->has_cal)
         cal_set_record(&r->cal, false);
@@ -463,7 +521,7 @@ void cfg_init(void)
     net_boot_ip = net_ip;
     net_boot_mask = net_mask;
     valve_event("CFG", "Settings saved %s loaded from %c%s", when(&slot[newest]),
-                slot_letter(newest), slot_ver[newest] == 10 ? " (saved by 0.16.29 or earlier)" : "");
+                slot_letter(newest), slot_ver[newest] == 10 ? " (saved by 0.16.29 or earlier)" : slot_ver[newest] == 11 ? " (saved by 0.16.33 or earlier)" : "");
     // What a version 10 record held that is not kept (0.16.30).
     const uint32_t n = slot_note[newest];
     if (n & NOTE_MODE)
@@ -527,6 +585,7 @@ static int32_t *key_ref(cfg_rec_t *r, cfg_key_t k)
     case CFG_RATE:    return &r->mot[M_RATE];
     case CFG_START:   return &r->mot[M_START];
     case CFG_ACCEL:   return &r->mot[M_ACCEL];
+    case CFG_SPT:     return &r->mot[M_SPT];
     default:
         // The tuning keys run in tune[] order (cfg.h).
         return k >= CFG_KP && k <= CFG_TUNE_LAST ? &r->tune[k - CFG_KP] : NULL;
@@ -577,6 +636,8 @@ void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi)
         *lo = STEPPER3_ACCEL_MIN; *hi = STEPPER3_ACCEL_MAX;
     } else if (k == CFG_REVERSE) {
         *hi = 1;
+    } else if (k == CFG_SPT) {
+        *lo = SPT_MIN; *hi = SPT_MAX;
     } else {
         int i = k == CFG_POSMAX ? V_POSMAX : k == CFG_FHOME ? V_FHOME : k == CFG_FCREEP ? V_FCREEP :
                 k == CFG_BACKOFF ? V_BACKOFF : V_RETURN;
@@ -603,30 +664,39 @@ cfg_key_t cfg_pid_key(int set, int which)
 
 static cfg_rec_t cand;   // cfg_save_with, cfg_reset_factory and cfg_save_system (never at once)
 
-bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
+// The live values with v[k] for each set[k], checked together, into cand.
+// In AUTO only the tuning may change (the loop picks it up at its next
+// step); anything else waits for MANUAL.
+static bool candidate(const int32_t v[CFG_N], const bool set[CFG_N], bool *tune_only, const char **why)
 {
-    // In AUTO only the tuning may change (the loop picks it up at its next
-    // step); anything else waits for MANUAL.
-    bool tune_only = valve_auto();
-    if (!tune_only && (*why = busy_why()) != NULL) return false;
+    *tune_only = valve_auto();
+    if (!*tune_only && (*why = busy_why()) != NULL) return false;
     capture(&cand);
     for (int k = 0; k < CFG_N; k++) {
         if (!set[k])
             continue;
-        if (tune_only && (k < CFG_KP || k > CFG_TUNE_LAST)) {
+        if (*tune_only && (k < CFG_KP || k > CFG_TUNE_LAST)) {
             // cand holds the live values here (only tuning keys are written).
             if (v[k] != *key_ref(&cand, (cfg_key_t)k)) { *why = "Stop AUTO first"; return false; }
             continue;
         }
         int32_t lo, hi;
         cfg_range((cfg_key_t)k, &lo, &hi);
-        if (v[k] < lo || v[k] > hi) { *why = "a value is out of range, nothing saved"; return false; }
+        if (v[k] < lo || v[k] > hi) { *why = "a value is out of range, nothing changed"; return false; }
         *key_ref(&cand, (cfg_key_t)k) = v[k];
     }
     if (cand.mot[M_START] > cand.mot[M_RATE]) { *why = "Start speed must not exceed Run speed"; return false; }
     if ((*why = bounds_why(cand.tune)) != NULL) return false;
     if ((*why = pass_why(cand.tune)) != NULL) return false;
-    if (values_why(&cand)) { *why = "a value is out of range, nothing saved"; return false; }
+    if (values_why(&cand)) { *why = "a value is out of range, nothing changed"; return false; }
+    return true;
+}
+
+bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
+{
+    bool tune_only;
+    if (!candidate(v, set, &tune_only, why))
+        return false;
     // Written first, then put in use: a failed write changes nothing, so
     // "Not saved" also means "not in use" (review of 0.10.11). The cal was
     // captured into cand.
@@ -644,6 +714,19 @@ bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **w
         *why = "saved, but not in use until a restart";
         return false;
     }
+    return true;
+}
+
+bool cfg_apply_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why)
+{
+    bool tune_only;
+    if (!candidate(v, set, &tune_only, why))
+        return false;
+    if (tune_only) {
+        memcpy(tune, cand.tune, sizeof tune);
+        return true;
+    }
+    if (!apply(&cand)) { *why = "wait for the valve to stop"; return false; }
     return true;
 }
 
@@ -823,7 +906,7 @@ void cfg_set_remote(bool on)
     if (on == remote_on)
         return;
     remote_on = on;
-    valve_event("NET", on ? "Remote control on (screen): the network can set" :
-                            "Remote control off (screen): the network can only read");
+    valve_event("NET", on ? "Network control on (screen): the network can set" :
+                            "Network control off (screen): the network can only read");
 }
 

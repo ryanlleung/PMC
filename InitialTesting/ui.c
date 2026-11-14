@@ -572,7 +572,7 @@ void ui_btn_arrow(lv_obj_t *b, bool up)
 // The drawn icons, 16 x 16, in the object's text colour: the status line's
 // (the valve, the target) and the Menu's (those and the trend, 0.16.2).
 // Which one is the object's user data.
-typedef enum { SHAPE_VALVE, SHAPE_TARGET, SHAPE_TREND } shape_t;
+typedef enum { SHAPE_VALVE, SHAPE_TARGET, SHAPE_TREND, SHAPE_MOTOR, SHAPE_PID, SHAPE_GAUGE } shape_t;
 static shape_t shape;          // the strip's, to redraw it only on a change
 static lv_color_t shape_col;
 
@@ -605,6 +605,54 @@ static void shape_draw(lv_event_t *e)
             d.p2.x = x + px[i + 1]; d.p2.y = y + py[i + 1];
             lv_draw_line(layer, &d);
         }
+    } else if (which == SHAPE_MOTOR || which == SHAPE_GAUGE) {
+        // Motor: a body, its end plate and the shaft (0.17.0). Gauge
+        // (Pressure sensor): a dial, a needle and its hub.
+        lv_draw_arc_dsc_t c;
+        lv_draw_arc_dsc_init(&c);
+        c.color = shape_col;
+        c.width = 2;
+        lv_draw_line_dsc_t d;
+        lv_draw_line_dsc_init(&d);
+        d.color = shape_col;
+        d.width = 2;
+        if (which == SHAPE_MOTOR) {
+            // The body, its end plate and the shaft (Ryan 14 Nov: the old
+            // one, simplified).
+            lv_draw_rect_dsc_t o;
+            lv_draw_rect_dsc_init(&o);
+            o.bg_opa = LV_OPA_TRANSP;
+            o.border_color = shape_col;
+            o.border_width = 2;
+            o.radius = 2;
+            lv_area_t body = { x + 3, y + 3, x + 12, y + 12 };
+            lv_draw_rect(layer, &o, &body);
+            lv_area_t plate = { x, y + 3, x + 1, y + 12 };
+            lv_draw_rect(layer, &r, &plate);
+            lv_area_t sh = { x + 13, y + 7, x + 17, y + 8 };
+            lv_draw_rect(layer, &r, &sh);
+        } else {
+            c.center.x = x + 8; c.center.y = y + 10; c.radius = 8;
+            c.start_angle = 150; c.end_angle = 30;
+            c.rounded = 1;
+            lv_draw_arc(layer, &c);
+            d.round_start = d.round_end = 1;
+            d.p1.x = x + 8; d.p1.y = y + 10; d.p2.x = x + 12; d.p2.y = y + 4;
+            lv_draw_line(layer, &d);
+            r.radius = LV_RADIUS_CIRCLE;
+            lv_area_t hub = { x + 6, y + 8, x + 9, y + 11 };
+            lv_draw_rect(layer, &r, &hub);
+        }
+    } else if (which == SHAPE_PID) {
+        // PID (0.17.0): two sliders, the tuning symbol (Ryan 14 Nov: three
+        // with open knobs was too busy).
+        lv_area_t l1 = { x, y + 3, x + 15, y + 4 }, l2 = { x, y + 11, x + 15, y + 12 };
+        lv_draw_rect(layer, &r, &l1);
+        lv_draw_rect(layer, &r, &l2);
+        r.radius = LV_RADIUS_CIRCLE;
+        lv_area_t k1 = { x + 3, y + 1, x + 7, y + 6 }, k2 = { x + 9, y + 9, x + 13, y + 14 };
+        lv_draw_rect(layer, &r, &k1);
+        lv_draw_rect(layer, &r, &k2);
     } else if (which == SHAPE_VALVE) {
         // P&ID hand valve: two triangles tip to tip, stem and handle.
         lv_draw_triangle_dsc_t t;
@@ -641,7 +689,10 @@ static int shape_of(const char *icon)
 {
     return !icon ? -1 : strcmp(icon, UI_ICON_VALVE) == 0 ? SHAPE_VALVE
          : strcmp(icon, UI_ICON_TARGET) == 0 ? SHAPE_TARGET
-         : strcmp(icon, UI_ICON_TREND) == 0 ? SHAPE_TREND : -1;
+         : strcmp(icon, UI_ICON_TREND) == 0 ? SHAPE_TREND
+         : strcmp(icon, UI_ICON_MOTOR) == 0 ? SHAPE_MOTOR
+         : strcmp(icon, UI_ICON_PID) == 0 ? SHAPE_PID
+         : strcmp(icon, UI_ICON_GAUGE) == 0 ? SHAPE_GAUGE : -1;
 }
 
 void ui_btn_icon(lv_obj_t *b, const char *icon)
@@ -1089,16 +1140,12 @@ static void frame_refresh(void)
     static int32_t fit_right;
     static const char *fit_mode;
     static char fit_title[40];
-    // Home's title: "<cryostat> pressure controller" (System > Cryostat name).
-    static char home_title[CFG_NAME_LEN + 24], fit_name[CFG_NAME_LEN + 1] = "\x01";
-    bool renamed = strcmp(cfg_name(), fit_name) != 0;
-    if (renamed) {
-        lv_strlcpy(fit_name, cfg_name(), sizeof fit_name);
-        if (fit_name[0])
-            lv_snprintf(home_title, sizeof home_title, "%s pressure controller", fit_name);
-        else
-            lv_strlcpy(home_title, "Pressure controller", sizeof home_title);
-        ui_set_text(pmc_lbl, home_title);
+    // Home's title: always "Pressure controller" (the cryostat name is gone, 0.17.0).
+    static bool titled;
+    bool renamed = !titled;
+    if (!titled) {
+        titled = true;
+        ui_set_text(pmc_lbl, "Pressure controller");
     }
     ui_set_text(mode_lbl, mode_txt);
     if (renamed || mode_txt != fit_mode || ((!home || kp_open) && strcmp(ttl, fit_title) != 0) || right != fit_right) {
@@ -1109,9 +1156,6 @@ static void frame_refresh(void)
             ui_set_text(title_lbl, ttl);
             lv_obj_set_width(title_lbl, right - HDR_TITLE_X);
         }
-        // Home's title from the same x as every title; the cryostat name
-        // alone when "<name> pressure controller" does not fit.
-        ui_set_text(pmc_lbl, text_w(home_title) <= right - HDR_TITLE_X || !fit_name[0] ? home_title : fit_name);
         lv_obj_set_width(pmc_lbl, right - HDR_TITLE_X);
     }
     bool op = !valve_stop_latches();
@@ -1313,7 +1357,7 @@ void ui_home(void)
     frame_refresh();
 }
 
-// Motor settings > Override > Motor override (Valve position until 0.16.16), a framework screen since 0.11.32.
+// Motor, its Jog tab first (0.17.0).
 void ui_service(void)
 {
     ui_open(&ui_scr_motor);
@@ -1757,7 +1801,7 @@ void ui_confirm(const char *text, const char *ok, void (*on_ok)(void))
     ui_ask(text, "Cancel", NULL, ok, on_ok);
 }
 
-/* The Shut down question (Ryan 4 Nov: short). From 0.15.7 (Ryan: "a
+/* The Power options question (Ryan 14 Nov; Shut down question to 0.16.33). From 0.15.7 (Ryan: "a
  * checkbox or a button ... whether I want to close the valve") a checkbox
  * "Close the valve to 0 %", ticked each time it opens; untick it and the
  * valve stays where it is. Not homed there is no 0 % to go to: no
@@ -1792,18 +1836,18 @@ static void shut_ask(void)
 {
     shut_close = true;
     if (!valve_calibrated()) {
-        ui_ask3("Valve not homed: shut down without moving it?", "Cancel", NULL, "Restart", ui_restart_ask,
+        ui_ask3("Valve not homed: shut down without moving it?", "Cancel", NULL, "Restart", ui_restart_now,
                 "Shut down", shut_go);
         return;
     }
     lv_obj_t *o = overlay_dim();
     confirm_ok = shut_go;
-    confirm_mid = ui_restart_ask;   // Restart from the power icon too (Ryan 4 Nov), with its own question
+    confirm_mid = ui_restart_now;   // Restart acts at once (0.17.0: no second question)
     confirm_cancel = confirm_mid2 = NULL;
     const int32_t bw = 376, h = 14 + 22 + 6 + 44 + 8 + 48 + 12;   // three buttons (340 to 0.15.7)
     lv_obj_t *box = popup_box(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
     lv_obj_set_style_radius(box, 8, 0);
-    ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Shut down the controller?");
+    ui_label(box, 16, 14, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Power options");
     // The whole row is the checkbox (a 44 px touch target).
     lv_obj_t *row = plain(box);
     lv_obj_set_pos(row, 8, 42);
@@ -1825,7 +1869,7 @@ static void shut_ask(void)
     lv_obj_set_style_text_color(m, lv_color_white(), 0);
     lv_obj_set_style_text_font(m, &ui_font_16, 0);
     lv_obj_center(m);
-    ui_label(row, 46, 12, bw - 70, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Close the valve to 0 %");
+    ui_label(row, 46, 12, bw - 70, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Close the valve on shut down");
     shut_box_show();
     int32_t by = 42 + 44 + 8;
     dialog_btn(box, 16, by, 108, 48, "Cancel", confirm_event, NULL);
@@ -1973,10 +2017,10 @@ static void question_check(void)
         } else {
             lv_snprintf(t, sizeof t, "%s\nLast saved position %s %%.", head, v);
         }
-        // The saved position at once, Set position (the list, the saved one
-        // in it), or Home valve, the filled one (Ryan, 24 Oct).
-        lv_snprintf(ok, sizeof ok, "Use\n%s %%", v);
-        ui_ask3(t, ok, sp_use, "Set\nposition", ui_set_position_ask, "Home\nvalve", sp_calibrate);
+        // The saved position at once, Set as % (the keypad), or Home valve,
+        // the filled one (Ryan, 24 Oct; 0.17.0 wording).
+        lv_snprintf(ok, sizeof ok, "Use %s %%", v);
+        ui_ask3(t, ok, sp_use, "Set as %", ui_set_position_ask, "Home valve", sp_calibrate);
     }
     asking = false;
     overlay_q = want;
@@ -2091,7 +2135,7 @@ void ui_splash(void)
 
 /* Shut down and OFF (0.15.0, Ryan 4 Nov: "look like it's shut down, with
  * the screen as the power button"). Shutting down: the whole screen black,
- * "Shutting down", the bar emptying as the valve goes to 0 %, the seconds
+ * "Closing valve", the bar filling as the valve goes to 0 %, the seconds
  * left, STOP where it always is (cancels: MANUAL). OFF: as at start-up;
  * two taps anywhere within OFF_TAP_MS turn it on (Ryan: double tap), the
  * logo and the stuttering bar, then Home. On lv_layer_sys, over the frame
@@ -2140,15 +2184,24 @@ static void off_stop_event(lv_event_t *e)
     valve_stop();   // the shut down ends: MANUAL, the valve where it stopped
 }
 
+// Shutting down (0.17.0): "Closing valve" on black, a white bar filling
+// left to right as the valve closes, the seconds left, the plain STOP.
 static void off_show_closing(void)
 {
     lv_obj_t *s = off_layer(lv_color_black(), 1);
-    ui_label(s, 0, 92, 480, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "Shutting down");
-    off_fill = bar_new(s, 124, lv_color_hex(0x1E2833));
-    off_txt = ui_label(s, 0, 150, 480, &ui_font_12, lv_color_hex(0x9AA6B4), LV_TEXT_ALIGN_CENTER, "");
+    ui_label(s, 0, 92, 480, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "Closing valve");
+    off_fill = bar_new(s, 124, lv_color_black());
+    lv_obj_t *t = lv_obj_get_parent(off_fill);
+    lv_obj_set_style_border_color(t, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(off_fill, lv_color_white(), 0);
+    lv_obj_set_style_bg_grad_dir(off_fill, LV_GRAD_DIR_NONE, 0);
+    bar_set(off_fill, 0);
+    off_txt = ui_label(s, 0, 150, 480, &ui_font_12, lv_color_hex(0xD3D9E0), LV_TEXT_ALIGN_CENTER, "");
     off_stop = ui_btn(s, 361, 216, 109, 48, UI_RED, "STOP", off_stop_event, NULL);
-    lv_obj_set_style_text_font(lv_obj_get_child(off_stop, 0),
-                               lv_obj_get_style_text_font(lv_obj_get_child(stop_btn, 0), 0), 0);
+    lv_obj_set_style_text_font(lv_obj_get_child(off_stop, 0), &ui_font_26, 0);
+    lv_obj_add_style(off_stop, &st_stop_op, LV_STATE_USER_2);
+    lv_obj_add_style(off_stop, &st_stop_op_pr, LV_STATE_USER_2 | LV_STATE_PRESSED);
+    lv_obj_add_state(off_stop, LV_STATE_USER_2);
 }
 
 // Turning on, every 30 ms: a tick pauses 90 to 360 ms (1 in 10), jumps 8 to
@@ -2251,12 +2304,12 @@ static void off_timer(lv_timer_t *t)
     if (off_kind == 1) {
         int left, secs;
         if (valve_shutdown_progress(&left, &secs)) {
-            bar_set(off_fill, left);
+            bar_set(off_fill, 100 - left);   // fills as the valve closes (emptied to 0.16.33)
             char b[40];
             if (secs >= 0)
-                lv_snprintf(b, sizeof b, "Closing the valve, %d s", secs);
+                lv_snprintf(b, sizeof b, "%d s left", secs);
             else
-                lv_strlcpy(b, "Closing the valve", sizeof b);
+                b[0] = 0;
             ui_set_text(off_txt, b);
         }
     }

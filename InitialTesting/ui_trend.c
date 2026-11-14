@@ -11,7 +11,8 @@
  * sparklines (drawSpark). Both draw straight from trend.c on a draw event:
  * no lv_chart, no point arrays in the LVGL heap.
  *   Trend   chart card 10,48 343x160: legend, pressure axis left (linear,
- *           3-5 rounded steps), valve 0-100 % right, -range and now under it;
+ *           3-5 rounded steps), valve right (from 0.17.0 scaled to the window,
+ *           at least 20 % tall), -range and now under it;
  *           Up / Range / Down on the right, 1, 2, 5, 10, 30 min and 1 hour.
  *   Spark   10 min, one point per 5 s (slot means, see pts_build), one pen, no axes; pressure linear
  *           (log when the window spans more than a decade), valve 0-100 %.
@@ -268,6 +269,7 @@ static bool pen(lv_layer_t *layer, uint32_t win, tkey_t k, float x0, float x1, y
 typedef struct {
     float lo, hi, top, bot;   // values (mbar) and pixel rows
     bool log;
+    float vlo, vhi;           // valve axis, % (0 and 0: 0 to 100 %)
 } scale_t;
 
 static float y_scale(void *ctx, int32_t v)
@@ -286,7 +288,64 @@ static float y_scale(void *ctx, int32_t v)
 static float y_pct(void *ctx, int32_t v)
 {
     scale_t *s = ctx;
-    return s->bot - (float)v / 10000.0f * (s->bot - s->top);
+    float lo = s->vhi > s->vlo ? s->vlo : 0, hi = s->vhi > s->vlo ? s->vhi : 100;
+    float r = ((float)v / 100.0f - lo) / (hi - lo);
+    if (r < 0) r = 0;
+    if (r > 1) r = 1;
+    return s->bot - r * (s->bot - s->top);
+}
+
+// The valve axis on Trend (0.17.0, Ryan 14 Nov: "the valve rarely goes
+// above 50, maybe make the valve axis dynamic as well, minimum +- 10"; 0 to
+// 100 % before): the opening over the window with a margin, at least 20 %
+// tall, inside 0 to 100 %. It takes the pressure axis's nt intervals, so
+// each valve label sits on a pressure gridline (Ryan 14 Nov: "the text
+// position is wrong"): the smallest round step whose nt intervals cover
+// the opening. 0 to 100 % with no samples.
+#define V_SPAN_MIN 20.0f
+
+static float v_axis(float *lo, float *hi, int nt)
+{
+    if (nt < 1)
+        nt = 1;
+    bool any = false;
+    float dlo = 0, dhi = 100;
+    for (int i = 0; i < pts_n; i++) {
+        int32_t v = pts[i].v[K_V];
+        if (v == TREND_NONE)
+            continue;
+        float f = (float)v / 100.0f;
+        if (!any || f < dlo) dlo = f;
+        if (!any || f > dhi) dhi = f;
+        any = true;
+    }
+    if (any) {
+        float span = dhi - dlo, mid = (dhi + dlo) / 2;
+        span = span * 1.2f < V_SPAN_MIN ? V_SPAN_MIN : span * 1.2f;
+        dlo = mid - span / 2;
+        dhi = mid + span / 2;
+        if (dlo < 0) { dhi -= dlo; dlo = 0; }
+        if (dhi > 100) { dlo -= dhi - 100; dhi = 100; }
+        if (dlo < 0) dlo = 0;
+    }
+    static const float steps[] = { 5, 10, 20, 25, 50 };
+    for (unsigned i = 0; i < sizeof steps / sizeof steps[0]; i++) {
+        float st = steps[i], top = st * (float)nt;
+        if (top < dhi - dlo || top > 100.0f + 1e-3f)
+            continue;
+        float l = floorf(dlo / st + 1e-4f) * st;   // at or below the opening
+        if (l + top < dhi - 1e-3f)
+            continue;                                 // too short from there: a bigger step
+        if (l + top > 100.0f)
+            l = 100.0f - top;   // moved down, still a multiple of st (as 100 is)
+        *lo = l;
+        *hi = l + top;
+        return st;
+    }
+    // No round step fits (three intervals over most of the travel): 0 to 100.
+    *lo = 0;
+    *hi = 100;
+    return 100.0f / (float)nt;
 }
 
 // Valve as a shaded area under its line on Trend, so it reads apart from
@@ -477,11 +536,12 @@ static void trend_draw(lv_event_t *e)
     lo = floorf(lo / step + 1e-4f) * step;
     hi = ceilf(hi / step - 1e-4f) * step;
     if (hi - lo < step) hi = lo + step;
-    scale_t s = { lo, hi, (float)y0, (float)y1, false };
+    int nt = (int)lroundf((hi - lo) / step);
+    float vlo = 0, vhi = 100, vstep = v_axis(&vlo, &vhi, nt);
+    scale_t s = { lo, hi, (float)y0, (float)y1, false, vlo, vhi };
 
     char buf[16];
     area(layer, win, (float)x0, (float)x1, &s, COL_AREA);   // under the grid
-    int nt = (int)lroundf((hi - lo) / step);
     for (int i = 0; i <= nt; i++) {
         float v = lo + step * (float)i;
         int32_t y = (int32_t)lroundf(y_scale(&s, (int32_t)lroundf(v * 1000)));
@@ -493,9 +553,10 @@ static void trend_draw(lv_event_t *e)
             lv_snprintf(buf, sizeof buf, "%ld", (long)lroundf(v));
         text(layer, buf, UI_MUTED, LV_TEXT_ALIGN_RIGHT, a.x1, y - 7, x0 - 8);
     }
-    for (int i = 0; i <= 4; i++) {
-        int32_t y = (int32_t)lroundf(y_pct(&s, 2500 * i));
-        lv_snprintf(buf, sizeof buf, "%d", 25 * i);
+    for (int i = 0; i <= nt; i++) {   // on the pressure gridlines
+        float v = vlo + vstep * (float)i;
+        int32_t y = (int32_t)lroundf(y_pct(&s, (int32_t)lroundf(v * 100)));
+        lv_snprintf(buf, sizeof buf, "%ld", (long)lroundf(v));
         text(layer, buf, UI_MUTED, LV_TEXT_ALIGN_LEFT, x1 + 8, y - 7, a.x2);
     }
     lv_snprintf(buf, sizeof buf, "-%s", WIN_NAME[wi]);

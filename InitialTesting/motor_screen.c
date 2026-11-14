@@ -12,111 +12,45 @@
 #include "lv_port_indev.h"
 
 /*
- * Motor settings > Override > Motor override (from 0.16.17; Valve position to 0.16.16;
- * Settings > Motor override to 0.14.13;
- * 0.11.32: option B, Ryan 22 Oct; three tabs
- * since 0.11.33, Ryan 23 Oct). A framework screen: the standard header,
- * status strip and STOP; every MOT setting and move from the touchscreen,
- * and the screen follows MOT commands on the link.
- * Body y 48-208, three 48 px rows (y 48, 104, 160). The top row is on every
- * tab: the tabs Move / Speed / Coils (x10 w226) and the position
- * card (x244 w226). Below it:
- *   Move   Limit override, Close and Open, two rows tall. Close and Open
- *          move while pressed (hold to run) and ramp down on release;
- *          the step sizes 1 to 10k and Set zero went in 0.16.32 (Ryan 13
- *          Nov: "only hold to run is necessary as other step options
- *          arent useful"). Limit override is a two-finger deadman: hold
- *          it and press Close or Open with another finger (Close then
- *          goes past the switch)
- *   Speed  Run, Start and Accel [-] value [+], and the time for a full open or close
- *   Coils  Hold torque, Coils off, Coil order, Direction (full steps only from 0.16.30)
- * The Switch tab (Pass 5 to 50 %, 0.16.5 to 0.16.18) is a toggle on Motor
- * settings > Override from 0.16.19 (Ryan 12 Nov: "remove the switch tab on
- * the motor override page"); the strip still says when the switch is passed.
- * Coil order and Direction ask first while the valve is homed.
- * The strip reads the motor state and the limit line (a latched fault, the
- * limit override or a message over it, as on every screen).
- * Close and Open move while pressed and ramp down on release. Settings are
- * refused while moving, as on the
- * link. Buttons act on press. Each action is echoed on the link as
- * "MOT screen: ..." so a terminal log shows what was done.
+ * Motor > Jog (0.17.0; Motor override, on Motor settings > Override, 0.16.17
+ * to 0.16.33; Valve position to 0.16.16; Settings > Motor override to
+ * 0.14.13; option B from 0.11.32, Ryan 22 Oct).
+ *
+ * Close, Limit override and Open in a row, 109 x 104 each (x 10, 127, 244,
+ * y 104). Close and Open move while pressed (hold to run) and ramp down on
+ * release. Limit override is a two-finger deadman: hold it and press Close
+ * or Open with another finger (Close then goes past the switch).
+ *
+ * The rest of Motor override went in 0.17.0 (the 0.17 screens, Ryan 14
+ * Nov): the position card (the steps are on the strip), the Speed tab
+ * (Speed, Start and Accel are settings on Motor > Settings), Coils off
+ * (STOP or a restart turns the coils off), Coil order (MOT ORDER on the
+ * link) and Hold torque and Direction (Motor > Settings).
+ *
+ * The Motor page (ui_settings.c) makes the row in its Jog tab, calls
+ * motor_jog_fast at 10 Hz and motor_jog_strip for the strip. The row and
+ * its timer go when the tab or the page does.
  */
-#define TRACK lv_color_hex(0xC3CDD7)
-
-static const int32_t R[3] = { 48, 104, 160 };
-#define H 48
-
-enum { TAB_MOVE, TAB_SPEED, TAB_COILS, TAB_N };
-
 static struct {
-    lv_obj_t *tabs[TAB_N], *page[TAB_N];
-    lv_obj_t *pos;
-    lv_obj_t *turns, *travel;
-    lv_obj_t *rate, *start, *accel, *adj[6];
-    lv_obj_t *close, *open, *over, *hold, *off, *order, *dir;
+    lv_obj_t *close, *open, *over;
     lv_obj_t *held;   // the Close or Open button driving a hold move
     int32_t held_to;  // that move's target, so a release stops only it
     int32_t held2_to; // the same for held2
     lv_obj_t *held2;  // Close or Open under the second finger, Limit override held
-    lv_timer_t *two;  // reads the second finger while the screen is open
+    lv_timer_t *two;  // reads the second finger while the row is up
 } m;
 // Limit override is held (accepted on press); a second finger may move.
 static bool over_on;
 // The second finger has been off the glass since Limit override was
 // pressed, so its next touch is a fresh press.
 static bool second_up;
-static int tab_sel;
 // A hold move asks for this far and is ramped down on release.
 #define HOLD_MOVE 200000
-
-// +/- walk these lists; a value set over the link snaps to the nearest entry.
-static const uint32_t rates[] = { 16, 25, 50, 75, 100, 125, 150, 200, 250, 300, 400, 500, 600, 800, 1000 };
-static const uint32_t accels[] = { 25, 50, 100, 200, 400, 800, 1600, 3200, 6400 };
-
-// The three distinct coil orders for a four-phase unipolar motor; every other
-// order is one of these turned or reversed.
-static const uint8_t orders[3][4] = { { 0, 1, 2, 3 }, { 0, 2, 1, 3 }, { 0, 1, 3, 2 } };
 
 static intptr_t event_arg(lv_event_t *e)
 {
     return (intptr_t)lv_event_get_user_data(e);
 }
-
-static size_t nearest(const uint32_t *list, size_t n, uint32_t v)
-{
-    size_t best = 0;
-    for (size_t i = 1; i < n; i++) {
-        uint32_t d = list[i] > v ? list[i] - v : v - list[i];
-        uint32_t db = list[best] > v ? list[best] - v : v - list[best];
-        if (d < db)
-            best = i;
-    }
-    return best;
-}
-
-// Next list entry above (dir > 0) or below the current value.
-static uint32_t step_list(const uint32_t *list, size_t n, uint32_t v, int dir)
-{
-    size_t i = nearest(list, n, v);
-    if (dir > 0 && list[i] <= v && i + 1 < n)
-        i++;
-    else if (dir < 0 && list[i] >= v && i > 0)
-        i--;
-    return list[i];
-}
-
-static int order_index(void)
-{
-    uint8_t o[4];
-    stepper3_order(o);
-    for (int i = 0; i < 3; i++)
-        if (memcmp(o, orders[i], 4) == 0)
-            return i;
-    return -1;
-}
-
-static void motor_fast(void);
-static void motor_refresh(void);
 
 /* --------------------------------------------------------------------------
  * Events (on press; a greyed button does nothing)
@@ -137,7 +71,7 @@ static void move_event(lv_event_t *e)
             why = stepper3_refusal();
         ui_msg(why);
     }
-    motor_fast();
+    motor_jog_fast();
 }
 
 // Hold move released (or the finger slid off): ramp down where it is.
@@ -158,120 +92,14 @@ static void release_event(lv_event_t *e)
         hold_end();
 }
 
-/* Coil order and direction clear the homing. While the valve is
- * homed they ask first (Ryan, 23 Oct). Not homed, they apply at once as
- * before. A mode change keeps the homing (the count is rescaled). */
-static char ask_text[64];
-
-static void guarded(const char *what, const char *ok, void (*act)(void))
-{
-    if (!valve_calibrated()) {
-        act();
-        return;
-    }
-    snprintf(ask_text, sizeof ask_text, "%s? This clears the homing.", what);
-    ui_confirm(ask_text, ok, act);
-}
-
-enum { SET_RATE, SET_START, SET_ACCEL };
-
-static void adjust_event(lv_event_t *e)
-{
-    if (ui_btn_disabled(e))
-        return;
-    intptr_t a = event_arg(e);
-    int dir = a & 1 ? 1 : -1;
-    switch (a >> 1) {
-    case SET_RATE: {
-        uint32_t v = step_list(rates, (sizeof rates / sizeof rates[0]), stepper3_rate(), dir);
-        (void)stepper3_set_rate(v);
-        break;
-    }
-    case SET_START: {
-        uint32_t v = step_list(rates, (sizeof rates / sizeof rates[0]), stepper3_start_rate(), dir);
-        (void)stepper3_set_start(v);
-        break;
-    }
-    default: {
-        uint32_t v = step_list(accels, (sizeof accels / sizeof accels[0]), stepper3_accel(), dir);
-        (void)stepper3_set_accel(v);
-        break;
-    }
-    }
-    motor_fast();
-}
-
-// Coil order and Direction clear the homing: refused while the valve layer
-// locks the motor (AUTO, homing, a latched fault), as MOT ORDER and MOT DIR
-// are on the link. Checked again here: the question may have waited.
-static bool ref_locked(void)
-{
-    const char *why = stepper3_locked();
-    if (why)
-        ui_msg(why);
-    return why != NULL;
-}
-
-static void do_order(void)
-{
-    int i = (order_index() + 1) % 3;
-    if (ref_locked())
-        return;
-    if (!stepper3_busy())
-        (void)stepper3_set_order(orders[i]);
-    motor_fast();
-}
-
-static void order_event(lv_event_t *e)
-{
-    if (ui_btn_disabled(e))
-        return;
-    guarded("Change the coil order", "Change", do_order);
-}
-
-static void do_dir(void)
-{
-    if (ref_locked())
-        return;
-    if (!stepper3_busy())
-        (void)stepper3_set_reverse(!stepper3_reverse());
-    motor_fast();
-}
-
-static void dir_event(lv_event_t *e)
-{
-    if (ui_btn_disabled(e))
-        return;
-    guarded("Reverse the direction", "Change", do_dir);
-}
-
-static void hold_event(lv_event_t *e)
-{
-    if (ui_btn_disabled(e))
-        return;
-    (void)stepper3_set_hold(!stepper3_hold());
-    motor_fast();
-}
-
-static void off_event(lv_event_t *e)
-{
-    (void)e;
-    // In AUTO the loop would move (and energise) the valve again at its
-    // next step: end AUTO first, as MOT OFF does on the link.
-    if (valve_auto())
-        valve_stop();
-    stepper3_off();
-    motor_fast();
-}
-
 // Limit override is a two-finger deadman (0.13.7, Ryan 28 Oct; one finger
 // closed past the switch from 0.13.2, and it armed the next close from
 // 0.12.19). Held alone it does nothing. While it is held, a second finger
-// pressing Close closes past the switch, and Open opens, by the move
-// choice (Hold to run or a step). The move stops when either finger lifts
-// or the second slides off its button: a close past the switch at once,
-// an open ramped down. LVGL follows one finger (the one on Limit
-// override); the second comes from touch_second() and is read by two_poll.
+// pressing Close closes past the switch, and Open opens. The move stops
+// when either finger lifts or the second slides off its button: a close
+// past the switch at once, an open ramped down. LVGL follows one finger
+// (the one on Limit override); the second comes from touch_second() and
+// is read by two_poll.
 static void override_event(lv_event_t *e)
 {
     if (ui_btn_disabled(e))
@@ -284,7 +112,7 @@ static void override_event(lv_event_t *e)
     over_on = true;
     second_up = !touch_second(NULL, NULL);   // a finger already down waits to lift
     valve_event("LIM", "Limit override held (screen): press Close or Open to move");
-    motor_refresh();
+    ui_refresh_soon();
 }
 
 static bool inside(lv_obj_t *b, int32_t x, int32_t y)
@@ -351,7 +179,7 @@ static void over_release(lv_event_t *e)
     two_end();
     if (!moving)
         valve_event("LIM", "Limit override released (screen)");
-    motor_refresh();
+    ui_refresh_soon();
 }
 
 static void two_poll(lv_timer_t *t)
@@ -367,7 +195,7 @@ static void two_poll(lv_timer_t *t)
     if (m.held2) {
         if (!down || !inside(m.held2, x, y)) {
             two_end();
-            motor_fast();
+            motor_jog_fast();
         }
         return;
     }
@@ -384,197 +212,68 @@ static void two_poll(lv_timer_t *t)
     }
     if (two_start(b)) {
         second_up = false;
-        motor_fast();
+        motor_jog_fast();
     }
 }
 
-static void two_delete(lv_event_t *e)
+// The row goes (a tab change, leaving the page): its timer and any move
+// it drives go with it.
+static void jog_delete(lv_event_t *e)
 {
     (void)e;
     if (m.two)
         lv_timer_delete(m.two);
     m.two = NULL;
     two_end();
+    hold_end();
     over_on = false;
-}
-
-static void tab_show(void);
-
-static void tab_event(lv_event_t *e)
-{
-    tab_sel = (int)event_arg(e);
-    tab_show();
+    memset(&m, 0, sizeof m);
 }
 
 /* --------------------------------------------------------------------------
  * Layout
  * ------------------------------------------------------------------------ */
-static lv_obj_t *btn(lv_obj_t *p, int32_t x, int32_t y, int32_t w, const char *text, lv_event_cb_t cb,
-                     intptr_t arg)
+// A 109 x 104 button: an arrow over the word, or two lines (Limit override).
+static lv_obj_t *big(lv_obj_t *p, int32_t x, const char *text, const char *arrow, lv_event_cb_t cb, intptr_t arg)
 {
-    lv_obj_t *b = ui_btn(p, x, y, w, H, UI_SECONDARY, text, NULL, NULL);
+    lv_obj_t *b = ui_btn(p, x, 104, 109, 104, UI_SECONDARY, text, NULL, NULL);
     lv_obj_add_event_cb(b, cb, LV_EVENT_PRESSED, (void *)arg);
+    if (arrow)
+        ui_btn_icon(b, arrow);
     return b;
 }
 
-// Segmented choice as the Motor settings tabs: grey track, the chosen segment
-// raised white (seg_show).
-static void seg(lv_obj_t *p, int32_t x, int32_t y, int32_t w, int n, const char *const *labels,
-                lv_obj_t **out, lv_event_cb_t cb)
-{
-    lv_obj_t *t = ui_card(p, x, y, w, H);
-    lv_obj_set_style_bg_color(t, TRACK, 0);
-    lv_obj_set_style_border_width(t, 0, 0);
-    lv_obj_set_style_radius(t, 6, 0);
-    const int32_t pad = 4, iw = (w - 2 * pad) / n;
-    for (int i = 0; i < n; i++) {
-        int32_t bx = pad + i * iw, bw = iw;
-        lv_obj_t *b = ui_card(t, bx, pad, bw, H - 2 * pad);
-        lv_obj_set_style_radius(b, 4, 0);
-        lv_obj_set_style_border_width(b, 0, 0);
-        lv_obj_set_style_shadow_width(b, 0, 0);
-        lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
-        lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(b, cb, LV_EVENT_PRESSED, (void *)(intptr_t)i);
-        lv_obj_t *l = ui_label(b, 0, 0, bw, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_CENTER, labels[i]);
-        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
-        out[i] = b;
-    }
-}
-
-static void seg_show(lv_obj_t *b, bool sel, bool on)
-{
-    lv_opa_t o = sel ? LV_OPA_COVER : LV_OPA_TRANSP;
-    if (lv_obj_get_style_bg_opa(b, 0) != o)
-        lv_obj_set_style_bg_opa(b, o, 0);
-    ui_set_color(lv_obj_get_child(b, 0), !on ? UI_IDLE : sel ? UI_TEXT : UI_MUTED);
-}
-
-// [-] card [+], the card with a 12 px caption over the value; returns the
-// value label.
-static lv_obj_t *adjust_row(lv_obj_t *p, int32_t x, int32_t y, int32_t w, int which, const char *cap)
-{
-    const int32_t bw = 48, cw = w - 2 * bw - 8;
-    m.adj[which * 2] = btn(p, x, y, bw, LV_SYMBOL_MINUS, adjust_event, which << 1);
-    lv_obj_t *c = ui_card(p, x + bw + 4, y, cw, H);
-    ui_label(c, 0, 5, cw, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, cap);
-    lv_obj_t *v = ui_label(c, 0, 22, cw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, "");
-    m.adj[which * 2 + 1] = btn(p, x + w - bw, y, bw, LV_SYMBOL_PLUS, adjust_event, (which << 1) | 1);
-    return v;
-}
-
-// A tab's page: rows 2 and 3 only, so it never covers the header or the
-// top row.
-static lv_obj_t *page(lv_obj_t *scr)
-{
-    lv_obj_t *pg = lv_obj_create(scr);
-    lv_obj_remove_style_all(pg);
-    lv_obj_remove_flag(pg, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(pg, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(pg, 0, R[1]);
-    lv_obj_set_size(pg, 480, R[2] + H - R[1]);
-    return pg;
-}
-
-static void tab_show(void)
-{
-    for (int i = 0; i < TAB_N; i++) {
-        seg_show(m.tabs[i], i == tab_sel, true);
-        if (i == tab_sel)
-            lv_obj_remove_flag(m.page[i], LV_OBJ_FLAG_HIDDEN);
-        else
-            lv_obj_add_flag(m.page[i], LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
-static void motor_build(lv_obj_t *scr)
+void motor_jog_make(lv_obj_t *p)
 {
     memset(&m, 0, sizeof m);
-    tab_sel = TAB_MOVE;
-    const int32_t y2 = 0, y3 = R[2] - R[1];
-
-    // Top row: the tabs and the position (room for -2147483648, Ryan 22 Oct).
-    static const char *const tabs[TAB_N] = { "Move", "Speed", "Coils" };
-    seg(scr, 10, R[0], 226, TAB_N, tabs, m.tabs, tab_event);
-    lv_obj_t *pc = ui_card(scr, 244, R[0], 226, H);
-    ui_label(pc, 8, 3, 210, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "Steps (+ open)");
-    m.pos = ui_label(pc, 0, 0, 210, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "0");
-    lv_obj_align(m.pos, LV_ALIGN_BOTTOM_RIGHT, -8, -1);
-    // Output turns, bottom left (0.12.20, Ryan 27 Oct).
-    m.turns = ui_label(pc, 8, 0, 110, &ui_font_16, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
-    lv_obj_align(m.turns, LV_ALIGN_BOTTOM_LEFT, 8, -5);
-
-    // Move: Limit override leftmost, then Close and Open, both rows tall.
-    lv_obj_t *p = m.page[TAB_MOVE] = page(scr);
-    // Apart from the moves: a warning outline, filled while it drives.
-    m.over = btn(p, 10, y2, 148, "Limit\noverride", override_event, 0);
+    m.close = big(p, 10, "Close", LV_SYMBOL_LEFT, move_event, -1);
+    m.over = big(p, 127, "Limit\noverride", NULL, override_event, 0);
+    m.open = big(p, 244, "Open", LV_SYMBOL_RIGHT, move_event, 1);
+    // Apart from the moves: a dark outline, filled while it is held.
     lv_obj_set_style_border_side(m.over, LV_BORDER_SIDE_FULL, 0);
     lv_obj_set_style_border_width(m.over, 2, 0);
     lv_obj_set_style_border_color(m.over, UI_WARN, 0);
-    m.close = btn(p, 166, y2, 148, LV_SYMBOL_LEFT " Close", move_event, -1);
-    m.open = btn(p, 322, y2, 148, "Open " LV_SYMBOL_RIGHT, move_event, 1);
     lv_obj_t *const held_btns[2] = { m.close, m.open };
-    lv_obj_set_height(m.over, y3 + H);
     for (int i = 0; i < 2; i++) {
-        lv_obj_set_height(held_btns[i], y3 + H);
         lv_obj_add_event_cb(held_btns[i], release_event, LV_EVENT_RELEASED, NULL);
         lv_obj_add_event_cb(held_btns[i], release_event, LV_EVENT_PRESS_LOST, NULL);
     }
     lv_obj_add_event_cb(m.over, over_release, LV_EVENT_RELEASED, NULL);
     lv_obj_add_event_cb(m.over, over_release, LV_EVENT_PRESS_LOST, NULL);
-    // The second finger, every 20 ms; the timer goes with the screen.
+    // The second finger, every 20 ms; the timer goes with the row.
     over_on = false;
     m.two = lv_timer_create(two_poll, 20, NULL);
-    lv_obj_add_event_cb(m.over, two_delete, LV_EVENT_DELETE, NULL);
-
-    // Speed: the three rates.
-    p = m.page[TAB_SPEED] = page(scr);
-    m.rate = adjust_row(p, 10, y2, 226, SET_RATE, "Run");
-    m.start = adjust_row(p, 244, y2, 226, SET_START, "Start");
-    m.accel = adjust_row(p, 10, y3, 226, SET_ACCEL, "Accel");
-    // How long a full open or close takes at these rates (Ryan, 28 Oct).
-    m.travel = ui_info(p, 244, y3, 226, H, "Full open or close");
-
-    // Coils: hold torque, coils off, order, direction. (The step mode row
-    // went in 0.16.30: full step only.)
-    p = m.page[TAB_COILS] = page(scr);
-    m.hold = btn(p, 10, y2, 226, "", hold_event, 0);
-    m.off = btn(p, 244, y2, 226, "Coils off", off_event, 0);
-    m.order = btn(p, 10, y3, 226, "", order_event, 0);
-    m.dir = btn(p, 244, y3, 226, "", dir_event, 0);
-
-    tab_show();
-    motor_fast();
+    lv_obj_add_event_cb(m.over, jog_delete, LV_EVENT_DELETE, NULL);
+    motor_jog_fast();
 }
 
 /* --------------------------------------------------------------------------
- * Refresh: fast() at 10 Hz so the position follows a move; unchanged
- * values redraw nothing.
+ * Refresh: fast() at 10 Hz; unchanged values redraw nothing.
  * ------------------------------------------------------------------------ */
-// Full travel (POS_MAX, in steps of the current mode) at the start, run and
-// accel rates: up to speed, at speed, and down again, as stepper3 ramps.
-static void travel_show(void)
+void motor_jog_fast(void)
 {
-    float n = (float)valve_pos_max(), r = (float)stepper3_rate(), s0 = (float)stepper3_start_rate();
-    float a = (float)stepper3_accel(), t;
-    if (r < s0)
-        r = s0;
-    float d = (r * r - s0 * s0) / (2.0f * a);   // steps to reach the run rate
-    if (2.0f * d >= n) {
-        float v = sqrtf(s0 * s0 + a * n);           // peak rate halfway
-        t = 2.0f * (v - s0) / a;
-    } else {
-        t = 2.0f * (r - s0) / a + (n - 2.0f * d) / r;
-    }
-    uint32_t sec = (uint32_t)(t + 0.5f);
-    char buf[32];
-    lv_snprintf(buf, sizeof buf, "%lu min %02lu s", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
-    ui_set_text(m.travel, buf);
-}
-
-static void motor_fast(void)
-{
-    char t[48];
+    if (!m.over)
+        return;
     bool busy = stepper3_busy();
 
     // A hold move ends when its button is no longer pressed, even if the
@@ -593,20 +292,9 @@ static void motor_fast(void)
         shown = now;
     }
 
-    lv_snprintf(t, sizeof t, "%ld", (long)stepper3_position());
-    ui_set_text(m.pos, t);
-
-    // Output turns from count 0.
-    char tn[24];
-    int64_t c100 = (int64_t)stepper3_position() * 100 / STEPPER3_STEPS_PER_TURN;
-    int64_t a100 = c100 < 0 ? -c100 : c100;
-    lv_snprintf(tn, sizeof tn, "%s%ld.%02ld turns", stepper3_position() < 0 ? "-" : "", (long)(a100 / 100),
-                (long)(a100 % 100));
-    ui_set_text(m.turns, tn);
     // Close is greyed while the limit stop reads open, unless the override
-    // is on; Limit override while the motor is locked. A
-    // move does not grey the row (0.12.19, Ryan 27 Oct: the buttons seemed
-    // to hide themselves); a press during a move does nothing.
+    // is on; Limit override while the motor is locked. A move does not grey
+    // the row (0.12.19, Ryan 27 Oct); a press during a move does nothing.
     bool ov = stepper3_override() || over_on;
     ui_btn_enable(m.close, !stepper3_limit_open() || ov || m.held == m.close);
     ui_btn_enable(m.open, true);
@@ -621,67 +309,51 @@ static void motor_fast(void)
         else
             lv_obj_remove_local_style_prop(m.over, LV_STYLE_BG_COLOR, LV_STATE_PRESSED);
         for (uint32_t i = 0; i < lv_obj_get_child_count(m.over); i++)
-            lv_obj_set_style_text_color(lv_obj_get_child(m.over, (int32_t)i),
-                                        ov ? lv_color_white() : i ? UI_MUTED : UI_TEXT, 0);
+            lv_obj_set_style_text_color(lv_obj_get_child(m.over, (int32_t)i), ov ? lv_color_white() : UI_TEXT, 0);
     }
-
-    lv_snprintf(t, sizeof t, "%lu sps", (unsigned long)stepper3_rate());
-    ui_set_text(m.rate, t);
-    lv_snprintf(t, sizeof t, "%lu sps", (unsigned long)stepper3_start_rate());
-    ui_set_text(m.start, t);
-    lv_snprintf(t, sizeof t, "%lu sps/s", (unsigned long)stepper3_accel());
-    ui_set_text(m.accel, t);
-    for (int i = 0; i < 6; i++)
-        ui_btn_enable(m.adj[i], !busy);
-    travel_show();
-
-    uint8_t o[4];
-    stepper3_order(o);
-    lv_snprintf(t, sizeof t, "%d%d%d%d", o[0], o[1], o[2], o[3]);
-    ui_btn_text(m.order, "Coil order", t);
-    ui_btn_text(m.dir, "Direction", stepper3_reverse() ? "Reversed" : "Normal");
-    ui_btn_text(m.hold, "Hold torque", stepper3_hold() ? "On" : "Off");
-    ui_btn_enable(m.order, !busy && !stepper3_locked());
-    ui_btn_enable(m.dir, !busy && !stepper3_locked());
-    ui_btn_enable(m.hold, !busy);
-
 }
 
-// The strip: the motor state, then the limit switch (released or pressed,
-// the words of Diagnostics; HMI review H7) and whether closing is allowed.
-// A latched fault, an armed override or a message shows over it.
-static void motor_refresh(void)
+// The strip: the steps and what the motor does ("0 steps. Idle",
+// "-120 steps. Closing past the switch"); Limit override held, or the
+// switch blocking a close, as a dark warning. A latched fault or a
+// message shows over it, as on every screen.
+void motor_jog_strip(void)
 {
     char t[96];
     int8_t d = stepper3_direction();
-    const char *st = d > 0 ? "Opening" : d < 0 ? "Closing"
-                   : stepper3_energised() ? "Idle, coils on" : "Idle, coils off";
-    limit_state_t lim = limit_state();
-    const char *ls;
-    char lb[48];
     bool warn = false;
-    if (!stepper3_limit_fitted())
-        ls = lim == LIMIT_CLOSED ? "Switch released, stop off" : lim == LIMIT_OPEN ? "Switch pressed, stop off"
-                                                                                   : "Switch not read yet";
-    else if (lim == LIMIT_CLOSED)
-        ls = "Switch released, closing allowed";
-    else if (lim == LIMIT_OPEN && stepper3_limit_ignored()) {
-        // Disable switch on, in its band (Motor settings > Override).
-        lv_snprintf(lb, sizeof lb, "Switch pressed, disabled (%d to %d %%)", valve_pass_lo(), valve_pass_hi());
-        ls = lb;
-    } else {
-        ls = lim == LIMIT_OPEN ? "Switch pressed, closing blocked" : "Switch not read yet, closing blocked";
+    const char *st = d > 0 ? "Opening" : d < 0 ? (stepper3_override() ? "Closing past the switch" : "Closing")
+                   : "Idle";
+    if (d < 0 && stepper3_override())
         warn = true;
+    lv_snprintf(t, sizeof t, "%ld steps. %s", (long)stepper3_position(), st);
+    if (d == 0 && stepper3_limit_fitted() && limit_state() == LIMIT_OPEN && !stepper3_limit_ignored()) {
+        lv_snprintf(t, sizeof t, "%ld steps. Switch pressed: hold Limit override to close", (long)stepper3_position());
     }
-    lv_snprintf(t, sizeof t, "%s. %s", st, ls);
     // Limit override held, nothing moving yet: what the second finger does.
     if (over_on && !m.held2) {
-        lv_snprintf(t, sizeof t, "Limit override held: press Close or Open");
+        lv_strlcpy(t, "Limit override held: press Close or Open", sizeof t);
         warn = true;
     }
-    // The status line's icons (arrows, valve symbol), without its sparkline.
-    ui_strip_set(warn ? UI_STRIP_WARN : UI_STRIP_INFO, d > 0 ? LV_SYMBOL_UP : d < 0 ? LV_SYMBOL_DOWN : UI_ICON_VALVE, t);
-    motor_fast();
+    ui_strip_set(warn ? UI_STRIP_WARN : UI_STRIP_INFO, UI_ICON_VALVE, t);
 }
 
-const ui_screen_t ui_scr_motor = { "Motor override", motor_build, motor_refresh, motor_fast };
+// Full travel (POS_MAX steps) at the start, run and accel rates in use: up
+// to speed, at speed, and down again, as stepper3 ramps (Ryan, 28 Oct).
+const char *motor_travel_text(char *buf, size_t n)
+{
+    float steps = (float)valve_pos_max(), r = (float)stepper3_rate(), s0 = (float)stepper3_start_rate();
+    float a = (float)stepper3_accel(), t;
+    if (r < s0)
+        r = s0;
+    float d = (r * r - s0 * s0) / (2.0f * a);   // steps to reach the run rate
+    if (2.0f * d >= steps) {
+        float v = sqrtf(s0 * s0 + a * steps);   // peak rate halfway
+        t = 2.0f * (v - s0) / a;
+    } else {
+        t = 2.0f * (r - s0) / a + (steps - 2.0f * d) / r;
+    }
+    uint32_t sec = (uint32_t)(t + 0.5f);
+    lv_snprintf(buf, n, "%lu min %02lu s", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
+    return buf;
+}
