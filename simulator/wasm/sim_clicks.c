@@ -9,7 +9,6 @@
 #include "stepper3.h"
 #include "bench.h"
 
-#define DRUCK_VEXC_MIN_MV    7000
 #define DRUCK_R_MIN_PPB      5000
 #define DRUCK_R_MAX_PPB      11000000
 

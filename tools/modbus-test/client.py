@@ -47,7 +47,7 @@ if writes is not None:
         global ok
         print(("ok   " if cond else "FAIL ") + what)
         ok &= bool(cond)
-    check(r[0] == 3 and abs(f32(r, 10) - 4.625) < 1e-4, "map version and pressure")
+    check(r[0] == 4 and abs(f32(r, 10) - 4.625) < 1e-4, "map version and pressure")
     payload = list(struct.unpack(">HH", struct.pack(">f", 4.8)))
     w = c.write_registers(12, payload)
     if writes == "1":
@@ -63,7 +63,7 @@ if writes is not None:
         check(c.write_coil(0, True).exception_code == 1, "AUTO coil refused, exception 1")
     e = c.read_input_registers(0, count=1)
     check(e.isError() and e.exception_code == 1, "FC4 answers exception 1")
-    e = c.read_holding_registers(55, count=10)   # the map ends at 58 (version 3)
+    e = c.read_holding_registers(55, count=10)   # the map ends at 58 (version 3 on)
     check(e.isError() and e.exception_code == 2, "read past the map answers exception 2")
     c.close()
     sys.exit(0 if ok else 1)

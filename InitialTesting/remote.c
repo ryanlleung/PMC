@@ -133,7 +133,7 @@ static void alarm_query(void)
         PART(f.tag, f.can_reset ? 1 : 0, f.text);
     if (valve_question(&at))
         PART("W-1", 0, "Limit-switch question waiting at the screen");
-    const char *w = valve_warning();   // "W-2 Not settling: ...": the tag is the first word
+    const char *w = valve_warning();   // "W-2 No pressure response: ...": the tag is the first word
     if (w && n < sizeof a) {
         char tag[8];
         size_t k = strcspn(w, " ");

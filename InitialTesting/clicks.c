@@ -282,7 +282,6 @@ static void powermonitor_init(void)
  * Integer maths: r in ppb (1 mV/V = 1 000 000 ppb).
  *   r = raw_shunt * 312.5 nV / (raw_bus * 195.3125 uV) = raw_shunt / raw_bus * 1.6e6 ppb
  * ------------------------------------------------------------------------ */
-#define DRUCK_VEXC_MIN_MV    7000      // datasheet supply range 7-12 V
 
 /* A connected Druck gives about 0.01-0.13 mV/V at vacuum (cert 13825224
  * zero 1.337 mV at 10 V; the bench unit 5880156 gives 0.13 mV, 0.013 mV/V)

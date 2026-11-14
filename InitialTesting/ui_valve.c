@@ -54,7 +54,7 @@ static const char *const calib_help =
     "Acts on the valve now; its saved numbers are on Motor settings.\n\n"
     "Home valve: close to the switch, back off, close slowly, Return = 0 %. STOP cancels.\n\n"
     "Set as 0 %, Use last saved: set the position without moving.\n\n"
-    "F-3 switch not found, F-4 switch stuck: check the switch, reset, home again.";
+    "F-2 switch not found, F-3 switch stuck: check the switch, reset, home again.";
 
 static void start_cb(lv_event_t *e)
 {
@@ -202,26 +202,20 @@ typedef struct {
 } fault_help_t;
 
 static const fault_help_t fault_help[] = {
-    { "F-1", "The Druck reading is missing or outside 0.005-11 mV/V.",
+    // Three faults from 0.16.33 (valve.c). F-1 takes in the excitation
+    // (F-2 to 0.16.32); the event log names which cause it was.
+    { "F-1", "No Druck reading: missing, outside 0.005-11 mV/V, or the excitation under 7 V or tripped.",
       "Pressure shows ----. The valve still moves.",
-      "The Druck cable and plug, and the Power Monitor Click.",
+      "The Druck cable and plug, the Power Monitor and the Boost 10. A trip needs a power cycle.",
       "The reading is back." },
-    { "F-2", "The Druck excitation left 9.5-10.5 V, or the Boost 10 tripped.",
-      "Pressure not trusted. The valve still moves.",
-      "The Boost 10 and the 5 V supply. A trip needs a power cycle.",
-      "The excitation is back in the window." },
-    { "F-3", "Homing, the valve closed 1.1 x full travel without the limit switch.",
+    { "F-2", "Homing, the valve closed 1.1 x full travel without the limit switch.",
       "Stopped. The valve is not homed.",
       "The switch and its wire, and that the valve turns.",
       "Any time. Then home again." },
-    { "F-4", "The limit switch stayed pressed after the valve moved off it, or pressed during an opening move.",
+    { "F-3", "The limit switch stayed pressed after the valve moved off it, or pressed during an opening move.",
       "Stopped. The valve is not homed.",
       "The switch is not stuck (ice), its wire is not broken. On an opening move: Direction and coil order.",
       "Any time. Then home again." },
-    { "F-6", "The valve moved in AUTO but the pressure did not respond, 5 windows of 30 s.",
-      "Stopped the valve and holds it. MANUAL.",
-      "Drive slipping, motor unplugged, needle seized.",
-      "Any time. Check before starting AUTO." },
 };
 
 static const fault_help_t *help_for(const char *tag)

@@ -85,6 +85,7 @@ const char *ctrl_check(const ctrl_t *c, const ctrl_tune_t *k, bool homed, bool f
 
 void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_t now_pos)
 {
+    (void)t_ms;   // no timer starts with AUTO from 0.16.33 (the convergence timeout is gone)
     float e = c->sp - pv;
     c->set = ctrl_pick_set(k, 0, fminf(pv, c->sp));   // the lower of the two (0.16.9, ctrl.h)
     const ctrl_pid_t g = ctrl_set_gains(k, c->set);
@@ -95,7 +96,6 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
     c->win_pos = c->pos_f;
     c->win_pv = pv;
     c->noresp = 0;
-    c->conv_ms = t_ms;
     c->move = false;
     c->kp_used = steps_of(g.kp, k);
     c->kd_used = steps_of(g.kd, k);
@@ -106,12 +106,12 @@ void ctrl_start(ctrl_t *c, const ctrl_tune_t *k, uint32_t t_ms, float pv, int32_
 
 bool ctrl_set_sp(ctrl_t *c, float sp, float fs, uint32_t t_ms)
 {
+    (void)t_ms;   // no timer starts at a new target from 0.16.33 (the convergence timeout is gone)
     sp = roundf(sp * 10.0f) / 10.0f;   // targets are 0.1 mbar everywhere
     if (!(sp >= 0 && sp <= fs))
         return false;
     c->sp = sp;
     c->sp_set = true;
-    c->conv_ms = t_ms;
     c->in_band = false;
     return true;
 }
@@ -223,11 +223,11 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         const bool judged = fabsf(moved) >= judge;
         const int way = judged ? sgnf(moved) : !in->moving && pin_open ? 1 : !in->moving && pin_min ? -1 : 0;
         if (way) {
-            // A wrong-way change is a response too: no fault for it (Ryan, 22 Oct;
-            // on the model a lost helium supply shows as F-6, a stopped pump as W-2).
+            // A wrong-way change is a response too: nothing raised for it (Ryan,
+            // 22 Oct; on the model a lost helium supply shows as W-2).
             if (judged && fabsf(dp) < CTRL_DPMIN) {
                 if (++c->noresp >= CTRL_NRESP)
-                    return CTRL_F06;
+                    return CTRL_NORESP;
             } else {
                 c->noresp = 0;
             }
@@ -239,18 +239,8 @@ ctrl_result_t ctrl_step(ctrl_t *c, const ctrl_tune_t *k, const ctrl_in_t *in)
         c->win_pv = pv;
     }
 
-    // W-6 (pinned at the wrong end for 60 s) removed in 0.15.11 (Ryan 5 Nov):
-    // at low pressure the valve rightly sits within 1 % of closed with the
-    // pressure under the band for minutes, and it tripped there.
-
-    // W-2 convergence timeout. The setpoint band can be 0 (0.16.16, Ryan
-    // 12 Nov): In band and Stable then never show, but W-2 still judges
-    // against 0.10 mbar, the old least band, or a steady hold would end AUTO
-    // after CTRL_TCONV_S for not reading the setpoint exactly.
-    if (fabsf(c->sp - pv) <= fmaxf(k->band, CTRL_TCONV_BAND))
-        c->conv_ms = in->t_ms;
-    else if (since(in->t_ms, c->conv_ms) > CTRL_TCONV_S * 1000u)
-        return CTRL_W02;
+    // No convergence timeout from 0.16.33 (ctrl.h): AUTO stays on however
+    // long the pressure is off the setpoint.
     return CTRL_RUN;
 }
 

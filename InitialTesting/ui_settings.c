@@ -932,7 +932,7 @@ static const tab_t valve_tabs[4] = {
     { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4, "Used by Home valve. " VALVE_SET_NOTE },
     { "Override", { CFG_PASS_LO, CFG_PASS_HI }, 2,
       "Disable switch: when On and homed, the limit switch does not stop closing from From to To % open "
-      "(no W-1, W-4 or F-4). Off after a restart.\n\nMotor override: drives the motor by steps.", false, true },
+      "(no W-1 or F-3). Off after a restart.\n\nMotor override: drives the motor by steps.", false, true },
 };
 // PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
 // name on their own tab, the rest of AUTO's settings on the other. From

@@ -115,13 +115,13 @@ bool valve_motion_blocked(void) { return v_f12 || v_f16; }
 bool valve_fault_first(const char **tag, const char **text)
 {
     if (v_f01) { *tag = "F-1"; *text = "No pressure signal"; return true; }
-    if (v_f12) { *tag = "F-4"; *text = "Limit pressed when it should be free"; return true; }
-    if (v_f16) { *tag = "F-6"; *text = "No pressure response"; return true; }
+    if (v_f16) { *tag = "F-2"; *text = "Limit not found while homing"; return true; }
+    if (v_f12) { *tag = "F-3"; *text = "Limit pressed when it should be free"; return true; }
     return false;
 }
 bool valve_fault_is(const char *tag)
 {
-    return (v_f01 && !strcmp(tag, "F-1")) || (v_f12 && !strcmp(tag, "F-4")) || (v_f16 && !strcmp(tag, "F-6"));
+    return (v_f01 && !strcmp(tag, "F-1")) || (v_f16 && !strcmp(tag, "F-2")) || (v_f12 && !strcmp(tag, "F-3"));
 }
 int valve_reset(char *left, size_t n) { int a = valve_fault_count(); v_f12 = v_f16 = false; if (n) strcpy(left, v_f01 ? "F-1" : ""); return a; }
 static bool v_q;
@@ -129,15 +129,16 @@ bool valve_question(int32_t *p) { if (v_q && p) *p = 187; return v_q; }
 bool valve_answer(bool z, const char **why) { (void)z; (void)why; v_q = false; return true; }
 bool valve_fault_get(int i, valve_fault_t *f)
 {
-    const char *tags[3] = { "F-1", "F-4", "F-6" },
-               *texts[3] = { "No pressure signal", "Limit pressed when it should be free", "No pressure response" };
-    bool on[3] = { v_f01, v_f12, v_f16 };
+    // The three faults of 0.16.33 (v_f16: F-2 limit not found, v_f12: F-3 limit pressed).
+    const char *tags[3] = { "F-1", "F-2", "F-3" },
+               *texts[3] = { "No pressure signal", "Limit not found while homing", "Limit pressed when it should be free" };
+    bool on[3] = { v_f01, v_f16, v_f12 };
     int k = 0;
     for (int j = 0; j < 3; j++) {
         if (!on[j]) continue;
         if (k++ != i) continue;
         f->tag = tags[j]; f->text = texts[j]; f->age_ms = j ? 64000 : 312000;
-        f->mode = j == 2 ? VALVE_AUTO : VALVE_MANUAL; f->can_reset = j != 0;
+        f->mode = j == 1 ? VALVE_CALIBRATING : VALVE_MANUAL; f->can_reset = j != 0;
         return true;
     }
     return false;
@@ -304,9 +305,7 @@ int main(int argc, char **argv)
     if (!strcmp(st, "autosched")) v_pidset = 2;
     if (!strcmp(st, "autostable")) v_reg = CTRL_REG_STABLE;
     if (!strcmp(st, "autoreg")) { extern bool fake_busy; fake_busy = moving = true; v_target10 = 356; v_reg = CTRL_REG_REGULATING; }
-    if (!strcmp(st, "paused")) v_warn = "W-2 Not settling: switched to MANUAL, valve idle";   // shown until OK
-    if (!strcmp(st, "warn4")) v_warn = "W-4 Switch pressed at 48.04 %: check the switch";
-    if (!strcmp(st, "warn5")) v_warn = "W-5 Move timed out: switched to MANUAL";
+    if (!strcmp(st, "paused")) v_warn = "W-2 No pressure response: switched to MANUAL";   // shown until OK
     if (!strcmp(st, "f08")) v_f16 = true;
     if (!strcmp(st, "faults") || !strcmp(st, "detail")) { v_f01 = true; v_f12 = true; }
 

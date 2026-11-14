@@ -86,7 +86,7 @@ static uint32_t v_fp;                   // current rate, steps/s * 256
 static volatile uint32_t v_run_fp, v_start_fp;
 static uint32_t n_acc;                  // steps spent accelerating
 static uint32_t move_rate;              // run rate of this move, steps/s
-static uint32_t deadline_ms;            // W-5: lv_tick_get() past this = timeout
+static uint32_t deadline_ms;            // lv_tick_get() past this = the move has timed out
 static volatile uint32_t moves_ended;   // counts moves ended, for stepper3_move_seq()
 static int32_t move_from;                // last move: start position and times
 static uint32_t move_t0;
@@ -295,7 +295,7 @@ void TIM7_IRQHandler(void)
     // valve has: once it has read released for FREE_ARM steps, pressed again
     // during an opening move means the valve is in fact closing (Direction
     // or coil order wrong, a count saved under another one) or the switch is
-    // failing. Stopped at once, and valve.c latches F-4; otherwise it would
+    // failing. Stopped at once, and valve.c latches F-3; otherwise it would
     // drive the needle into the seat with nothing to stop it.
     // The pin itself, in steps: PRESSED_N in a row once armed (one glitch on
     // a long pulled-up line is not a press).
@@ -397,7 +397,8 @@ static void step_irq_release(uint32_t pm) { __asm volatile ("msr primask, %0" ::
 
 static int32_t abs32(int32_t v) { return v < 0 ? -v : v; }
 
-// W-5 (F-5 to 0.16.28): the move should be done within |distance| / rate, plus the ramps
+// The motion timeout (an event only from 0.16.33; W-5, and F-5 to 0.16.28,
+// before): the move should be done within |distance| / rate, plus the ramps
 // (counted twice over, for a turn round), plus 2 s.
 static void set_deadline(void)
 {
@@ -525,7 +526,7 @@ void stepper3_poll(void)
     if (run_state != ST_MOVING || (int32_t)(lv_tick_get() - deadline_ms) <= 0)
         return;
     stepper3_stop();
-    last_stop = STEPPER3_STOP_TIMEOUT;   // valve.c logs W-5 (no latch)
+    last_stop = STEPPER3_STOP_TIMEOUT;   // valve.c logs a SYS event (no latch, no warning)
 }
 
 // During a ramped stop (MOT STOP RAMP, a hold released, Switch to MANUAL)

@@ -24,7 +24,7 @@
  * Each accepted write is logged as a NET event with the client's address.
  * ------------------------------------------------------------------------ */
 
-#define MAP_VERSION 3
+#define MAP_VERSION 4
 
 enum {
     HR_VERSION = 0, HR_HEARTBEAT, HR_MODE, HR_STATUS, HR_REGULATION,
@@ -117,22 +117,22 @@ void mbmap_begin(void)
         st |= 1u << ST_HOMED;
     if (stepper3_busy())                       st |= 1u << ST_MOVING;
     if (stepper3_limit_open())                 st |= 1u << ST_SWITCH;
-    if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 and F-2 too
+    if (valve_fault_count() > 0)               st |= 1u << ST_FAULT;   // F-1 too
     if (w || valve_question(NULL))             st |= 1u << ST_WARNING;
     if (sp_set)                                st |= 1u << ST_TARGET_SET;
     if (mbmap_writes_allowed())                st |= 1u << ST_WRITES;
     st |= 1u << ST_MOTOR_SUPPLY;   // no supply sense from 0.14.3: kept at 1 so the map does not change
 
-    // Bit 4 was F-5 (motion timeout): the warning W-5 from 0.16.29, so
-    // always 0 here.
-    static const char *const ftag[] = { "F-1", "F-2", "F-3", "F-4", NULL, "F-6" };
+    // Map version 4 (0.16.33, the codes renumbered): bit 0 F-1, bit 1 F-2
+    // limit not found, bit 2 F-3 limit pressed; bits 3 to 5 always 0.
+    static const char *const ftag[] = { "F-1", "F-2", "F-3" };
     uint16_t f = 0;
-    for (int i = 0; i < 6; i++)
-        if (ftag[i] && valve_fault_is(ftag[i]))
+    for (int i = 0; i < 3; i++)
+        if (valve_fault_is(ftag[i]))
             f |= (uint16_t)(1u << i);
 
-    // W-1 is the switch question; the others are the strip warning, one at
-    // a time. Bit 2 was W-3 (controller hot, removed in 0.16.29): always 0.
+    // Bit 0 W-1, the switch question; bit 1 W-2, no pressure response (the
+    // strip warning, by its number). Bits 2 to 5 always 0 from version 4.
     uint16_t wb = 0;
     if (valve_question(NULL))
         wb |= 1u << 0;

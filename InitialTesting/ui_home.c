@@ -61,7 +61,7 @@ typedef struct {
 
 static tile_t pt, vt;
 static lv_obj_t *pid_btn, *pid_nm[3], *pid_val[3], *start_btn, *stop_btn, *homev_btn;
-static bool vt_fault;   // a valve fault (F-3 to F-6): the Valve tile's red edge, over the limit's yellow
+static bool vt_fault;   // a valve fault (F-2, F-3): the Valve tile's red edge, over the limit's yellow
 
 static void show_if(lv_obj_t *o, bool on)
 {
@@ -654,7 +654,7 @@ static void home_refresh(void)
     ui_set_text(pt.reading, ok ? ui_fmt1(buf, sizeof buf, s->p_mmbar) : "----");
     ui_set_color(pt.reading, ok ? UI_TEXT : UI_FAULT);
     bar_set(&pt, ok ? pbar_x(s->p_mmbar) : -1);
-    alarm_set(&pt, !ok || valve_fault_is("F-1") || valve_fault_is("F-2"));
+    alarm_set(&pt, !ok || valve_fault_is("F-1"));
     int32_t sp;
     bool auto_on = valve_auto();
     box_set(&pt, auto_on, valve_target(&sp) ? ui_fmt1(buf, sizeof buf, sp) : "Not set");
@@ -665,7 +665,7 @@ static void home_refresh(void)
     show_if(start_btn, !auto_on);
     ui_btn_enable(start_btn, m == VALVE_MANUAL && !valve_fault_count() && ok);
 
-    vt_fault = valve_fault_is("F-3") || valve_fault_is("F-4") || valve_fault_is("F-6");
+    vt_fault = valve_fault_is("F-2") || valve_fault_is("F-3");
     home_fast();
     bool manual = m == VALVE_MANUAL && !valve_motion_blocked();
     // Where the valve is going, greyed when not editable; "----" while
@@ -707,8 +707,8 @@ void ui_status_line(void)
                                              "Homing 4 of 4: return" };
         ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_REFRESH, what[step < 0 ? 0 : step]);
     } else if (m == VALVE_MANUAL && valve_warning()) {
-        // No PAUSED state (Ryan, 22 Oct): W-2, W-4 and W-5 drop to
-        // MANUAL; shown until OK.
+        // No PAUSED state (Ryan, 22 Oct): W-2 drops to MANUAL; shown
+        // until OK.
         if (!nf)
             ui_strip_action("OK", NULL, warn_ok_event);
         ui_strip_set(UI_STRIP_WARN, NULL, valve_warning());

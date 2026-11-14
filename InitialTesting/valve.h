@@ -15,7 +15,7 @@
  * by CFG SAVE (cfg.c, stage 3).
  *
  * Modes: OFF (every start, 0.15.1; Shut down below), NOT CALIBRATED
- * (turned on not homed, after F-3/F-4 or an aborted calibration),
+ * (turned on not homed, after F-2/F-3 or an aborted calibration),
  * CALIBRATING, MANUAL and AUTO (stage 8, ctrl.c), SHUTDOWN. Nothing moves
  * at boot.
  *
@@ -23,30 +23,39 @@
  * the target set; bumpless from where the valve is going. Every second,
  * after the pressure read, ctrl_step works out the valve command and the
  * checks. A fault stops the valve and drops to MANUAL, holding where it
- * stopped (sensor faults too). W-2 (not settling) stops it and drops to
- * MANUAL too, the valve idle (no PAUSED state since 0.11.25, Ryan 22 Oct);
- * the strip shows W-2 until OK or the next Start AUTO. Leaving AUTO ramps the valve down and
+ * stopped (the sensor fault too). W-2 (no pressure response) stops it and
+ * drops to MANUAL too, the valve idle (no PAUSED state since 0.11.25, Ryan
+ * 22 Oct); the strip shows W-2 until OK or the next Start AUTO. So does
+ * W-1 away from the seat. AUTO does not end for being off the setpoint
+ * (no convergence timeout from 0.16.33). Leaving AUTO ramps the valve down and
  * MANUAL holds where it stops. MANUAL moves, homing and the valve settings
  * are refused in AUTO ("Stop AUTO first" on the screen from 0.15.3; ERR 202 "Switch to MANUAL first" over the network).
  *
  * Calibration (Control Logic 4): if the switch is pressed, an N_clear
- * clearance move off it first (F-4 if still pressed); a fast close at
- * f_home for up to 1.1 x POS_MAX (F-3 if the switch is not found); an
- * N_backoff back-off (F-4 if still pressed); a creep close at f_creep
- * (F-3 if not found); the switch point is N_offset (0 %).
+ * clearance move off it first (F-3 if still pressed); a fast close at
+ * f_home for up to 1.1 x POS_MAX (F-2 if the switch is not found); an
+ * N_backoff back-off (F-3 if still pressed); a creep close at f_creep
+ * (F-2 if not found); the switch point is N_offset (0 %).
  *
- * The switch pressed during any other move, once calibrated: the move stops
- * (stepper3.c), a W-1 event, and a question waits on the screen (this point
- * is 0 %, or keep the count).
+ * W-1, the switch pressed outside homing, once calibrated: a closing move
+ * stops at it (stepper3.c), and pressed away from the seat, moving or not,
+ * counts too and ends AUTO (its own warning W-4 to 0.16.32). A W-1 event,
+ * and a question waits on the screen (this point is the seat, or keep the
+ * count).
  *
  * Faults latch, stop the motor and lock out moves until ALARM RESET (or
- * Reset on the screen), which clears only the latches whose cause has gone:
- *   F-1 no pressure signal, F-2 excitation outside 9.5-10.5 V or tripped,
- *   F-3 switch not found while calibrating, F-4 switch still pressed
- *   after moving off it; in AUTO only: F-6 no pressure response (there
- *   is no F-5: the motion timeout is the warning W-5 from 0.16.29).
- *   F-1 and F-2 do not block manual moves. STOP
- *   latches nothing; in AUTO it drops to MANUAL.
+ * Reset on the screen), which clears only the latches whose cause has gone.
+ * Three from 0.16.33 (Ryan 14 Nov, renumbered):
+ *   F-1 no pressure signal (also the excitation under 7 V or tripped: F-2
+ *       to 0.16.32),
+ *   F-2 switch not found while homing (F-3 to 0.16.32),
+ *   F-3 switch still pressed after moving off it, or pressed during an
+ *       opening move (F-4 to 0.16.32).
+ *   F-1 does not block manual moves. STOP latches nothing; in AUTO it
+ *   drops to MANUAL.
+ * Two warnings, nothing latched: W-1 above and W-2 no pressure response in
+ * AUTO (the fault F-6 to 0.16.32). Removed in 0.16.33: not settling (the
+ * old W-2) and move timed out (W-5; an event only).
  * Outside AUTO, STOP stops and holds the valve without a latch (STOP event).
  *
  * The remote commands are in remote.c (SETPOINT, MODE, VALVE SET, STOP, ALARM,
@@ -75,7 +84,7 @@ int32_t valve_pos_max(void);
 // 0.16.21, Ryan 13 Nov: "change ignore to disable") (0.16.5, Ryan 9 Nov:
 // the valve binds about 13 % and the force switch trips there, off the
 // seat): while on and homed, between valve_pass_lo() and valve_pass_hi() %
-// open the switch neither stops closing nor raises W-1, W-4 or F-4. Motor
+// open the switch neither stops closing nor raises W-1 or F-3. Motor
 // settings > Override (0.16.19). RAM only, off at power-up. The edges are
 // saved settings from 0.16.21 (Ryan 12 Nov: "make the boundary editable";
 // CFG_PASS_LO and CFG_PASS_HI, factory 5 and 50, 0 to 100 % from 0.16.22). Fixed before: 10 to 20 %
@@ -84,11 +93,11 @@ bool valve_limit_band(void);
 void valve_limit_band_set(bool on);
 int valve_pass_lo(void);         // % open
 int valve_pass_hi(void);
-bool valve_motion_blocked(void); // a latched fault that stops the motor (not F-1, F-2)
+bool valve_motion_blocked(void); // a latched fault that stops the motor (not F-1)
 
 // AUTO (stage 8).
 bool valve_auto(void);
-// The strip text of a warning not yet acknowledged (W-2, W-4, W-5), or
+// The strip text of a warning not yet acknowledged (W-2), or
 // NULL; cleared by OK, Start AUTO and homing.
 const char *valve_warning(void);
 void valve_warning_clear(void);
@@ -135,7 +144,7 @@ bool valve_stop_latches(void);                   // STOP would end AUTO now (red
 int valve_reset(char *left, size_t n);
 int valve_fault_count(void);
 bool valve_fault_first(const char **tag, const char **text);   // highest priority
-bool valve_fault_is(const char *tag);            // e.g. "F-6" latched
+bool valve_fault_is(const char *tag);            // e.g. "F-1" latched
 bool valve_question(int32_t *pct10);             // switch question waiting, where
 bool valve_answer(bool set_zero, const char **why);   // VALVE SETZERO / VALVE SKIP
 

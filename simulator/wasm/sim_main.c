@@ -212,7 +212,7 @@ ADC_TypeDef *sim_adc1_access(void)
 // One simulated millisecond of TIM7 (1 MHz count). Update events run the
 // step interrupt; EGR UG reloads at once; ARR takes effect at the next
 // update when ARPE is set.
-static bool tim7_lost;   // knob 24: the step interrupt does not run (a move then overruns its time, W-5)
+static bool tim7_lost;   // knob 24: the step interrupt does not run (a move then overruns its time: a SYS event)
 
 static void tim7_ms(void)
 {

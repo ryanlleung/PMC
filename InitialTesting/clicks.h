@@ -20,6 +20,10 @@
  * for the Druck excitation, and drops to ~5 V if VBUS reads over 11.5 V.
  */
 
+// The Druck gives no reading with the excitation below this (datasheet
+// supply range 7-12 V); valve.c names it as the cause of F-1.
+#define DRUCK_VEXC_MIN_MV    7000
+
 // Latest readings for the UI, valid after clicks_init(), updated by clicks_poll().
 typedef struct {
     bool pm_found;        // INA228 answering

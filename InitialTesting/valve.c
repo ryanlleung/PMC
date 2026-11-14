@@ -54,8 +54,6 @@ static int32_t seat_count(void) { return -n_return; }
 
 #define SETTLE_MS     150     // after a move, before the switch is read
 #define CREEP_EXTRA   200     // creep goes this far past the back-off
-#define EXC_MIN_MV    9500    // F-2 window
-#define EXC_MAX_MV    10500
 
 /* --------------------------------------------------------------------------
  * Event log: 100 in RAM, each also sent as an EVT line (200 to 0.11.17;
@@ -103,19 +101,24 @@ void valve_event(const char *tag, const char *fmt, ...)
 /* --------------------------------------------------------------------------
  * Faults, in the simulator's FAULT_ORDER (highest priority first).
  * ------------------------------------------------------------------------ */
-// F-5 (motion timeout) is the warning W-5 from 0.16.29: the numbers of the
-// others stay.
-typedef enum { F01, F02, F03, F04, F06, F_N } fault_t;   // priority order (Ryan, 22 Oct)
+// Three faults from 0.16.33 (Ryan 14 Nov: "implement, and renumber them so
+// it makes more sense"), each one a hard reading of the hardware:
+//   F-1 no pressure signal (the excitation fault, F-2 to 0.16.32, is one of
+//       its causes now);
+//   F-2 limit not found while homing (F-3 to 0.16.32);
+//   F-3 limit pressed when it should be free (F-4 to 0.16.32).
+// No pressure response (F-6 to 0.16.32) is the warning W-2; the motion
+// timeout (F-5 to 0.16.28, W-5 to 0.16.32) is an event only.
+typedef enum { F_NOPV, F_NOLIMIT, F_STUCK, F_N } fault_t;   // priority order (Ryan, 22 Oct)
 
-static const char *const fault_tag[F_N]   = { "F-1", "F-2", "F-3", "F-4", "F-6" };
+static const char *const fault_tag[F_N]   = { "F-1", "F-2", "F-3" };
 static const char *const fault_short[F_N] = {
-    "No pressure signal", "Excitation out of window", "Limit not found while calibrating",
-    "Limit pressed when it should be free", "No pressure response" };
+    "No pressure signal", "Limit not found while homing", "Limit pressed when it should be free" };
 
 static bool latched[F_N];
 static uint32_t latched_ms[F_N];    // when each latched
 static valve_mode_t latched_mode[F_N];
-static bool cause_f01, cause_f02;   // from the last sensor read
+static bool cause_f01;              // from the last sensor read
 static bool sensed;                 // at least one sensor read since boot
 
 /* --------------------------------------------------------------------------
@@ -163,25 +166,27 @@ static const char *pct_text(char *buf, size_t n, int32_t pos)
     return fixed_fmt(buf, n, pct10_of(pos), 1);
 }
 
-// The pressure faults (F-1 no Druck, F-2 excitation) do not block the motor: manual moves and calibrating use the step
-// count and the limit switch, not the pressure (Ryan 16 Oct). In AUTO they
-// stop the valve and drop to MANUAL like any other fault.
-static bool sensor_fault(fault_t f) { return f == F01 || f == F02; }
+// The pressure fault (F-1) does not block the motor: manual moves and homing use the step
+// count and the limit switch, not the pressure (Ryan 16 Oct). In AUTO it
+// stops the valve and drops to MANUAL like any other fault.
+static bool sensor_fault(fault_t f) { return f == F_NOPV; }
 
 static bool is_auto(void) { return mode == VALVE_AUTO; }
 
-// The warning that ended AUTO or needs a look (W-2, W-4, W-5; W-6 removed in
-// 0.15.11), shown on the status strip until OK, the next Start AUTO or
-// homing. W-5 is the move timeout from 0.16.29 (F-5 before; the pressure
-// above the sensor range to 0.16.28, removed: a 15 psia sensor on a pumped
-// line cannot reach it).
+// The warning that ended AUTO (W-2 no pressure response), or a shut down
+// stopped by the switch: shown on the status strip until OK, the next
+// Start AUTO or homing. Two warnings from 0.16.33: W-1 the limit switch
+// question (below, with the old W-4 folded in) and W-2. Gone: not settling
+// (W-2 to 0.16.32), switch pressed away from the seat (W-4, now W-1), move
+// timed out (W-5, an event only now).
 static char warn[72];
-static uint32_t sw_far_ms; // W-4: when the switch was first read pressed away from the seat, 0 = not
-static bool sw_far_said;  // W-4 raised for this occurrence
-// W-4 once the switch has read pressed away from the seat this long (0.16.4,
-// Ryan PR #43: the warning "should update as quickly as the limit hitting
-// it"; to 0.16.3 two 1 s reads, so up to 2 s after Home's limit edge).
-// Long enough that one glitch on the wire does not end AUTO.
+static uint32_t sw_far_ms; // when the switch was first read pressed away from the seat
+static bool sw_far_on;    // sw_far_ms is running
+static bool sw_far_said;  // W-1 raised for this occurrence
+// The switch pressed away from the seat counts once it has read pressed this
+// long (0.16.4, Ryan PR #43: the warning "should update as quickly as the
+// limit hitting it"; to 0.16.3 two 1 s reads, so up to 2 s after Home's
+// limit edge). Long enough that one glitch on the wire does not end AUTO.
 #define SW_FAR_MS 200
 // Pass band (0.16.5, Ryan 9 Nov): asked for on Motor settings > Override
 // > Disable switch (Ignore switch in 0.16.21; Motor override > Switch to 0.16.18); in force
@@ -299,7 +304,7 @@ static bool cal_move(int32_t to, int32_t rate)
 }
 
 // A homing move refused (the saved position not written): the homing ends with the reason in the log, as for STOP, and no
-// fault (F-3 is the switch not found). first: nothing has moved yet.
+// fault (F-2 is the switch not found). first: nothing has moved yet.
 static bool cal_go(int32_t to, int32_t rate, bool first)
 {
     if (cal_move(to, rate))
@@ -374,7 +379,7 @@ static void cal_move_ended(stepper3_stop_t why)
             cal_stage = CAL_BACK;
             cal_go(stepper3_position() + n_backoff, f_home, false);
         } else if (why == STEPPER3_STOP_DONE) {
-            raise(F03, true, "Homing: switch not found within %ld steps",
+            raise(F_NOLIMIT, true, "Homing: switch not found within %ld steps",
                   (long)(((int64_t)pos_max * 11 + 5) / 10));
         } else {
             cal_abort(stepper3_stop_name(why));
@@ -391,7 +396,7 @@ static void cal_move_ended(stepper3_stop_t why)
             cal_stage = CAL_PARK;
             cal_go(0, f_home, false);
         } else if (why == STEPPER3_STOP_DONE) {
-            raise(F03, true, "Homing: switch not found on the creep close");
+            raise(F_NOLIMIT, true, "Homing: switch not found on the creep close");
         } else {
             cal_abort(stepper3_stop_name(why));
         }
@@ -420,7 +425,7 @@ static void cal_settled(void)
     cal_settling = false;
     int32_t moved = cal_stage == CAL_CLEAR ? n_clear : cal_stage == CAL_PARK ? n_return : n_backoff;
     if (limit_open_now()) {
-        raise(F04, true, "Switch still active after %ld-step %s", (long)moved,
+        raise(F_STUCK, true, "Switch still active after %ld-step %s", (long)moved,
               cal_stage == CAL_CLEAR ? "clearance move" : cal_stage == CAL_PARK ? "return" : "back-off");
     } else if (cal_stage == CAL_CLEAR) {
         cal_fast(false);
@@ -431,6 +436,11 @@ static void cal_settled(void)
     }
 }
 
+// W-1: the switch pressed outside homing, homed. A closing move that
+// reaches it stops there (stepper3.c); pressed away from the seat for
+// SW_FAR_MS, moving or not, comes here too (far_check; the warning W-4 to
+// 0.16.32). Either way one question waits on the screen: this point is the
+// seat, or keep the count. Only a look can tell ice from the seat.
 static void limit_hit(void)
 {
     if (!calibrated || question)
@@ -590,32 +600,31 @@ void valve_init(void)
 
 static void auto_end(const char *strip);
 
-// W-5 (F-5 to 0.16.28; Ryan 13 Nov: "make it a warning instead, use faults
-// for stuff thats is verifiably a fault"): a move ran past its time and
-// stepper3_poll stopped it. The stepper is open loop, so this is the
-// firmware's own step timing, not a stalled motor. Nothing latches: AUTO,
-// a homing or a shut down ends, the strip says so until OK, and the next
-// move is allowed.
+// A move ran past its time and stepper3_poll stopped it (the fault F-5 to
+// 0.16.28, the warning W-5 to 0.16.32). An event only from 0.16.33 (Ryan
+// 14 Nov): the stepper is open loop, so this is the firmware's own step
+// timing, not a stalled motor, and there is nothing for the operator to do.
+// A homing or a shut down ends (its next move would start from a count that
+// is short); AUTO carries on with its next move. Said once, until a move
+// ends another way, so a step timer that has stopped cannot fill the log.
+static bool timeout_said;
 static void move_timeout(void)
 {
     char pc[16];
     int32_t pos = stepper3_position();
-    ev("W-5", "Move timed out at count %ld (%s %%), valve stopped", (long)pos, pct_text(pc, sizeof pc, pos));
-    if (is_auto()) {
-        auto_end("W-5 Move timed out: switched to MANUAL");
-        ev("MODE", "Manual after W-5, valve idle at %s %%", pct_text(pc, sizeof pc, pos));
-        return;
+    if (!timeout_said) {
+        timeout_said = true;
+        ev("SYS", "Move stopped at count %ld (%s %%): it ran past its time", (long)pos, pct_text(pc, sizeof pc, pos));
     }
-    cal_abort("W-5 move timed out");
-    shut_cancel("W-5 move timed out", NULL);
-    lv_snprintf(warn, sizeof warn, "W-5 Move timed out, valve stopped");
+    cal_abort("move timed out");
+    shut_cancel("move timed out", NULL);
 }
 
-// A move has ended since the last look: why (W-5, homing, the limit).
+// A move has ended since the last look: why (timed out, homing, the limit).
 static void seq_check(void)
 {
     if (stepper3_take_reversed())
-        raise(F04, true, "Switch pressed during an opening move at count %ld: Direction, coil order or switch",
+        raise(F_STUCK, true, "Switch pressed during an opening move at count %ld: Direction, coil order or switch",
               (long)stepper3_position());
     if (stepper3_take_stall()) {
         ev("SYS", "Move stopped at count %ld: the main loop stalled for over 1 s", (long)stepper3_position());
@@ -626,6 +635,8 @@ static void seq_check(void)
     if (seq != seq_seen) {
         seq_seen = seq;
         stepper3_stop_t why = stepper3_last_stop();
+        if (why != STEPPER3_STOP_TIMEOUT)
+            timeout_said = false;
         if (why == STEPPER3_STOP_TIMEOUT)
             move_timeout();
         else if (why == STEPPER3_STOP_REVERSED || why == STEPPER3_STOP_STALL)
@@ -709,12 +720,14 @@ static const char *mbar_text(char *buf, size_t n, float mbar, int dec)
     return fixed_fmt(buf, n, (int64_t)(mbar * (float)scale + (mbar >= 0 ? 0.5f : -0.5f)), dec);
 }
 
-// A warning ends AUTO: the valve stops where it is, MANUAL.
+// A warning ends AUTO: the valve stops where it is, MANUAL. strip: the
+// text for the status strip until OK, or NULL (W-1: the question shows).
 static void auto_end(const char *strip)
 {
     stepper3_stop();
     mode = VALVE_MANUAL;
-    lv_snprintf(warn, sizeof warn, "%s", strip);
+    if (strip)
+        lv_snprintf(warn, sizeof warn, "%s", strip);
     update_lock();
 }
 
@@ -726,31 +739,38 @@ static bool switch_far(void)
            stepper3_position() > n_clear + (n_backoff > n_return ? n_backoff : n_return);
 }
 
-// W-4, every pass of the main loop: the switch pressed away from the seat
-// for SW_FAR_MS.
+// Every pass of the main loop: the switch pressed away from the seat for
+// SW_FAR_MS is W-1 too (0.16.33; its own warning W-4 before, which a
+// closing move raised on top of W-1 for the same press). The question is
+// asked, unless the closing move that found the switch has asked it
+// already, and AUTO ends: the count or the switch is wrong, and the loop
+// cannot close past it. Once per press: Skip does not ask again while the
+// switch stays pressed. Not while OFF (asked once it is turned on), and
+// held over while Limit override is armed or in use: the operator is
+// driving past the switch on purpose, and a question popping up would
+// take the buttons from under two fingers. A press that is still there
+// when the override ends is asked then.
 static void far_check(void)
 {
-    char pc[16], v[16];
-    if (!switch_far()) {
-        sw_far_ms = 0;
+    char pc[16];
+    if (!switch_far() || mode == VALVE_OFF) {
+        sw_far_on = false;
         sw_far_said = false;
-    } else if (!sw_far_ms) {
-        sw_far_ms = lv_tick_get() | 1;   // 0 means not pressed
+    } else if (stepper3_override()) {
+        sw_far_on = false;   // held over: timed again once the override ends
+    } else if (!sw_far_on) {
+        // Its own flag (0.16.33): to 0.16.32 the time itself was the flag,
+        // made non-zero with | 1, which on an even tick put it 1 ms ahead,
+        // so the next pass read it as long past and the 200 ms was skipped.
+        sw_far_on = true;
+        sw_far_ms = lv_tick_get();
     } else if (lv_tick_elaps(sw_far_ms) >= SW_FAR_MS && !sw_far_said) {
         sw_far_said = true;
-        int32_t pos = stepper3_position();
-        bool was_auto = is_auto();
-        fixed_fmt(v, sizeof v, fixed_round(milli_of(pos), 1), 2);
-        char t[72];
-        lv_snprintf(t, sizeof t, "W-4 Switch pressed at %s %%: check the switch", v);
-        if (was_auto)
-            auto_end(t);
-        else
-            lv_snprintf(warn, sizeof warn, "%s", t);
-        ev("W-4", "Switch pressed at count %ld (%s %%), off the seat: check switch, wiring, position",
-           (long)pos, pct_text(pc, sizeof pc, pos));
-        if (was_auto)
-            ev("MODE", "Manual after W-4, valve idle at %s %%", pct_text(pc, sizeof pc, pos));
+        limit_hit();
+        if (is_auto()) {
+            auto_end(NULL);
+            ev("MODE", "Manual after W-1, valve idle at %s %%", pct_text(pc, sizeof pc, stepper3_position()));
+        }
     }
 }
 
@@ -786,14 +806,17 @@ static void auto_step(void)
             }
         }
         break;
-    case CTRL_W02:
-        auto_end("W-2 Not settling: switched to MANUAL, valve idle");
-        ev("W-2", "Convergence timeout after %d s, AUTO ended, MANUAL, valve idle", CTRL_TCONV_S);
+    case CTRL_NORESP: {
+        // W-2 (the fault F-6 to 0.16.32; Ryan 13 Nov: "use faults for stuff
+        // thats is verifiably a fault"): nothing latches, AUTO ends, the
+        // strip says so until OK and the next Start AUTO is allowed.
+        char pc[16];
+        auto_end("W-2 No pressure response: switched to MANUAL");
+        ev("W-2", "No pressure response in %d windows of %d s: needle blocked, no helium or drive slipping",
+           CTRL_NRESP, CTRL_TCHECK_S);
+        ev("MODE", "Manual after W-2, valve idle at %s %%", pct_text(pc, sizeof pc, stepper3_position()));
         break;
-    case CTRL_F06:
-        raise(F06, false, "No pressure response in %d windows: drive slipping, motor unplugged or needle seized",
-              CTRL_NRESP);
-        break;
+    }
     }
 }
 
@@ -919,20 +942,28 @@ ctrl_reg_t valve_regulation(void)
 
 void valve_sense(const clicks_state_t *s)
 {
-    bool exc_bad = s->pm_found && (s->boost_tripped || s->bus_mv < EXC_MIN_MV || s->bus_mv > EXC_MAX_MV);
-    cause_f02 = exc_bad;
-    cause_f01 = !s->pm_found || (!exc_bad && !s->reading_ok);
+    // One fault for no pressure reading (0.16.33, Ryan 14 Nov; the
+    // excitation outside 9.5 to 10.5 V was its own fault F-2 before, with
+    // the same action). The reading is the ratio of the bridge to the
+    // excitation (mV/V), so it is right at any excitation the transducer
+    // works at: only one below DRUCK_VEXC_MIN_MV (clicks.c gives no reading
+    // then) or a tripped supply stops it, and the event names that cause.
+    cause_f01 = !s->pm_found || !s->reading_ok || s->boost_tripped;
     sensed = true;
-    if (cause_f01)
-        raise(F01, false, s->pm_found ? "No pressure signal (%s)" : "No pressure signal (Power Monitor not answering)%s",
-              s->pm_found ? (s->druck_absent ? "outside 0.005-11 mV/V" : "no valid reading") : "");
-    if (cause_f02) {
-        if (s->boost_tripped)
-            raise(F02, false, "Excitation supply tripped at %ld mV", (long)s->boost_trip_mv);
+    if (cause_f01) {
+        if (!s->pm_found)
+            raise(F_NOPV, false, "No pressure signal (Power Monitor not answering)");
+        else if (s->boost_tripped)
+            raise(F_NOPV, false, "No pressure signal (excitation supply tripped at %ld mV)", (long)s->boost_trip_mv);
+        else if (s->druck_absent)
+            raise(F_NOPV, false, "No pressure signal (outside 0.005-11 mV/V)");
+        else if (s->bus_mv < DRUCK_VEXC_MIN_MV)
+            raise(F_NOPV, false, "No pressure signal (excitation %ld mV, under %d mV)", (long)s->bus_mv,
+                  DRUCK_VEXC_MIN_MV);
         else
-            raise(F02, false, "Excitation %ld mV, outside 9500-10500 mV", (long)s->bus_mv);
+            raise(F_NOPV, false, "No pressure signal (no valid reading)");
     }
-    pv_ok = s->pm_found && s->reading_ok && !s->boost_tripped && !cause_f01 && !cause_f02;
+    pv_ok = !cause_f01;
     pv_mbar = (float)s->p_mmbar / 1000.0f;
     auto_step();
 }
@@ -1038,8 +1069,7 @@ const char *valve_mode_name(void)
  * ------------------------------------------------------------------------ */
 static bool can_reset(fault_t f)
 {
-    if (f == F01) return sensed && !cause_f01;
-    if (f == F02) return sensed && !cause_f02;
+    if (f == F_NOPV) return sensed && !cause_f01;
     return true;
 }
 
@@ -1258,8 +1288,6 @@ bool valve_answer(bool set_zero, const char **why)
         int32_t d = stepper3_position() - question_at;
         stepper3_set_position(seat_count() + d);
         ev("W-1", "Point set as the seat, count %ld (0 %% is the return above it)", (long)seat_count());
-        if (!strncmp(warn, "W-4", 3))
-            warn[0] = 0;   // the switch was right, the count was not
     } else {
         ev("W-1", "Zero skipped, count kept at %ld", (long)question_at);
     }

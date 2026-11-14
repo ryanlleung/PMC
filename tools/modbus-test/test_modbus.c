@@ -31,7 +31,7 @@ static int32_t sp = 0;
 static bool sp_set;
 static int32_t pos_milli = 14200, goto_milli = 14200;
 static const char *warn;
-static bool question, fault_f6, busy, limit_open;
+static bool question, fault_f3, busy, limit_open;
 static int resets, stops;
 static char last_event[160];
 static bool remote = true;   // the Remote control switch (0.13.4)
@@ -44,8 +44,8 @@ valve_ref_t valve_reference(void) { return VALVE_REF_HOMED; }
 bool valve_target(int32_t *m) { *m = sp; return sp_set; }
 int32_t valve_range_mmbar(void) { return 1034000; }
 ctrl_reg_t valve_regulation(void) { return CTRL_REG_BAND; }
-bool valve_fault_is(const char *t) { return fault_f6 && !strcmp(t, "F-6"); }
-int valve_fault_count(void) { return fault_f6; }
+bool valve_fault_is(const char *t) { return fault_f3 && !strcmp(t, "F-3"); }
+int valve_fault_count(void) { return fault_f3; }
 uint32_t valve_event_total(void) { return 70000; }
 const char *valve_warning(void) { return warn; }
 void valve_warning_clear(void) { warn = NULL; }
@@ -119,7 +119,7 @@ size_t lv_strlcpy(char *d, const char *s, size_t n)
 
 bool valve_set_target(int32_t m, const char **why)
 {
-    if (fault_f6) { *why = "fault"; return false; }
+    if (fault_f3) { *why = "fault"; return false; }
     sp = (int32_t)(lround(m / 100.0) * 100);
     sp_set = true;
     return true;
@@ -138,7 +138,7 @@ bool valve_start_auto(const char **why)
 }
 bool valve_to_manual(const char **why) { (void)why; mode = VALVE_MANUAL; return true; }
 void valve_stop(void) { stops++; if (mode == VALVE_AUTO) mode = VALVE_MANUAL; }
-int valve_reset(char *left, size_t n) { resets++; fault_f6 = false; if (n) left[0] = 0; return 1; }
+int valve_reset(char *left, size_t n) { resets++; fault_f3 = false; if (n) left[0] = 0; return 1; }
 void valve_event(const char *tag, const char *fmt, ...)
 {
     va_list a;
@@ -191,7 +191,7 @@ static void tests(void)
     // Read the version 1 map.
     REQ(0x03, 0, 0, 0, 26);
     CHECK(rlen == 9 + 52 && rsp[7] == 3 && rsp[8] == 52 && rsp[5] == 3 + 52 && rsp[6] == 0x11);
-    CHECK(r16(0) == 3);                         // map version (2 from 0.15.15, 3 from 0.16.14)
+    CHECK(r16(0) == 4);                         // map version (2 from 0.15.15, 3 from 0.16.14, 4 from 0.16.33)
     CHECK(r16(1) == (uint16_t)123456);          // heartbeat
     CHECK(r16(2) == VALVE_MANUAL);
     CHECK(r16(3) & 1);                          // reading OK
@@ -323,12 +323,12 @@ static void tests(void)
     REQ(0x05, 0, 1, 0, 0);   CHECK(rlen == 12 && stops == 0);
     REQ(0x05, 0, 1, 0xFF, 0); CHECK(stops == 1 && mode == VALVE_MANUAL);
     // RESET, and a target refused while a fault is latched.
-    fault_f6 = true;
-    REQ(0x03, 0, 5, 0, 1);   CHECK(r16(0) == 1u << 5);
+    fault_f3 = true;
+    REQ(0x03, 0, 5, 0, 1);   CHECK(r16(0) == 1u << 2);   // F-3 limit pressed is bit 2 (map version 4)
     f32(5.0f, w + 6); req(sizeof w, w); CHECK(is_ex(0x10, MODBUS_EX_REFUSED));
-    REQ(0x05, 0, 2, 0xFF, 0); CHECK(resets == 1 && !fault_f6);
+    REQ(0x05, 0, 2, 0xFF, 0); CHECK(resets == 1 && !fault_f3);
     // Warning OK.
-    warn = "W-2 Not settling: switched to MANUAL, valve idle";
+    warn = "W-2 No pressure response: switched to MANUAL";
     REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == 1u << 1);
     REQ(0x05, 0, 3, 0xFF, 0); CHECK(warn == NULL);
     // Status coils are read only.
@@ -343,10 +343,9 @@ static void tests(void)
     REQ(0x05, 0, 9, 0xFF, 0); CHECK(is_ex(5, MODBUS_EX_ADDRESS));
     remote = true;
     REQ(0x03, 0, 3, 0, 1);    CHECK(((r16(0) >> 8) & 1) == 1);
-    // Warning bits: W-1 question, the strip warning by its number (W-5 move
-    // timed out, 0.16.29); bit 2 (W-3 controller hot, removed) stays 0.
-    question = true; cs.die_mc = 56000; warn = "W-5 Move timed out, valve stopped";
-    REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == ((1u << 0) | (1u << 4)));
+    // Warning bits (map version 4): W-1 the question, W-2 the strip warning.
+    question = true; cs.die_mc = 56000; warn = "W-2 No pressure response: switched to MANUAL";
+    REQ(0x03, 0, 6, 0, 1);   CHECK(r16(0) == ((1u << 0) | (1u << 1)));
     question = false; cs.die_mc = 31500; warn = NULL;
 }
 

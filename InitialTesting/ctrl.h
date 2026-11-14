@@ -40,15 +40,19 @@
  *     high set's KP and shuts the valve (bench model, today's gains: 12 to
  *     8 mbar 91 % under before, 7 % after).
  *   - Response monitor: every CTRL_TCHECK s, the counted position through a
- *     CTRL_TLAG s lag against the pressure change. F-6 after CTRL_NRESP
- *     windows with no response. A window with the valve pinned fully open,
- *     or at AUTO min, while the loop asks for more is judged too. A
- *     wrong-way change counts as a response (no fault since 0.11.20).
- *   - W-2: outside the target band (CTRL_TCONV_BAND at least) for CTRL_TCONV s;
- *     AUTO ends, MANUAL, valve idle.
- *   - W-6 (0.11.45 to 0.15.10, pinned at the wrong end for 60 s) is removed:
- *     it tripped at low pressure, where the valve rightly rests near closed
- *     (Ryan 5 Nov).
+ *     CTRL_TLAG s lag against the pressure change. W-2 (the fault F-6 to
+ *     0.16.32) after CTRL_NRESP windows with no response: AUTO ends,
+ *     MANUAL, valve idle, nothing latched. A window with the valve pinned
+ *     fully open, or at AUTO min, while the loop asks for more is judged
+ *     too. A wrong-way change counts as a response (no fault since 0.11.20).
+ *   - The convergence timeout (W-2 to 0.16.32: outside the target band for
+ *     30 min ended AUTO) is removed in 0.16.33 (Ryan 14 Nov): a cool-down
+ *     or a setpoint out of reach looks the same, and the loop recovers by
+ *     itself if it stays in AUTO. Regulating / In band / Stable still say
+ *     where the pressure is.
+ *   - The wrong-way warning (0.11.45 to 0.15.10, pinned at the wrong end
+ *     for 60 s) is removed: it tripped at low pressure, where the valve
+ *     rightly rests near closed (Ryan 5 Nov).
  *   - Less hunting (0.12.12, Ryan 26 Oct): a move the opposite
  *     way to the last one is only sent once the command is CTRL_REV_PCT of
  *     travel from the valve. Before, the reading's noise turned the motor
@@ -66,11 +70,9 @@
 // OUTMIN, DB, BAND and KD.
 #define CTRL_TS_S       1       // control step, s
 #define CTRL_TCHECK_S   30      // response window, s
-#define CTRL_NRESP      5       // windows with no response before F-6
+#define CTRL_NRESP      5       // windows with no response before W-2
 #define CTRL_DPMIN      0.05f   // smallest pressure change that counts, mbar
 #define CTRL_CHECKMIN   1000    // smallest lagged move that is judged, steps
-#define CTRL_TCONV_S    1800    // W-2 after this long outside the band, s
-#define CTRL_TCONV_BAND 0.10f   // W-2's band is never narrower than this, mbar (a band of 0 is allowed from 0.16.16)
 #define CTRL_LEAD_MAX   3000    // travel anti-windup, steps
 #define CTRL_TLAG_S     40      // process lag for the response monitor, s
 #define CTRL_STABLE_S   60      // in band this long reads Stable, s
@@ -110,8 +112,7 @@ typedef struct {
 
 typedef enum {
     CTRL_RUN,          // carry on (a move may be requested)
-    CTRL_F06,          // no pressure response
-    CTRL_W02,          // not settling: to MANUAL
+    CTRL_NORESP,       // W-2 no pressure response: to MANUAL
 } ctrl_result_t;
 
 typedef enum { CTRL_REG_NONE, CTRL_REG_REGULATING, CTRL_REG_BAND, CTRL_REG_STABLE } ctrl_reg_t;
@@ -126,7 +127,6 @@ typedef struct {
     float pos_f;       // counted position through the lag
     float win_t, win_pos, win_pv;
     int noresp;
-    uint32_t conv_ms;  // last time in band (or target set, or AUTO started)
     bool in_band;
     uint32_t in_band_ms;
     bool move;         // ctrl_step asks for a move to move_to

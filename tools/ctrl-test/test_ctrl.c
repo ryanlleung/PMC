@@ -1,8 +1,9 @@
 /* Host test of ctrl.c (stage 8) against the C port of the simulator's flow
  * line (model.c). Runs the porting plan's cases and checks them:
  *   closed to 5 mB, 4.5 to 10 mB, targets 5, 7, 3, 5 with no false trip,
- *   helium off -> F-6, pump off -> W-2 to MANUAL (no wrong-way fault since 0.11.20),
- *   slipping drive -> F-6, AUTO min 0 closing to the seat without a fault, and the
+ *   helium off -> W-2 (no pressure response; F-6 to 0.16.32), pump off -> AUTO stays on
+ *   (no convergence timeout from 0.16.33), slipping drive -> W-2, AUTO min 0 closing
+ *   to the seat without a trip, and the
  *   entry refusals. -v prints a line a second. */
 #include <math.h>
 #include <stdio.h>
@@ -27,7 +28,6 @@ static ctrl_tune_t K = { .kp = 4.0f, .ti = 0.25f, .db = 8, .band = 0.1f, .outmin
 #define FS 1034.0f
 
 typedef enum { MANUAL, AUTO } mode_t_;
-static bool w02;
 static mode_t_ mode;
 static ctrl_t C;
 static ctrl_result_t fault;   // last fault, CTRL_RUN if none
@@ -98,10 +98,6 @@ static void ctrl_tick(void)
     if (r == CTRL_RUN) {
         if (C.move && request_move(C.move_to))
             ctrl_sent(&C);
-    } else if (r == CTRL_W02) {
-        model_stop();
-        mode = MANUAL;
-        w02 = true;
     } else {
         model_stop();
         fault = r;
@@ -158,7 +154,6 @@ static void fresh(void)
         C.rev_pct = 0;
     mode = MANUAL;
     fault = CTRL_RUN;
-    w02 = false;
     run(120, 0);
 }
 
@@ -247,7 +242,7 @@ int main(int argc, char **argv)
     run(2000, 5);
     // No wrong-way fault: with the valve pinned open and the pressure flat,
     // the response monitor catches it instead.
-    CHECK(fault == CTRL_F06 && mode == MANUAL && !M.moving, "helium off: F-6 after %.0f s, MANUAL, valve idle", fault_t - t0);
+    CHECK(fault == CTRL_NORESP && mode == MANUAL && !M.moving, "helium off: W-2 after %.0f s, MANUAL, valve idle", fault_t - t0);
 
     // The same targets as the firmware runs, with the reversal hold: in
     // band no later than 60 s after the reference, and the last 60 s within
@@ -302,22 +297,34 @@ int main(int argc, char **argv)
     run(1500, 5);
     M.pump = false;
     t0 = M.t;
-    run(2000, 5);
-    CHECK(fault == CTRL_RUN && w02 && mode == MANUAL, "pump off: no fault, W-2 to MANUAL (t %.0f s)", M.t - t0);
+    run(3600, 5);
+    // No convergence timeout from 0.16.33 (W-2 to 0.16.32 ended AUTO after
+    // 30 min off the setpoint): the loop stays on, the valve at AUTO min,
+    // and takes over again when the pump is back.
+    {
+        const ctrl_reg_t reg = ctrl_regulation(&C, &K, ms(), true, (float)M.pv);
+        CHECK(fault == CTRL_RUN && mode == AUTO && reg == CTRL_REG_REGULATING,
+              "pump off: still AUTO after %.0f min at %.1f mB, nothing raised, reads Regulating", (M.t - t0) / 60, M.pv);
+    }
+    M.pump = true;
+    {
+        met_t m = run(1500, 5);
+        CHECK(fault == CTRL_RUN && mode == AUTO && fabs(m.tail - 5) <= K.band,
+              "pump back: AUTO settles at 5 mB again by itself (last 60 s %.3f)", m.tail);
+    }
 
     // A setpoint band of 0 (0.16.16, Ryan 12 Nov): In band and Stable never
-    // show, but a steady hold is not ended by W-2, which still judges
-    // against CTRL_TCONV_BAND.
+    // show, and a steady hold stays in AUTO.
     {
         const ctrl_tune_t kk = K;
         K.band = 0;
         fresh();
         set_sp(5);
         to_auto();
-        run(CTRL_TCONV_S + 1200, 5);
+        run(3000, 5);
         const ctrl_reg_t reg = ctrl_regulation(&C, &K, ms(), true, 5.04f);
-        CHECK(fault == CTRL_RUN && !w02 && mode == AUTO && reg == CTRL_REG_REGULATING,
-              "band 0: %.0f min in AUTO at 5 mB, no W-2, reads Regulating (%d)", (CTRL_TCONV_S + 1200) / 60.0, (int)reg);
+        CHECK(fault == CTRL_RUN && mode == AUTO && reg == CTRL_REG_REGULATING,
+              "band 0: %.0f min in AUTO at 5 mB, nothing raised, reads Regulating (%d)", 3000 / 60.0, (int)reg);
         K = kk;
     }
 
@@ -330,7 +337,7 @@ int main(int argc, char **argv)
     set_sp(7);
     t0 = M.t;
     run(900, 7);
-    CHECK(fault == CTRL_F06 && mode == MANUAL && fabs(fault_t - t0 - 150) <= 2, "slipping drive: F-6 after %.0f s (sim 150)", fault_t - t0);
+    CHECK(fault == CTRL_NORESP && mode == MANUAL && fabs(fault_t - t0 - 150) <= 2, "slipping drive: W-2 after %.0f s (sim 150)", fault_t - t0);
 
     // Room air, target above the reading (the bench test with no process).
     fresh();
@@ -340,7 +347,7 @@ int main(int argc, char **argv)
     to_auto();
     t0 = M.t;
     run(400, 1030);
-    CHECK(fault == CTRL_F06, "room air, target above: F-6 after %.0f s", fault_t - t0);
+    CHECK(fault == CTRL_NORESP, "room air, target above: W-2 after %.0f s", fault_t - t0);
 
     // AUTO min 0 (the factory value since 0.11.33; the cases above keep the
     // simulator's 14 to match its references): a target the closed valve

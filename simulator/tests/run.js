@@ -242,22 +242,36 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('F-1 Druck unplugged', /F-1/.test(ev), ev);
   shot(s, 'f01');
 }
-{ // F-2: excitation out of 9.5-10.5 V.
-  const s = homed(load()); s.set(10, 9.2); s.run(5000);
-  const ev = events(s, 5);
-  check('F-2 excitation low', /F-2/.test(ev), ev);
+{ // The excitation is a cause of F-1 from 0.16.33 (its own fault F-2 before, outside 9.5-10.5 V): the reading is a
+  // ratio, so 9.2 V raises nothing and reads the same pressure; under 7 V there is no reading, which is F-1.
+  const s = homed(load()); s.run(3000);
+  const p0 = s.cmd('PRESSURE?');
+  s.set(10, 9.2); s.run(5000);
+  const p1 = s.cmd('PRESSURE?'), a1 = s.cmd('ALARM?');
+  const mb = t => parseFloat(t.replace(/^PRESSURE /, ''));
+  check('excitation 9.2 V: no fault, the pressure reads the same', a1 === 'ALARM NONE\r\n' && Math.abs(mb(p1) - mb(p0)) <= 0.05,
+    [p0.trim(), p1.trim(), a1.trim()].join(' | '));
+  s.set(10, 6.5); s.run(5000);
+  const ev = events(s, 5), a2 = s.cmd('ALARM?');
+  check('excitation 6.5 V: F-1 names it, no F-2', /F-1,No pressure signal \(excitation 6\d\d\d mV, under 7000 mV\)/.test(ev) &&
+    /^ALARM F-1,0,No pressure signal\r\n$/.test(a2), ev + a2);
+  s.set(10, 10); s.run(3000);
+  check('excitation back: F-1 can be reset', /^ALARM F-1,1,/.test(s.cmd('ALARM?')) && s.cmd('ALARM RESET;ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
 }
-{ // F-3: the switch never trips during homing.
+{ // F-2 (F-3 to 0.16.32): the switch never trips during homing.
   const s = load(); s.boot(); s.set(5, 40000); s.set(7, 2); s.run(2000);
   s.home(400000);
   const out = events(s, 5);
-  check('F-3 limit not found', /F-3/.test(out), out.slice(-600));
+  check('F-2 limit not found', /F-2,Homing: switch not found/.test(out) && /^ALARM F-2,1,Limit not found while homing\r\n$/.test(s.cmd('ALARM?')),
+    out.slice(-600) + s.cmd('ALARM?'));
 }
-{ // F-4: homing from the switch, which stays pressed after the clearance move.
+{ // F-3 (F-4 to 0.16.32): homing from the switch, which stays pressed after the clearance move.
   const s = homed(load()); s.set(7, 1);
   s.home(60000);
   const out = events(s, 5);
-  check('F-4 limit stuck', /F-4/.test(out), out.slice(-600));
+  check('F-3 limit stuck', /F-3,Switch still active/.test(out) && /^ALARM F-3,1,Limit pressed when it should be free\r\n$/.test(s.cmd('ALARM?')),
+    out.slice(-600) + s.cmd('ALARM?'));
+  shot(s, 'f03');
 }
 { // AUTO at 5 mbar settles.
   const s = oldGains(homed(load()));
@@ -288,60 +302,59 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('motor power loss does not directly end AUTO', s.cmd('MODE?;ALARM?') === 'MODE AUTO;ALARM NONE\r\n');
   check('unpowered motor stays still while the step count advances', s.get(5) === needle && s.get(30) !== count);
 }
-{ // F-6: the needle slips in AUTO, so the pressure does not follow.
+{ // W-2 from 0.16.33 (the fault F-6 before): the needle slips in AUTO, so the pressure does not follow. AUTO ends,
+  // nothing latches, the strip says so until OK, and Start AUTO is allowed again without a reset.
   const s = oldGains(homed(load()));
   s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
   s.set(6, 0); s.cmd('SETPOINT 8');
   s.run(600000);
-  const ev = events(s, 10);
-  check('F-6 no response', /F-6/.test(ev), ev);
-  shot(s, 'f06');
-  // Fault detail: its buttons sit in the strip's row, so the strip hides (0.14.13).
-  s.tap(415, 184); s.tap(240, 72); s.tap(180, 72);   // Menu > Events (0.16.2), the fault
-  shot(s, 'f06-detail');
-  s.tap(181, 240);   // Reset fault
-  check('fault detail Reset fault works', s.cmd('ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
+  const ev = events(s, 10), st = s.cmd('MODE?;ALARM?');
+  check('W-2 no pressure response: MANUAL, a warning, no fault', /W-2,No pressure response in 5 windows of 30 s/.test(ev) &&
+    /MODE,Manual after W-2/.test(ev) && !/F-\d,/.test(ev) &&
+    /^MODE MANUAL;ALARM W-2,1,No pressure response: switched to MANUAL\r\n$/.test(st), ev + st);
+  shot(s, 'w02');
+  s.set(6, 1);
+  check('W-2: Start AUTO again is allowed, and it clears the strip', s.cmd('MODE AUTO;MODE?;ALARM?') === 'MODE AUTO;ALARM NONE\r\n', s.cmd('MODE?;ALARM?'));
+  s.cmd('MODE MANUAL');
 }
-{ // W-2: the rotary pump stops in AUTO; the pressure never comes back into band.
+{ // No convergence timeout from 0.16.33 (W-2 to 0.16.32 ended AUTO after 30 min outside the band): the rotary pump
+  // stops in AUTO, the pressure stays off the setpoint, and AUTO stays on with nothing raised.
   const s = oldGains(homed(load()));
   s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
   s.set(4, 0);
   s.run(1900000);
   const ev = events(s, 10), st = s.cmd('MODE?;ALARM?');
-  check('W-2 to MANUAL', /W-2/.test(ev) && /^MODE MANUAL;ALARM W-2,1,/.test(st), ev + st);
-  shot(s, 'w02');
+  check('pump off for 32 min: still AUTO, nothing raised', !/W-\d,/.test(ev) && st === 'MODE AUTO;ALARM NONE\r\n', ev + st);
+  shot(s, 'pump-off-auto');
 }
-{ // W-5 (0.16.29; F-5 before): a move that runs past its time is stopped and warned, nothing latches.
+{ // A move that runs past its time is stopped and logged, and that is all (0.16.33; the warning W-5 to 0.16.32, the
+  // fault F-5 to 0.16.28): no warning, nothing latched, the next move runs.
   const s = homed(load());
   s.cmd('VALVE SET 30', 60000);
   s.set(24, 1);                       // the step interrupt does not run
   s.cmd('VALVE SET 31', 1000); s.run(20000);
   const ev = events(s, 5), st = s.cmd('MODE?;VALVE MOVING?;ALARM?');
-  check('W-5 in MANUAL: stopped, warned, no fault', /W-5,Move timed out at count/.test(ev) && !/F-5/.test(ev) &&
-    /^MODE MANUAL;VALVE MOVING 0;ALARM W-5,1,Move timed out, valve stopped\r\n$/.test(st), ev + st);
-  shot(s, 'w05');
+  check('move timed out in MANUAL: stopped, a SYS event, no warning', /SYS,Move stopped at count \d+ \(30\.0 %\): it ran past its time/.test(ev) &&
+    !/[WF]-\d,/.test(ev) && st === 'MODE MANUAL;VALVE MOVING 0;ALARM NONE\r\n', ev + st);
   s.set(24, 0);
-  check('W-5: the next move runs, no reset needed', s.cmd('VALVE SET 31', 60000) === '' && s.cmd('VALVE?') === 'VALVE 31.00 %\r\n', s.cmd('VALVE?'));
-  s.cmd('ALARM OK');
-  check('W-5: OK clears it', s.cmd('ALARM?') === 'ALARM NONE\r\n', s.cmd('ALARM?'));
+  check('move timed out: the next move runs', s.cmd('VALVE SET 31', 60000) === '' && s.cmd('VALVE?') === 'VALVE 31.00 %\r\n', s.cmd('VALVE?'));
   s.cmd('SETPOINT 5;MODE AUTO', 1000); s.run(5000);
   s.set(24, 1); s.run(120000);
-  const ev2 = events(s, 6), st2 = s.cmd('MODE?;ALARM?');
-  check('W-5 in AUTO: MANUAL, valve idle', /W-5,Move timed out/.test(ev2) && /MODE,Manual after W-5/.test(ev2) &&
-    /^MODE MANUAL;ALARM W-5,1,Move timed out: switched to MANUAL\r\n$/.test(st2), ev2 + st2);
+  const ev2 = events(s, 30), st2 = s.cmd('MODE?;ALARM?');
+  const said = (ev2.match(/ran past its time/g) || []).length;
+  check('move timed out in AUTO: AUTO stays on, said once', st2 === 'MODE AUTO;ALARM NONE\r\n' && said === 2, said + ' ' + ev2 + st2);
   s.set(24, 0);
-  check('W-5 after AUTO: Start AUTO again is allowed', s.cmd('MODE AUTO;MODE?') === 'MODE AUTO\r\n', s.cmd('MODE?'));
 }
-{ // W-5 while homing: the homing ends, not homed; homing again works.
+{ // A move timed out while homing: the homing ends, not homed; homing again works.
   const s = load(); s.boot(); s.set(5, 40000); s.run(2000);
   s.set(24, 1);
   s.home(200000);
   const ev = events(s, 6), st = s.cmd('MODE?;ALARM?');
-  check('W-5 while homing: homing aborted, NOT HOMED, no fault', /W-5,Move timed out/.test(ev) && /REF,Homing aborted \(W-5 move timed out\)/.test(ev) &&
-    /^MODE NOT HOMED;ALARM W-5,1,Move timed out, valve stopped\r\n$/.test(st), ev + st);
+  check('move timed out while homing: homing aborted, NOT HOMED, nothing raised', /SYS,Move stopped at count/.test(ev) &&
+    /REF,Homing aborted \(move timed out\)/.test(ev) && st === 'MODE NOT HOMED;ALARM NONE\r\n', ev + st);
   s.set(24, 0);
   s.home();
-  check('W-5 while homing: homes at the next try', /Homed in/.test(events(s, 10)) && s.cmd('MODE?') === 'MODE MANUAL\r\n', events(s, 10));
+  check('move timed out while homing: homes at the next try', /Homed in/.test(events(s, 10)) && s.cmd('MODE?') === 'MODE MANUAL\r\n', events(s, 10));
 }
 { // A board that ran 0.16.29 (fixtures/flash-0.16.29.json, a flash image that firmware wrote): its version 10
   // settings record loads converted (0.16.30), the saved valve position is still offered, the two-point cal
@@ -452,6 +465,23 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   check('Motor override: Open runs while held and stops on release', p1 > p0 + 300 && p2 >= p1 && p2 < p1 + 400 && s.get(30) === p2 && !s.busy(),
     [p0, p1, p2, s.get(30)].join());
   check('override + Open opens', opened > rel2 + 300, opened + ' vs ' + rel2);
+}
+{ // W-1 and Limit override (0.16.33): while the override is held the question is not asked, so it cannot take the
+  // buttons from under two fingers; a press still there when the override ends is asked then.
+  const s = homed(load()); s.cmd('VALVE SET 30', 60000);
+  s.set(7, 1); s.run(1000);                                             // the switch reads pressed at 30 %
+  const asked = s.popup() && /W-1/.test(s.cmd('ALARM?'));
+  s.tap(160, 147);                                                      // Skip
+  s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(298, 184); s.tap(318, 147);   // Menu > Motor settings > Override > Motor override > Open
+  const over = (d) => s.x.sim_touch(64, 184, d), second = (px, d) => s.x.sim_touch2(px, 184, d);
+  const c0 = s.get(30);
+  over(1); s.run(300); second(186, 1); s.run(1000);
+  s.set(7, 0); s.run(300); s.set(7, 1); s.run(1700);                    // released and pressed again: a new press, mid-hold
+  const held = s.get(30), quiet = !s.popup() && s.cmd('ALARM?', 100) === 'ALARM NONE\r\n';
+  second(186, 0); over(0); s.run(1000);
+  const after = s.popup() && /W-1/.test(s.cmd('ALARM?'));
+  check('W-1 waits while Limit override is held, and asks when it ends', asked && held < c0 - 300 && quiet && after,
+    [asked, c0, held, quiet, after, s.cmd('ALARM?').trim()].join(' '));
 }
 { // Pressure 21: the air point at the room sensor's reading.
   const s = load(); s.boot(); s.run(3000);
@@ -903,22 +933,61 @@ let parkedFlash;
     one('SCHED SET OFF,6,10,14,15') + one('SCHED?'));
 }
 { // The limit switch pressed away from the seat (0.16.4, Ryan PR #43): a yellow edge round Home's Valve tile at
-  // once (the "Limit" tag of 0.16.1 gone) and W-4 within 0.3 s (two 1 s reads to 0.16.3); released, the edge goes.
+  // once (the "Limit" tag of 0.16.1 gone) and, within 0.3 s, W-1 and its question (0.16.33; the warning W-4 before,
+  // two 1 s reads to 0.16.3); released, the edge goes and the question waits for its answer.
   const s = homed(load()); s.cmd('VALVE SET 20', 60000);
   const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
   const before = px(187, 100);
-  s.set(7, 1); s.run(200);   // the wire open: the NC contact reads pressed
-  const edge = px(187, 100), al = s.cmd('ALARM?', 100);
+  s.set(7, 1); s.run(100);   // the wire open: the NC contact reads pressed
+  const edge = px(187, 100);  // before the question covers the tile
   shot(s, 'limit-edge');
+  s.run(100);
+  const al = s.cmd('ALARM?', 100);
+  check('limit pressed with the valve still: yellow edge on the Valve tile, W-1 within 0.3 s', before === 0xFFFF && edge === 0xF606 &&
+    al === 'ALARM W-1,0,Limit-switch question waiting at the screen\r\n', [before.toString(16), edge.toString(16), al.trim()].join(' '));
+  s.run(1000);
+  const ev = events(s, 5), asked = s.popup();
+  shot(s, 'w01-still');
+  check('W-1 with the valve still: one event, the question on the screen, no W-4', asked &&
+    (ev.match(/W-1,Limit switch pressed at count/g) || []).length === 1 && !/W-4/.test(ev), asked + ' ' + ev);
+  s.tap(160, 147); s.run(3000);   // Skip, the switch still pressed: not asked again
+  const skipped = s.cmd('ALARM?'), ev2 = events(s, 3);
+  check('W-1 Skip: count kept, not asked again while the switch stays pressed', skipped === 'ALARM NONE\r\n' && !s.popup() &&
+    /W-1,Zero skipped/.test(ev2) && /^VALVE 20\.00 %/.test(s.cmd('VALVE?')), skipped + ev2 + s.cmd('VALVE?'));
   s.set(7, 0); s.run(300);
   const after = px(187, 100);
-  check('limit pressed: yellow edge on the Valve tile, W-4 within 0.3 s', before === 0xFFFF && edge === 0xF606 && /W-4/.test(al) &&
-    after === 0xFFFF, [before.toString(16), edge.toString(16), al.trim(), after.toString(16)].join(' '));
+  s.set(7, 1); s.run(1000);       // released and pressed again: a new press, asked again
+  check('W-1: the edge goes when released; a new press asks again', after === 0xFFFF && s.popup() && /W-1/.test(s.cmd('ALARM?')),
+    [after.toString(16), s.popup(), s.cmd('ALARM?').trim()].join(' '));
+}
+{ // W-1 in AUTO (0.16.33; W-4 before): the switch pressed away from the seat ends AUTO, MANUAL with the valve
+  // idle, and the question waits. Start AUTO is refused while it waits.
+  const s = oldGains(homed(load()));
+  s.cmd('SETPOINT 5'); s.cmd('MODE AUTO'); s.run(300000);
+  const at = s.cmd('VALVE?');
+  s.set(7, 1); s.run(2000);
+  const ev = events(s, 5), st = s.cmd('MODE?;ALARM?');
+  check('W-1 in AUTO, away from the seat: MANUAL, the question, one W-1 event', /MODE,Manual after W-1/.test(ev) &&
+    (ev.match(/W-1,Limit switch pressed at count/g) || []).length === 1 &&
+    st === 'MODE MANUAL;ALARM W-1,0,Limit-switch question waiting at the screen\r\n' && s.popup(), at.trim() + ' | ' + ev + st);
+  const refused = s.cmd('MODE AUTO');
+  check('W-1: Start AUTO refused while the switch is pressed away from the seat', /^ERR \d+ /.test(refused) && s.cmd('MODE?') === 'MODE MANUAL\r\n', refused);
+}
+{ // A closing move that reaches the switch away from the seat raises W-1 once (W-1 and W-4 for the same press to 0.16.32).
+  const s = homed(load()); s.cmd('VALVE SET 30', 60000);
+  s.set(18, 12000); s.set(7, 3);   // trips 6000 full steps above the seat
+  s.cmd('VALVE SET 2', 90000); s.run(2000);
+  const ev = events(s, 6), st = s.cmd('MODE?;ALARM?');
+  check('closing onto an early switch: one W-1, the question, no second warning', (ev.match(/W-1,Limit switch pressed at count/g) || []).length === 1 &&
+    !/W-4/.test(ev) && st === 'MODE MANUAL;ALARM W-1,0,Limit-switch question waiting at the screen\r\n', ev + st);
+  s.tap(318, 147); s.run(500);     // Set as seat
+  check('W-1 Set as seat: the count becomes the seat, nothing left showing', /W-1,Point set as the seat/.test(events(s, 3)) &&
+    s.cmd('ALARM?') === 'ALARM NONE\r\n' && /^VALVE -0\./.test(s.cmd('VALVE?')), events(s, 3) + s.cmd('ALARM?') + s.cmd('VALVE?'));
 }
 { // Disable switch (Ignore switch in 0.16.21), the pass band (0.16.5, Ryan PR #43: the force switch trips about 13 % where the valve binds): a
   // toggle on Motor settings > Override (0.16.19; Motor override > Switch to 0.16.18; "Switch pass" to 0.16.20);
   // between From and To, 5 and 50 % (10 to 20 % until 0.16.8, 5 to 25 % until 0.16.11), the pressed switch neither
-  // stops closing nor raises W-4; below From it stops.
+  // stops closing nor raises W-1; below From it stops.
   const s = homed(load()); s.cmd('VALVE SET 40', 150000);
   s.tap(415, 184); s.tap(84, 128); s.tap(305, 72); s.tap(180, 128);   // Menu > Motor settings > Override, Disable switch on
   shot(s, 'override-switch');
@@ -933,7 +1002,7 @@ let parkedFlash;
   const at6 = s.cmd('VALVE?'), a6 = s.cmd('ALARM?');
   s.cmd('VALVE SET 2', 30000);
   const at5 = s.cmd('VALVE?'), ev = events(s, 5);
-  check('pass band: no W-4 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
+  check('pass band: no W-1 at 40 %, closes to 6 % past the pressed switch, stops at 5 %', on && a1 === 'ALARM NONE\r\n' &&
     /VALVE 6\.0/.test(at6) && a6 === 'ALARM NONE\r\n' && /VALVE (4\.9|5\.0)/.test(at5) && /W-1/.test(ev),
     [on, a1.trim(), at6.trim(), a6.trim(), at5.trim(), ev.slice(-300)].join(' | '));
 }
