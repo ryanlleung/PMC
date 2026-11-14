@@ -20,8 +20,8 @@
  * defaults are used and an event says so. Nothing moves at start-up either
  * way.
  *
- * The record is version 11 from 0.16.30 (cfg.c). Version 10 records
- * (0.16.21 to 0.16.29) are read and converted; older ones are not read.
+ * The record is version 12 from 0.17.0 (cfg.c). Version 10 and 11 records
+ * (0.16.21 to 0.16.33) are read and converted; older ones are not read.
  *
  * Three things act on the record (0.16.31, Ryan 13 Nov: "saving is too
  * clunky, maybe just a save an undo, and a reset to factory is enough"):
@@ -112,6 +112,7 @@ typedef enum {
     // Disable switch (the pass band, valve.h) edges (0.16.21), % open, 0
     // to 100: From below To.
     CFG_PASS_LO, CFG_PASS_HI,
+    CFG_SPT,       // motor steps per output turn (0.17.0): the turns shown; 100 % stays in steps
     CFG_N
 } cfg_key_t;
 
@@ -124,11 +125,15 @@ bool cfg_rev(cfg_from_t from, uint32_t *rev, const char **saved_at);
 void cfg_range(cfg_key_t k, int32_t *lo, int32_t *hi);
 #define CFG_TUNE_LAST CFG_PASS_HI
 int32_t cfg_tune(cfg_key_t k);   // live tuning value
+int32_t cfg_steps_per_turn(void);  // live CFG_SPT
 // The key of PID set 1 to 4's KP (which 0), TI (1) or KD (2).
 cfg_key_t cfg_pid_key(int set, int which);
 // Applies the live values with v[k] for each set[k], checked together, then
 // saves. Nothing changes unless all of it is good.
 bool cfg_save_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why);
+// The same checks, then the values put in use without saving (0.17.0: an
+// edit on the screens is in use at once; Save keeps it, Undo drops it).
+bool cfg_apply_with(const int32_t v[CFG_N], const bool set[CFG_N], const char **why);
 // Undo: the newest save (with none, the start-up settings) back in use.
 // Refused in AUTO and while the valve moves or homes.
 bool cfg_undo(const char **why);

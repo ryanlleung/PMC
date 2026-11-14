@@ -7,7 +7,7 @@ From 0.11.38 the simulator runs the mm4 firmware itself. `pmc-wasm.js` is the fi
 | On the board | In the simulator |
 |---|---|
 | Display and touch panel | 480 x 272 canvas, mouse or finger (a press lasts at least 80 ms) |
-| Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so the direction and coil order selected on Settings > Motor override > Coils act as on the bench |
+| Stepper 3 outputs, TIM7 step interrupt | `stepper3.c` unchanged, its timer run per simulated microsecond count; the four outputs turn a simulated motor, so the direction and coil order selected with MOT ORDER act as on the bench |
 | Needle valve, limit switch | flow-line needle, 16512 steps a turn, seats 30 steps past the switch; switch faults: broken wire, stuck, trips early |
 | Druck through the INA228 | the cryostat flow line read through the 5 % input loading; open to room air for calibration. Two flow lines (Cryostat > Flow line): the bench cryostat (default), fitted to the bench logs of 6 and 9 Nov 2026, and the physics model (v63, as `tools/ctrl-test/model.c`) |
 | Boost 10, motor 12 V supply (the motor stalls without it; the firmware does not sense it from 0.14.3), INA228 die temperature | bench controls (excitation, supply volts, controller temperature) |
@@ -129,4 +129,4 @@ The v62 tests (`workflows.js`, `regression.js`, `audit.js`, `wp023.js`) drove th
 
 From 0.13.4 the simulator has the board's Remote control switch (Settings > System). From 0.13.7 it is On at power-up, as on the board; turned Off on the screen, the page's console answers set commands with ERR 211. `boot(flash, { remote: false })` in the node tests turns it Off.
 
-From 0.13.7 the simulator takes a second finger, for the two-finger Limit override (Settings > Motor override): on a touchscreen, put a second finger down; with a mouse, Shift+click holds a press down until the next Shift+click, and a plain click is then the second finger. The node tests use `sim_touch2(x, y, down)`.
+From 0.13.7 the simulator takes a second finger, for the two-finger Limit override (Menu > Motor > Jog from 0.17.0): on a touchscreen, put a second finger down; with a mouse, Shift+click holds a press down until the next Shift+click, and a plain click is then the second finger. The node tests use `sim_touch2(x, y, down)`.

@@ -343,62 +343,47 @@ static void calibrate(void)
     const char *why;
     if (!valve_calibrate(&why))
         ui_msg(valve_motion_blocked() ? "Reset the fault first" : why);
-    else if (!ui_showing(&ui_scr_calib))
-        ui_open(&ui_scr_calib);   // the steps show there; Back returns (Ryan, 16 Oct)
-}
-
-static void set_closed(void)
-{
-    const char *why;
-    if (!valve_set_closed(&why))
-        ui_msg(valve_motion_blocked() ? "Reset the fault first" : why);
-    else
-        ui_msg("Position set to 0 %. Not verified by homing.");
+    else if (!ui_showing(&ui_scr_valve_set))
+        ui_open(&ui_scr_valve_set);   // the steps show on Valve > Position; Back returns (Ryan, 16 Oct)
 }
 
 /* Home and Set position are two jobs, kept apart on every screen (Ryan,
- * 23 Oct): Home finds the limit switch (0 % is the back-off above it); Set position takes the
- * position from the operator (closed, or the saved position), not
- * verified by homing. A typed % (Set as other %) went in 0.16.32. */
-static void set_closed_ask(void)
+ * 23 Oct): Home finds the limit switch (0 % is the back-off above it); Set
+ * as % takes the position from the operator, not verified by homing, and
+ * logs it. From 0.17.0 it is one keypad (Set as 0 % and Use last saved are
+ * typed: 0, or the last saved value on its line). */
+static bool setpos_set(int32_t v100, const char **why)
 {
-    ui_confirm("Set the present position as 0 %? Not verified by homing.",
-               "Set as 0 %", set_closed);
+    if (valve_motion_blocked()) {
+        *why = "Reset the fault first";
+        return false;
+    }
+    if (!valve_set_position(v100, why))
+        return false;
+    ui_msg("Position set by hand. Not verified by homing.");
+    return true;
 }
 
-static void use_saved(void)
-{
-    const char *why;
-    if (!valvepos_use(&why))
-        ui_msg(why);
-}
-
-void ui_set_position_pick(int i)
-{
-    if (i == 0)
-        set_closed_ask();
-    else
-        use_saved();
-}
-
-// The ways to set it: closed, or the saved position when offered (then a
-// list of the two).
 void ui_set_position_ask(void)
 {
-    static char saved[32];
-    static const char *items[2] = { "Set as 0 %", saved };
+    static char info[40];
     int32_t q;
-    if (!valvepos_offer(&q)) {
-        set_closed_ask();
-        return;
-    }
-    {
+    if (valvepos_offer(&q)) {
         char v[16];
         int32_t pm = valve_pos_max();
         ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
-        lv_snprintf(saved, sizeof saved, "Use last saved, %s %%", v);
+        lv_snprintf(info, sizeof info, "Last saved %s %%", v);
+    } else {
+        info[0] = 0;
     }
-    ui_pick("Set position (not verified by homing)", items, 2, -1, ui_set_position_pick);
+    ui_kp_t k = { 0 };
+    k.title = "Set position as, %";
+    k.info = info[0] ? info : NULL;
+    k.dec = 2;
+    k.min = 0;
+    k.max = 10000;
+    k.on_set = setpos_set;
+    ui_keypad_ex(&k);
 }
 
 static char home_q[128];
@@ -422,9 +407,8 @@ void ui_home_ask(void)
 // Home valve (Home's Valve tile) while not homed: the two jobs side by side.
 void ui_position_ask(void)
 {
-    lv_snprintf(home_q, sizeof home_q, "Valve position unknown. Home the valve on the limit switch (%s), or set the position?",
-                home_minutes());
-    ui_ask3(home_q, "Cancel", NULL, "Set\nposition", ui_set_position_ask, "Home\nvalve", calibrate);
+    lv_snprintf(home_q, sizeof home_q, "Valve position unknown. Home it (%s) or set it?", home_minutes());
+    ui_ask3(home_q, "Cancel", NULL, "Set as %", ui_set_position_ask, "Home valve", calibrate);
 }
 
 // Stop AUTO (the Valve tile, AUTO): MANUAL, the valve stays where it is,
@@ -596,7 +580,7 @@ static void home_build(lv_obj_t *scr)
     // 0.15.3; the IP tile in place of Trend from 0.15.6).
     pid_make(scr, 48);
     ip_make(scr, 104);
-    ui_btn(scr, 361, 160, 109, 48, UI_NAV, "Menu", menu_event, NULL);
+    ui_btn(scr, 361, 160, 109, 48, UI_NAV, LV_SYMBOL_BARS "  Menu", menu_event, NULL);
     // The mode buttons on the tiles' bottom rows, in place of the SP and Go
     // to boxes (0.15.3): Start AUTO outside AUTO, filled dark blue with
     // white lettering in the template (Ryan, 4 Nov; outlined to 0.15.7),
@@ -732,21 +716,13 @@ void ui_status_line(void)
 const ui_screen_t ui_scr_home = { "Home", home_build, home_refresh, home_fast };
 
 /* --------------------------------------------------------------------------
- * Menu: nine tiles in three rows of three, an icon over each name, no row
- * captions (0.16.2, Ryan 9 Nov: "remove the settings page and put
- * everything in the menu. remove the labels on the menu. show some icons
- * for each button"). Every page is one tap away:
- *   Trend           Events          PID tuning
- *   Motor settings  Valve position  Pressure sensor
- *   System          Diagnostics     Reset to factory
- * Valve position and PID tuning swapped places in 0.16.3 (Ryan 9 Nov, PR #43:
- * "swap location of valve position and pid tuning"): the two valve tiles
- * side by side in the middle row. The ninth tile was Review and save, filled
- * dark blue, to 0.16.30; from 0.16.31 (Ryan 13 Nov: "just a save an undo,
- * and a reset to factory is enough") it is Reset to factory, which opens
- * no page: it asks, then resets (ui_factory_reset_ask, ui_settings.c).
- * Three columns of 148 (x 10, 166, 322): the template's 109 columns are too
- * narrow for the names, and Ryan does not want two-line tile names (6 Nov).
+ * Menu: nine tiles in three rows of three, an icon over each name (0.17.0):
+ *   Trend   Events       PID
+ *   Motor   Valve        Pressure sensor
+ *   System  Diagnostics  Factory reset
+ * Factory reset opens no page: it asks, then resets (ui_factory_reset_ask,
+ * ui_settings.c). Three columns of 148 (x 10, 166, 322): the template's 109
+ * columns are too narrow for the names (Ryan, 6 Nov: no two-line names).
  * ------------------------------------------------------------------------ */
 typedef struct {
     const char *name, *icon;
@@ -756,13 +732,13 @@ typedef struct {
 static const menu_item_t menu_items[9] = {
     { "Trend", UI_ICON_TREND, &ui_scr_trend },
     { "Events", LV_SYMBOL_LIST, &ui_scr_faults },
-    { "PID tuning", LV_SYMBOL_LOOP, &ui_scr_tune },            // the loop, as the status line shows AUTO
-    { "Motor settings", LV_SYMBOL_EDIT, &ui_scr_valve_set },   // travel, homing, drive: saved numbers (the pencil, as a draft's)
-    { "Valve position", UI_ICON_VALVE, &ui_scr_calib },        // home, set the position, the motor: the valve now
-    { "Pressure sensor", UI_ICON_TARGET, &ui_scr_sensor_cal },  // Sensor calibration (Pressure setup to 0.16.26)
+    { "PID", UI_ICON_PID, &ui_scr_tune },
+    { "Motor", UI_ICON_MOTOR, &ui_scr_motor },               // Jog and the drive settings
+    { "Valve", UI_ICON_VALVE, &ui_scr_valve_set },           // position, homing, ignore the switch
+    { "Pressure sensor", UI_ICON_GAUGE, &ui_scr_sensor_cal },
     { "System", LV_SYMBOL_SETTINGS, &ui_scr_namenet },
     { "Diagnostics", LV_SYMBOL_EYE_OPEN, &ui_scr_diag },
-    { "Reset to factory", LV_SYMBOL_REFRESH, NULL },           // no page: asks, then resets
+    { "Factory reset", LV_SYMBOL_REFRESH, NULL },            // no page: asks, then resets
 };
 
 static void menu_tile_event(lv_event_t *e)

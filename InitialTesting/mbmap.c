@@ -312,7 +312,7 @@ uint8_t mbmap_write_coil(uint16_t addr, bool on)
             return 0;
         if (on ? !valve_start_auto(&why) : !valve_to_manual(&why))
             return refused(on ? "AUTO" : "MANUAL", why);
-        valve_event("NET", "Modbus %s: %s", peer, on ? "AUTO" : "MANUAL");
+        valve_event("NET", "Modbus %s: %s", peer, on ? "AUTO started" : "switched to MANUAL");
         return 0;
     case CO_STOP:
         if (on) {

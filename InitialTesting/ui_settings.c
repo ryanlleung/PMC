@@ -9,34 +9,33 @@
 #include "link.h"
 #include "ethlink.h"
 #include "sysinfo.h"
+#include "rtclock.h"
 #include "fixed.h"
+#include "limit.h"
 #include "stepper3.h"
 #include "valve.h"
+#include "valvepos.h"
+#include "motor_screen.h"
 #include "ui.h"
 
 /* --------------------------------------------------------------------------
- * The settings pages (stage 6, simulator v63), each on the Menu from 0.16.2
- * (Ryan 9 Nov: "remove the settings page and put everything in the menu"):
- * System (with Cryostat name and IP address), Motor settings, PID tuning
- * and Sensor calibration. The Settings page of navigation
- * tiles (0.15.9 to 0.16.1) and Choose sensor (one sensor per board, Ryan 9
- * Nov: "a new one will be recalibrated anyway") are gone.
+ * The settings pages of the 0.17 screens (Ryan 14 Nov; the design canvas
+ * "PMC Screens 0.17"), each on the Menu: PID, Valve, Motor, Pressure
+ * sensor and System.
  *
- * An edit is a draft (dark edge) until Save, which checks the drafts and
- * the settings in use together, puts them in use all or nothing, and writes
- * the whole record (cfg_save_with). Undo drops the drafts and puts the last
- * save back. A grey edge is a setting in use that differs from the last
- * save (Motor override). Reset to factory is on the Menu.
- * 0.16.31 (Ryan 13 Nov: "saving is too clunky, maybe just a save an undo,
- * and a reset to factory is enough"): Save and Undo act at once (Save
- * settings and Discard changes asked first); the name, the address and
- * Remote control save as they are set; Review and save, its list of unsaved
- * changes and Load settings (last, previous, factory) are gone.
+ * PID, Valve and Motor are tabbed pages: a bar of equal tabs on the top
+ * row, the tab's cards under it, Help, Save and Undo on the right.
+ *
+ * An edit is in use at once (0.17.0; a draft until Save from 0.15.x to
+ * 0.16.33): the keypad's Set puts the value in use (cfg_apply_with, with
+ * the checks of a save). Save writes everything in use to flash; Undo puts
+ * the last save back in use. The header's unsaved icon and a dark edge on
+ * a card show what is in use and not saved. Factory reset is on the Menu.
  * ------------------------------------------------------------------------ */
 
-#define COL_DRAFT  UI_TEXT   // dark edge, no colour (Ryan, 24 Oct; was violet)
-#define COL_GREY   UI_IDLE   // light, apart from the draft's dark edge
-#define STEPS_PER_TURN STEPPER3_STEPS_PER_TURN
+#define COL_EDGE   UI_TEXT   // a card in use but not saved: a dark left edge
+#define STEPS_PER_TURN cfg_steps_per_turn()
+#define TRACK_GREY lv_color_hex(0xC3CDD7)
 
 static const int32_t RY[4] = { 48, 104, 160, 216 };
 #define RH 48
@@ -44,19 +43,8 @@ static const int32_t RY[4] = { 48, 104, 160, 216 };
 static const int32_t C2X[2] = { 10, 186 }, C2W[2] = { 168, 167 };
 
 /* --------------------------------------------------------------------------
- * Drafts
+ * Settings in use
  * ------------------------------------------------------------------------ */
-static int32_t draft_v[CFG_N];
-static bool draft_set[CFG_N];
-
-static int drafts(void)
-{
-    int n = 0;
-    for (int k = 0; k < CFG_N; k++)
-        n += draft_set[k];
-    return n;
-}
-
 static int32_t live(cfg_key_t k)
 {
     int32_t v = 0;
@@ -64,42 +52,16 @@ static int32_t live(cfg_key_t k)
     return v;
 }
 
-static int32_t shown(cfg_key_t k)
+static bool unsaved_key(cfg_key_t k)
 {
-    return draft_set[k] ? draft_v[k] : live(k);
+    int32_t s;
+    return cfg_value(CFG_FROM_SAVED, k, &s) && s != live(k);
 }
 
-// A draft equal to the value in use is no draft.
-static void set_draft(cfg_key_t k, int32_t v)
+static const char *plural(char *buf, size_t n, int count, const char *word)
 {
-    draft_set[k] = v != live(k);
-    draft_v[k] = v;
-}
-
-static void drafts_clear(void)
-{
-    memset(draft_set, 0, sizeof draft_set);
-}
-
-// Unsaved changes: drafts plus settings in use that differ from the save.
-static int unsaved(void)
-{
-    int n = drafts();
-    int other = cfg_unsaved();
-    for (int k = 0; k < CFG_N; k++) {
-        int32_t s;
-        // A draft that puts a changed setting back to its saved value.
-        if (draft_set[k] && cfg_value(CFG_FROM_SAVED, k, &s) && live(k) != s)
-            other--;
-    }
-    return n + (other > 0 ? other : 0);
-}
-
-// The settings line's icon: a pencil for unsaved drafts, the save symbol
-// for changes in use but not saved, a tick when all is saved.
-static const char *save_icon(int n)
-{
-    return drafts() ? LV_SYMBOL_EDIT : n ? LV_SYMBOL_SAVE : LV_SYMBOL_OK;
+    lv_snprintf(buf, n, "%d %s%s", count, word, count == 1 ? "" : "s");
+    return buf;
 }
 
 // A save is named by when it was made: "16/10/26 14:32", or "date unknown"
@@ -107,12 +69,6 @@ static const char *save_icon(int n)
 static const char *save_when(char *buf, size_t n, const char *at)
 {
     return at[0] ? ui_date(buf, n, at) : "date unknown";
-}
-
-static const char *plural(char *buf, size_t n, int count, const char *word)
-{
-    lv_snprintf(buf, n, "%d %s%s", count, word, count == 1 ? "" : "s");
-    return buf;
 }
 
 /* --------------------------------------------------------------------------
@@ -124,44 +80,41 @@ typedef struct {
     const char *cap, *unit;
     uint8_t dec;
     uint8_t kind;
-    const char *info;
 } field_t;
 
-// In cfg_key_t order.
+// In cfg_key_t order. The captions as on the cards ("Speed, st/s").
 static const field_t F[CFG_N] = {
-    [CFG_POSMAX]  = { "100 % travel", "turns", 2, K_TURNS, "Output turns, closed to open" },
-    [CFG_REVERSE] = { "Motor direction", NULL, 0, K_TOGGLE, "Reverse if Open closes; saving clears the zero" },
-    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM, "Homing step 2, off the switch" },
-    [CFG_RETURN]  = { "Return", "steps", 0, K_NUM, "Homing step 4, off the switch; sets 0 %" },
-    [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM, "Homing step 1, to the switch" },
-    [CFG_FCREEP]  = { "Slow close", "steps/s", 0, K_NUM, "Homing step 3, onto the switch" },
-    [CFG_RATE]    = { "Run speed", "steps/s", 0, K_NUM, "Move speed" },
-    [CFG_START]   = { "Start speed", "steps/s", 0, K_NUM, "Start and stop speed" },
-    [CFG_ACCEL]   = { "Acceleration", "steps/s/s", 0, K_NUM, "Ramp from start to run speed" },
-    [CFG_KP]      = { "KP", "%/mB", 2, K_NUM, "Proportional gain" },
-    [CFG_TI]      = { "TI", "min", 2, K_NUM, "Integral time; 0 = off" },
-    [CFG_OUTMIN]  = { "AUTO min", "% open", 1, K_NUM, "Lowest opening AUTO commands" },
-    [CFG_DB]      = { "Deadband", "steps", 0, K_NUM, "AUTO moves gather to this, then go at once" },
-    [CFG_BAND]    = { "Setpoint band", "mB", 2, K_NUM, "Tolerance about the setpoint; 0 = none" },
-    [CFG_KD]      = { "KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
-    // The gain schedule (0.15.15): sets 2 and 3, as set 1 (KP, TI, KD);
-    // set 4 and boundary 3 from 0.16.14.
-    [CFG_KP2]     = { "Set 2 KP", "%/mB", 2, K_NUM, "Proportional gain" },
-    [CFG_TI2]     = { "Set 2 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
-    [CFG_KD2]     = { "Set 2 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
-    [CFG_KP3]     = { "Set 3 KP", "%/mB", 2, K_NUM, "Proportional gain" },
-    [CFG_TI3]     = { "Set 3 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
-    [CFG_KD3]     = { "Set 3 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
-    [CFG_B1]      = { "Boundary 1", "mB", 1, K_NUM, "Set 1 / set 2 switch point" },
-    [CFG_B2]      = { "Boundary 2", "mB", 1, K_NUM, "Set 2 / set 3 switch point" },
-    [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM, "Switching band about each boundary" },
-    [CFG_KP4]     = { "Set 4 KP", "%/mB", 2, K_NUM, "Proportional gain" },
-    [CFG_TI4]     = { "Set 4 TI", "min", 2, K_NUM, "Integral time; 0 = off" },
-    [CFG_KD4]     = { "Set 4 KD", "%s/mB", 2, K_NUM, "Derivative, % per mB/s; 0 = off" },
-    [CFG_B3]      = { "Boundary 3", "mB", 1, K_NUM, "Set 3 / set 4 switch point; 0 = no set 4" },
-    // Disable switch edges (0.16.21; "From, %" and "To, %" on their cards).
-    [CFG_PASS_LO] = { "Disable from", "%", 0, K_NUM, "Switch works below this" },
-    [CFG_PASS_HI] = { "Disable to", "%", 0, K_NUM, "Switch works above this" },
+    [CFG_POSMAX]  = { "100 %", "turns", 2, K_TURNS },
+    [CFG_REVERSE] = { "Direction", NULL, 0, K_TOGGLE },
+    [CFG_BACKOFF] = { "Back-off", "steps", 0, K_NUM },
+    [CFG_RETURN]  = { "Return", "steps", 0, K_NUM },
+    [CFG_FHOME]   = { "Fast close", "steps/s", 0, K_NUM },
+    [CFG_FCREEP]  = { "Slow close", "steps/s", 0, K_NUM },
+    [CFG_RATE]    = { "Speed", "st/s", 0, K_NUM },
+    [CFG_START]   = { "Start", "st/s", 0, K_NUM },
+    [CFG_ACCEL]   = { "Accel", "st/s/s", 0, K_NUM },
+    [CFG_KP]      = { "KP", "%/mB", 2, K_NUM },
+    [CFG_TI]      = { "TI", "min", 2, K_NUM },
+    [CFG_OUTMIN]  = { "AUTO min", "%", 1, K_NUM },
+    [CFG_DB]      = { "Deadband", "steps", 0, K_NUM },
+    [CFG_BAND]    = { "SP band", "mB", 2, K_NUM },
+    [CFG_KD]      = { "KD", "%s/mB", 2, K_NUM },
+    [CFG_KP2]     = { "KP", "%/mB", 2, K_NUM },
+    [CFG_TI2]     = { "TI", "min", 2, K_NUM },
+    [CFG_KD2]     = { "KD", "%s/mB", 2, K_NUM },
+    [CFG_KP3]     = { "KP", "%/mB", 2, K_NUM },
+    [CFG_TI3]     = { "TI", "min", 2, K_NUM },
+    [CFG_KD3]     = { "KD", "%s/mB", 2, K_NUM },
+    [CFG_B1]      = { "1 to 2", "mB", 1, K_NUM },
+    [CFG_B2]      = { "2 to 3", "mB", 1, K_NUM },
+    [CFG_HYST]    = { "Hysteresis", "%", 0, K_NUM },
+    [CFG_KP4]     = { "KP", "%/mB", 2, K_NUM },
+    [CFG_TI4]     = { "TI", "min", 2, K_NUM },
+    [CFG_KD4]     = { "KD", "%s/mB", 2, K_NUM },
+    [CFG_B3]      = { "3 to 4", "mB", 1, K_NUM },
+    [CFG_PASS_LO] = { "From", "%", 0, K_NUM },
+    [CFG_PASS_HI] = { "To", "%", 0, K_NUM },
+    [CFG_SPT]     = { "Steps/turn", NULL, 0, K_NUM },
 };
 
 static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
@@ -169,10 +122,10 @@ static const char *value_text(char *buf, size_t n, cfg_key_t k, int32_t v)
     switch (F[k].kind) {
     case K_TURNS:
         return fixed_fmt(buf, n, fixed_round((int64_t)v * 1000 / STEPS_PER_TURN, 1), 2);
-    case K_TOGGLE:   // CFG_REVERSE, the only one (Pressure response went in 0.16.30)
+    case K_TOGGLE:   // CFG_REVERSE, the only one
         return v ? "Reversed" : "Normal";
     default:
-        // 0 means none here (0.16.25, Fable): no set 4, no band.
+        // 0 means none here (0.16.25): no set 4, no band.
         if (v == 0 && (k == CFG_B3 || k == CFG_BAND))
             return "None";
         return fixed_fmt(buf, n, v, F[k].dec);
@@ -188,39 +141,29 @@ static const char *caption(char *buf, size_t n, cfg_key_t k)
     return buf;
 }
 
-// Help lines from the field descriptions.
-static const char *field_help(char *buf, size_t n, const char *notes, const cfg_key_t *keys, int nk)
+// The keypad's title: the caption, with the set for a PID gain ("Set 2
+// KP, %/mB").
+static const char *kp_title(char *buf, size_t n, cfg_key_t k)
 {
-    size_t used = 0;
-    buf[0] = '\0';
-    if (notes) {
-        lv_snprintf(buf, n, "%s\n\n", notes);
-        used = strlen(buf);
-    }
-    for (int i = 0; i < nk && used < n; i++) {
-        // Terse, for a trained operator (0.15.18, Ryan): the unit in brackets.
-        const field_t *f = &F[keys[i]];
-        if (f->unit)
-            lv_snprintf(buf + used, n - used, "%s [%s]: %s.\n", f->cap, f->unit, f->info);
-        else
-            lv_snprintf(buf + used, n - used, "%s: %s.\n", f->cap, f->info);
-        used += strlen(buf + used);
-    }
-    if (used && buf[used - 1] == '\n')
-        buf[used - 1] = '\0';
-    return buf;
+    for (int s = 1; s <= 4; s++)
+        for (int w = 0; w < 3; w++)
+            if (cfg_pid_key(s, w) == k) {
+                lv_snprintf(buf, n, "Set %d %s, %s", s, F[k].cap, F[k].unit);
+                return buf;
+            }
+    return caption(buf, n, k);
 }
 
 /* Editable card: white, outlined, 12 px caption, 16 px value, chevron; a
- * 3 px edge on the left for draft (dark) or unsaved (light grey). */
+ * 3 px dark edge on the left while its value is in use and not saved. */
 typedef struct {
     lv_obj_t *card, *edge, *v;
 } ecard_t;
 
-static void ecard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, int32_t w, const char *cap,
+static void ecard_make(ecard_t *e, lv_obj_t *p, int32_t x, int32_t y, int32_t w, const char *cap,
                        lv_event_cb_t cb, void *user)
 {
-    e->card = ui_card(scr, x, y, w, RH);
+    e->card = ui_card(p, x, y, w, RH);
     lv_obj_add_flag(e->card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_border_width(e->card, 1, 0);
     lv_obj_set_style_border_color(e->card, UI_TICK, 0);
@@ -229,123 +172,107 @@ static void ecard_make(ecard_t *e, lv_obj_t *scr, int32_t x, int32_t y, int32_t 
     ui_label(e->card, 11, 5, w - 31, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, cap);
     e->v = ui_label(e->card, 11, 22, w - 31, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
     lv_label_set_long_mode(e->v, LV_LABEL_LONG_DOT);
-    lv_obj_t *chev = ui_label(e->card, w - 20, 15, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT,
-                              LV_SYMBOL_RIGHT);
-    (void)chev;
+    ui_label(e->card, w - 20, 15, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
     e->edge = ui_card(e->card, -1, 5, 3, 36);
     lv_obj_set_style_radius(e->edge, 0, 0);
     lv_obj_set_style_border_width(e->edge, 0, 0);
+    lv_obj_set_style_bg_color(e->edge, COL_EDGE, 0);
     lv_obj_set_style_bg_opa(e->edge, LV_OPA_TRANSP, 0);
 }
 
-static void ecard_state(ecard_t *e, const char *text, bool draft, bool applied)
+static void ecard_state(ecard_t *e, const char *text, bool edge)
 {
     ui_set_text(e->v, text);
-    ui_set_color(e->v, UI_TEXT);
-    lv_opa_t opa = draft || applied ? LV_OPA_COVER : LV_OPA_TRANSP;
+    lv_opa_t opa = edge ? LV_OPA_COVER : LV_OPA_TRANSP;
     if (lv_obj_get_style_bg_opa(e->edge, 0) != opa)
         lv_obj_set_style_bg_opa(e->edge, opa, 0);
-    lv_color_t c = draft ? COL_DRAFT : COL_GREY;
-    if (opa && !lv_color_eq(lv_obj_get_style_bg_color(e->edge, 0), c))
-        lv_obj_set_style_bg_color(e->edge, c, 0);
 }
 
 static void field_update(ecard_t *e, cfg_key_t k)
 {
     char buf[40];
-    int32_t s;
-    bool applied = cfg_value(CFG_FROM_SAVED, k, &s) && s != live(k);
-    ecard_state(e, value_text(buf, sizeof buf, k, shown(k)), draft_set[k], applied);
+    ecard_state(e, value_text(buf, sizeof buf, k, live(k)), unsaved_key(k));
 }
 
-/* Editing */
+/* Editing: the value goes in use at once */
 static cfg_key_t ed_key;
+
+static bool set_now(cfg_key_t k, int32_t v, const char **why)
+{
+    int32_t vals[CFG_N];
+    bool set[CFG_N];
+    char t[40], b[16];
+    if (v == live(k))
+        return true;
+    memset(set, 0, sizeof set);
+    memset(vals, 0, sizeof vals);
+    vals[k] = v;
+    set[k] = true;
+    if (!cfg_apply_with(vals, set, why))
+        return false;
+    valve_event("CFG", "%s set to %s (screen), in use, not saved", kp_title(t, sizeof t, k),
+                value_text(b, sizeof b, k, v));
+    ui_refresh_soon();
+    return true;
+}
 
 static bool ed_set(int32_t v, const char **why)
 {
-    (void)why;
-    set_draft(ed_key, v);
-    return true;
+    return set_now(ed_key, v, why);
 }
 
 static bool ed_turns(int32_t v100, const char **why)
 {
-    (void)why;
-    set_draft(CFG_POSMAX, (int32_t)(((int64_t)v100 * STEPS_PER_TURN + 50) / 100));
-    return true;
+    return set_now(CFG_POSMAX, (int32_t)(((int64_t)v100 * STEPS_PER_TURN + 50) / 100), why);
 }
 
-// The keypad's side rows. A setting is normally in use as saved, so one
-// row, Saved; In use as well only when they differ (after Motor override),
-// or In use alone when nothing is saved yet.
+// The keypad's side rows: In use, and Saved when it differs.
 static void kp_rows(ui_kp_t *k, cfg_key_t key, char *now, char *sv, size_t n)
 {
     int32_t s;
     bool have = cfg_value(CFG_FROM_SAVED, key, &s);
-    int r = 0;
-    if (!have || s != live(key)) {
-        k->side_label[r] = "In use";
-        k->side_text[r++] = value_text(now, n, key, live(key));
+    k->side_label[0] = "In use";
+    k->side_text[0] = value_text(now, n, key, live(key));
+    if (have && s != live(key)) {
+        k->side_label[1] = "Saved";
+        k->side_text[1] = value_text(sv, n, key, s);
     }
-    if (have) {
-        k->side_label[r] = "Saved";
-        k->side_text[r] = value_text(sv, n, key, s);
-    }
-}
-
-static void ed_turns_keypad(void)
-{
-    static char now[16], sv[16];
-    int32_t lo, hi, s;
-    cfg_range(CFG_POSMAX, &lo, &hi);
-    ui_kp_t k = { .title = "100 % travel, output turns", .dec = 2,   // no steps-per-turn hint (template)
-                  .min = (int32_t)(((int64_t)lo * 100 + STEPS_PER_TURN - 1) / STEPS_PER_TURN),
-                  .max = (int32_t)((int64_t)hi * 100 / STEPS_PER_TURN), .on_set = ed_turns };
-    kp_rows(&k, CFG_POSMAX, now, sv, sizeof now);
-    (void)s;
-    ui_keypad_ex(&k);
-}
-
-static int32_t ed_present;   // full steps, the position "Use the present position" showed
-
-static void ed_turns_present(void)
-{
-    set_draft(CFG_POSMAX, ed_present);
 }
 
 static void ed_toggle_ok(void)
 {
-    set_draft(ed_key, !shown(ed_key));
+    const char *why;
+    char t[64];
+    if (!set_now(ed_key, !live(ed_key), &why)) {
+        lv_snprintf(t, sizeof t, "Not changed: %s", why);
+        ui_msg(t);
+    }
 }
 
 static void edit(cfg_key_t k)
 {
-    static char t[160], cap[40], now[24], sv[24];
-    char b[16];
+    static char t[96], cap[40], now[24], sv[24];
     ed_key = k;
     if (F[k].kind == K_TURNS) {
-        int32_t lo, hi, pos = stepper3_position();
+        // The keypad at once (0.17.0, Ryan 14 Nov: "just open a keypad to
+        // type the number of turns, no question").
+        int32_t lo, hi;
         cfg_range(CFG_POSMAX, &lo, &hi);
-        if (!valve_calibrated() || stepper3_busy() || pos < lo || pos > hi) {
-            ed_turns_keypad();
-            return;
-        }
-        ed_present = pos;
-        lv_snprintf(t, sizeof t, "Use the present position (%s turns) as 100 %%, or type turns?",
-                    value_text(b, sizeof b, k, pos));
-        ui_ask(t, "Present", ed_turns_present, "Type turns", ed_turns_keypad);
+        ui_kp_t kp = { .title = "100 %, turns", .dec = 2,
+                       .min = (int32_t)(((int64_t)lo * 100 + STEPS_PER_TURN - 1) / STEPS_PER_TURN),
+                       .max = (int32_t)((int64_t)hi * 100 / STEPS_PER_TURN), .on_set = ed_turns };
+        kp_rows(&kp, CFG_POSMAX, now, sv, sizeof now);
+        ui_keypad_ex(&kp);
     } else if (F[k].kind == K_TOGGLE) {
-        lv_snprintf(t, sizeof t, "Set motor direction to %s? Saving clears the zero.",
-                    shown(k) ? "Normal" : "Reversed");
+        lv_snprintf(t, sizeof t, "Set motor direction to %s? This clears the zero.",
+                    live(k) ? "Normal" : "Reversed");
         ui_confirm(t, "Change", ed_toggle_ok);
     } else {
-        int32_t lo, hi, s;
+        int32_t lo, hi;
         cfg_range(k, &lo, &hi);
-        // The range is in the entry field's corners (Min, Max): no info line.
-        ui_kp_t kp = { .title = caption(cap, sizeof cap, k), .dec = F[k].dec, .min = lo, .max = hi,
+        ui_kp_t kp = { .title = kp_title(cap, sizeof cap, k), .dec = F[k].dec, .min = lo, .max = hi,
                        .on_set = ed_set };
         kp_rows(&kp, k, now, sv, sizeof now);
-        (void)s;
         ui_keypad_ex(&kp);
     }
 }
@@ -356,32 +283,30 @@ static void field_event(lv_event_t *e)
 }
 
 /* --------------------------------------------------------------------------
- * Save, Undo and the side column (Help, Save, Undo). Both act at once
- * (0.16.31); Undo asks first only when it would drop something in use (a
- * new calibration, a Motor override change), which typing cannot bring back.
+ * Save, Undo and the side column (Help, Save, Undo)
  * ------------------------------------------------------------------------ */
 static void save_now(void)
 {
+    static int32_t none_v[CFG_N];
+    static bool none[CFG_N];
     const char *why;
     char t[96];
     uint32_t rev;
     const char *at;
-    if (!unsaved()) {
+    if (!cfg_unsaved()) {
         ui_msg("Nothing to save");
         return;
     }
-    // In AUTO the valve moves all the time; tuning saves there (cfg.c
-    // refuses anything else with "Stop AUTO first").
+    // In AUTO the valve moves all the time; tuning saves there.
     if (!valve_auto() && (stepper3_busy() || valve_mode() == VALVE_CALIBRATING)) {
         ui_msg("Wait for the valve to stop");
         return;
     }
-    if (!cfg_save_with(draft_v, draft_set, &why)) {
+    if (!cfg_save_with(none_v, none, &why)) {
         lv_snprintf(t, sizeof t, "Not saved: %s", why);
         ui_msg(t);
         return;
     }
-    drafts_clear();
     if (cfg_rev(CFG_FROM_SAVED, &rev, &at)) {
         char w[24];
         lv_snprintf(t, sizeof t, at[0] ? "Saved, %s." : "Saved, %s (clock not set).", save_when(w, sizeof w, at));
@@ -393,12 +318,11 @@ static void undo_now(void)
 {
     const char *why;
     char t[64];
-    if (cfg_unsaved() && !cfg_undo(&why)) {
+    if (!cfg_undo(&why)) {
         lv_snprintf(t, sizeof t, "Not undone: %s", why);
-        ui_msg(t);   // the drafts are kept
+        ui_msg(t);
         return;
     }
-    drafts_clear();
     ui_msg("Undone: back to the last save.");
 }
 
@@ -406,24 +330,20 @@ static void undo_ask(void)
 {
     static char t[96];
     char c[24];
-    const int in_use = cfg_unsaved();
-    if (!drafts() && !in_use) {
+    const int n = cfg_unsaved();
+    if (!n) {
         ui_msg("Nothing to undo");
-    } else if (in_use) {
-        lv_snprintf(t, sizeof t, "Undo? %s in use %s back to the last save.", plural(c, sizeof c, in_use, "change"),
-                    in_use == 1 ? "goes" : "go");
-        ui_confirm(t, "Undo", undo_now);
-    } else {
-        undo_now();
+        return;
     }
+    lv_snprintf(t, sizeof t, "Undo? %s in use %s back to the last save.", plural(c, sizeof c, n, "change"),
+                n == 1 ? "goes" : "go");
+    ui_confirm(t, "Undo", undo_now);
 }
 
 static void save_cb(lv_event_t *e) { (void)e; save_now(); }
 static void undo_cb(lv_event_t *e) { (void)e; undo_ask(); }
 
-// The header's unsaved icon (ui.c): something is in use and not saved (a
-// new calibration, a Motor override change). Save is one tap from here;
-// Undo is on the settings pages.
+// The header's unsaved icon (ui.c): Save is one tap from here.
 void ui_unsaved_ask(void)
 {
     static char t[96];
@@ -432,7 +352,7 @@ void ui_unsaved_ask(void)
     ui_confirm(t, "Save", save_now);
 }
 
-// Reset to factory (the Menu's ninth tile, 0.16.31).
+// Factory reset (the Menu's ninth tile).
 static void reset_now(void)
 {
     const char *why;
@@ -442,7 +362,6 @@ static void reset_now(void)
         ui_msg(t);
         return;
     }
-    drafts_clear();
     ui_msg("Factory settings saved.");
 }
 
@@ -456,15 +375,15 @@ void ui_factory_reset_ask(void)
         ui_msg("Wait for the valve to stop");
         return;
     }
-    ui_confirm("Reset motor and PID settings to factory? Calibration, name and IP address stay. No undo.",
+    ui_confirm("Reset motor, valve and PID settings to factory? Calibration and IP address stay.",
                "Reset", reset_now);
 }
 
-static const char *help_title, *(*help_text)(void);
+static const char *help_title, *help_text;
 static void help_cb(lv_event_t *e)
 {
     (void)e;
-    ui_text_view(help_title, help_text());
+    ui_text_view(help_title, help_text);
 }
 
 static struct {
@@ -472,7 +391,7 @@ static struct {
 } side;
 
 // Help in row 0, Save in row 1, Undo in row 2.
-static void side_make(lv_obj_t *scr, const char *title, const char *(*help)(void))
+static void side_make(lv_obj_t *scr, const char *title, const char *help)
 {
     help_title = title;
     help_text = help;
@@ -481,35 +400,38 @@ static void side_make(lv_obj_t *scr, const char *title, const char *(*help)(void
     side.undo = ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Undo", undo_cb, NULL);
 }
 
-// Strip and side buttons, every refresh.
-static void side_refresh(void)
+// The save state on the strip: "1 change in use, not saved", "All
+// settings saved 14/11/26 13:02", "Factory settings, nothing saved yet".
+static void save_strip(void)
 {
     char t[64], c[32], w[24];
     uint32_t rev;
     const char *at;
-    int n = unsaved();
-    ui_btn_enable(side.save, n > 0);
-    ui_btn_enable(side.undo, drafts() > 0 || cfg_unsaved() > 0);
-    if (drafts())
-        lv_snprintf(t, sizeof t, "%s. Save to use.", plural(c, sizeof c, n, "unsaved change"));
-    else if (n)
-        lv_snprintf(t, sizeof t, "%s in use, not saved.", plural(c, sizeof c, n, "change"));
+    int n = cfg_unsaved();
+    if (n)
+        lv_snprintf(t, sizeof t, "%s in use, not saved", plural(c, sizeof c, n, "change"));
     else if (cfg_rev(CFG_FROM_SAVED, &rev, &at))
-        lv_snprintf(t, sizeof t, "All settings saved%s%s.", at[0] ? " " : "", at[0] ? save_when(w, sizeof w, at) : "");
+        lv_snprintf(t, sizeof t, "All settings saved%s%s", at[0] ? " " : "", at[0] ? save_when(w, sizeof w, at) : "");
     else
-        lv_snprintf(t, sizeof t, "Factory settings, nothing saved yet.");
-    ui_strip_set(UI_STRIP_INFO, save_icon(n), t);
+        lv_strlcpy(t, "Factory settings, nothing saved yet", sizeof t);
+    ui_strip_set(UI_STRIP_INFO, n ? LV_SYMBOL_SAVE : LV_SYMBOL_OK, t);
+}
+
+// Save and Undo lit while something is in use and not saved; the strip.
+static void side_refresh(void (*strip)(void))
+{
+    int n = cfg_unsaved();
+    ui_btn_enable(side.save, n > 0);
+    ui_btn_enable(side.undo, n > 0);
+    (strip ? strip : save_strip)();
 }
 
 /* --------------------------------------------------------------------------
- * Restart (System)
+ * Restart (the Power question only, 0.17.0: no question of its own and no
+ * button on System). Stops the valve (AUTO ends, homing is cancelled),
+ * then waits 2.5 s so the valve position is saved at standstill
+ * (valvepos.h, 2 s) and offered at start-up.
  * ------------------------------------------------------------------------ */
-// Restart (on Diagnostics from 0.12.19, Name and network from 0.13.2,
-// next to Motor override on Settings from 0.13.5, Ryan 28 Oct; on System
-// beside Firmware in the common HMI template): asks
-// first, stops the valve (AUTO ends, homing is cancelled), then waits 2.5 s
-// so the valve position is saved at standstill (valvepos.h, 2 s) and
-// offered at start-up.
 static void restart_now(lv_timer_t *t)
 {
     // Something moved the valve meanwhile (the network, a tap): stop it and
@@ -523,117 +445,13 @@ static void restart_now(lv_timer_t *t)
     sysinfo_restart();
 }
 
-static void do_restart(void)
+void ui_restart_now(void)
 {
     valve_stop();
     valve_event("SYS", "Restart from the screen");
     ui_msg_no_ok("Restarting.");   // nothing to acknowledge (Ryan, 28 Oct)
     lv_timer_t *t = lv_timer_create(restart_now, 2500, NULL);
     lv_timer_set_repeat_count(t, 1);
-}
-
-void ui_restart_ask(void)
-{
-    ui_confirm("Restart the controller? The valve stops and holds where it is.", "Restart", do_restart);
-}
-
-static void restart_cb(lv_event_t *e)
-{
-    (void)e;
-    ui_restart_ask();
-}
-
-/* --------------------------------------------------------------------------
- * Cryostat name (System > Cryostat name): a keyboard for the name in the
- * Home title, "<name> pressure controller". Use name puts it in use and
- * saves it (0.16.31; unsaved until Save settings before).
- * ------------------------------------------------------------------------ */
-static struct {
-    lv_obj_t *kb, *text, *use;
-    char buf[CFG_NAME_LEN + 1];
-} nm;
-
-static const char *const nm_map[] = {
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
-    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
-    "A", "S", "D", "F", "G", "H", "J", "K", "L", "-", "\n",
-    "Z", "X", "C", "V", "B", "N", "M", "Space", "Del", ""
-};
-
-static void nm_show(void)
-{
-    // The end being typed stays in view.
-    const char *t = nm.buf;
-    lv_point_t sz;
-    for (;;) {
-        lv_text_get_size(&sz, t, &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (sz.x <= 89 || !*t)
-            break;
-        t++;
-    }
-    ui_set_text(nm.text, t[0] ? t : "None");
-    ui_set_color(nm.text, t[0] ? UI_TEXT : UI_MUTED);
-    ui_btn_enable(nm.use, strcmp(nm.buf, cfg_name()) != 0);
-}
-
-static void nm_key(lv_event_t *e)
-{
-    (void)e;
-    uint32_t id = lv_buttonmatrix_get_selected_button(nm.kb);
-    const char *k = lv_buttonmatrix_get_button_text(nm.kb, id);
-    size_t n = strlen(nm.buf);
-    if (!k)
-        return;
-    if (!strcmp(k, "Del")) {
-        if (n)
-            nm.buf[n - 1] = '\0';
-    } else if (n >= CFG_NAME_LEN) {
-        ui_msg("Up to 12 characters");
-        return;
-    } else {
-        nm.buf[n] = strcmp(k, "Space") ? k[0] : ' ';
-        nm.buf[n + 1] = '\0';
-    }
-    nm_show();
-}
-
-// The name, the address and Remote control are saved as they are set
-// (0.16.31). A save that fails says so; the header's unsaved icon then shows.
-static void system_save(void)
-{
-    const char *why;
-    char t[96];
-    if (!cfg_save_system(&why)) {
-        lv_snprintf(t, sizeof t, "In use, not saved: %s", why);
-        ui_msg(t);
-    }
-}
-
-static void nm_use(lv_event_t *e)
-{
-    if (ui_btn_disabled(e))
-        return;
-    // No spaces at the ends.
-    char *a = nm.buf;
-    while (*a == ' ')
-        a++;
-    size_t n = strlen(a);
-    while (n && a[n - 1] == ' ')
-        a[--n] = '\0';
-    const char *why = NULL;
-    if (!cfg_set_name(a, &why)) {
-        ui_msg(why);
-        return;
-    }
-    valve_event("CFG", a[0] ? "Cryostat name set (screen)" : "Cryostat name cleared (screen)");
-    ui_back();
-    system_save();
-}
-
-static void nm_cancel(lv_event_t *e)
-{
-    (void)e;
-    ui_back();
 }
 
 // A key grid in the card style, keys raised as the buttons.
@@ -663,125 +481,141 @@ static lv_obj_t *key_grid(lv_obj_t *scr, int32_t w, const char *const *map, lv_e
     return kb;
 }
 
-static void nm_build(lv_obj_t *scr)
+// The address and mask are saved as they are set (0.16.31), as is Network
+// control. A save that fails says so; the header's unsaved icon then shows.
+static void system_save(void)
 {
-    lv_strlcpy(nm.buf, cfg_name(), sizeof nm.buf);
-    nm.kb = key_grid(scr, 343, nm_map, nm_key);
-    // Bottom row: Z to M as the keys above, Space and Del wider.
-    for (uint32_t i = 30; i < 37; i++)
-        lv_buttonmatrix_set_button_width(nm.kb, i, 4);
-    lv_buttonmatrix_set_button_width(nm.kb, 37, 7);
-    lv_buttonmatrix_set_button_width(nm.kb, 38, 5);
-    nm.text = ui_info(scr, 361, RY[0], 109, RH, "Name");
-    nm.use = ui_btn(scr, 361, RY[1], 109, RH, UI_PRIMARY, "Use name", nm_use, NULL);
-    ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Cancel", nm_cancel, NULL);
-    nm_show();
+    const char *why;
+    char t[96];
+    if (!cfg_save_system(&why)) {
+        lv_snprintf(t, sizeof t, "In use, not saved: %s", why);
+        ui_msg(t);
+    }
 }
 
-static void nm_refresh(void)
+// A switch on a card that takes the press (Network control, Ignore switch).
+static lv_obj_t *card_switch(lv_obj_t *c, int32_t w, int32_t h)
 {
-    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_HOME, "Shown on Home. Use name saves it.");
+    lv_obj_t *sw = lv_switch_create(c);
+    lv_obj_set_size(sw, w, h);
+    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -12, 0);
+    lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);   // the card takes the press
+    lv_obj_set_style_bg_color(sw, TRACK_GREY, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_anim_duration(sw, 0, 0);
+    return sw;
 }
 
-const ui_screen_t ui_scr_name = { "Cryostat name", nm_build, nm_refresh, NULL };
+static void switch_show(lv_obj_t *sw, bool on)
+{
+    if (lv_obj_has_state(sw, LV_STATE_CHECKED) != on)
+        lv_obj_set_state(sw, LV_STATE_CHECKED, on);
+}
 
 /* --------------------------------------------------------------------------
- * System (on the Menu; Name and network 0.12.13 to 0.13.6, System 0.13.7 to 0.13.18,
- * Ryan 28 Oct): the cryostat name, the Ethernet address (static, no DHCP
- * from 0.14.9), the address in use, the MAC, the
- * firmware and its build date, the Remote control switch, Restart and
- * Shut down (0.16.24).
+ * System (0.17.0 layout; the canvas, Ryan 14 Nov):
+ *   IP address & mask (its page)  MAC address
+ *   Network control (toggle)      Date and time
+ *   Firmware                      Up time        Power
+ * The cryostat name went in 0.17.0 (Ryan 14 Nov: "remove the option to name
+ * the controller just say Pressure controller"); Restart and Shut down are
+ * in the Power question (the Power button here, the header's power icon).
+ * Network control was Remote control (0.13.4 to 0.16.33).
  * ------------------------------------------------------------------------ */
-static struct { lv_obj_t *name, *net, *mac, *fw, *remote, *rsw, *rtext; } nn;
+static struct { ecard_t net; lv_obj_t *mac, *fw, *rsw, *rtext, *clock, *up; } nn;
 
 static void nn_go(lv_event_t *e) { ui_open((const ui_screen_t *)lv_event_get_user_data(e)); }
 
-// Remote control (0.13.4, Ryan 28 Oct, network plan A): a toggle switch
-// since 0.13.7; a press anywhere on the card turns it On or Off, live at
-// once and saved (0.16.31).
 static void remote_cb(lv_event_t *e)
 {
     (void)e;
     cfg_set_remote(!cfg_remote());
-    lv_obj_set_state(nn.rsw, LV_STATE_CHECKED, cfg_remote());
+    switch_show(nn.rsw, cfg_remote());
     system_save();
 }
 
-// Restart and Shut down on System are actions, not pages: filled dark
-// (Restart from 0.13.5, Ryan 28 Oct; Shut down beside it from 0.16.24).
-static void nn_dark(lv_obj_t *b)
-{
-    lv_obj_set_style_bg_color(b, UI_TEXT, 0);
-    lv_obj_set_style_text_color(b, lv_color_white(), 0);
-    lv_obj_set_style_border_width(b, 0, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(0x3C4856), LV_STATE_PRESSED);
-}
-
-static void shut_cb(lv_event_t *e)
+static void power_cb(lv_event_t *e)
 {
     (void)e;
-    ui_shutdown_ask();   // the power icon's question
+    ui_shutdown_ask();   // the power icon's question: Cancel, Restart, Shut down
 }
 
 static void nn_build(lv_obj_t *scr)
 {
-    // 0.16.24 (Ryan 13 Nov: "diagnostics should not be a button in system.
-    // put remote control on the first row right. ip on second row left and
-    // mac on second row right ... maybe put restart in diagnostics place and
-    // shut down in where restart is now"): Cryostat name and Remote control,
-    // IP address and MAC, then Firmware, Restart and Shut down. Diagnostics
-    // is on the Menu only.
-    nn.name = ui_btn(scr, 10, RY[0], 226, RH, UI_NAV, "Cryostat name", nn_go, (void *)&ui_scr_name);
-    // Remote control: the name and what it means, the switch on the right.
-    lv_obj_t *c = nn.remote = ui_card(scr, 244, RY[0], 226, RH);
+    memset(&nn, 0, sizeof nn);
+    ecard_make(&nn.net, scr, 10, RY[0], 226, "IP address & mask", nn_go, (void *)&ui_scr_netaddr);
+    nn.mac = ui_info(scr, 244, RY[0], 226, RH, "MAC address");
+    lv_obj_t *c = ui_card(scr, 10, RY[1], 226, RH);
     lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(c, remote_cb, LV_EVENT_PRESSED, NULL);
-    ui_label(c, 12, 6, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Remote control");
+    ui_label(c, 12, 6, 150, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Network control");
     nn.rtext = ui_label(c, 12, 26, 150, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
-    lv_obj_t *sw = nn.rsw = lv_switch_create(c);
-    lv_obj_set_size(sw, 52, 28);
-    lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -12, 0);
-    lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);   // the card takes the press
-    lv_obj_set_style_bg_color(sw, lv_color_hex(0xC3CDD7), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_anim_duration(sw, 0, 0);
-    nn.net = ui_btn(scr, 10, RY[1], 226, RH, UI_NAV, "IP address", nn_go, (void *)&ui_scr_netaddr);
-    // The MAC, for the site's network records (Ryan, 28 Oct).
-    nn.mac = ui_info(scr, 244, RY[1], 226, RH, "MAC address");
+    nn.rsw = card_switch(c, 52, 28);
+    nn.clock = ui_info(scr, 244, RY[1], 226, RH, "Date and time");
     nn.fw = ui_info(scr, 10, RY[2], 226, RH, "Firmware");
-    nn_dark(ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Restart", restart_cb, NULL));
-    nn_dark(ui_btn(scr, 361, RY[2], 109, RH, UI_SECONDARY, "Shut down", shut_cb, NULL));
+    nn.up = ui_info(scr, 244, RY[2], 109, RH, "Up time");
+    ui_btn(scr, 361, RY[2], 109, RH, UI_DARK, LV_SYMBOL_POWER "  Power", power_cb, NULL);
+}
+
+// "192.168.1.100/24" from the address and mask in use.
+static const char *net_short(char *t, size_t n)
+{
+    uint32_t ip, mask, m;
+    char a[48];
+    cfg_net(&ip, &mask);
+    cfg_net_text(a, sizeof a, ip, mask);   // "a.b.c.d m.m.m.m[ (build default)]"
+    char *sp = strchr(a, ' ');
+    if (!sp) {
+        lv_strlcpy(t, a, n);
+        return t;
+    }
+    *sp = '\0';
+    char *end = strchr(sp + 1, ' ');
+    if (end)
+        *end = '\0';
+    int bits = 0;
+    if (cfg_net_parse(sp + 1, &m))
+        for (; m & 0x80000000u; m <<= 1)
+            bits++;
+    lv_snprintf(t, n, "%s/%d", a, bits);
+    return t;
 }
 
 static void nn_refresh(void)
 {
     char t[48];
-    uint32_t ip, mask;
-    cfg_net(&ip, &mask);
-    ui_btn_text(nn.name, "Cryostat name", cfg_name()[0] ? cfg_name() : "None");
-    cfg_net_text(t, sizeof t, ip, mask);
-    if (ip == 0 && mask == 0)
-        lv_strlcpy(t, "Build default", sizeof t);
-    else
-        *strchr(t, ' ') = '\0';   // the address; the mask is on its page
-    ui_btn_text(nn.net, "IP address", t);
+    ecard_state(&nn.net, net_short(t, sizeof t), false);
 #if PMC_LINK_ETHERNET
     ui_set_text(nn.mac, ethlink_mac()[0] ? ethlink_mac() : "Not read");
 #else
     ui_set_text(nn.mac, "None (host build)");
 #endif
     ui_set_text(nn.fw, ui_fw_text());
-    if (lv_obj_has_state(nn.rsw, LV_STATE_CHECKED) != cfg_remote())
-        lv_obj_set_state(nn.rsw, LV_STATE_CHECKED, cfg_remote());
+    switch_show(nn.rsw, cfg_remote());
     ui_set_text(nn.rtext, cfg_remote() ? "On: network can set" : "Off: network read only");
+    // "14/11/26 13:29:34" (DD/MM/YY); the clock is set by TIME SET.
+    const char *iso = rtclock_iso();
+    if (iso[0] && strlen(iso) >= 19)
+        lv_snprintf(t, sizeof t, "%.2s/%.2s/%.2s %.8s", iso + 8, iso + 5, iso + 2, iso + 11);
+    else
+        lv_strlcpy(t, "Not set", sizeof t);
+    ui_set_text(nn.clock, t);
+    uint32_t s = lv_tick_get() / 1000;
+    if (s >= 86400)
+        lv_snprintf(t, sizeof t, "%lu d %lu h", (unsigned long)(s / 86400), (unsigned long)(s % 86400 / 3600));
+    else if (s >= 3600)
+        lv_snprintf(t, sizeof t, "%lu h %lu min", (unsigned long)(s / 3600), (unsigned long)(s % 3600 / 60));
+    else
+        lv_snprintf(t, sizeof t, "%lu min", (unsigned long)(s / 60));
+    ui_set_text(nn.up, t);
     ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, cfg_net_restart_due()
-                 ? "New IP address saved: restart to use it." : "Static IP address.");   // no DHCP wording (Ryan 6 Nov)
+                 ? "New IP address saved: restart to use it" : "Static IP address");   // no DHCP wording (Ryan 6 Nov)
 }
 
 const ui_screen_t ui_scr_namenet = { "System", nn_build, nn_refresh, NULL };
 
-/* IP address: digits and dots for the address and the mask; Use saves
- * them (0.16.31) for the next restart. */
+/* IP address & mask: digits and dots for the address and the mask; Use
+ * saves them (0.16.31) for the next restart. */
 static struct {
     lv_obj_t *kb, *box[2], *val[2], *use;
     char buf[2][16];
@@ -792,7 +626,7 @@ static const char *const na_map[] = {
     "1", "2", "3", "\n",
     "4", "5", "6", "\n",
     "7", "8", "9", "\n",
-    ".", "0", "Del", ""
+    ".", "0", LV_SYMBOL_BACKSPACE, ""
 };
 
 static void na_show(void)
@@ -812,7 +646,7 @@ static void na_key(lv_event_t *e)
     size_t n = strlen(b);
     if (!k)
         return;
-    if (!strcmp(k, "Del")) {
+    if (!strcmp(k, LV_SYMBOL_BACKSPACE)) {
         if (n)
             b[n - 1] = '\0';
     } else if (n < 15) {
@@ -873,11 +707,11 @@ static void na_build(lv_obj_t *scr)
     lv_strlcpy(na.buf[1], sp + 1, sizeof na.buf[1]);
     na.sel = 0;
     na.kb = key_grid(scr, 226, na_map, na_key);
-    static const char *const cap[2] = { "Address (tap to type)", "Mask (tap to type)" };
+    static const char *const cap[2] = { "Address", "Mask" };
     for (int i = 0; i < 2; i++) {
         na.val[i] = ui_info(scr, 244, RY[i], 226, RH, cap[i]);
         na.box[i] = lv_obj_get_parent(na.val[i]);
-        lv_obj_set_style_border_color(na.box[i], UI_BLUE, 0);
+        lv_obj_set_style_border_color(na.box[i], UI_TEXT, 0);
         lv_obj_add_flag(na.box[i], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(na.box[i], na_pick, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
@@ -888,115 +722,46 @@ static void na_build(lv_obj_t *scr)
 
 static void na_refresh(void)
 {
-    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "The controller's address. Use saves it; a restart puts it in use.");
+    ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SETTINGS, "Use saves it. A restart puts it in use.");
 }
 
-const ui_screen_t ui_scr_netaddr = { "IP address", na_build, na_refresh, NULL };
+const ui_screen_t ui_scr_netaddr = { "IP address & mask", na_build, na_refresh, NULL };
 
 /* --------------------------------------------------------------------------
- * Motor settings (three tabs) and PID tuning (three)
+ * Tabbed pages: PID, Valve and Motor
  * ------------------------------------------------------------------------ */
 typedef struct {
     const char *label;
-    cfg_key_t keys[6];
-    int n;
-    const char *note;
-    bool tall;                // the keys as three tall cards (PID tuning's PID tab)
-    bool over;                // the Disable switch toggle, its two edges and the Motor override button (Override tab)
-    bool brow;                // B1, B2 and B3 in a row, the last key under them (Set ranges tab)
-    bool arow;                // two 109 px cards in a row, the grey text under them (AUTO tab)
-    const char *aside;        // grey text right of the last row's 109 px card (under the cards on the AUTO tab)
+    void (*make)(lv_obj_t *body);   // the tab's cards, rows 1 and 2
+    void (*refresh)(void);          // its own values, every refresh (the setting cards refresh anyway)
+    void (*strip)(void);            // its strip; NULL: the save state
+    void (*fast)(void);             // 10 Hz, or NULL
 } tab_t;
-
-// Motor settings (Valve setup to 0.16.1, Valve settings to 0.16.15, Ryan 12 Nov
-// "change valve settings to motor settings"; Ryan 9 Nov: "the functionality
-// between valve position and valve setup is a bit confusing"): the valve's
-// saved numbers, drafts until Save; Travel, Homing and Drive move
-// nothing. Motor override, which drives the motor by steps, opens from the
-// fourth tab, Override (0.16.17, Ryan 12 Nov: "it doesnt feel right to be in
-// valve position"; the side column and the strip have no room for it). Home
-// valve and Set position are on Valve position.
-// Drive is the first tab from 0.16.21 (Ryan 12 Nov: "put drive in the
-// first tab"). The Override tab's Ignore switch wording is from 0.16.21
-// (Ryan 12 Nov: the description was unclear; "Switch pass" to 0.16.20), and
-// its edges are saved settings (Ryan: "make the boundary editable"). From
-// 0.16.22 (Ryan 13 Nov: "change ignore to disable, and make the description
-// less verbose. also make all help notes or subtexts less verbose"):
-// Disable switch, and every note here a line or two.
-#define VALVE_SET_NOTE "Saved numbers; nothing moves. Home or set the valve on Valve position."
-static const tab_t valve_tabs[4] = {
-    { "Drive", { CFG_RATE, CFG_START, CFG_ACCEL }, 3, "Manual and AUTO moves. Saved with the valve stopped." },
-    // The deadband is the valve's (one from 0.16.32, Ryan 13 Nov; opening
-    // and closing from 0.15.15).
-    { "Travel", { CFG_POSMAX, CFG_REVERSE, CFG_DB }, 3, VALVE_SET_NOTE },
-    { "Homing", { CFG_BACKOFF, CFG_RETURN, CFG_FHOME, CFG_FCREEP }, 4, "Used by Home valve. " VALVE_SET_NOTE },
-    { "Override", { CFG_PASS_LO, CFG_PASS_HI }, 2,
-      "Disable switch: when On and homed, the limit switch does not stop closing from From to To % open "
-      "(no W-1 or F-3). Off after a restart.\n\nMotor override: drives the motor by steps.", false, true },
-};
-// PID tuning (0.14.21, Ryan 4 Nov; was Control tuning): KP, TI and KD by
-// name on their own tab, the rest of AUTO's settings on the other. From
-// 0.15.15 (Ryan 5 Nov, "build like industry ones"): three PID sets, one
-// shown at a time (the keys here are set 1's; the set row picks), and the
-// gain schedule on its own tab. From 0.16.14 (Ryan 11 Nov, "Yes fourth
-// set"): four sets and a third boundary. From 0.16.20 (Ryan 12 Nov) the
-// table is always on. From 0.16.25 (Ryan 13 Nov: "rework the pid tuning
-// page, use fable to evaluate whether each control is intuitive"; Fable's
-// review): tabs named by what they hold, Gains, Set ranges and AUTO; the
-// set row as four cards, the one shown outlined, so it does not read as a
-// second tab bar; the set in the gain captions; each boundary captioned by
-// the two sets it splits, the hysteresis under them; 0 shown as None; a
-// grey line of explanation in the empty cell; no "Save to keep".
-static const tab_t tune_tabs[3] = {
-    { "Gains", { CFG_KP, CFG_TI, CFG_KD }, 3, "Tap a set to edit it. Dot = set in use now.", true },
-    { "Set ranges", { CFG_B1, CFG_B2, CFG_B3, CFG_HYST }, 4,
-      "Each boundary splits two sets. Set 3 | 4 None: three sets.", false, false, true, false,
-      "The lower of pressure and setpoint picks the set. Hysteresis: % of the boundary." },
-    { "AUTO", { CFG_OUTMIN, CFG_BAND }, 2,
-      "AUTO min: lowest opening AUTO commands. Band 0 = none.", false, false, false, true,
-      "SP band: the In band and Stable tolerance about the setpoint." },
-};
 
 static struct {
     const tab_t *tabs;
     int ntabs, tab;
+    lv_obj_t *scr, *body, *segb[4];
     ecard_t f[6];
-    lv_obj_t *seg, *segb[4];
-    lv_obj_t *scr;
-    int set;                                   // the PID set the PID tab shows, 1 to 4
-    bool sets;                                 // the PID tab shows the set row (schedule on)
-    bool sel;                                  // the set row is up
-    lv_obj_t *selb[4], *selr[4], *seld[4];     // the set row: cards, range lines, in-use dots
-    lv_obj_t *band_sw, *band_title, *band_text;   // Motor settings' Override tab: the Disable switch toggle
+    cfg_key_t fk[6];
+    int nf;
+    int set;   // the PID set the Gains tab shows, 1 to 4
 } pg;
 
-// The key a tab shows in place i: on the PID tab, the set picked.
-static cfg_key_t pg_key(const tab_t *t, int i)
+// A setting card on the tab.
+static void fcard(lv_obj_t *b, int32_t x, int32_t y, int32_t w, const char *cap, cfg_key_t k)
 {
-    return t->tall ? cfg_pid_key(pg.set, i) : t->keys[i];
+    ecard_make(&pg.f[pg.nf], b, x, y, w, cap, field_event, (void *)(intptr_t)k);
+    pg.fk[pg.nf++] = k;
 }
 
-static void segs_draw(lv_obj_t *const *b, int n, int on);
-static void pg_fields(void);
-static void pg_refresh(void);
-static void motor_cb(lv_event_t *e);
-static void band_cb(lv_event_t *e);
-
-static void set_cb(lv_event_t *e)
+// A grey track of n equal segments; the one picked raised white (tabs,
+// the PID sets).
+static void segs_make(lv_obj_t *p, int32_t y, int n, const char *const *labels, lv_obj_t **b,
+                      lv_event_cb_t cb, int first)
 {
-    int s = (int)(intptr_t)lv_event_get_user_data(e);
-    if (s == pg.set)
-        return;
-    pg.set = s;
-    pg_fields();
-    pg_refresh();
-}
-
-// A grey track with n raised segments (the tabs, and the PID tab's sets).
-static lv_obj_t *segs_make(lv_obj_t *scr, int32_t y, int n, lv_obj_t **b, lv_event_cb_t cb, int first)
-{
-    lv_obj_t *track = ui_card(scr, 10, y, 343, RH);
-    lv_obj_set_style_bg_color(track, lv_color_hex(0xC3CDD7), 0);
+    lv_obj_t *track = ui_card(p, 10, y, 343, RH);
+    lv_obj_set_style_bg_color(track, TRACK_GREY, 0);
     lv_obj_set_style_border_width(track, 0, 0);
     lv_obj_set_style_radius(track, 6, 0);
     int32_t iw = (343 - 8) / n;
@@ -1005,327 +770,570 @@ static lv_obj_t *segs_make(lv_obj_t *scr, int32_t y, int n, lv_obj_t **b, lv_eve
         lv_obj_add_flag(b[i], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_radius(b[i], 4, 0);
         lv_obj_set_style_border_width(b[i], 0, 0);
+        lv_obj_set_style_border_color(b[i], UI_TEXT, 0);
+        lv_obj_set_style_shadow_width(b[i], 0, 0);
         lv_obj_add_event_cb(b[i], cb, LV_EVENT_CLICKED, (void *)(intptr_t)(first + i));
-    }
-    return track;
-}
-
-// The set row: "Set 2" over its pressures, a dot on the set in use. Four
-// white cards of 82 px from 0.16.25 (a grey track with segments, like the
-// tab bar, to 0.16.24), the one shown with a 2 px dark outline.
-static void sel_draw(void)
-{
-    for (int i = 0; i < 4; i++) {
-        bool on = i + 1 == pg.set;
-        lv_obj_set_style_border_width(pg.selb[i], on ? 2 : 1, 0);
-        lv_obj_set_style_border_color(pg.selb[i], on ? UI_TEXT : UI_TICK, 0);
+        lv_obj_t *l = ui_label(b[i], 0, 0, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, labels[i]);
+        lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
     }
 }
 
-static void sel_make(void)
-{
-    const int32_t iw = 82;
-    pg.sel = true;
-    for (int i = 0; i < 4; i++) {
-        char t[8];
-        lv_obj_t *b = pg.selb[i] = ui_card(pg.scr, 10 + i * 87, RY[1], iw, RH);
-        lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_bg_color(b, UI_TRACK, LV_STATE_PRESSED);
-        lv_obj_add_event_cb(b, set_cb, LV_EVENT_CLICKED, (void *)(intptr_t)(i + 1));
-        lv_snprintf(t, sizeof t, "Set %d", i + 1);
-        ui_label(b, 0, 4, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, t);
-        pg.selr[i] = ui_label(b, 0, 24, iw, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
-        // The dot 6 px before "Set n", on the middle of its capitals (0.15.20,
-        // Ryan: it sat at the segment's left edge, apart from the name).
-        lv_point_t sz;
-        lv_text_get_size(&sz, t, &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        const int32_t cap_mid = 4 + ui_font_16.line_height - ui_font_16.base_line - 6;   // half a 12 px capital
-        pg.seld[i] = ui_card(b, (iw - sz.x) / 2 - 6 - 8, cap_mid - 4, 8, 8);
-        lv_obj_set_style_radius(pg.seld[i], 4, 0);
-        lv_obj_set_style_border_width(pg.seld[i], 0, 0);
-        lv_obj_set_style_bg_color(pg.seld[i], UI_TEXT, 0);
-    }
-    sel_draw();
-}
-
-static void sel_refresh(void)
-{
-    // Four segments of 83 px (0.16.14): the pressures without "mB",
-    // "< 6.0", "6.0-10.0", "> 14.0"; B3 0 (three sets): set 4 "Not used".
-    char b[3][16], t[4][28];
-    fixed_fmt(b[0], sizeof b[0], shown(CFG_B1), 1);
-    fixed_fmt(b[1], sizeof b[1], shown(CFG_B2), 1);
-    fixed_fmt(b[2], sizeof b[2], shown(CFG_B3), 1);
-    lv_snprintf(t[0], sizeof t[0], "< %s", b[0]);
-    lv_snprintf(t[1], sizeof t[1], "%s-%s", b[0], b[1]);
-    if (shown(CFG_B3) != 0) {
-        lv_snprintf(t[2], sizeof t[2], "%s-%s", b[1], b[2]);
-        lv_snprintf(t[3], sizeof t[3], "> %s", b[2]);
-    } else {
-        lv_snprintf(t[2], sizeof t[2], "> %s", b[1]);
-        lv_snprintf(t[3], sizeof t[3], "Not used");
-    }
-    const int use = valve_pid_set();
-    for (int i = 0; i < 4; i++) {
-        ui_set_text(pg.selr[i], t[i]);
-        if ((i + 1 == use) == lv_obj_has_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN)) {
-            if (i + 1 == use) lv_obj_remove_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN);
-            else              lv_obj_add_flag(pg.seld[i], LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-}
-
-static void pg_fields(void)
-{
-    // Rebuilt on a tab change: only one tab's cards exist at a time.
-    for (int i = 0; i < 6; i++)
-        if (pg.f[i].card) {
-            lv_obj_delete(pg.f[i].card);
-            pg.f[i].card = NULL;
-        }
-    if (pg.sel) {
-        for (int i = 0; i < 4; i++) {
-            lv_obj_delete(pg.selb[i]);
-            pg.selb[i] = NULL;
-        }
-        pg.sel = false;
-    }
-    pg.band_sw = pg.band_title = pg.band_text = NULL;   // went with their card (the Disable switch's)
-    const tab_t *t = &pg.tabs[pg.tab];
-    int y0 = pg.ntabs > 1 ? 1 : 0;
-    char cap[40];
-    // The PID tab: the set row and the set picked as three cards under it
-    // (the PID table always on from 0.16.20; set 1 as three tall cards with
-    // it Off to 0.16.19).
-    pg.sets = t->tall;
-    if (pg.sets) {
-        // The set in the caption (0.16.25): "KP 2, %/mB" (78 px of caption).
-        static const char *const nm[3] = { "KP", "TI", "KD" };
-        sel_make();
-        for (int i = 0; i < 3; i++) {
-            const cfg_key_t k = pg_key(t, i);
-            lv_snprintf(cap, sizeof cap, "%s %d, %s", nm[i], pg.set, F[k].unit);   // KD in %s/mB: % per mB/s (0.16.25)
-            ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, cap, field_event, (void *)(intptr_t)k);
-        }
-    }
-    // Motor settings' Override tab: the Disable switch toggle across both
-    // columns (0.16.19, Ryan 12 Nov: "make switch override a toggle on the
-    // override screen in motor settings page"; the Switch tab of Motor
-    // override from 0.16.5), its edges From and To under it (0.16.21), then
-    // the Motor override button (0.16.17), set apart by a dark outline. A
-    // press anywhere on the toggle card turns it on or off, live at once, as
-    // Remote control on System. The button and the toggle card go in the
-    // spare f[] slots so a tab change deletes them.
-    if (t->over) {
-        static const char *const en[2] = { "From, %", "To, %" };
-        lv_obj_t *c = pg.f[2].card = ui_card(pg.scr, C2X[0], RY[y0], 343, RH);
-        lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(c, band_cb, LV_EVENT_PRESSED, NULL);
-        pg.band_title = ui_label(c, 12, 6, 260, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
-        pg.band_text = ui_label(c, 12, 26, 260, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
-        lv_obj_t *sw = pg.band_sw = lv_switch_create(c);
-        lv_obj_set_size(sw, 52, 28);
-        lv_obj_align(sw, LV_ALIGN_RIGHT_MID, -12, 0);
-        lv_obj_remove_flag(sw, LV_OBJ_FLAG_CLICKABLE);   // the card takes the press
-        lv_obj_set_style_bg_color(sw, lv_color_hex(0xC3CDD7), LV_PART_MAIN);
-        lv_obj_set_style_bg_color(sw, UI_BLUE, LV_PART_INDICATOR | LV_STATE_CHECKED);
-        lv_obj_set_style_anim_duration(sw, 0, 0);
-        for (int i = 0; i < 2; i++)
-            ecard_make(&pg.f[i], pg.scr, 10 + i * 117, RY[y0 + 1], 109, en[i], field_event,
-                       (void *)(intptr_t)t->keys[i]);
-        lv_obj_t *b = pg.f[3].card = ui_btn(pg.scr, 244, RY[y0 + 1], 109, RH, UI_SECONDARY, "Motor\noverride",
-                                            motor_cb, NULL);
-        lv_obj_set_style_border_side(b, LV_BORDER_SIDE_FULL, 0);
-        lv_obj_set_style_border_width(b, 2, 0);
-        lv_obj_set_style_border_color(b, UI_WARN, 0);
-    }
-    // Set ranges (brow, 0.16.25): B1, B2 and B3 in a row, each captioned by
-    // the two sets it splits, then the hysteresis under B1, with a grey line
-    // (aside) in the cell right of it. AUTO (arow): AUTO min and the
-    // setpoint band in a row, the grey line under them (Pressure response
-    // sat between them to 0.16.29).
-    for (int i = 0; i < t->n && (t->brow || t->arow); i++) {
-        static const char *const bn[4] = { "Set 1 | 2, mB", "Set 2 | 3, mB", "Set 3 | 4, mB", "Hysteresis, %" };
-        static const char *const an[2] = { "AUTO min, %", "SP band, mB" };
-        int32_t x, y, w = 109;
-        if (t->brow) {
-            x = i < 3 ? 10 + i * 117 : 10;
-            y = RY[y0 + (i < 3 ? 0 : 1)];
-        } else {
-            x = 10 + i * 117;
-            y = RY[y0];
-        }
-        ecard_make(&pg.f[i], pg.scr, x, y, w, t->brow ? bn[i] : an[i], field_event, (void *)(intptr_t)t->keys[i]);
-    }
-    if (t->aside) {
-        // Up to three 12 px lines, centred on the row.
-        lv_obj_t *l = pg.f[5].card = ui_label(pg.scr, t->arow ? 10 : 139, 0, t->arow ? 341 : 212, &ui_font_12, UI_MUTED,
-                                              LV_TEXT_ALIGN_LEFT, t->aside);
-        lv_label_set_long_mode(l, LV_LABEL_LONG_WRAP);
-        lv_obj_set_height(l, LV_SIZE_CONTENT);
-        lv_obj_update_layout(l);
-        lv_obj_set_y(l, RY[y0 + 1] + (RH - lv_obj_get_height(l)) / 2);
-    }
-    // Two columns (Motor settings' Drive, Travel and Homing tabs).
-    for (int i = 0; i < t->n && !t->tall && !t->over && !t->brow && !t->arow; i++)
-        ecard_make(&pg.f[i], pg.scr, C2X[i % 2], RY[y0 + i / 2], C2W[i % 2], caption(cap, sizeof cap, t->keys[i]),
-                   field_event, (void *)(intptr_t)t->keys[i]);
-}
-
-static void segs_draw(lv_obj_t *const *b, int n, int on)
+// on: the raised one; boxed: outlined dark (the PID set in use), 0 none.
+static void segs_draw(lv_obj_t *const *b, int n, int on, int boxed)
 {
     for (int i = 0; i < n; i++) {
-        lv_obj_set_style_bg_opa(b[i], i == on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_shadow_width(b[i], 0, 0);
-        ui_set_color(lv_obj_get_child(b[i], 0), i == on ? UI_TEXT : UI_MUTED);
+        lv_opa_t o = i == on ? LV_OPA_COVER : LV_OPA_TRANSP;
+        if (lv_obj_get_style_bg_opa(b[i], 0) != o)
+            lv_obj_set_style_bg_opa(b[i], o, 0);
+        int32_t bw = i + 1 == boxed ? 2 : 0;
+        if (lv_obj_get_style_border_width(b[i], 0) != bw)
+            lv_obj_set_style_border_width(b[i], bw, 0);
+        ui_set_color(lv_obj_get_child(b[i], 0), i == on || i + 1 == boxed ? UI_TEXT : UI_MUTED);
     }
 }
 
-static void seg_draw(void)
-{
-    if (pg.ntabs > 1)
-        segs_draw(pg.segb, pg.ntabs, pg.tab);
-}
+static void pg_refresh(void);
 
-static void seg_cb(lv_event_t *e)
+static void pg_show(int i)
 {
-    int i = (int)(intptr_t)lv_event_get_user_data(e);
-    if (i == pg.tab)
-        return;
+    if (pg.body)
+        lv_obj_delete(pg.body);   // the last tab's cards (and the jog row's timer)
     pg.tab = i;
-    seg_draw();
-    pg_fields();
+    pg.nf = 0;
+    memset(pg.f, 0, sizeof pg.f);
+    lv_obj_t *b = pg.body = lv_obj_create(pg.scr);
+    lv_obj_remove_style_all(b);
+    lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(b, 0, 0);
+    lv_obj_set_size(b, 353, 216);
+    segs_draw(pg.segb, pg.ntabs, pg.tab, 0);
+    pg.tabs[i].make(b);
     pg_refresh();   // the values now, not at the next 0.5 s refresh (Ryan, 28 Oct)
 }
 
-static const char *pg_help(void)
+static void tab_cb(lv_event_t *e)
 {
-    static char buf[1100];
-    const tab_t *t = &pg.tabs[pg.tab];
-    cfg_key_t keys[6];
-    for (int i = 0; i < t->n; i++)
-        keys[i] = pg_key(t, i);
-    return field_help(buf, sizeof buf, t->note, keys, t->n);
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (i != pg.tab)
+        pg_show(i);
 }
 
-static void pg_build(lv_obj_t *scr, const char *title, const tab_t *tabs, int n)
+static void pg_build(lv_obj_t *scr, const char *title, const tab_t *tabs, int n, const char *help)
 {
     memset(&pg, 0, sizeof pg);
     pg.scr = scr;
     pg.tabs = tabs;
     pg.ntabs = n;
-    pg.set = valve_pid_set();   // the PID tab opens on the set in use
-    if (n > 1) {
-        // Segmented choice: a grey track, the page shown as a raised white segment.
-        pg.seg = segs_make(scr, RY[0], n, pg.segb, seg_cb, 0);
-        int32_t iw = (343 - 8) / n;
-        for (int i = 0; i < n; i++) {
-            lv_obj_t *l = ui_label(pg.segb[i], 0, 0, iw, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_CENTER, tabs[i].label);
-            lv_obj_align(l, LV_ALIGN_CENTER, 0, 0);
-        }
-        seg_draw();
-    }
-    pg_fields();
-    side_make(scr, title, pg_help);
+    pg.set = valve_pid_set();   // the Gains tab opens on the set in use
+    const char *labels[4];
+    for (int i = 0; i < n; i++)
+        labels[i] = tabs[i].label;
+    segs_make(scr, RY[0], n, labels, pg.segb, tab_cb, 0);
+    side_make(scr, title, help);
+    pg_show(0);
 }
 
 static void pg_refresh(void)
 {
+    for (int i = 0; i < pg.nf; i++)
+        field_update(&pg.f[i], pg.fk[i]);
     const tab_t *t = &pg.tabs[pg.tab];
-    for (int i = 0; i < t->n; i++)
-        field_update(&pg.f[i], pg_key(t, i));
-    if (pg.sel)
-        sel_refresh();
-    if (pg.band_sw) {
-        bool band = valve_limit_band();
-        if (lv_obj_has_state(pg.band_sw, LV_STATE_CHECKED) != band)
-            lv_obj_set_state(pg.band_sw, LV_STATE_CHECKED, band);
-        // Wording by Fable (0.16.21), shorter and Disable from 0.16.22.
-        char t1[40], t2[48];
-        lv_snprintf(t1, sizeof t1, "Disable switch %d to %d %%", valve_pass_lo(), valve_pass_hi());
-        if (valve_pass_lo() > 0)
-            lv_snprintf(t2, sizeof t2, "On: still stops below %d %%", valve_pass_lo());
-        else
-            lv_snprintf(t2, sizeof t2, "On: stops by count at 0 %%");   // From 0: the move's own end
-        ui_set_text(pg.band_title, t1);
-        ui_set_text(pg.band_text, !band ? "Off: switch stops closing" : valve_calibrated() ? t2 : "On: works once homed");
-    }
-    side_refresh();
+    if (t->refresh)
+        t->refresh();
+    side_refresh(t->strip);
 }
 
-// Motor override (Settings to 0.14.13, Valve position to 0.16.16, Motor
-// settings > Override from 0.16.17): set apart from the saved numbers by a
-// dark outline, and asked first. Limit override is on it since 0.11.33.
-// Back from it reopens Motor settings on the Override tab.
-static int valve_back_tab = -1;
+static void pg_fast(void)
+{
+    const tab_t *t = &pg.tabs[pg.tab];
+    if (t->fast)
+        t->fast();
+}
 
-static void band_cb(lv_event_t *e)
+/* A bar card across row 1 (PID Ranges, Valve Ignore): a grey track with
+ * markers, labels over it and the ends under it. */
+typedef struct {
+    lv_obj_t *card, *track, *fill, *mark[3], *top[4], *lo, *hi, *mlab[2];
+} bar_t;
+
+#define BAR_X 12
+#define BAR_W 319
+
+static void bar_make(bar_t *b, lv_obj_t *p, int ntop, int nmark, bool fill, bool mlab)
+{
+    b->card = ui_card(p, 10, RY[1], 343, RH);
+    b->track = ui_card(b->card, BAR_X, 22, BAR_W, 6);
+    lv_obj_set_style_bg_color(b->track, TRACK_GREY, 0);
+    lv_obj_set_style_border_width(b->track, 0, 0);
+    lv_obj_set_style_radius(b->track, 3, 0);
+    if (fill) {
+        b->fill = ui_card(b->card, BAR_X, 22, 0, 6);
+        lv_obj_set_style_bg_color(b->fill, UI_FILL, 0);
+        lv_obj_set_style_border_width(b->fill, 0, 0);
+        lv_obj_set_style_radius(b->fill, 0, 0);
+    }
+    for (int i = 0; i < nmark; i++) {
+        b->mark[i] = ui_card(b->card, BAR_X, 20, 2, 10);
+        lv_obj_set_style_bg_color(b->mark[i], UI_TEXT, 0);
+        lv_obj_set_style_border_width(b->mark[i], 0, 0);
+        lv_obj_set_style_radius(b->mark[i], 0, 0);
+    }
+    for (int i = 0; i < ntop; i++) {
+        b->top[i] = ui_label(b->card, 0, 3, 0, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
+        lv_obj_set_width(b->top[i], LV_SIZE_CONTENT);
+        lv_obj_set_style_pad_hor(b->top[i], 3, 0);
+        lv_obj_set_style_border_color(b->top[i], UI_TEXT, 0);
+        lv_obj_set_style_radius(b->top[i], 2, 0);
+    }
+    b->lo = ui_label(b->card, BAR_X - 2, 31, 60, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
+    b->hi = ui_label(b->card, BAR_X + BAR_W - 60, 31, 62, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_RIGHT, "");
+    for (int i = 0; i < 2 && mlab; i++) {
+        b->mlab[i] = ui_label(b->card, 0, 31, 0, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_CENTER, "");
+        lv_obj_set_width(b->mlab[i], LV_SIZE_CONTENT);
+    }
+}
+
+static int32_t bar_x(float v, float max)
+{
+    if (v < 0) v = 0;
+    if (v > max) v = max;
+    return BAR_X + (int32_t)(v / max * (float)(BAR_W - 2) + 0.5f);
+}
+
+static void show_obj(lv_obj_t *o, bool on)
+{
+    if (on == lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+        if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+        else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// A label centred on x, kept inside the card.
+static void label_at(lv_obj_t *l, const char *text, int32_t x, bool show)
+{
+    ui_set_text(l, text);
+    show_obj(l, show);
+    if (!show)
+        return;
+    lv_obj_update_layout(l);
+    int32_t w = lv_obj_get_width(l), lx = x - w / 2;
+    if (lx < 4) lx = 4;
+    if (lx + w > 339) lx = 339 - w;
+    if (lv_obj_get_x(l) != lx)
+        lv_obj_set_x(l, lx);
+}
+
+/* --------------------------------------------------------------------------
+ * PID (PID tuning 0.14.21 to 0.16.33): Gains | Ranges | AUTO.
+ * Four PID sets by the pressure (0.15.15; four from 0.16.14, the table
+ * always on from 0.16.20). Gains shows one set; the set row is a track of
+ * four, the set shown raised, the set in use boxed (0.17.0, Ryan 14 Nov:
+ * "make a rectangle around the set x instead of having the dot").
+ * ------------------------------------------------------------------------ */
+static struct {
+    lv_obj_t *sb[4];
+    bar_t bar;
+} pid;
+
+static void set_cb(lv_event_t *e)
+{
+    int s = (int)(intptr_t)lv_event_get_user_data(e);
+    if (s != pg.set) {
+        pg.set = s;
+        pg_show(pg.tab);
+    }
+}
+
+static void gains_make(lv_obj_t *b)
+{
+    static const char *const sets[4] = { "Set 1", "Set 2", "Set 3", "Set 4" };
+    static const char *const caps[3] = { "KP, %/mB", "TI, min", "KD, %s/mB" };
+    segs_make(b, RY[1], 4, sets, pid.sb, set_cb, 1);
+    for (int i = 0; i < 3; i++)
+        fcard(b, 10 + i * 117, RY[2], 109, caps[i], cfg_pid_key(pg.set, i));
+}
+
+static void gains_refresh(void)
+{
+    segs_draw(pid.sb, 4, pg.set - 1, valve_pid_set());
+}
+
+static void ranges_make(lv_obj_t *b)
+{
+    bar_make(&pid.bar, b, 4, 3, false, false);
+    static const cfg_key_t k[3] = { CFG_B1, CFG_B2, CFG_B3 };
+    char cap[24];
+    for (int i = 0; i < 3; i++)
+        fcard(b, 10 + i * 117, RY[2], 109, caption(cap, sizeof cap, k[i]), k[i]);
+}
+
+/* Where the Ranges bar draws its boundaries: x[0] to x[n], n ranges. To
+ * scale, except that every range keeps at least SEG_MIN px for its "Set n"
+ * label (0.17.0, Ryan 14 Nov: with boundaries 2, 5 and 12 below a fourth at
+ * 900 mB the labels ran together). A range under that gets SEG_MIN and the
+ * rest share what is left, to scale. */
+#define SEG_MIN 44
+
+static void ranges_x(const float *edge, int n, int32_t *x)
+{
+    const int32_t W = BAR_W - 2;
+    bool fixed[4] = { false, false, false, false };
+    int32_t w[4] = { 0, 0, 0, 0 };
+    for (int pass = 0; pass < 4; pass++) {
+        int nf = 0;
+        float sum = 0;
+        for (int i = 0; i < n; i++) {
+            if (fixed[i]) nf++;
+            else sum += edge[i + 1] - edge[i];
+        }
+        int32_t room = W - nf * SEG_MIN;
+        bool again = false;
+        for (int i = 0; i < n; i++) {
+            if (fixed[i]) {
+                w[i] = SEG_MIN;
+                continue;
+            }
+            float len = edge[i + 1] - edge[i];
+            w[i] = sum > 0 ? (int32_t)((float)room * len / sum + 0.5f) : room / (n - nf);
+            if (w[i] < SEG_MIN) {
+                fixed[i] = true;
+                again = true;
+            }
+        }
+        if (!again)
+            break;
+    }
+    x[0] = BAR_X;
+    for (int i = 0; i < n; i++)
+        x[i + 1] = i + 1 == n ? BAR_X + W : x[i] + w[i];   // the last ends at the bar's end
+}
+
+static void ranges_refresh(void)
+{
+    // 0 to 20 mB, or past the last boundary when it is above 16 mB.
+    float bnd[3] = { live(CFG_B1) / 10.0f, live(CFG_B2) / 10.0f, live(CFG_B3) / 10.0f };
+    bool four = live(CFG_B3) != 0;
+    float top = four ? bnd[2] : bnd[1], max = 20;
+    if (top > 16)
+        max = (float)(((int)(top + 4) + 4) / 5 * 5);
+    char t[16];
+    lv_snprintf(t, sizeof t, "%d mB", (int)max);
+    ui_set_text(pid.bar.hi, t);
+    ui_set_text(pid.bar.lo, "0");
+    int use = valve_pid_set(), n = four ? 4 : 3;
+    float edge[5] = { 0, bnd[0], bnd[1], four ? bnd[2] : max, max };
+    int32_t x[5];
+    ranges_x(edge, n, x);
+    for (int i = 0; i < 3; i++) {
+        bool on = i < 2 || four;
+        show_obj(pid.bar.mark[i], on);
+        if (on && lv_obj_get_x(pid.bar.mark[i]) != x[i + 1] - 1)
+            lv_obj_set_x(pid.bar.mark[i], x[i + 1] - 1);
+    }
+    for (int i = 0; i < 4; i++) {
+        char s[8];
+        lv_snprintf(s, sizeof s, "Set %d", i + 1);
+        label_at(pid.bar.top[i], s, i < n ? (x[i] + x[i + 1]) / 2 : 0, i < n);
+        int32_t bw = i + 1 == use ? 1 : 0;
+        if (lv_obj_get_style_border_width(pid.bar.top[i], 0) != bw)
+            lv_obj_set_style_border_width(pid.bar.top[i], bw, 0);
+        ui_set_color(pid.bar.top[i], i + 1 == use ? UI_TEXT : UI_MUTED);
+    }
+}
+
+static void auto_make(lv_obj_t *b)
+{
+    fcard(b, C2X[0], RY[1], C2W[0], "AUTO min, %", CFG_OUTMIN);
+    fcard(b, C2X[1], RY[1], C2W[1], "SP band, mB", CFG_BAND);
+    fcard(b, C2X[0], RY[2], C2W[0], "Hysteresis, %", CFG_HYST);
+    fcard(b, C2X[1], RY[2], C2W[1], "Deadband, steps", CFG_DB);
+}
+
+static const tab_t pid_tabs[3] = {
+    { "Gains", gains_make, gains_refresh, NULL, NULL },
+    { "Ranges", ranges_make, ranges_refresh, NULL, NULL },
+    { "Settings", auto_make, NULL, NULL, NULL },   // AUTO on the canvas to v38 (Ryan 14 Nov)
+};
+
+static void pid_build(lv_obj_t *scr)
+{
+    memset(&pid, 0, sizeof pid);
+    pg_build(scr, "PID", pid_tabs, 3,
+             "Gains: KP, TI and KD of each set. Box = set in use.\n\n"
+             "Ranges: the pressure where each set takes over.\n\n"
+             "Settings: lowest valve %, setpoint band, hysteresis and deadband.");
+}
+
+const ui_screen_t ui_scr_tune = { "PID", pid_build, pg_refresh, NULL };
+
+/* --------------------------------------------------------------------------
+ * Valve (0.17.0; Valve position and Motor settings' Travel, Homing and
+ * Override tabs before): Position | Homing | Ignore. What is in % and the
+ * limit switch: the position, 100 %, homing and the Ignore range.
+ * ------------------------------------------------------------------------ */
+static struct {
+    lv_obj_t *pos, *ref, *ref_cap, *setas, *home;
+    bar_t bar;
+    lv_obj_t *sw, *sw_v;
+} vv;
+
+static void setas_cb(lv_event_t *e)
+{
+    if (ui_btn_disabled(e)) {
+        ui_msg(valve_mode() == VALVE_CALIBRATING ? "Homing: STOP to cancel"
+               : valve_auto() ? "Stop AUTO first" : "Reset the fault first");
+        return;
+    }
+    ui_set_position_ask();   // the Set as keypad (ui_home.c)
+}
+
+static void home_cb(lv_event_t *e)
+{
+    (void)e;
+    if (valve_mode() == VALVE_CALIBRATING)
+        ui_msg("Homing: STOP to cancel");
+    else if (valve_motion_blocked())
+        ui_msg("Reset the fault first");
+    else if (valve_auto())
+        ui_msg("Stop AUTO first");
+    else
+        ui_home_ask();
+}
+
+static void vpos_make(lv_obj_t *b)
+{
+    vv.pos = ui_info(b, 10, RY[1], 109, RH, "Position, %");
+    fcard(b, 127, RY[1], 109, "100 %, turns", CFG_POSMAX);
+    vv.ref = ui_info(b, 244, RY[1], 109, RH, "Last saved, %");
+    vv.ref_cap = lv_obj_get_child(lv_obj_get_parent(vv.ref), 0);
+    vv.setas = ui_btn(b, 10, RY[2], 167, RH, UI_SECONDARY, "Set as %", setas_cb, NULL);
+    ui_label(vv.setas, 167 - 24, 15, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
+    vv.home = ui_btn(b, 185, RY[2], 168, RH, UI_PRIMARY, "Home valve", home_cb, NULL);
+}
+
+static void vpos_fast(void)
+{
+    char t[16];
+    bool have = valve_calibrated() && valve_mode() != VALVE_CALIBRATING;
+    ui_set_text(vv.pos, have ? ui_fmt2(t, sizeof t, valve_pct_milli()) : "----");
+}
+
+static void vpos_refresh(void)
+{
+    char cap[24], v[24];
+    bool calib = valve_mode() == VALVE_CALIBRATING;
+    valve_ref_t how = valve_reference();
+    uint32_t age = 0, took = 0;
+    bool ran = valve_last_cal(&age, &took);
+    const char *iso = valve_last_cal_iso();
+    if (!calib && how == VALVE_REF_HOMED && ran && iso[0] && strlen(iso) >= 16) {
+        // "Homed, 14:01" over "24/10/26".
+        lv_snprintf(cap, sizeof cap, "Homed, %.5s", iso + 11);
+        lv_snprintf(v, sizeof v, "%.2s/%.2s/%.2s", iso + 8, iso + 5, iso + 2);
+    } else if (!calib && how == VALVE_REF_HOMED) {
+        lv_strlcpy(cap, "Homed", sizeof cap);
+        if (ran)
+            ui_when(v, sizeof v, age);
+        else
+            lv_strlcpy(v, "Yes", sizeof v);
+    } else if (!calib && how == VALVE_REF_HAND) {
+        lv_strlcpy(cap, "Not homed", sizeof cap);
+        lv_strlcpy(v, "Set by hand", sizeof v);
+    } else if (!calib && how == VALVE_REF_PARKED) {
+        lv_strlcpy(cap, "Homed", sizeof cap);
+        lv_strlcpy(v, "Before shut down", sizeof v);
+    } else {
+        int32_t q;
+        lv_strlcpy(cap, "Last saved, %", sizeof cap);
+        if (valvepos_offer(&q)) {
+            int32_t pm = valve_pos_max();
+            ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
+        } else {
+            lv_strlcpy(v, "None", sizeof v);
+        }
+    }
+    ui_set_text(vv.ref_cap, cap);
+    ui_set_text(vv.ref, v);
+    vpos_fast();
+    ui_btn_text(vv.home, calib ? "Homing" : "Home valve", NULL);
+    ui_btn_enable(vv.home, !calib && !valve_motion_blocked() && !valve_auto());
+    ui_btn_enable(vv.setas, !calib && !valve_motion_blocked() && !valve_auto());
+}
+
+// "0.00 turns. Valve idle" once homed; else the status line.
+static void vpos_strip(void)
+{
+    valve_mode_t m = valve_mode();
+    if (m == VALVE_MANUAL && valve_calibrated() && !stepper3_busy() && !valve_warning()) {
+        char t[48], b[16];
+        int64_t full = (int64_t)stepper3_position();
+        lv_snprintf(t, sizeof t, "%s turns. Valve idle",
+                    fixed_fmt(b, sizeof b, fixed_round(full * 1000 / STEPS_PER_TURN, 1), 2));
+        ui_strip_set(UI_STRIP_INFO, UI_ICON_VALVE, t);
+    } else {
+        ui_status_line();
+    }
+}
+
+static void vhome_make(lv_obj_t *b)
+{
+    fcard(b, C2X[0], RY[1], C2W[0], "Fast close, steps/s", CFG_FHOME);
+    fcard(b, C2X[1], RY[1], C2W[1], "Slow close, steps/s", CFG_FCREEP);
+    fcard(b, C2X[0], RY[2], C2W[0], "Back-off, steps", CFG_BACKOFF);
+    fcard(b, C2X[1], RY[2], C2W[1], "Return, steps", CFG_RETURN);
+}
+
+// Ignore switch (Disable switch on Motor settings > Override 0.16.19 to
+// 0.16.33; renamed 0.17.0, Ryan 14 Nov): while On and homed, the limit
+// switch does not stop closing between From and To % open. A press
+// anywhere on the card turns it On or Off, at once; Off after a restart.
+static void ignore_cb(lv_event_t *e)
 {
     (void)e;
     valve_limit_band_set(!valve_limit_band());
     pg_refresh();
 }
 
-static void motor_go(void)
+static void vign_make(lv_obj_t *b)
 {
-    valve_back_tab = pg.tab;
-    ui_service();
+    bar_make(&vv.bar, b, 1, 2, true, true);
+    fcard(b, 10, RY[2], 84, "From, %", CFG_PASS_LO);
+    fcard(b, 102, RY[2], 84, "To, %", CFG_PASS_HI);
+    lv_obj_t *c = ui_card(b, 194, RY[2], 159, RH);
+    lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(c, ignore_cb, LV_EVENT_PRESSED, NULL);
+    ui_label(c, 11, 5, 100, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "Ignore switch");
+    vv.sw_v = ui_label(c, 11, 22, 60, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+    vv.sw = card_switch(c, 44, 24);
 }
 
-static void motor_cb(lv_event_t *e)
+static void vign_refresh(void)
+{
+    bool on = valve_limit_band();
+    int lo = valve_pass_lo(), hi = valve_pass_hi();
+    switch_show(vv.sw, on);
+    ui_set_text(vv.sw_v, on ? "On" : "Off");
+    int32_t xl = bar_x((float)lo, 100), xh = bar_x((float)hi, 100);
+    lv_obj_set_x(vv.bar.mark[0], xl - 1);
+    lv_obj_set_x(vv.bar.mark[1], xh - 1);
+    lv_obj_set_x(vv.bar.fill, xl);
+    lv_obj_set_width(vv.bar.fill, xh - xl > 0 ? xh - xl : 0);
+    lv_opa_t fo = on ? LV_OPA_COVER : LV_OPA_TRANSP;
+    if (lv_obj_get_style_bg_opa(vv.bar.fill, 0) != fo)
+        lv_obj_set_style_bg_opa(vv.bar.fill, fo, 0);
+    label_at(vv.bar.top[0], on ? "Ignored" : "Ignore range", (xl + xh) / 2, true);
+    ui_set_color(vv.bar.top[0], on ? UI_TEXT : UI_MUTED);
+    char a[8], b[8];
+    lv_snprintf(a, sizeof a, "%d", lo);
+    lv_snprintf(b, sizeof b, "%d", hi);
+    label_at(vv.bar.mlab[0], a, xl, true);
+    label_at(vv.bar.mlab[1], b, xh, hi < 90);
+    ui_set_text(vv.bar.hi, "100 %");
+}
+
+static void vign_strip(void)
+{
+    char t[64];
+    limit_state_t lim = limit_state();
+    const char *ls = lim == LIMIT_CLOSED ? "Switch released" : lim == LIMIT_OPEN ? "Switch pressed" : "Switch not read yet";
+    if (valve_limit_band())
+        lv_snprintf(t, sizeof t, "%s. Ignored from %d to %d %%", ls, valve_pass_lo(), valve_pass_hi());
+    else
+        lv_strlcpy(t, ls, sizeof t);
+    ui_strip_set(UI_STRIP_INFO, UI_ICON_VALVE, t);
+}
+
+static const tab_t valve_tabs[3] = {
+    { "Position", vpos_make, vpos_refresh, vpos_strip, vpos_fast },
+    { "Homing", vhome_make, NULL, NULL, NULL },
+    { "Ignore", vign_make, vign_refresh, vign_strip, NULL },
+};
+
+static void valve_build(lv_obj_t *scr)
+{
+    memset(&vv, 0, sizeof vv);
+    pg_build(scr, "Valve", valve_tabs, 3,
+             "Position: 0 % is the limit switch, 100 % the turns set here. Set as types in the position.\n\n"
+             "Homing: speeds and steps used to find the switch.\n\n"
+             "Ignore: the limit switch is ignored between From and To.");
+}
+
+const ui_screen_t ui_scr_valve_set = { "Valve", valve_build, pg_refresh, pg_fast };
+
+/* --------------------------------------------------------------------------
+ * Motor (0.17.0; Motor override and Motor settings' Drive tab before): Jog
+ * | Settings. What is in steps: jogging, speeds, hold torque, direction.
+ * ------------------------------------------------------------------------ */
+static struct {
+    ecard_t hold;
+} mo;
+
+static void hold_cb(lv_event_t *e)
 {
     (void)e;
     if (stepper3_busy()) {
         ui_msg("Wait for the valve to stop");
         return;
     }
-    ui_confirm("Open Motor override? Drives the motor by steps.", "Open", motor_go);
+    (void)stepper3_set_hold(!stepper3_hold());
+    valve_event("CFG", "Hold torque %s (screen), in use, not saved", stepper3_hold() ? "on" : "off");
+    pg_refresh();
 }
 
-static void valve_set_build(lv_obj_t *scr)
+static void mjog_make(lv_obj_t *b) { motor_jog_make(b); }
+
+static void mset_make(lv_obj_t *b)
 {
-    pg_build(scr, "Motor settings", valve_tabs, 4);
-    if (valve_back_tab > 0) {
-        pg.tab = valve_back_tab;
-        seg_draw();
-        pg_fields();
-    }
-    valve_back_tab = -1;
+    fcard(b, 10, RY[1], 109, "Speed, st/s", CFG_RATE);
+    fcard(b, 127, RY[1], 109, "Start, st/s", CFG_START);
+    fcard(b, 244, RY[1], 109, "Accel, st/s/s", CFG_ACCEL);
+    ecard_make(&mo.hold, b, 10, RY[2], 109, "Hold torque", hold_cb, NULL);
+    // Steps per output turn, a setting (0.17.0, in place of Coil order;
+    // Ryan 14 Nov "make this a changeable value"): the turns shown.
+    fcard(b, 127, RY[2], 109, "Steps/turn", CFG_SPT);
+    fcard(b, 244, RY[2], 109, "Direction", CFG_REVERSE);
 }
-static void tune_build(lv_obj_t *scr) { pg_build(scr, "PID tuning", tune_tabs, 3); }
 
-const ui_screen_t ui_scr_valve_set = { "Motor settings", valve_set_build, pg_refresh, NULL };
-const ui_screen_t ui_scr_tune = { "PID tuning", tune_build, pg_refresh, NULL };
+static void mset_refresh(void)
+{
+    ecard_state(&mo.hold, stepper3_hold() ? "On" : "Off", false);
+}
+
+static void mset_strip(void)
+{
+    char t[64], b[24];
+    lv_snprintf(t, sizeof t, "Full travel %s at this speed", motor_travel_text(b, sizeof b));
+    ui_strip_set(UI_STRIP_INFO, UI_ICON_VALVE, t);
+}
+
+static const tab_t motor_tabs[2] = {
+    { "Jog", mjog_make, NULL, motor_jog_strip, motor_jog_fast },
+    { "Settings", mset_make, mset_refresh, mset_strip, NULL },
+};
+
+static void motor_build(lv_obj_t *scr)
+{
+    memset(&mo, 0, sizeof mo);
+    pg_build(scr, "Motor", motor_tabs, 2,
+             "Jog: hold Close or Open to move. To close past the switch, hold Limit override, then Close.\n\n"
+             "Settings: speeds, hold torque and direction of the stepper. Steps per turn: motor steps for one output turn.");
+}
+
+const ui_screen_t ui_scr_motor = { "Motor", motor_build, pg_refresh, pg_fast };
 
 /* --------------------------------------------------------------------------
- * Sensor calibration (Menu > Pressure sensor; Calibrate sensor and Pressure
- * setup to 0.16.26): CAL VAC / CAL AIR on the screen.
- * The new cal is in use once both points are held, unsaved until Save
- * (Undo puts the saved one back). One sensor per board from 0.16.2: a new sensor is
- * calibrated here, nothing else to choose (the header named the serial,
- * "Calibrate 5880156", to 0.16.1).
+ * Pressure sensor (Sensor calibration 0.16.27 to 0.16.33): CAL VAC / CAL
+ * AIR on the screen. Row 1 the signal, the pressure and the calibration in
+ * use (Nominal: the datasheet line, 0 to 10 mV/V for 0 to 1034.2 mB; Ryan
+ * 14 Nov "nominal", Factory before), then a wide card for each point with
+ * Capture on it. A new calibration is in use once both points are held,
+ * not saved until Save (Undo puts the saved one back).
  * ------------------------------------------------------------------------ */
 static struct {
-    lv_obj_t *sig, *now, *sv, *vac, *air, *bv, *ba;
-    lv_obj_t *ev, *ea;   // the draft edges on the point cards (0.16.27)
+    lv_obj_t *sig, *now, *calv;
+    lv_obj_t *card[2], *sub[2], *cap[2], *edge[2];
 } cs;
-
-// "0.0 at 0.0128": a cal point, mB at mV/V.
-static const char *pt_text(char *buf, size_t n, bool have, int32_t p, int32_t r)
-{
-    char a[16], b[16];
-    if (!have)
-        return "Not held";
-    lv_snprintf(buf, n, "%s at %s", fixed_fmt(a, sizeof a, fixed_round(p, 2), 1), fixed_fmt(b, sizeof b, fixed_round(r, 2), 4));
-    return buf;
-}
-
-static const char *cs_help(void)
-{
-    // Two lines (0.16.27, Fable's review).
-    return "Two points: the sensor pumped down, then open to room air.\n"
-           "A new calibration is in use at once. Save keeps it, Undo puts the saved one back.";
-}
 
 static bool reading_ok(void)
 {
@@ -1352,29 +1360,20 @@ static bool cs_vac_set(int32_t v100, const char **why)
     return true;
 }
 
-static int32_t now_milli(void)
+static const char *signal_now(char *t, size_t n)
 {
-    return reading_ok() ? clicks_state()->p_mmbar : 0;
+    char b[16];
+    lv_snprintf(t, n, "Signal now %s mV/V",
+                reading_ok() ? fixed_fmt(b, sizeof b, fixed_round(clicks_state()->r_ppb, 2), 4) : "----");
+    return t;
 }
 
 static void cs_vac_typed(void)
 {
-    ui_kp_t k = { .title = "Vacuum gauge, mB", .info = "Only if a gauge reads above 0", .dec = 2,
-                  .min = 0, .max = 5000, .live_label = "Now, mB", .live_milli = now_milli, .live_dec = 1,
-                  .on_set = cs_vac_set };
+    static char info[40];
+    ui_kp_t k = { .title = "Vacuum point, mB", .info = signal_now(info, sizeof info), .dec = 2,
+                  .min = 0, .max = 5000, .on_set = cs_vac_set };
     ui_keypad_ex(&k);
-}
-
-static void vac_cb(lv_event_t *e)
-{
-    (void)e;
-    if (ui_btn_disabled(e)) {
-        ui_msg(cal_capturing() ? "A capture is running" : "No pressure signal");
-        return;
-    }
-    // "Enter value" as on the air question (Not 0 mB to 0.16.26).
-    ui_ask("Sensor pumped down? Capture records 0 mB.",
-           "Enter value", cs_vac_typed, "Capture", cs_vac0);
 }
 
 static bool cs_air_set(int32_t v10, const char **why)
@@ -1386,69 +1385,71 @@ static bool cs_air_set(int32_t v10, const char **why)
 
 static void cs_air_typed(void)
 {
-    ui_kp_t k = { .title = "Barometer reading, mB", .info = "Vent sensor to room air first", .dec = 1,
-                  .min = 5000, .max = 11000, .live_label = "Now, mB", .live_milli = now_milli, .live_dec = 1,
-                  .on_set = cs_air_set };
+    static char info[40];
+    ui_kp_t k = { .title = "Air point, mB", .info = signal_now(info, sizeof info), .dec = 1,
+                  .min = 5000, .max = 11000, .on_set = cs_air_set };
     ui_keypad_ex(&k);
 }
 
 static void cs_air_baro(void) { cs_start(2, CAL_P_BARO); }
 
-static void air_cb(lv_event_t *e)
+static void point_cb(lv_event_t *e)
 {
-    if (ui_btn_disabled(e)) {
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    if (!reading_ok() || cal_capturing()) {
         ui_msg(cal_capturing() ? "A capture is running" : "No pressure signal");
         return;
     }
-    // With the Pressure 21 fitted the room pressure is read, not typed
-    // (0.14.0); Enter value keeps the lab barometer possible.
+    static char q[96];
+    if (i == 0) {
+        ui_ask3("Sensor pumped down? Capture sets this point to 0 mB.",
+               "Cancel", NULL, "Enter value", cs_vac_typed, "Capture", cs_vac0);
+        return;
+    }
+    // With the Pressure 21 fitted the room pressure is read (0.14.0); Enter
+    // value keeps the lab barometer possible.
     const clicks_state_t *s = clicks_state();
     if (!s->baro_ok) {
         cs_air_typed();
         return;
     }
-    static char q[96];
     char v[16];
-    lv_snprintf(q, sizeof q, "Sensor open to room air? Capture uses the room sensor, now %s mB.",
+    lv_snprintf(q, sizeof q, "Sensor open to room air? Capture sets this point to %s mB.",
                 ui_fmt1(v, sizeof v, s->baro_mmbar));
-    ui_ask(q, "Enter value", cs_air_typed, "Capture", cs_air_baro);
-}
-
-// A dark edge on a point card while its point is new, as on a draft
-// setting (0.16.27).
-static lv_obj_t *cs_edge(lv_obj_t *value)
-{
-    lv_obj_t *e = ui_card(lv_obj_get_parent(value), -1, 5, 3, 36);
-    lv_obj_set_style_radius(e, 0, 0);
-    lv_obj_set_style_border_width(e, 0, 0);
-    lv_obj_set_style_bg_color(e, COL_DRAFT, 0);
-    lv_obj_add_flag(e, LV_OBJ_FLAG_HIDDEN);
-    return e;
+    ui_ask3(q, "Cancel", NULL, "Enter value", cs_air_typed, "Capture", cs_air_baro);
 }
 
 static void cs_build(lv_obj_t *scr)
 {
-    // 0.16.27 (Ryan 13 Nov: "come up with a better name for the pressure
-    // sensor calibration page ... also evaluate and improve the ui on that
-    // screen"; Fable's review): the Menu tile Pressure sensor (Pressure
-    // setup to 0.16.26), the page Sensor calibration (Calibrate sensor).
-    // Row 1 Signal, the Pressure now (with the calibration in use) and the
-    // pressure by the Saved calibration, which says In use when it is the
-    // one in use (Saved cal and Captured to 0.16.26; Captured said None yet
-    // almost always). A new point gets the draft edge.
-    cs.sig = ui_info(scr, 10, RY[0], 109, RH, "Signal, mV/V");
-    cs.now = ui_info(scr, 127, RY[0], 109, RH, "Pressure, mB");
-    cs.sv = ui_info(scr, 244, RY[0], 109, RH, "Saved cal, mB");
-    cs.vac = ui_info(scr, 10, RY[1], 226, RH, "Vacuum point, mB at mV/V");
-    cs.air = ui_info(scr, 10, RY[2], 226, RH, "Air point, mB at mV/V");
-    cs.ev = cs_edge(cs.vac);
-    cs.ea = cs_edge(cs.air);
-    cs.bv = ui_btn(scr, 244, RY[1], 109, RH, UI_SECONDARY, "Capture\nvacuum", vac_cb, NULL);
-    cs.ba = ui_btn(scr, 244, RY[2], 109, RH, UI_SECONDARY, "Capture\nair", air_cb, NULL);   // both on two lines
-    side_make(scr, "Sensor calibration", cs_help);
+    memset(&cs, 0, sizeof cs);
+    cs.now = ui_info(scr, 10, RY[0], 109, RH, "Pressure, mB");   // Pressure first (Ryan 14 Nov)
+    cs.sig = ui_info(scr, 127, RY[0], 109, RH, "Signal, mV/V");
+    cs.calv = ui_info(scr, 244, RY[0], 109, RH, "Calibration");
+    static const char *const names[2] = { "Vacuum point", "Air point" };
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *c = cs.card[i] = ui_card(scr, 10, RY[1 + i], 343, RH);
+        lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_border_width(c, 1, 0);
+        lv_obj_set_style_border_color(c, UI_TICK, 0);
+        lv_obj_set_style_bg_color(c, UI_TRACK, LV_STATE_PRESSED);
+        lv_obj_add_event_cb(c, point_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        ui_label(c, 12, 5, 200, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, names[i]);
+        cs.sub[i] = ui_label(c, 12, 27, 240, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "");
+        cs.cap[i] = ui_label(c, 343 - 110, 14, 80, &ui_font_16, UI_BLUE, LV_TEXT_ALIGN_RIGHT, "Capture");
+        ui_label(c, 343 - 22, 15, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
+        lv_obj_t *e = cs.edge[i] = ui_card(c, -1, 5, 3, 36);
+        lv_obj_set_style_radius(e, 0, 0);
+        lv_obj_set_style_border_width(e, 0, 0);
+        lv_obj_set_style_bg_color(e, COL_EDGE, 0);
+        lv_obj_add_flag(e, LV_OBJ_FLAG_HIDDEN);
+    }
+    side_make(scr, "Pressure sensor",
+              "Vacuum point: pump the sensor down, then Capture.\n\n"
+              "Air point: open it to room air, then Capture. The on-board barometer is the reference.\n\n"
+              "Save keeps them. Undo restores the saved ones.");
 }
 
-// A point new since the save: not the saved bench cal's (vacuum 0, air 1).
+// A point new since the save: not the saved one.
 static bool pt_new(const cal_rec_t *saved, int i, const cal_point_t *p)
 {
     if (!p->have)
@@ -1458,41 +1459,56 @@ static bool pt_new(const cal_rec_t *saved, int i, const cal_point_t *p)
     return saved->r_ppb[i] != p->r_ppb || saved->p_mmbar[i] != p->p_mmbar;
 }
 
-static void cs_refresh(void)
+static void cs_strip(void)
 {
-    char t[40];
-    const clicks_state_t *s = clicks_state();
-    bool ok = reading_ok();
-    ui_set_text(cs.sig, ok ? fixed_fmt(t, sizeof t, fixed_round(s->r_ppb, 2), 4) : "----");   // 9.3580
+    char t[64], w[24];
+    uint32_t rev;
+    const char *at;
     const cal_rec_t *saved = NULL;
-    bool in_save = cfg_saved_cal(&saved);   // a save exists; saved NULL if it holds the nominal
-    bool as_saved = cal_saved();             // the cal in use is the saved one
-    int64_t p_saved = saved ? cal_pressure_with(saved, s->r_ppb)
-                    : (int64_t)s->r_ppb * cfg_sensor_range_mmbar() / 10000000;   // nominal: 0 to 10 mV/V
-    cal_point_t v, a;
-    cal_points(&v, &a);
-    ui_set_text(cs.now, ok ? ui_fmt1(t, sizeof t, s->p_mmbar) : "----");
-    ui_set_text(cs.sv, !ok ? "----" : !in_save ? "None" : as_saved ? "In use" : ui_fmt1(t, sizeof t, p_saved));
-    int cap = cal_capturing(), left = cal_capture_left();
-    if (cap == 1)
-        lv_snprintf(t, sizeof t, "Capturing %d of %d", CAL_CAPTURE_N - left, CAL_CAPTURE_N);
-    ui_set_text(cs.vac, cap == 1 ? t : pt_text(t, sizeof t, v.have, v.p_mmbar, v.r_ppb));
-    char u[40];
-    if (cap == 2)
-        lv_snprintf(u, sizeof u, "Capturing %d of %d", CAL_CAPTURE_N - left, CAL_CAPTURE_N);
-    ui_set_text(cs.air, cap == 2 ? u : pt_text(u, sizeof u, a.have, a.p_mmbar, a.r_ppb));
-    const bool nv = !as_saved && cap != 1 && pt_new(saved, 0, &v), na = !as_saved && cap != 2 && pt_new(saved, 1, &a);
-    if (nv == lv_obj_has_flag(cs.ev, LV_OBJ_FLAG_HIDDEN)) {
-        if (nv) lv_obj_remove_flag(cs.ev, LV_OBJ_FLAG_HIDDEN);
-        else    lv_obj_add_flag(cs.ev, LV_OBJ_FLAG_HIDDEN);
+    bool in_save = cfg_saved_cal(&saved);
+    if (!cal_saved())
+        ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_SAVE, "New calibration in use, not saved");
+    else if (!saved)
+        ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_OK, in_save ? "Nominal calibration" : "Nominal calibration, nothing saved yet");
+    else {
+        if (cfg_rev(CFG_FROM_SAVED, &rev, &at) && at[0])
+            lv_snprintf(t, sizeof t, "Calibration saved %s", save_when(w, sizeof w, at));
+        else
+            lv_strlcpy(t, "Calibration saved", sizeof t);
+        ui_strip_set(UI_STRIP_INFO, LV_SYMBOL_OK, t);
     }
-    if (na == lv_obj_has_flag(cs.ea, LV_OBJ_FLAG_HIDDEN)) {
-        if (na) lv_obj_remove_flag(cs.ea, LV_OBJ_FLAG_HIDDEN);
-        else    lv_obj_add_flag(cs.ea, LV_OBJ_FLAG_HIDDEN);
-    }
-    ui_btn_enable(cs.bv, ok && !cap);
-    ui_btn_enable(cs.ba, ok && !cap);
-    side_refresh();
 }
 
-const ui_screen_t ui_scr_sensor_cal = { "Sensor calibration", cs_build, cs_refresh, NULL };
+static void cs_refresh(void)
+{
+    char t[48], a[16], b[16];
+    const clicks_state_t *s = clicks_state();
+    bool ok = reading_ok();
+    ui_set_text(cs.sig, ok ? fixed_fmt(t, sizeof t, fixed_round(s->r_ppb, 2), 4) : "----");
+    ui_set_text(cs.now, ok ? ui_fmt1(t, sizeof t, s->p_mmbar) : "----");
+    const cal_rec_t *saved = NULL;
+    (void)cfg_saved_cal(&saved);
+    bool as_saved = cal_saved();
+    ui_set_text(cs.calv, !as_saved ? "Not saved" : saved ? "Saved" : "Nominal");
+    cal_point_t pt[2];
+    cal_points(&pt[0], &pt[1]);
+    int cap = cal_capturing(), left = cal_capture_left();
+    for (int i = 0; i < 2; i++) {
+        if (cap == i + 1)
+            lv_snprintf(t, sizeof t, "Capturing %d of %d", CAL_CAPTURE_N - left, CAL_CAPTURE_N);
+        else if (pt[i].have)
+            lv_snprintf(t, sizeof t, "%s mB at %s mV/V", fixed_fmt(a, sizeof a, fixed_round(pt[i].p_mmbar, 2), 1),
+                        fixed_fmt(b, sizeof b, fixed_round(pt[i].r_ppb, 2), 4));
+        else if (i == 1 && s->baro_ok)
+            lv_snprintf(t, sizeof t, "Not captured. Room %s mB", ui_fmt1(a, sizeof a, s->baro_mmbar));
+        else
+            lv_strlcpy(t, "Not captured", sizeof t);
+        ui_set_text(cs.sub[i], t);
+        bool can = ok && !cap;
+        ui_set_color(cs.cap[i], can ? UI_BLUE : UI_IDLE);
+        show_obj(cs.edge[i], !as_saved && cap != i + 1 && pt_new(saved, i, &pt[i]));
+    }
+    side_refresh(cs_strip);
+}
+
+const ui_screen_t ui_scr_sensor_cal = { "Pressure sensor", cs_build, cs_refresh, NULL };
