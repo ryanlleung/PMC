@@ -522,7 +522,7 @@ static void switch_show(lv_obj_t *sw, bool on)
  * in the Power question (the Power button here, the header's power icon).
  * Network control was Remote control (0.13.4 to 0.16.33).
  * ------------------------------------------------------------------------ */
-static struct { lv_obj_t *net, *mac, *fw, *rsw, *rtext, *clock, *up; } nn;
+static struct { ecard_t net; lv_obj_t *mac, *fw, *rsw, *rtext, *clock, *up; } nn;
 
 static void nn_go(lv_event_t *e) { ui_open((const ui_screen_t *)lv_event_get_user_data(e)); }
 
@@ -543,7 +543,7 @@ static void power_cb(lv_event_t *e)
 static void nn_build(lv_obj_t *scr)
 {
     memset(&nn, 0, sizeof nn);
-    nn.net = ui_btn(scr, 10, RY[0], 226, RH, UI_NAV, "IP address & mask", nn_go, (void *)&ui_scr_netaddr);
+    ecard_make(&nn.net, scr, 10, RY[0], 226, "IP address & mask", nn_go, (void *)&ui_scr_netaddr);
     nn.mac = ui_info(scr, 244, RY[0], 226, RH, "MAC address");
     lv_obj_t *c = ui_card(scr, 10, RY[1], 226, RH);
     lv_obj_add_flag(c, LV_OBJ_FLAG_CLICKABLE);
@@ -584,7 +584,7 @@ static const char *net_short(char *t, size_t n)
 static void nn_refresh(void)
 {
     char t[48];
-    ui_btn_text(nn.net, "IP address & mask", net_short(t, sizeof t));
+    ecard_state(&nn.net, net_short(t, sizeof t), false);
 #if PMC_LINK_ETHERNET
     ui_set_text(nn.mac, ethlink_mac()[0] ? ethlink_mac() : "Not read");
 #else

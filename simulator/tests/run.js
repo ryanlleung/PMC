@@ -202,21 +202,21 @@ function shot(s, name) { if (pngDir) s.png(path.join(pngDir, name + '.png')); }
   s.tap(100, 240); const hb = !s.popup();                           // the greyed strip under it
   check('Help: closes on a tap on the greyed strip', ha && hb, [ha, hb].join());
 }
-{ // The remote light holds steady while a client polls (0.15.17, Ryan: "The flashing arrow is a bit annoying"):
-  // each arrow lit until 3 s after its last message, not 300 ms a message.
+{ // No remote light from 0.17.0 (Ryan 13 Nov: "remove the ethernet thing"): a change made over the network shows on
+  // the strip ("Network: ..."), a NET event; reading (PRESSURE?) shows nothing.
   const s = homed(load()); s.run(12000);
-  const px = (x, y) => new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272)[y * 480 + x];
-  const arrows = () => [px(325, 17), px(334, 23)];   // the arrow down's and the arrow up's stems (smaller from 0.16.26)
-  let dark = 0, n = 0;
-  for (let i = 0; i < 8; i++) {
-    s.send('PRESSURE?');
-    for (let t = 0; t < 10; t++) { s.run(100); if (i || t > 2) { n++; if (arrows().some(c => c !== 0xFFFF)) dark++; } }
-  }
-  shot(s, 'remote-light');
-  check('remote light: steady while polled once a second', n > 70 && dark === 0, dark + ' of ' + n + ' samples not lit');
-  s.run(1800); const still = arrows().every(c => c === 0xFFFF);
-  s.run(1500); const grey = arrows().every(c => c !== 0xFFFF);
-  check('remote light: grey 3 s after the last message', still && grey, [still, grey].join());
+  const strip = () => { const fb = new Uint16Array(s.x.memory.buffer, s.x.sim_fb(), 480 * 272); let h = 0;
+    for (let y = 222; y < 266; y++) for (let x = 12; x < 250; x++) h = (h * 31 + fb[y * 480 + x]) >>> 0; return h; };
+  const h0 = strip();
+  for (let i = 0; i < 5; i++) { s.send('PRESSURE?'); s.run(1000); }
+  const quiet = strip() === h0;
+  const r = s.cmd('SETPOINT 7.5', 600);
+  shot(s, 'network-change-strip');
+  const shown = strip() !== h0, ev = events(s, 3);
+  s.run(6000); const gone = strip() === h0;
+  check('network change: SETPOINT shows on the strip and logs NET; polling shows nothing; the message clears',
+    r === '' && quiet && shown && /NET.*Text port: setpoint 7\.5 mbar/.test(ev) && gone,
+    [r.trim(), quiet, shown, gone].join() + ' ' + ev);
 }
 { // Set position (no homing): Set as 0 % takes the count as 0 where it stands.
   const s = load(); s.boot(); s.run(2000);

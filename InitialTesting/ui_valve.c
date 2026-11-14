@@ -44,18 +44,35 @@ static void right(lv_obj_t *l)
  * Events
  * ------------------------------------------------------------------------ */
 #define LOG_ROWS 40
+#define EV_ROWS (LOG_ROWS + 4)   // the latched faults (up to 3) over the events
 static struct {
-    lv_obj_t *list, *none, *reset, *log, *log_time, *log_tag, *box, *page[2];
-    int nf;                   // rows built
-    char sig[64];             // tags shown, to rebuild on change
+    lv_obj_t *reset, *box, *rows, *page[2];
+    int nf;                   // faults shown
+    char sig[64];             // their tags, to rebuild on change
     uint32_t log_total;
     int detail;               // fault shown in the detail, -1 none
     lv_obj_t *d_title, *d_when, *d_text[4], *d_next;
 } fp;
-static char log_text[LOG_ROWS * 112];
-// Time and tag columns, one line per wrapped text line (Ryan, 22 Oct: the
-// event texts start at one x).
-static char log_time[LOG_ROWS * 20], log_tag[LOG_ROWS * 12];
+
+/* The list (0.17.0, the canvas): one card, a row each, newest first, the
+ * latched faults on top in red with a chevron (a tap opens the detail).
+ * A row is the time and tag in 12 px over the text in 16 px, wrapped, with
+ * a rule under it. Drawn on one object from these copies, not a label per
+ * row, to keep the LVGL heap small. */
+typedef struct {
+    uint32_t at;             // lv_tick_get() when it happened
+    int16_t y, h;
+    int8_t fault;            // the fault's index, -1 an event
+    char tag[8];
+    char text[104];
+} ev_row_t;
+static ev_row_t ev_rows[EV_ROWS];
+static int ev_n;
+#define EV_TEXT_W 319
+#define EV_FAULT_W 300       // room for the chevron
+#define EV_TOP 3             // the time line from the row's top
+#define EV_TEXT_Y 18         // the text from the row's top
+#define EV_GAP 6             // under the text, then the rule
 
 typedef struct {
     const char *tag, *happened, *controller, *check, *reset;
@@ -181,9 +198,67 @@ static void detail_open(int i)
     detail_fill();
 }
 
-static void row_cb(lv_event_t *e)
+// A tap on a fault row opens its detail.
+static void rows_click(lv_event_t *e)
 {
-    detail_open((int)(intptr_t)lv_event_get_user_data(e));
+    lv_point_t p;
+    lv_indev_get_point(lv_indev_active(), &p);
+    lv_area_t a;
+    lv_obj_get_coords(fp.rows, &a);
+    int32_t y = p.y - a.y1;
+    for (int i = 0; i < ev_n; i++)
+        if (y >= ev_rows[i].y && y < ev_rows[i].y + ev_rows[i].h) {
+            if (ev_rows[i].fault >= 0)
+                detail_open(ev_rows[i].fault);
+            return;
+        }
+    (void)e;
+}
+
+static void rows_draw(lv_event_t *e)
+{
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_area_t a;
+    lv_obj_get_coords(fp.rows, &a);
+    uint32_t now = lv_tick_get();
+    for (int i = 0; i < ev_n; i++) {
+        const ev_row_t *r = &ev_rows[i];
+        int32_t y = a.y1 + r->y;
+        char head[40], w[16];
+        lv_snprintf(head, sizeof head, "%s   %s", ui_when(w, sizeof w, lv_tick_diff(now, r->at)), r->tag);
+        lv_draw_label_dsc_t d;
+        lv_draw_label_dsc_init(&d);
+        d.font = &ui_font_12;
+        d.color = UI_MUTED;
+        d.text = head;
+        d.text_local = 1;
+        lv_area_t t = { a.x1, y + EV_TOP, a.x1 + EV_TEXT_W, y + EV_TOP + 15 };
+        if (r->tag[0])
+            lv_draw_label(layer, &d, &t);
+        lv_draw_label_dsc_init(&d);
+        d.font = &ui_font_16;
+        d.color = r->fault >= 0 ? UI_FAULT : UI_TEXT;
+        d.text = r->text;
+        d.text_local = 1;
+        int32_t tw = r->fault >= 0 ? EV_FAULT_W : EV_TEXT_W;
+        lv_area_t x = { a.x1, y + EV_TEXT_Y, a.x1 + tw - 1, y + r->h - EV_GAP };
+        lv_draw_label(layer, &d, &x);
+        if (r->fault >= 0) {
+            lv_draw_label_dsc_init(&d);
+            d.font = &lv_font_montserrat_14;
+            d.color = UI_IDLE;
+            d.text = LV_SYMBOL_RIGHT;
+            lv_area_t c = { a.x1 + EV_TEXT_W - 10, y + r->h / 2 - 8, a.x1 + EV_TEXT_W, y + r->h / 2 + 8 };
+            lv_draw_label(layer, &d, &c);
+        }
+        if (i + 1 < ev_n) {
+            lv_draw_rect_dsc_t rd;
+            lv_draw_rect_dsc_init(&rd);
+            rd.bg_color = lv_color_hex(0xE3E9EF);
+            lv_area_t l = { a.x1, y + r->h - 1, a.x1 + EV_TEXT_W - 1, y + r->h - 1 };
+            lv_draw_rect(layer, &rd, &l);
+        }
+    }
 }
 
 static void faults_reset_cb(lv_event_t *e)
@@ -221,27 +296,30 @@ static void faults_build(lv_obj_t *scr)
     memset(&fp, 0, sizeof fp);
     fp.detail = -1;
     fp.nf = -1;
-    fp.list = ui_card(scr, 10, 48, 343, 48);
-    lv_obj_add_flag(fp.list, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_scroll_dir(fp.list, LV_DIR_VER);
-    lv_obj_set_scroll_snap_y(fp.list, LV_SCROLL_SNAP_START);
-    fp.reset = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Reset fault", faults_reset_cb, NULL);
-
-    lv_obj_t *ev = ui_card(scr, 10, 104, 343, 104);
-    ui_label(ev, 12, 4, 300, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, "Events, newest first");
-    lv_obj_t *box = lv_obj_create(ev);
+    ev_n = 0;
+    lv_obj_t *card = ui_card(scr, 10, 48, 343, 160);
+    lv_obj_t *box = lv_obj_create(card);
     lv_obj_remove_style_all(box);
-    lv_obj_set_pos(box, 12, 22);
-    lv_obj_set_size(box, 319, 80);
+    lv_obj_set_pos(box, 12, 2);
+    lv_obj_set_size(box, 327, 156);
     lv_obj_set_scroll_dir(box, LV_DIR_VER);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
                             LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_CHAIN);
-    lv_obj_set_scrollbar_mode(box, LV_SCROLLBAR_MODE_ON);
-    lv_obj_set_style_width(box, 6, LV_PART_SCROLLBAR);
-    lv_obj_set_style_radius(box, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_scrollbar_mode(box, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(box, 4, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(box, 2, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(box, LV_OPA_COVER, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_color(box, UI_IDLE, LV_PART_SCROLLBAR);
     fp.box = box;
+    fp.rows = lv_obj_create(box);
+    lv_obj_remove_style_all(fp.rows);
+    lv_obj_set_pos(fp.rows, 0, 0);
+    lv_obj_set_size(fp.rows, EV_TEXT_W, 10);
+    lv_obj_add_flag(fp.rows, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(fp.rows, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_add_event_cb(fp.rows, rows_draw, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_event_cb(fp.rows, rows_click, LV_EVENT_CLICKED, NULL);
+    fp.reset = ui_btn(scr, 361, 48, 109, 48, UI_PRIMARY, "Reset fault", faults_reset_cb, NULL);
     for (int i = 0; i < 2; i++) {
         lv_obj_t *b = ui_btn(scr, 361, i ? 160 : 104, 109, 48, UI_SECONDARY, "", NULL, NULL);
         ui_btn_arrow(b, !i);
@@ -249,16 +327,28 @@ static void faults_build(lv_obj_t *scr)
         lv_obj_add_event_cb(b, log_page, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)i);
         fp.page[i] = b;
     }
-    fp.log_time = ui_label(box, 0, 0, 0, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
-    fp.log_tag = ui_label(box, 0, 0, 0, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
-    fp.log = ui_label(box, 0, 0, 307, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
-    lv_label_set_long_mode(fp.log, LV_LABEL_LONG_WRAP);
-    for (int i = 0; i < 3; i++)
-        lv_obj_set_style_text_line_space(i == 0 ? fp.log_time : i == 1 ? fp.log_tag : fp.log, 2, 0);
     fp.log_total = (uint32_t)-1;
 }
 
-static void faults_rows(void)
+// One row's place and height: the text wrapped to its width.
+static void row_add(int fault, uint32_t age, const char *tag, const char *text, int32_t *y)
+{
+    if (ev_n >= EV_ROWS)
+        return;
+    ev_row_t *r = &ev_rows[ev_n++];
+    r->fault = (int8_t)fault;
+    r->at = lv_tick_get() - age;
+    lv_strlcpy(r->tag, tag, sizeof r->tag);
+    lv_strlcpy(r->text, text, sizeof r->text);
+    lv_point_t sz;
+    lv_text_get_size(&sz, r->text, &ui_font_16, 0, 0, fault >= 0 ? EV_FAULT_W : EV_TEXT_W, LV_TEXT_FLAG_NONE);
+    r->y = (int16_t)*y;
+    r->h = (int16_t)(EV_TEXT_Y + sz.y + EV_GAP);
+    *y += r->h;
+}
+
+// Rebuilt when a fault latches or clears or an event is logged.
+static void faults_list(void)
 {
     char sig[64] = "";
     valve_fault_t f;
@@ -267,92 +357,35 @@ static void faults_rows(void)
         size_t len = strlen(sig);
         lv_snprintf(sig + len, sizeof sig - len, "%s ", f.tag);
     }
-    if (n == fp.nf && strcmp(sig, fp.sig) == 0)
+    uint32_t total = valve_event_total();
+    if (n == fp.nf && strcmp(sig, fp.sig) == 0 && total == fp.log_total)
         return;
     fp.nf = n;
-    lv_strlcpy(fp.sig, sig, sizeof fp.sig);
-    lv_obj_clean(fp.list);
-    if (!n) {
-        ui_label(fp.list, 12, 14, 300, &ui_font_16, UI_IDLE, LV_TEXT_ALIGN_LEFT, "No faults");
-        return;
-    }
-    for (int i = 0; i < n && valve_fault_get(i, &f); i++) {
-        lv_obj_t *r = lv_obj_create(fp.list);
-        lv_obj_remove_style_all(r);
-        lv_obj_remove_flag(r, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_pos(r, 0, i * 48);
-        lv_obj_set_size(r, 343, 48);
-        lv_obj_add_flag(r, LV_OBJ_FLAG_SCROLL_ON_FOCUS | LV_OBJ_FLAG_SNAPPABLE);
-        lv_obj_add_event_cb(r, row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
-        char t[48], w[16];
-        lv_snprintf(t, sizeof t, "%s  %s", f.tag, f.text);
-        ui_label(r, 12, 5, 300, &ui_font_16, UI_FAULT, LV_TEXT_ALIGN_LEFT, t);
-        lv_snprintf(t, sizeof t, "%s  %s", ui_when(w, sizeof w, f.age_ms), mode_word(f.mode));
-        ui_label(r, 12, 27, 300, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, t);
-        ui_label(r, 318, 14, 0, &lv_font_montserrat_14, UI_IDLE, LV_TEXT_ALIGN_LEFT, LV_SYMBOL_RIGHT);
-    }
-}
-
-static void faults_log(void)
-{
-    uint32_t total = valve_event_total();
-    if (total == fp.log_total)
-        return;
     fp.log_total = total;
-    // Column widths from the widest time and tag shown.
-    const lv_font_t *f = &ui_font_12;
-    int32_t tw = 0, gw = 0;
-    int n = 0;
-    for (; n < LOG_ROWS; n++) {
+    lv_strlcpy(fp.sig, sig, sizeof fp.sig);
+    ev_n = 0;
+    int32_t y = 0;
+    for (int i = 0; i < n && valve_fault_get(i, &f); i++)
+        row_add(i, f.age_ms, f.tag, f.text, &y);
+    for (int i = 0; i < LOG_ROWS; i++) {
         uint32_t age;
         const char *tag, *text;
-        char w[16];
-        if (!valve_event_get(n, &age, &tag, &text))
-            break;
-        lv_point_t a, b;
-        lv_text_get_size(&a, ui_when(w, sizeof w, age), f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        lv_text_get_size(&b, tag, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        if (a.x > tw) tw = a.x;
-        if (b.x > gw) gw = b.x;
-    }
-    const int32_t gap = 8, x_tag = tw + gap, x_text = x_tag + gw + gap, text_w = 307 - x_text;
-    size_t lt = 0, lg = 0, lx = 0;
-    log_text[0] = log_time[0] = log_tag[0] = '\0';
-    for (int i = 0; i < n; i++) {
-        uint32_t age;
-        const char *tag, *text;
-        char w[16];
         if (!valve_event_get(i, &age, &tag, &text))
             break;
-        // Lines the text wraps to: the time and tag columns skip as many.
-        lv_point_t sz;
-        lv_text_get_size(&sz, text, f, 0, 2, text_w, LV_TEXT_FLAG_NONE);
-        int lines = (sz.y + 2) / (lv_font_get_line_height(f) + 2);
-        if (lines < 1) lines = 1;
-        lv_snprintf(log_time + lt, sizeof log_time - lt, "%s%s", i ? "\n" : "", ui_when(w, sizeof w, age));
-        lv_snprintf(log_tag + lg, sizeof log_tag - lg, "%s%s", i ? "\n" : "", tag);
-        lv_snprintf(log_text + lx, sizeof log_text - lx, "%s%s", i ? "\n" : "", text);
-        lt += strlen(log_time + lt);
-        lg += strlen(log_tag + lg);
-        lx += strlen(log_text + lx);
-        for (int k = 1; k < lines; k++) {
-            if (lt + 1 < sizeof log_time) { log_time[lt++] = '\n'; log_time[lt] = '\0'; }
-            if (lg + 1 < sizeof log_tag)  { log_tag[lg++] = '\n'; log_tag[lg] = '\0'; }
-        }
+        row_add(-1, age, tag, text, &y);
     }
-    lv_obj_set_x(fp.log_tag, x_tag);
-    lv_obj_set_x(fp.log, x_text);
-    lv_obj_set_width(fp.log, text_w);
-    lv_label_set_text_static(fp.log_time, log_time);
-    lv_label_set_text_static(fp.log_tag, log_tag);
-    lv_label_set_text_static(fp.log, log_text);
+    if (!ev_n) {
+        row_add(-1, 0, "", "No events yet", &y);
+    }
+    lv_obj_set_height(fp.rows, y > 10 ? y : 10);
+    lv_obj_invalidate(fp.rows);
     log_buttons();
 }
 
 static void faults_refresh(void)
 {
-    faults_rows();
-    faults_log();
+    faults_list();
+    lv_obj_invalidate(fp.rows);   // the times move on
     ui_btn_enable(fp.reset, valve_fault_count() > 0);
     if (fp.detail >= 0)   // the detail overlay is open (detail_deleted)
         detail_fill();

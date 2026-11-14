@@ -580,7 +580,7 @@ static void home_build(lv_obj_t *scr)
     // 0.15.3; the IP tile in place of Trend from 0.15.6).
     pid_make(scr, 48);
     ip_make(scr, 104);
-    ui_btn(scr, 361, 160, 109, 48, UI_NAV, "Menu", menu_event, NULL);
+    ui_btn(scr, 361, 160, 109, 48, UI_NAV, LV_SYMBOL_BARS "  Menu", menu_event, NULL);
     // The mode buttons on the tiles' bottom rows, in place of the SP and Go
     // to boxes (0.15.3): Start AUTO outside AUTO, filled dark blue with
     // white lettering in the template (Ryan, 4 Nov; outlined to 0.15.7),

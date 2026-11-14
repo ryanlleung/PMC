@@ -14,6 +14,8 @@
 #include "remote.h"
 #include "cfg.h"
 
+static void net(const char *fmt, ...);   // a set taken, as a NET event (below)
+
 /* --------------------------------------------------------------------------
  * The reply line: query replies and at most one refusal, joined by ';'.
  * ------------------------------------------------------------------------ */
@@ -289,6 +291,8 @@ static void pid_set(const char *c)
     const char *why;
     if (!same && !cfg_save_with(v, on, &why))
         refuse_why(why);
+    else if (!same)
+        net("PID settings saved");
 }
 
 // SCHED SET PV,<b1>,<b2>,<b3>,<h> (0.15.15; SP removed in 0.15.20; b3, the
@@ -350,6 +354,8 @@ static void sched_set(const char *c)
     const char *why;
     if (!same && !cfg_save_with(v, on, &why))
         refuse_why(why);
+    else if (!same)
+        net("PID settings saved");
 }
 
 // What follows the command words (a space and the value, or ""), or NULL if
@@ -360,6 +366,19 @@ static const char *after(const char *c, const char *words)
     if (strncmp(c, words, n) != 0 || (c[n] != ' ' && c[n] != '\0'))
         return NULL;
     return c + n;
+}
+
+/* A set command taken from the text port, as a NET event (0.17.0). The
+ * screen shows "Over the network: ..." for these and Modbus's (ui.c), in
+ * place of the header's remote light, removed in 0.17.0 (Ryan 13 Nov). */
+static void net(const char *fmt, ...)
+{
+    char t[64];
+    va_list args;
+    va_start(args, fmt);
+    lv_vsnprintf(t, sizeof t, fmt, args);
+    va_end(args);
+    valve_event("NET", "Text port: %s", t);
 }
 
 static bool set(const char *c)
@@ -376,9 +395,13 @@ static bool set(const char *c)
             refuse(102, "Outside 0 to %s mbar", fixed_fmt(a, sizeof a, fixed_round(fs, 2), 1));
         else if (!valve_set_target((int32_t)v, &why))
             refuse_why(why);
+        else
+            net("setpoint %s mbar", fixed_fmt(a, sizeof a, fixed_round(v, 2), 1));
     } else if (strcmp(c, "MODE AUTO") == 0) {
         if (!valve_start_auto(&why))
             refuse_why(why);
+        else
+            net("AUTO started");
     } else if (strcmp(c, "MODE MANUAL") == 0) {
         // Outside AUTO there is nothing to end; the valve stays where it is.
         // Off or shutting down it is refused: only the screen turns it on.
@@ -386,6 +409,8 @@ static bool set(const char *c)
             refuse_why(valve_off_why());
         else if (valve_auto() && !valve_to_manual(&why))
             refuse_why(why);
+        else
+            net("switched to MANUAL");
     } else if (after(c, "MODE")) {
         refuse(101, "Expected: MODE AUTO or MODE MANUAL");
     } else if ((v_text = after(c, "VALVE SET")) != NULL) {
@@ -395,13 +420,18 @@ static bool set(const char *c)
             refuse(102, "Outside 0 to 100 %%");
         else if (!valve_goto_pct10((int32_t)v, &why))
             refuse_why(why);
+        else
+            net("valve to %s %%", fixed_fmt(a, sizeof a, v, 1));
     } else if (strcmp(c, "STOP") == 0) {
+        net("STOP");
         valve_stop();
     } else if (strcmp(c, "ALARM RESET") == 0) {
         char left[40];
         valve_reset(left, sizeof left);
         if (left[0])
             refuse(210, "Not reset, cause still present: %s", left);
+        else
+            net("fault reset");
     } else if (strcmp(c, "ALARM OK") == 0) {
         // The screen OK and the Modbus OK coil: clear the strip warning.
         const char *w = valve_warning();
