@@ -2,7 +2,7 @@
 
 A pressure-based needle-valve controller for helium-flow cryostats.
 
-<img src="docs/screens/home-auto.png" width="480" alt="The Home screen in AUTO">
+<img src="docs/screens/home-in-auto.png" width="480" alt="The Home screen in AUTO">
 
 Oxford Instruments cryostats such as the CF-11 and CF-12 draw helium through a needle valve driven by a geared stepper motor. The controller holds the pressure measured by a Druck transducer on the pumping line by moving that valve. It keeps the cryostat's existing transducer and valve.
 

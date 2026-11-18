@@ -35,7 +35,7 @@ Click a picture to open it at full size.
 | **Home, not homed**<br>`home-not-homed.png` | [<img src="home-not-homed.png" width="240" alt="Home, not homed">](home-not-homed.png) | After power-up without a kept position: Home valve is in the Valve tile and Start AUTO is greyed |
 | **Start-up question**<br>`startup-question.png` | [<img src="startup-question.png" width="240" alt="Start-up question">](startup-question.png) | A saved valve position is offered: Home valve, Set as % or use it |
 | **Home, MANUAL**<br>`home-manual.png` | [<img src="home-manual.png" width="240" alt="Home, MANUAL">](home-manual.png) | Pressure and Valve tiles, the PID and IP tiles, Menu and STOP; the strip shows the status line and the 5 min sparkline |
-| **Home, AUTO**<br>`home-auto.png` | [<img src="home-auto.png" width="240" alt="Home, AUTO">](home-auto.png) | The SP box and Stop AUTO; the strip reads Regulating, In band or Stable |
+| **Home, AUTO**<br>`home-in-auto.png` | [<img src="home-in-auto.png" width="240" alt="Home, AUTO">](home-in-auto.png) | The SP box and Stop AUTO; the strip reads Regulating, In band or Stable |
 | **Keypad**<br>`keypad.png` | [<img src="keypad.png" width="240" alt="Keypad">](keypad.png) | Every number is typed on this keypad, over the dimmed page |
 
 ## Menu, Trend and Events
