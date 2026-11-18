@@ -1,0 +1,21 @@
+# NECTO / CMake build outputs and the clangd index: regenerated on every build.
+firmware/.cache/
+firmware/compile_commands.json
+# Build folders, one per NECTO build configuration (build-MM4,
+# "build-Default Configuration", ...). Only build-MM4/generated is kept: the
+# LVGL Designer screen code (from main_screen.mscr), which tools/ui-preview
+# compiles.
+firmware/build-*/
+!firmware/build-MM4/
+firmware/build-MM4/*
+!firmware/build-MM4/generated/
+
+# Python bytecode.
+__pycache__/
+
+# Simulator test screenshots.
+simulator/tests/shots/
+tools/cfg-test/out/
+tools/ctrl-test/out/
+tools/baro-test/out/
+tools/modbus-test/out/

@@ -1,0 +1,60 @@
+#ifndef _CLICKS_H_
+#define _CLICKS_H_
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/**
+ * @brief Bring-up checks for the Click boards on the mikroBUS shield.
+ *
+ * Socket layout:
+ *   S1 Pressure 21   (BMP581, on an Adapter Click)  I2C2 at 0x46 (baro.c);
+ *                    the Adapter also carries the limit switch (socket TX,
+ *                    PD5 = IDC10 pad 8 printed RX, with GND on pad 10)
+ *   S2 Stepper 3     (ULN2003)  AN PB0, RST PC3, CS PA15, PWM PD13
+ *   S3 Boost 10      (LT8337 + TPL0501)  SPI1 PA5/PA6/PB5, CS PF8, PG PG2
+ *   S4 Power Monitor (INA228)   SCL PF1 / SDA PF0 (I2C2, mikroSDK driver)
+ *
+ * The stepper itself is in stepper3.c (coils off at start-up). The Boost 10
+ * is set to ~10 V at start-up for the Druck excitation, and drops to ~5 V
+ * if VBUS reads over 11.5 V.
+ */
+
+// The Druck gives no reading with the excitation below this (datasheet
+// supply range 7-12 V); valve.c names it as the cause of F-1.
+#define DRUCK_VEXC_MIN_MV    7000
+
+// Latest readings for the UI, valid after clicks_init(), updated by clicks_poll().
+typedef struct {
+    bool pm_found;        // INA228 answering
+    bool reading_ok;      // pm_found, excitation >= 7 V and a plausible Druck signal
+    bool druck_absent;    // excitation fine but the signal is outside what a Druck gives
+    int32_t shunt_nv;     // Druck signal (Vshunt), nV
+    int32_t bus_mv;       // excitation (Vbus), mV
+    int32_t r_ppb;        // signal / excitation, ppb (1 mV/V = 1 000 000)
+    int32_t p_mmbar;      // pressure, 0.001 mbar absolute
+    int32_t die_mc;       // INA228 die temperature, 0.001 degC
+    bool cal_nominal;     // true until the cert values are entered
+    bool boost_pg;        // Boost 10 regulating
+    bool boost_tripped;   // 11.5 V trip latched
+    int32_t boost_trip_mv;
+    int32_t boost_set_mv; // nominal setpoint for the wiper written
+    bool baro_ok;         // Pressure 21 (baro.c) fitted, answering and plausible
+    int32_t baro_mmbar;   // room pressure, 0.001 mbar absolute
+    int32_t baro_mc;      // BMP581 temperature, 0.001 degC
+} clicks_state_t;
+
+void clicks_init(void);
+
+// Re-reads every board. Call about once a second.
+void clicks_poll(void);
+
+const clicks_state_t *clicks_state(void);
+
+// The shared I2C2 (PF1 SCL, PF0 SDA) for the other boards on it (baro.c).
+// A failed transfer recovers the bus, as for the Power Monitor.
+bool clicks_i2c_read(uint8_t addr, uint8_t reg, uint8_t *buf, size_t len);
+bool clicks_i2c_write(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len);
+
+#endif // _CLICKS_H_

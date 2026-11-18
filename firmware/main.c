@@ -1,0 +1,205 @@
+#include <string.h>
+/**
+ * @file main.c
+ * @brief Start-up and main loop of the iPC firmware: sets up the board,
+ * the Click boards, the saved settings, the screens and the network link,
+ * then runs every task in turn once a millisecond.
+ */
+
+#ifdef PREINIT_SUPPORTED
+#include "preinit.h"
+#endif
+
+#ifdef __GNUC__
+#include "delays.h"
+#endif
+
+#include "display_lvgl.h"
+#include "lv_port_indev.h"
+#include "1ms_Timer.h"
+#include "ipc_config.h"
+#include "link.h"
+#include "sysinfo.h"
+#include "rtclock.h"
+#include "clicks.h"
+#include "cal.h"
+#include "stepper3.h"
+#include "valve.h"
+#include "cfg.h"
+#include "ui.h"
+#include "limit.h"
+#include "sense.h"
+#include "valvepos.h"
+#include "trend.h"
+#include "baro.h"
+#include "remote.h"
+#if IPC_LINK_ETHERNET   // 0: a host build (the simulator compiles this file)
+#include "ethlink.h"
+#endif
+
+
+/**
+ * @brief Initializes board peripherals for display, touch, and LVGL timing.
+ */
+void board_init()
+{
+    lv_init();
+    // The LVGL heap is the 64 KB in CCM only: main SRAM is left for the
+    // stack and the network buffers. The host previews peak at about 55 KB
+    // with 64-bit pointers; the board reads about 33 KB.
+    lv_port_disp_init();
+    lv_port_indev_init();
+
+    // Configure 1ms timer interrupt for LVGL tick updates.
+    timerInit();
+}
+
+/**
+ * @brief Initializes the LVGL application and loads the main screen.
+ */
+void application_init()
+{
+    // Why the last reset happened (before anything else touches RCC).
+    sysinfo_init();
+    rtclock_init();
+
+    // Initialize board peripherals and LVGL drivers.
+    board_init();
+    // Every start is OFF: the OFF screen from the first frame; a double
+    // tap turns it on once ui_init has run. The backlight comes on only
+    // once it is drawn, so there is no white flash.
+    ui_splash();
+    lv_port_disp_light();
+
+    // Druck calibration from the on-board serial flash (nominal if none stored).
+    cal_init();
+
+    // Click boards on the shield. Stepper coils off; the motor only moves
+    // when the valve is moved (screen or link).
+    clicks_init();
+    limit_init();
+    valve_init();   // OFF, not homed: nothing moves until turned on and homed or moved
+    // Saved motor, valve and cal settings (factory defaults if none). Nothing moves.
+    cfg_init();
+    // The valve position saved at the last standstill: offered on the
+    // screen (Use saved / Calibrate), never used by itself; the count kept
+    // at Shut down is taken (valvepos.h).
+    valvepos_init();
+
+    // The frame and Home. The Motor screen is built the first time
+    // Menu > Motor opens it, which keeps its LVGL heap free until then.
+    ui_init();
+
+    // Draw the screen once first, so a link start-up fault cannot leave it blank.
+    lv_timer_handler();
+
+    // Text link to the PC over Ethernet (sets SYSCLK 150 MHz and the 50 MHz
+    // RMII clock).
+    link_init();
+}
+
+/**
+ * @brief Independent watchdog: resets the MCU if the main loop stops for
+ * more than ~3-4 s (LSI 32 kHz nominal, 17-47 kHz; /64, reload 2000).
+ * Covers hangs such as LV_ASSERT's while(1), HardFault and unbounded
+ * hardware waits. Started after init; a software-started IWDG is stopped
+ * by the reset it causes, so mikroBootloader is unaffected.
+ */
+static void watchdog_start(void)
+{
+    IWDG->KR = 0x5555;      // unlock PR/RLR
+    IWDG->PR = 4;           // /64
+    IWDG->RLR = 2000;
+    IWDG->KR = 0xAAAA;      // reload
+    IWDG->KR = 0xCCCC;      // start
+}
+
+static inline void watchdog_kick(void)
+{
+    IWDG->KR = 0xAAAA;
+}
+
+/**
+ * @brief Application entry point.
+ *
+ * Initializes the MCU and LVGL environment, then enters
+ * the main event loop for GUI processing.
+ */
+int main(void)
+{
+    /* Do not remove this line — it ensures correct MCU initialization. */
+#ifdef PREINIT_SUPPORTED
+    preinit();
+#endif
+
+    // Initialize the application.
+    application_init();
+    watchdog_start();
+
+    ////////////////////////// LVGL timing routine (DO NOT REMOVE) //////////////////////////
+    char line[LINK_LINE_MAX + 1];
+    uint32_t sense_ms = lv_tick_get();
+    uint32_t held_from = 0;   // when the dump being waited for began holding the next line
+    while (1)
+    {
+        link_task();
+#if IPC_LINK_ETHERNET
+        // A new client does not get the last one's EVENT? lines: stopped
+        // before valve_task writes its next lines this pass.
+        if (ethlink_take_new_client())
+            valve_events_stop();
+#endif
+        touch_poll();
+        rtclock_poll();
+        limit_poll();
+        stepper3_poll();
+        valve_task();
+        valvepos_task();
+        if (lv_tick_elaps(sense_ms) >= 1000) {
+            sense_ms += 1000;
+            if (lv_tick_elaps(sense_ms) >= 1000)   // fell behind: no catch-up burst
+                sense_ms = lv_tick_get();
+            sense_second();
+        }
+        // The remote command set (remote.c): no echo, one reply line. While
+        // an EVENT? reply is going out a few lines a pass, the next line
+        // waits, so its reply does not land among those lines; for 0.5 s at
+        // most, so a STOP is not held longer than that.
+        bool dumping = valve_events_sending();
+        if (!dumping)
+            held_from = lv_tick_get();
+        if ((!dumping || lv_tick_elaps(held_from) >= 500) && link_getline(line, sizeof line))
+            remote_line(line);
+        lv_timer_handler();
+        watchdog_kick();
+        Delay_ms(1);
+    }
+    ////////////////////////////////////////////////////////////////////////////////////////
+
+    return 0;
+}
+
+/**
+ * @brief 1ms interrupt routine for the LVGL tick (and the CycloneTCP tick).
+ * Touch is polled from the main loop (touch_poll, lv_port_indev.c).
+ */
+static volatile uint32_t msCount = 0;
+
+#if IPC_LINK_ETHERNET
+extern volatile uint32_t systemTicks;   // CycloneTCP time base, 1 ms
+#endif
+
+INTERRUPT_ROUTINE
+{
+    msCount++;
+#if IPC_LINK_ETHERNET
+    systemTicks++;
+#endif
+
+    if (5 == msCount) {
+        msCount = 0;
+        lv_tick_inc(5);
+    }
+
+    CLEAR_FLAG;
+}

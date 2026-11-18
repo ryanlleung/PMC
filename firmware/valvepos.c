@@ -1,0 +1,477 @@
+#include "ipc_config.h"
+#include <stddef.h>
+#include <string.h>
+
+#include "lvgl.h"        // lv_tick_get
+#include "cfg.h"         // cfg_jog_rate
+#include "link.h"
+#include "limit.h"
+#include "sysinfo.h"
+#include "extflash.h"
+#include "fixed.h"
+#include "stepper3.h"
+#include "valve.h"
+#include "valvepos.h"
+
+#define VP_BASE      0x7EC000UL
+#define VP_SECTORS   16
+#define VP_SECTOR    4096UL
+#define VP_PER       (VP_SECTOR / sizeof(vp_entry_t))
+#define VP_SAFE      0x45464153UL   // "SAFE": at standstill
+#define VP_MOVING    0x45564F4DUL   // "MOVE": during a move, within MOVE_MS of travel
+#define VP_UNSAFE    0UL            // not calibrated: nothing to offer
+#define VP_PARKED    0x4B524150UL   // "PARK": OFF after Shut down, homed
+#define VP_PARKED_NH 0x4E524150UL   // "PARN": the same, not homed (set by hand or from a saved count)
+#define STILL_MS     2000
+#define MOVE_MS      2000           // a moving entry at most this often
+
+typedef struct {
+    uint32_t seq;        // +1 each entry, never 0xFFFFFFFF
+    int32_t count;
+    uint32_t state;      // VP_SAFE, VP_MOVING, VP_PARKED(_NH) or VP_UNSAFE, XOR the drive's reference (ref_sig)
+    uint32_t crc;
+} vp_entry_t;
+_Static_assert(sizeof(vp_entry_t) == 16, "16-byte entries");
+
+static bool ok;                 // flash found
+static uint32_t sector, at;  // where the next entry goes
+static vp_entry_t last;         // newest good entry (seq 0: none)
+static bool offer;
+static int32_t boot_count;
+static bool boot_moving;        // the offer was saved during a move
+static uint32_t put_at;         // tick of the last entry written
+static uint32_t still_since;
+static bool still;             // standing since still_since
+static uint32_t writes;
+static bool warned;            // withdraw failure logged
+static bool failed;            // the last put() did not take
+static uint32_t failed_at;     // tick of that put()
+static bool parked_boot;       // the newest entry is parked: taken once the switch is read
+static bool unparked;          // the offer is from a power-up without Shut down
+
+/* Context entries: the mode, setpoint and run rate, written in the same log
+ * after a position entry whenever they change. The same 16 bytes; the CRC
+ * is XORed with CTX_KEY so a reader of position entries (good()) skips it
+ * as a torn slot. seq is the position entry's it follows (not a new one). */
+#define CTX_KEY   0x43545831UL   // "CTX1"
+#define CTX_AUTO  0x80000000UL   // b: AUTO; low 16 bits the rate, st/s (the faster of Speed and Jog)
+typedef struct { uint32_t seq; int32_t sp_mmbar; uint32_t b; uint32_t crc; } vp_ctx_t;
+_Static_assert(sizeof(vp_ctx_t) == 16, "16-byte entries");
+static vp_ctx_t ctx;            // newest context entry (seq 0: none)
+static vp_ctx_t boot_ctx;       // the one in force at start-up
+
+/* The direction and coil order the count was saved under (0 for the
+ * factory ones). A count saved under another direction or order is no
+ * position now (a Direction change on Motor not saved, then a restart):
+ * its state does not read as SAFE or MOVING, so it is not offered. Entries
+ * carry VP_REF (bit 31, clear in SAFE, MOVING and UNSAFE); one without it
+ * records no direction and is read as saved under the present one. */
+#define VP_REF 0x80000000UL
+static uint32_t ref_sig(void)
+{
+    uint8_t o[4];
+    stepper3_order(o);
+    uint32_t sig = (stepper3_reverse() ? 0x100u : 0u) | (uint32_t)(o[0] << 6 | o[1] << 4 | o[2] << 2 | o[3]);
+    return sig ^ (0u << 6 | 2u << 4 | 1u << 2 | 3u);   // factory: forward, order 0213
+}
+static uint32_t state_of(const vp_entry_t *e)
+{
+    return e->state & VP_REF ? (e->state & ~VP_REF) ^ ref_sig() : e->state;
+}
+// SAFE, MOVING or parked under whatever direction and order it was saved:
+// it could be used at a restart under those, so a withdrawal must cover it.
+static bool live(const vp_entry_t *e)
+{
+    uint32_t s = e->state & ~VP_REF;   // the reference bits stay below 0x200
+    return e->seq && (((s ^ VP_SAFE) & ~0x1FFu) == 0 || ((s ^ VP_MOVING) & ~0x1FFu) == 0 ||
+                      ((s ^ VP_PARKED) & ~0x1FFu) == 0 || ((s ^ VP_PARKED_NH) & ~0x1FFu) == 0);
+}
+// Parked at Shut down, under the present direction and order.
+static bool parked(const vp_entry_t *e)
+{
+    return e->seq && (state_of(e) == VP_PARKED || state_of(e) == VP_PARKED_NH);
+}
+
+static bool good(const vp_entry_t *e)
+{
+    return e->seq != 0xFFFFFFFFUL && e->seq != 0 && e->crc == crc32_ieee(e, offsetof(vp_entry_t, crc));
+}
+
+static uint32_t addr(uint32_t s, uint32_t i)
+{
+    return VP_BASE + s * VP_SECTOR + i * sizeof(vp_entry_t);
+}
+
+static bool ctx_good(const vp_ctx_t *c)
+{
+    return c->seq != 0xFFFFFFFFUL && c->seq != 0 && c->crc == (crc32_ieee(c, offsetof(vp_ctx_t, crc)) ^ CTX_KEY);
+}
+
+// Writes 16 bytes in the next slot and reads them back.
+static bool put_raw(const void *e)
+{
+    if (at >= VP_PER) {
+        sector = (sector + 1) % VP_SECTORS;
+        at = 0;
+    }
+    failed = true;              // until it is read back right
+    failed_at = lv_tick_get();
+    if (at == 0 && !extflash_erase_4k(addr(sector, 0)))
+        return false;
+    uint8_t back[16];
+    uint32_t a = addr(sector, at);
+    at++;                       // the slot is used whatever happens
+    writes++;
+    put_at = lv_tick_get();
+    extflash_write(a, e, 16);
+    extflash_read(a, back, 16);
+    if (memcmp(e, back, 16) != 0)
+        return false;
+    failed = false;
+    return true;
+}
+
+// The context now, as an entry for the newest position entry. The rate is
+// the faster of Speed and the Jog speed: Close and Open on Jog run at the
+// Jog speed, so with Speed alone the start-up question's "within +-X %"
+// after a power cut mid-jog would be short when Jog is the faster.
+static vp_ctx_t ctx_now(void)
+{
+    uint32_t r = stepper3_rate(), j = (uint32_t)cfg_jog_rate();
+    vp_ctx_t c = { last.seq, 0, (r > j ? r : j) & 0xFFFFu, 0 };
+    int32_t sp;
+    if (valve_auto() && valve_target(&sp)) {
+        c.b |= CTX_AUTO;
+        c.sp_mmbar = sp;
+    }
+    c.crc = crc32_ieee(&c, offsetof(vp_ctx_t, crc)) ^ CTX_KEY;
+    return c;
+}
+
+// A context entry when the mode, setpoint or rate differ from the newest.
+static void ctx_check(void)
+{
+    if (!last.seq)
+        return;
+    vp_ctx_t c = ctx_now();
+    if (ctx.seq && c.sp_mmbar == ctx.sp_mmbar && c.b == ctx.b)
+        return;
+    if (put_raw(&c))
+        ctx = c;
+}
+
+// Writes one entry and reads it back. False if it did not take: last is
+// then unchanged, so the next call tries again in the next slot.
+static bool put(int32_t count, uint32_t state)
+{
+    vp_entry_t e = { last.seq + 1, count, (state ^ ref_sig()) | VP_REF, 0 };
+    if (e.seq == 0xFFFFFFFFUL)
+        e.seq = 1;
+    e.crc = crc32_ieee(&e, offsetof(vp_entry_t, crc));
+    if (!put_raw(&e))
+        return false;
+    last = e;
+    // A new sector may have taken the context's: write it again there, so
+    // an erase never leaves the newest position without its context.
+    if (at == 1 && ctx.seq) {
+        vp_ctx_t c = ctx;
+        c.seq = last.seq;
+        c.crc = crc32_ieee(&c, offsetof(vp_ctx_t, crc)) ^ CTX_KEY;
+        if (put_raw(&c))
+            ctx = c;
+        failed = false;   // the position entry itself took
+    }
+    return true;
+}
+
+static bool safe_on_flash(void)
+{
+    return last.seq && state_of(&last) == VP_SAFE;
+}
+
+static bool offerable(const vp_entry_t *e)
+{
+    return e->seq && (state_of(e) == VP_SAFE || state_of(e) == VP_MOVING);
+}
+
+// Writes state at pos, two tries. False if both failed.
+static bool put2(int32_t pos, uint32_t state)
+{
+    return put(pos, state) || put(pos, state);
+}
+
+// Withdraws a safe or moving entry (calibration lost), two tries. False if
+// both failed: the flash may still hold it.
+static bool withdraw(int32_t pos)
+{
+    if (!live(&last))
+        return true;
+    if (put2(pos, VP_UNSAFE)) {
+        warned = false;
+        return true;
+    }
+    // Once per failure, not every main-loop pass.
+    if (!warned)
+        valve_event("REF", "Saved position could not be withdrawn (flash write failed), moves refused");
+    warned = true;
+    return false;
+}
+
+// stepper3.c, just before a move starts from rest: a moving entry at the
+// start goes before the motor turns, so a reset mid-move never leaves the
+// standstill one behind; valvepos_task() then adds one every MOVE_MS while
+// it moves. Not calibrated: the entry is withdrawn instead. If neither can
+// be written the move is refused; the entry then still matches the valve,
+// which has not moved.
+static bool before_move(const char **why)
+{
+    if (!ok)
+        return true;
+    offer = false;
+    still = false;
+    int32_t pos = stepper3_position();   // saved in full steps
+    if (valve_calibrated() ? put2(pos, VP_MOVING) : withdraw(pos)) {
+        warned = false;
+        return true;
+    }
+    *why = "saved position could not be written (flash write failed)";
+    return false;
+}
+
+static bool erased(const vp_entry_t *e)
+{
+    const uint8_t *b = (const uint8_t *)e;
+    for (size_t i = 0; i < sizeof *e; i++)
+        if (b[i] != 0xFF)
+            return false;
+    return true;
+}
+
+void valvepos_init(void)
+{
+    static vp_entry_t buf[16];
+    stepper3_on_move_start(before_move);
+    ok = extflash_init();
+    if (!ok)
+        return;
+    // Every slot is read: a failed write can leave a blank or spoilt slot
+    // with good entries after it (put() goes on to the next slot), so a
+    // blank slot does not end the log. The newest good entry wins; the
+    // next entry goes after the last slot used in its sector.
+    // As after a reset, also when called again (the host tests).
+    memset(&last, 0, sizeof last);
+    memset(&ctx, 0, sizeof ctx);
+    memset(&boot_ctx, 0, sizeof boot_ctx);
+    offer = false;
+    parked_boot = false;
+    unparked = false;
+    still = false;
+    warned = false;
+    failed = false;
+    writes = 0;
+    sector = 0;
+    at = 0;
+    for (uint32_t s = 0; s < VP_SECTORS; s++) {
+        bool newer = false;
+        uint32_t used = 0;
+        for (uint32_t i = 0; i < VP_PER; i++) {
+            // 64 KB in 256-byte reads, about 0.2 s at start-up.
+            if (i % 16 == 0)
+                extflash_read(addr(s, i), buf, sizeof buf);
+            const vp_entry_t *e = &buf[i % 16];
+            if (erased(e))
+                continue;
+            used = i + 1;     // a torn entry is skipped, not written over
+            if (good(e) && (!last.seq || e->seq >= last.seq)) {
+                last = *e;
+                newer = true;
+            } else if (ctx_good((const vp_ctx_t *)e) && (!ctx.seq || ((const vp_ctx_t *)e)->seq >= ctx.seq)) {
+                ctx = *(const vp_ctx_t *)e;
+                newer = newer || ctx.seq >= last.seq;
+            }
+        }
+        if (newer) {
+            sector = s;
+            at = used;
+        }
+    }
+    // A power-up (not a restart) with a safe or moving entry: switched off
+    // without Shut down. Said on the start-up question.
+    const char *rr = sysinfo_reset_reason();
+    bool power = !strcmp(rr, "power-on") || !strcmp(rr, "brown-out");
+    if (parked(&last)) {
+        // Shut down at 0 %: taken in valvepos_task once the switch reads
+        // steadily, if it is released.
+        parked_boot = true;
+    } else if (offerable(&last)) {
+        offer = true;
+        if (ctx.seq && ctx.seq <= last.seq)
+            boot_ctx = ctx;
+        unparked = power;
+        boot_count = last.count;
+        boot_moving = state_of(&last) == VP_MOVING;
+        char p[16];
+        if (unparked && (boot_ctx.b & CTX_AUTO)) {
+            char sp[16];
+            valve_event("REF", "Last power-off without Shut down, in AUTO at %s mbar",
+                        fixed_fmt(sp, sizeof sp, fixed_round(boot_ctx.sp_mmbar, 2), 1));
+        } else if (unparked)
+            valve_event("REF", "Last power-off without Shut down");
+        valve_event("REF", "Saved position on offer: %s %% (count %ld)%s, use it or home the valve",
+                    fixed_fmt(p, sizeof p, fixed_round((int64_t)boot_count * 100000 / valve_pos_max(), 1), 2),
+                    (long)boot_count, boot_moving ? ", saved while moving" : "");
+    } else if (live(&last)) {
+        // Saved as SAFE or MOVING under another direction or coil order.
+        valve_event("REF", "Saved position not offered: saved under another motor direction or coil order");
+    }
+}
+
+// The parked entry at start-up (Shut down leaves the valve at 0 %, above
+// the switch). The switch released: the count is taken, still OFF.
+// Pressed: the valve was closed further while off, or the switch or its
+// wire is at fault; not homed, and valvepos_task withdraws the entry.
+static void parked_check(void)
+{
+    limit_state_t l = limit_state();
+    if (l == LIMIT_UNKNOWN)
+        return;
+    parked_boot = false;
+    if (l == LIMIT_OPEN) {
+        valve_event("REF", "Kept at the last shut down, but the limit switch is pressed: home the valve");
+        return;
+    }
+    const char *why;
+    if (!valve_restore_parked(last.count, state_of(&last) == VP_PARKED, &why))
+        valve_event("REF", "Position kept at shut down not used: %s", why);
+}
+
+void valvepos_task(void)
+{
+    if (!ok)
+        return;
+    if (parked_boot) {
+        parked_check();
+        if (parked_boot)
+            return;   // the switch not read yet: nothing written meanwhile
+    }
+    valve_mode_t m = valve_mode();
+    bool moving = stepper3_busy() || m == VALVE_CALIBRATING || m == VALVE_SHUTDOWN;
+    bool cal = valve_calibrated();
+    int32_t pos = stepper3_position();   // saved in full steps
+    if (m == VALVE_OFF && cal) {
+        // Shut down, coils off: parked, at once (the supply may be switched
+        // off any moment now), saying whether it was homed. Tried again
+        // after MOVE_MS if the write fails.
+        valve_ref_t r = valve_reference();
+        uint32_t want = r == VALVE_REF_HOMED || r == VALVE_REF_PARKED ? VP_PARKED : VP_PARKED_NH;
+        if ((state_of(&last) != want || last.count != pos) &&
+            (!failed || lv_tick_elaps(failed_at) >= MOVE_MS) && !put2(pos, want))
+            valve_event("REF", "Parked position could not be written (flash)");
+        still = false;
+        return;
+    }
+    if (moving) {
+        still = false;
+    } else if (!still) {
+        still = true;
+        still_since = lv_tick_get();
+    }
+    if (offer) {
+        // Kept, untouched, until the operator answers or something moves.
+        if (!moving && !cal)
+            return;
+        offer = false;
+    }
+    // After a failed write, MOVE_MS before the next try from here: each try
+    // can take an erase (up to 100 ms) and uses up a slot.
+    if (failed && lv_tick_elaps(failed_at) < MOVE_MS)
+        return;
+    if (cal && !moving && parked(&last)) {
+        // Turned on: safe at once, so a power cut from now on is told at
+        // the next start as one without Shut down.
+        (void)put(pos, VP_SAFE);
+        return;
+    }
+    if (cal)
+        ctx_check();
+    if (failed && lv_tick_elaps(failed_at) < MOVE_MS)
+        return;
+    if (!cal) {
+        (void)withdraw(pos);
+    } else if (moving) {
+        // The count every MOVE_MS while it moves (a write each time, so
+        // no more often: a 4 KB sector takes 256, each erase 100,000 times).
+        if (pos != last.count && lv_tick_elaps(put_at) >= MOVE_MS && !put(pos, VP_MOVING)) {
+            // The flash no longer keeps up: stop, so the entry on it stays
+            // within MOVE_MS of travel, as the start-up question says.
+            stepper3_stop();
+            valve_event("REF", "Saved position could not be written during the move (flash): valve stopped");
+        }
+    } else if (offerable(&last) && pos != last.count) {
+        (void)put(pos, VP_MOVING);   // set without a move (VALVE CLOSED, restore): a new count
+    } else if (!safe_on_flash() && still && lv_tick_elaps(still_since) >= STILL_MS) {
+        put(pos, VP_SAFE);
+    }
+}
+
+// The offer still stands: moot once the position is set another way (Set
+// position, homing; valvepos_task withdraws it too, but only on its next
+// pass, and the screen asks again before that), or once the direction or
+// coil order changed (Motor settings) while it waited.
+static bool offer_stands(void)
+{
+    if (offer && (valve_calibrated() || !offerable(&last)))
+        offer = false;
+    return offer;
+}
+
+bool valvepos_offer(int32_t *count)
+{
+    if (offer_stands())
+        *count = boot_count;
+    return offer;
+}
+
+bool valvepos_offer_unparked(void)
+{
+    return offer_stands() && unparked;
+}
+
+bool valvepos_offer_moving(int32_t *steps)
+{
+    // The most the valve can have gone since the entry: MOVE_MS between
+    // entries, the step interrupt's 1 s stall stop and a loop pass (1 s
+    // allowed), at the rate from the log (the faster of Speed and Jog), or
+    // at the fastest rate when the log has none (a move may have run at a
+    // rate that was not saved). From the log: 2.4 % at 400 st/s, not 6.1 %
+    // at the fastest.
+    uint32_t r = boot_ctx.seq ? (boot_ctx.b & 0xFFFFu) : 0;
+    if (r < STEPPER3_RATE_MIN || r > STEPPER3_RATE_MAX)
+        r = STEPPER3_RATE_MAX;
+    *steps = (int32_t)((uint64_t)r * (MOVE_MS + 2000) / 1000);
+    return offer_stands() && boot_moving;
+}
+
+bool valvepos_offer_auto(int32_t *sp_mmbar)
+{
+    if (!offer_stands() || !unparked || !(boot_ctx.b & CTX_AUTO))
+        return false;
+    *sp_mmbar = boot_ctx.sp_mmbar;
+    return true;
+}
+
+bool valvepos_use(const char **why)
+{
+    if (!offer_stands()) { *why = "No saved position to use"; return false; }
+    if (!valve_restore(boot_count, why))
+        return false;
+    offer = false;
+    return true;
+}
+
+void valvepos_decline(void)
+{
+    offer = false;
+}
+
+

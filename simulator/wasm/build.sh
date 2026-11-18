@@ -1,0 +1,54 @@
+#!/bin/sh
+# Builds simulator/ipc-wasm.js (the WebAssembly, base64): the firmware in firmware/ (screens, valve,
+# AUTO, settings, calibration, the link commands) for the browser, over the
+# simulated board in this folder. Needs zig 0.13 (pip install ziglang==0.13.0,
+# then ZIG="python3 -m ziglang") for its WebAssembly C library.
+#
+# Only stepper3.c is changed on the way in, and only where it writes fixed
+# hardware addresses (NVIC, PRIMASK).
+set -e
+HERE=$(cd "$(dirname "$0")" && pwd)
+PROJ="$HERE/../../firmware"
+OUT="$HERE/out"
+ZIG=${ZIG:-"python3 -m ziglang"}
+mkdir -p "$OUT/lvgl" "$OUT/patched"
+
+CFLAGS="-target wasm32-wasi -O2 -w -DIPC_LINK_ETHERNET=0 -DLV_CONF_INCLUDE_SIMPLE -DLV_LVGL_H_INCLUDE_SIMPLE \
+  -I$HERE/include -I$PROJ/lvgl_940 -I$PROJ -I$PROJ/build-MM4/generated -I$HERE"
+
+if [ ! -f "$OUT/liblvgl.a" ]; then
+  echo "Compiling LVGL (once)..."
+  find "$PROJ/lvgl_940/src" -name '*.c' | while read -r f; do
+    o="$OUT/lvgl/$(echo "$f" | sed "s|$PROJ/lvgl_940/src/||; s|/|_|g").o"
+    $ZIG cc $CFLAGS -c "$f" -o "$o"
+  done
+  $ZIG ar rcs "$OUT/liblvgl.a" "$OUT"/lvgl/*.o
+fi
+
+sed -e 's|^#define NVIC_ISER(n).*|#define NVIC_ISER(n) sim_nvic_dummy|' \
+    -e 's|^#define NVIC_ICPR(n).*|#define NVIC_ICPR(n) sim_nvic_dummy|' \
+    -e 's|^#define NVIC_IPR8(n).*|#define NVIC_IPR8(n) sim_nvic_dummy|' \
+    -e 's|__asm volatile ("mrs %0, primask\\n\\tcpsid i" : "=r" (pm) :: "memory");|pm = 0;|' \
+    -e 's|__asm volatile ("msr primask, %0" :: "r" (pm) : "memory");|(void)pm;|' \
+    -e '1i #include <stdint.h>\nextern volatile uint32_t sim_nvic_dummy;' \
+    "$PROJ/stepper3.c" > "$OUT/patched/stepper3.c"
+if grep -q "0xE000E\|primask" "$OUT/patched/stepper3.c"; then
+  echo "stepper3.c changed: update the sed lines in build.sh" >&2
+  exit 1
+fi
+
+FW="limit.c rtclock.c sysinfo.c link.c remote.c cal.c cfg.c valve.c ctrl.c valvepos.c trend.c sense.c fixed.c \
+    ui.c ui_home.c ui_valve.c ui_settings.c ui_trend.c motor_screen.c \
+    ui_font_12.c ui_font_16.c ui_font_26.c ui_font_40.c ui_img_logo.c"
+SRC=""
+for f in $FW; do SRC="$SRC $PROJ/$f"; done
+
+WASM="$OUT/ipc.wasm"
+$ZIG cc $CFLAGS -mexec-model=reactor -o "$WASM" \
+  "$HERE/sim_main.c" "$HERE/sim_clicks.c" "$HERE/bench.c" "$HERE/textfit.c" \
+  "$OUT/patched/stepper3.c" $SRC "$OUT/liblvgl.a" \
+  -Wl,--export=malloc -Wl,--strip-all -lm
+# The page loads it from a script, so it also opens from a file:// path.
+{ printf '// Built by simulator/wasm/build.sh from firmware/ (IPC_FW_VERSION in ipc_config.h). Do not edit.\n'
+  printf 'window.IPC_WASM = "'; base64 -w0 "$OUT/ipc.wasm"; printf '";\n'; } > "$HERE/../ipc-wasm.js"
+ls -l "$OUT/ipc.wasm" "$HERE/../ipc-wasm.js"

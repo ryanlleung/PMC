@@ -1,0 +1,138 @@
+/**
+ * @file lv_port_disp_templ.c
+ */
+#include "display_lvgl.h"
+#include "lvgl_common.h"
+#include "mcu.h"
+#include "display_px.h"
+#include "lv_port_indev.h"
+
+static void disp_init(void);
+static void disp_flush(lv_display_t * display, const lv_area_t * area, uint8_t * px_map);
+
+static lv_display_t * g_disp;
+
+void lv_port_disp_init(void)
+{
+    /*-------------------------
+     * Initialize your display.
+     * -----------------------*/
+    disp_init();
+
+    /*-----------------------------------
+     * Create the display in LVGL (v9+).
+     *----------------------------------*/
+    g_disp = lv_display_create(_TFT_WIDTH_, _TFT_HEIGHT_);
+
+    /* Used to copy the buffer's content to the display. */
+    lv_display_set_flush_cb(g_disp, disp_flush);
+
+    /*-----------------------------
+     * Create a buffer for drawing.
+     *----------------------------*/
+    /* PARTIAL render mode, 25 rows of RGB565 (2 bytes a pixel): 11 strips a
+     * full screen, so a screen change has little per-strip work. */
+    static uint8_t buf_1[_TFT_WIDTH_ * 25 * 2] __attribute__((aligned(4)));
+
+    /* buf_size is in BYTES in v9 */
+    lv_display_set_buffers(g_disp,
+                           buf_1,
+                           NULL,
+                           sizeof(buf_1),
+                           LV_DISPLAY_RENDER_MODE_PARTIAL);
+}
+
+/* The backlight, 0 to 255: the SSD1963's PWM output, as the SDK's
+ * tft8_set_backlight() sets it but without its display off and on. */
+static void backlight(uint8_t level)
+{
+    write_command(SSD1963_CMD_SET_PWM_CONF);
+    write_param(0x06);
+    write_param(level);
+    write_param(0x01);
+    write_param(0xFF);
+    write_param(0x00);
+    write_param(0x01);
+}
+
+/* Initialize your display and the required peripherals. */
+static void disp_init(void)
+{
+    display_configure();
+
+    /* The SSD1963 frame memory holds random pixels at power-up, and the
+     * SDK init above turns the display and backlight on, so the panel would
+     * show them until LVGL draws the first screen. This panel shows white
+     * with the display off, so the display stays on: the backlight goes off
+     * at once, the memory is cleared to black, and lv_port_disp_light()
+     * turns the backlight on once the OFF screen is drawn. */
+    backlight(0);
+    const uint16_t black = 0x0000;
+    frame_start(0, _TFT_WIDTH_ - 1, 0, _TFT_HEIGHT_ - 1);
+    display_px_write(&black, 1, (int32_t)_TFT_WIDTH_ * _TFT_HEIGHT_, 0);   /* about 10 ms */
+    display_deselect();
+}
+
+void lv_port_disp_light(void)
+{
+    backlight(0xFF);
+}
+
+/* The backlight at a level, 0 (off) to 255 (full): ui.c dims it after 10 min
+ * with no touch and turns it off while OFF. */
+void lv_port_disp_backlight(uint8_t level)
+{
+    backlight(level);
+}
+
+/* Flush the content of the internal buffer to the display.
+ * Call lv_display_flush_ready(display) when done. */
+static void disp_flush(lv_display_t * display, const lv_area_t * area, uint8_t * px_map)
+{
+    LV_UNUSED(display);
+
+    /* Return if the area is outside the screen. */
+    if(area->x2 < 0) return;
+    if(area->y2 < 0) return;
+    if(area->x1 > _TFT_WIDTH_  - 1) return;
+    if(area->y1 > _TFT_HEIGHT_ - 1) return;
+
+    /* Truncate the area to the screen. */
+    int32_t act_x1 = area->x1 < 0 ? 0 : area->x1;
+    int32_t act_y1 = area->y1 < 0 ? 0 : area->y1;
+    int32_t act_x2 = area->x2 > _TFT_WIDTH_  - 1 ? _TFT_WIDTH_  - 1 : area->x2;
+    int32_t act_y2 = area->y2 > _TFT_HEIGHT_ - 1 ? _TFT_HEIGHT_ - 1 : area->y2;
+
+    /* Widths in pixels */
+    uint16_t full_w = (uint16_t)(area->x2 - area->x1 + 1);
+    uint16_t act_w  = (uint16_t)(act_x2 - act_x1 + 1);
+
+    /* LVGL v9 gives pixels as a byte pointer. For RGB565, treat it as uint16_t.
+     * Clipped at the left or top: start at the first pixel on the screen. */
+    uint16_t * color_p = (uint16_t *)px_map + (act_y1 - area->y1) * full_w + (act_x1 - area->x1);
+
+    /* Orientation dependent. */
+    set_column();
+    set_page();
+
+    /* Start frame. */
+    frame_start(start_column, end_column, start_page, end_page);
+
+    /* Flush data. The SDK's write_array_data makes three HAL calls per
+     * pixel, so the registers are written directly in display_px.c, which is
+     * built at -O2 (this file must stay at -O0, see CMakeLists.txt). */
+    display_px_write(color_p, act_w, act_y2 - act_y1 + 1, full_w);
+
+    /* Deselect display. */
+    display_deselect();
+
+    /* A full redraw is many strips and can take longer than a tap, and touch
+     * is otherwise read only between LVGL passes: read it here too, so a
+     * press made during the redraw is latched, not lost (touch_poll limits
+     * itself to once per 5 ms). */
+    touch_poll();
+
+    /* IMPORTANT: tell LVGL flushing is finished. */
+    lv_display_flush_ready(display);
+}
+

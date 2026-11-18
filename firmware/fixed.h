@@ -1,0 +1,35 @@
+#ifndef _FIXED_H_
+#define _FIXED_H_
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+/**
+ * @brief Integer maths and text for fixed-point values: integers scaled by
+ * a power of ten, such as 0.001 mbar or ppb. lv_snprintf has no float
+ * support, so every reading is printed through these.
+ */
+
+// "-12.345" for v = -12345, dec = 3: all dec decimals, a minus sign if v is
+// negative. Returns buf.
+const char *fixed_fmt(char *buf, size_t n, int64_t v, int dec);
+
+// v with its last `drop` decimals rounded off, halves away from zero:
+// fixed_round(12345, 1) = 1235, fixed_round(-12345, 1) = -1235.
+// (Plain v / 10^drop truncates instead.)
+int64_t fixed_round(int64_t v, int drop);
+
+// Parses a plain decimal ("-12.345") into an integer scaled by 10^dec.
+// Extra decimals are truncated. Advances *s past the number (stops at a
+// space or the end; anything else is refused).
+bool fixed_parse(const char **s, int dec, int64_t *out);
+
+// Integer square root, rounded down.
+uint32_t isqrt64(uint64_t v);
+
+// CRC-32 (IEEE 802.3, reflected 0xEDB88320, as zlib): the check on the
+// settings, calibration and saved valve position records in serial flash.
+uint32_t crc32_ieee(const void *data, size_t len);
+
+#endif // _FIXED_H_

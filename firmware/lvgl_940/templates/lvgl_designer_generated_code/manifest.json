@@ -1,0 +1,16 @@
+{
+    "name": "lvgl_{VERSION}",
+    "display_name": "LVGL {VERSION}",
+    "hidden": true,
+    "vendor": "MIKROE",
+    "type": "library",
+    "package_changed": true,
+    "category": "SDK Library",
+    "install_location": "%APPLICATION_DATA_DIR%/packages/lvgl",
+    "gh_package_name": "lvgl_{VERSION}_live.7z",
+    "requires_lvgl_processing": {
+        "external_package_repo": "MikroElektronika/mikrosdk_v2",
+        "external_package_asset": "lvgl.7z",
+        "extra_project_template_path": "templates/necto/live/project_templates/2_lvgl_designer"
+    }
+}

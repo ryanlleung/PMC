@@ -1,0 +1,2747 @@
+#include <stdlib.h>
+#include <string.h>
+
+#include "lvgl.h"
+#include "ipc_config.h"
+#include "rtclock.h"
+#include "stepper3.h"
+#include "limit.h"
+#include "cal.h"
+#include "valve.h"
+#include "valvepos.h"
+#include "sense.h"
+#include "motor_screen.h"
+#include "fixed.h"
+#include "cfg.h"
+#include "trend.h"
+#include "ui.h"
+#include "lv_port_indev.h"   // touch_watch: STOP for any finger
+
+/* --------------------------------------------------------------------------
+ * Fonts: tabular digits. Every digit takes the width of the widest, so a
+ * right-aligned reading does not shift as it changes.
+ * ------------------------------------------------------------------------ */
+lv_font_t ui_num_12, ui_num_16, ui_num_26, ui_num_40;
+
+static bool num_glyph_dsc(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uint32_t letter, uint32_t next)
+{
+    const lv_font_t *base = font->user_data;
+    if (!base->get_glyph_dsc(base, dsc, letter, next))
+        return false;
+    if (letter >= '0' && letter <= '9') {
+        int32_t widest = 0;
+        lv_font_glyph_dsc_t d;
+        for (uint32_t c = '0'; c <= '9'; c++)
+            if (base->get_glyph_dsc(base, &d, c, 0) && d.adv_w > widest)
+                widest = d.adv_w;
+        dsc->ofs_x += (widest - dsc->adv_w) / 2;
+        dsc->adv_w = widest;
+    }
+    return true;
+}
+
+static void num_font(lv_font_t *f, const lv_font_t *base)
+{
+    *f = *base;
+    f->get_glyph_dsc = num_glyph_dsc;
+    f->kerning = LV_FONT_KERNING_NONE;
+    f->user_data = (void *)base;
+}
+
+/* --------------------------------------------------------------------------
+ * Styles
+ * ------------------------------------------------------------------------ */
+#define UI_EDGE    lv_color_hex(0xAEB9C4)
+#define UI_DIS_BG  lv_color_hex(0xE9EEF2)
+#define UI_DIS_TX  lv_color_hex(0x9AA4AE)
+
+static lv_style_t st_btn, st_btn_pr, st_btn_dis, st_act, st_act_pr, st_act_small,
+                  st_red, st_red_pr, st_dark, st_dark_pr, st_card, st_stop_op, st_stop_op_pr,
+                  st_out, st_out_pr;
+#define ST_DIS LV_STATE_USER_1   // greyed, still clickable so it can say why
+
+static void styles_init(void)
+{
+    lv_style_init(&st_btn);
+    lv_style_set_bg_opa(&st_btn, LV_OPA_COVER);
+    lv_style_set_bg_color(&st_btn, UI_CARD);
+    lv_style_set_radius(&st_btn, 6);
+    lv_style_set_border_side(&st_btn, LV_BORDER_SIDE_BOTTOM);   // the raised edge
+    lv_style_set_border_width(&st_btn, 2);
+    lv_style_set_border_color(&st_btn, UI_EDGE);
+    lv_style_set_text_color(&st_btn, UI_TEXT);
+    lv_style_set_text_font(&st_btn, &ui_font_16);
+
+    lv_style_init(&st_btn_pr);
+    lv_style_set_bg_color(&st_btn_pr, UI_PRESS);
+    lv_style_set_border_width(&st_btn_pr, 0);
+
+    lv_style_init(&st_btn_dis);
+    lv_style_set_bg_color(&st_btn_dis, UI_DIS_BG);
+    lv_style_set_text_color(&st_btn_dis, UI_DIS_TX);
+    lv_style_set_border_width(&st_btn_dis, 0);
+
+    lv_style_init(&st_act);
+    lv_style_set_bg_color(&st_act, UI_BLUE);
+    lv_style_set_text_color(&st_act, lv_color_white());
+    lv_style_set_border_width(&st_act, 0);
+    lv_style_init(&st_act_pr);
+    lv_style_set_bg_color(&st_act_pr, lv_color_hex(0x24475F));
+    lv_style_init(&st_act_small);
+    lv_style_set_text_color(&st_act_small, lv_color_hex(0xD5E2EC));
+
+    lv_style_init(&st_red);
+    lv_style_set_bg_color(&st_red, UI_FAULT);
+    lv_style_set_text_color(&st_red, lv_color_white());
+    lv_style_set_border_width(&st_red, 0);
+    lv_style_init(&st_red_pr);
+    lv_style_set_bg_color(&st_red_pr, lv_color_hex(0xAA1E1E));
+
+    // STOP outside AUTO (no latch): white with a red edge and red word.
+    lv_style_init(&st_stop_op);
+    lv_style_set_bg_color(&st_stop_op, UI_CARD);
+    lv_style_set_text_color(&st_stop_op, UI_FAULT);
+    lv_style_set_border_side(&st_stop_op, LV_BORDER_SIDE_FULL);
+    lv_style_set_border_width(&st_stop_op, 3);
+    lv_style_set_border_color(&st_stop_op, UI_FAULT);
+    lv_style_set_pad_all(&st_stop_op, -3);      // the word keeps its place
+    lv_style_init(&st_stop_op_pr);
+    lv_style_set_bg_color(&st_stop_op_pr, lv_color_hex(0xF6D5D5));
+
+    // Switch to MANUAL in AUTO: Start AUTO's colours
+    // the other way round, edged as STOP outside AUTO.
+    lv_style_init(&st_out);
+    lv_style_set_bg_color(&st_out, UI_CARD);
+    lv_style_set_text_color(&st_out, UI_BLUE);
+    lv_style_set_border_side(&st_out, LV_BORDER_SIDE_FULL);
+    lv_style_set_border_width(&st_out, 3);
+    lv_style_set_border_color(&st_out, UI_BLUE);
+    lv_style_set_pad_all(&st_out, -3);      // the word keeps its place
+    lv_style_init(&st_out_pr);
+    lv_style_set_bg_color(&st_out_pr, lv_color_hex(0xD5E2EC));
+
+    lv_style_init(&st_dark);
+    lv_style_set_bg_color(&st_dark, UI_TEXT);
+    lv_style_set_text_color(&st_dark, lv_color_white());
+    lv_style_set_radius(&st_dark, 0);
+    lv_style_set_border_width(&st_dark, 0);
+    lv_style_init(&st_dark_pr);
+    lv_style_set_bg_color(&st_dark_pr, lv_color_hex(0x3C4856));
+
+    lv_style_init(&st_card);
+    lv_style_set_bg_opa(&st_card, LV_OPA_COVER);
+    lv_style_set_bg_color(&st_card, UI_CARD);
+    lv_style_set_radius(&st_card, 6);
+    lv_style_set_border_color(&st_card, UI_FAULT);   // alarm edge, width 0 until set
+    lv_style_set_border_width(&st_card, 0);
+}
+
+static lv_obj_t *plain(lv_obj_t *parent)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_remove_style_all(o);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    return o;
+}
+
+lv_obj_t *ui_card(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    lv_obj_t *o = plain(parent);
+    lv_obj_add_style(o, &st_card, 0);
+    lv_obj_set_pos(o, x, y);
+    lv_obj_set_size(o, w, h);
+    return o;
+}
+
+lv_obj_t *ui_label(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, const lv_font_t *font,
+                   lv_color_t color, lv_text_align_t align, const char *text)
+{
+    lv_obj_t *l = lv_label_create(parent);
+    lv_obj_set_pos(l, x, y);
+    if (w > 0) {
+        lv_obj_set_width(l, w);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_CLIP);
+    }
+    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_color(l, color, 0);
+    lv_obj_set_style_text_align(l, align, 0);
+    lv_label_set_text(l, text);
+    return l;
+}
+
+void ui_set_text(lv_obj_t *l, const char *text)
+{
+    if (strcmp(lv_label_get_text(l), text) != 0)
+        lv_label_set_text(l, text);
+}
+
+void ui_set_color(lv_obj_t *o, lv_color_t c)
+{
+    if (!lv_color_eq(lv_obj_get_style_text_color(o, LV_PART_MAIN), c))
+        lv_obj_set_style_text_color(o, c, 0);
+}
+
+lv_obj_t *ui_info(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h, const char *caption)
+{
+    lv_obj_t *c = ui_card(parent, x, y, w, h);
+    // 12 px inner padding, as the buttons (common HMI template).
+    ui_label(c, 12, 7, w - 24, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, caption);
+    // Proportional digits, as the setting cards, so one screen has one digit
+    // spacing; a reading that ticks asks for the tabular ones (ui_tabular).
+    return ui_label(c, 12, 24, w - 24, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+}
+
+void ui_tabular(lv_obj_t *l)
+{
+    lv_obj_set_style_text_font(l, &ui_num_16, 0);
+}
+
+/* The chevron of everything that opens something, the same everywhere:
+ * 12 px from the right edge, UI_CHEV, UI_IDLE when its button is greyed. */
+lv_obj_t *ui_chev(lv_obj_t *parent)
+{
+    lv_obj_t *c = lv_label_create(parent);
+    lv_obj_set_style_text_font(c, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(c, UI_CHEV, 0);
+    lv_label_set_text(c, LV_SYMBOL_RIGHT);
+    lv_obj_align(c, LV_ALIGN_RIGHT_MID, -(11 - lv_obj_get_style_border_width(parent, 0)), 0);
+    return c;
+}
+
+const char *ui_date(char *buf, size_t n, const char *iso)
+{
+    // "YYYY-MM-DD HH:MM:SS" to "16/10/26 14:32" (DD/MM/YY).
+    lv_snprintf(buf, n, "%.2s/%.2s/%.2s %.5s", iso + 8, iso + 5, iso + 2, iso + 11);
+    return buf;
+}
+
+/* The clock against the tick, so an event's time keeps its second at
+ * every redraw. The clock's whole second less the age in whole seconds
+ * would flip by 1, since the two roll over at different moments. Instead
+ * one offset from the tick to the time of day: taken where a second is
+ * seen to begin (at most a poll late), raised to the latest such reading,
+ * and taken afresh when a reading falls 0.5 s behind it (the clock set, or
+ * drift). clk_poll runs every 0.1 s. The tick is valve_ms, which does not
+ * wrap (lv_tick_get wraps after 49.7 days, and 2^32 ms is not a whole
+ * number of days). */
+#define DAY_MS 86400000
+static int32_t clk_off;         // ms of the day less valve_ms(), mod DAY_MS
+static bool clk_have;
+static int32_t clk_last = -1;   // the time of day last seen, s
+
+static int32_t iso_tod(const char *iso)
+{
+    return ((iso[11] - '0') * 10 + iso[12] - '0') * 3600 + ((iso[14] - '0') * 10 + iso[15] - '0') * 60
+           + (iso[17] - '0') * 10 + iso[18] - '0';
+}
+
+static void clk_poll(void)
+{
+    const char *iso = rtclock_iso();
+    if (!iso[0]) {
+        clk_have = false;
+        clk_last = -1;
+        return;
+    }
+    int32_t tod = iso_tod(iso);
+    if (clk_last >= 0 && tod != clk_last) {
+        int64_t c = ((int64_t)tod * 1000 - (int64_t)(valve_ms() % DAY_MS)) % DAY_MS;
+        int32_t cand = (int32_t)(c < 0 ? c + DAY_MS : c);
+        int32_t d = (int32_t)(((int64_t)cand - clk_off + DAY_MS + DAY_MS / 2) % DAY_MS) - DAY_MS / 2;
+        if (!clk_have || d > 0 || d < -500)
+            clk_off = cand;
+        clk_have = true;
+    }
+    clk_last = tod;
+}
+
+// Days since 1970-01-01 of a date, and back (the usual civil-calendar sums).
+static int32_t days_civil(int32_t y, int32_t m, int32_t d)
+{
+    y -= m <= 2;
+    int32_t era = (y >= 0 ? y : y - 399) / 400, yoe = y - era * 400;
+    int32_t doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    return era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+}
+
+static void civil_days(int32_t z, int32_t *y, int32_t *m, int32_t *d)
+{
+    z += 719468;
+    int32_t era = (z >= 0 ? z : z - 146096) / 146097, doe = z - era * 146097;
+    int32_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int32_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+    *d = doy - (153 * mp + 2) / 5 + 1;
+    *m = mp < 10 ? mp + 3 : mp - 9;
+    *y = yoe + era * 400 + (*m <= 2);
+}
+
+const char *ui_when(char *buf, size_t n, uint64_t age_ms)
+{
+    const char *iso = rtclock_iso();
+    if (iso[0]) {
+        clk_poll();
+        // ms into today now, by the offset (or, before a second has been seen
+        // to begin, the clock's whole second)
+        int64_t now = clk_have ? (int64_t)((valve_ms() + (uint64_t)clk_off) % DAY_MS) : (int64_t)iso_tod(iso) * 1000;
+        int64_t e = now - (int64_t)age_ms;
+        // Before today's midnight: its date, "15/11/26 23:15".
+        int32_t days = e < 0 ? (int32_t)((-e + DAY_MS - 1) / DAY_MS) : 0;
+        int32_t tod = (int32_t)((((e % DAY_MS) + DAY_MS) % DAY_MS) / 1000);
+        if (days) {
+            int32_t y = atoi(iso), m = atoi(iso + 5), d = atoi(iso + 8);
+            civil_days(days_civil(y, m, d) - days, &y, &m, &d);
+            lv_snprintf(buf, n, "%02ld/%02ld/%02ld %02ld:%02ld", (long)d, (long)m, (long)(y % 100), (long)(tod / 3600),
+                        (long)(tod / 60 % 60));
+        } else
+            lv_snprintf(buf, n, "%02ld:%02ld:%02ld", (long)(tod / 3600), (long)(tod / 60 % 60), (long)(tod % 60));
+    } else {
+        uint32_t t = (uint32_t)((valve_ms() - age_ms) / 1000);
+        lv_snprintf(buf, n, "up %lu:%02lu:%02lu", (unsigned long)(t / 3600), (unsigned long)(t / 60 % 60),
+                    (unsigned long)(t % 60));
+    }
+    return buf;
+}
+
+const char *ui_fmt2(char *buf, size_t n, int64_t milli)
+{
+    bool neg = milli < 0;
+    int64_t t = ((neg ? -milli : milli) + 5) / 10;
+    lv_snprintf(buf, n, "%s%ld.%02ld", neg && t ? "-" : "", (long)(t / 100), (long)(t % 100));
+    return buf;
+}
+
+const char *ui_fmt1(char *buf, size_t n, int64_t milli)
+{
+    bool neg = milli < 0;
+    int64_t t = ((neg ? -milli : milli) + 50) / 100;
+    lv_snprintf(buf, n, "%s%ld.%ld", neg && t ? "-" : "", (long)(t / 10), (long)(t % 10));
+    return buf;
+}
+
+int32_t ui_pct_shown(int32_t milli)
+{
+    int32_t c = milli < 0 ? 0 : (milli + 5) / 10;
+    return c > 10000 ? 10000 : c;
+}
+
+/* --------------------------------------------------------------------------
+ * Buttons. Child 0 is the main label, then the chevron (nav only), then the
+ * 12 px state line, made on first use (most buttons never have one).
+ * ------------------------------------------------------------------------ */
+#define BTN_NAV   LV_OBJ_FLAG_USER_1    // on the button
+#define BTN_SMALL LV_OBJ_FLAG_USER_1    // on its state line
+#define BTN_ICON  LV_OBJ_FLAG_USER_4    // on the button: an icon over the label (ui_btn_icon, the Menu)
+
+static lv_obj_t *btn_small(lv_obj_t *b)
+{
+    uint32_t n = lv_obj_get_child_count(b);
+    lv_obj_t *last = lv_obj_get_child(b, (int32_t)n - 1);
+    return n > 1 && lv_obj_has_flag(last, BTN_SMALL) ? last : NULL;
+}
+
+static void btn_layout(lv_obj_t *b)
+{
+    lv_obj_t *main = lv_obj_get_child(b, 0), *small = btn_small(b);
+    if (lv_obj_has_flag(b, BTN_ICON)) {
+        // The icon at the top, the label along the bottom (the Menu).
+        lv_obj_align(main, LV_ALIGN_BOTTOM_MID, 0, -5);
+        return;
+    }
+    bool two = small && !lv_obj_has_flag(small, LV_OBJ_FLAG_HIDDEN);
+    bool nav = lv_obj_has_flag(b, BTN_NAV);
+    lv_align_t al = nav ? LV_ALIGN_LEFT_MID : LV_ALIGN_CENTER;
+    int32_t x = nav ? 12 : 0;
+    lv_obj_align(main, al, x, two ? -8 : 0);
+    if (small)
+        lv_obj_align(small, al, x, 10);
+}
+
+lv_obj_t *ui_btn(lv_obj_t *parent, int32_t x, int32_t y, int32_t w, int32_t h,
+                 ui_btn_kind_t kind, const char *text, lv_event_cb_t cb, void *user)
+{
+    lv_obj_t *b = lv_obj_create(parent);
+    lv_obj_remove_style_all(b);
+    lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(b, x, y);
+    lv_obj_set_size(b, w, h);
+    lv_obj_add_style(b, &st_btn, 0);
+    lv_obj_add_style(b, &st_btn_pr, LV_STATE_PRESSED);
+    if (kind == UI_PRIMARY) {
+        lv_obj_add_style(b, &st_act, 0);
+        lv_obj_add_style(b, &st_act_pr, LV_STATE_PRESSED);
+    } else if (kind == UI_RED) {
+        lv_obj_add_style(b, &st_red, 0);
+        lv_obj_add_style(b, &st_red_pr, LV_STATE_PRESSED);
+    } else if (kind == UI_DARK) {
+        lv_obj_add_style(b, &st_dark, 0);
+        lv_obj_add_style(b, &st_dark_pr, LV_STATE_PRESSED);
+    }
+    lv_obj_add_style(b, &st_btn_dis, ST_DIS);
+    if (kind == UI_NAV)
+        lv_obj_add_flag(b, BTN_NAV);
+    if (kind == UI_PRIMARY)
+        lv_obj_add_flag(b, LV_OBJ_FLAG_USER_2);   // its state line is light
+
+    lv_obj_t *main = lv_label_create(b);
+    lv_obj_set_width(main, w - (kind == UI_NAV ? 36 : 8));
+    lv_obj_set_style_text_align(main, kind == UI_NAV || kind == UI_DARK ? LV_TEXT_ALIGN_LEFT
+                                                                         : LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_text(main, text);
+    if (kind == UI_NAV)
+        ui_chev(b);
+    btn_layout(b);
+    if (cb)
+        lv_obj_add_event_cb(b, cb, LV_EVENT_CLICKED, user);
+    return b;
+}
+
+void ui_btn_text(lv_obj_t *b, const char *text, const char *small)
+{
+    lv_obj_t *m = lv_obj_get_child(b, 0), *s = btn_small(b);
+    bool has = small && *small;
+    ui_set_text(m, text);
+    if (!s && !has)
+        return;
+    if (!s) {
+        s = lv_label_create(b);
+        lv_obj_add_flag(s, BTN_SMALL | LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_width(s, lv_obj_get_style_width(m, 0));
+        lv_obj_set_style_text_align(s, lv_obj_get_style_text_align(m, 0), 0);
+        lv_obj_set_style_text_font(s, &ui_font_12, 0);
+        lv_obj_set_style_text_color(s, UI_MUTED, 0);
+        if (lv_obj_has_flag(b, LV_OBJ_FLAG_USER_2))
+            lv_obj_add_style(s, &st_act_small, 0);
+    }
+    bool had = !lv_obj_has_flag(s, LV_OBJ_FLAG_HIDDEN);
+    ui_set_text(s, has ? small : "");
+    if (had != has) {
+        if (has) lv_obj_remove_flag(s, LV_OBJ_FLAG_HIDDEN);
+        else     lv_obj_add_flag(s, LV_OBJ_FLAG_HIDDEN);
+        btn_layout(b);
+    }
+}
+
+void ui_btn_enable(lv_obj_t *b, bool on)
+{
+    if (on == !lv_obj_has_state(b, ST_DIS))
+        return;
+    if (on) lv_obj_remove_state(b, ST_DIS);
+    else    lv_obj_add_state(b, ST_DIS);
+    if (lv_obj_has_flag(b, BTN_NAV))   // the chevron has its own colour
+        lv_obj_set_style_text_color(lv_obj_get_child(b, 1), on ? UI_CHEV : UI_IDLE, 0);
+}
+
+void ui_btn_primary(lv_obj_t *b, bool on)
+{
+    if (on == lv_obj_has_flag(b, LV_OBJ_FLAG_USER_2))
+        return;
+    if (on) {
+        lv_obj_add_style(b, &st_act, 0);
+        lv_obj_add_style(b, &st_act_pr, LV_STATE_PRESSED);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_USER_2);
+    } else {
+        lv_obj_remove_style(b, &st_act, 0);
+        lv_obj_remove_style(b, &st_act_pr, LV_STATE_PRESSED);
+        lv_obj_remove_flag(b, LV_OBJ_FLAG_USER_2);
+    }
+}
+
+void ui_btn_outline(lv_obj_t *b, bool on)
+{
+    if (on == lv_obj_has_flag(b, LV_OBJ_FLAG_USER_3))
+        return;
+    if (on) {
+        lv_obj_add_style(b, &st_out, 0);
+        lv_obj_add_style(b, &st_out_pr, LV_STATE_PRESSED);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_USER_3);
+    } else {
+        lv_obj_remove_style(b, &st_out, 0);
+        lv_obj_remove_style(b, &st_out_pr, LV_STATE_PRESSED);
+        lv_obj_remove_flag(b, LV_OBJ_FLAG_USER_3);
+    }
+}
+
+bool ui_btn_disabled(lv_event_t *e)
+{
+    return lv_obj_has_state(lv_event_get_current_target(e), ST_DIS);
+}
+
+/* --------------------------------------------------------------------------
+ * Frame on lv_layer_top(): header, status strip, STOP
+ * ------------------------------------------------------------------------ */
+#define HDR_BTN_W 44  // Home (Power on Home) and Back, icons only
+#define HDR_TITLE_X (2 * HDR_BTN_W + 8)   // every title starts here
+#define HDR_MODE_X 353   // the mode panel's left edge: the third column's right edge
+static lv_obj_t *frame, *hdr, *back_btn, *home_btn, *name_lbl, *title_lbl, *mode_lbl, *unsaved_btn, *pwr_btn;
+// What the network sets shows on the strip (net_tick).
+static lv_obj_t *strip, *strip_icon, *strip_shape, *strip_text, *strip_ok, *strip_act, *strip_spark;
+static lv_obj_t *stop_btn;
+
+static lv_obj_t *home_scr, *cur_scr, *overlay;
+// Screens to go Back to (Home is under them all), e.g. Menu under Events.
+static const ui_screen_t *back_stack[4];
+static int back_n;
+static bool overlay_tv;         // the overlay is a text page (Help): strip shown greyed
+static int overlay_q;           // the overlay is a question: 1 closed switch, 2 saved position
+static bool kp_open;            // the overlay is the keypad
+static bool overlay_full;       // the overlay uses the bottom row (fault detail): strip hidden, as for the keypad
+static char kp_head[40];        // its heading in the header: the title up to the comma
+static void kp_side(void);
+static void question_check(void);
+static lv_obj_t *overlay_new(void);
+static const ui_screen_t *cur = &ui_scr_home;
+
+static char msg_text[96];
+static uint32_t msg_until;
+static bool msg_ok;   // the message has its OK (not Restarting)
+static bool msg_plain; // a confirmation: the plain line, no triangle, no OK
+static bool msg_net;   // what the network set (net_tick): dropped when the operator sets the same thing
+static bool overlay_ask;        // the overlay is a question (ui_ask4, Power options)
+static uint32_t ask_at;         // when it opened
+static const char *msg_icon;   // its icon: a tick, or the stop square after STOP
+
+static ui_strip_kind_t line_kind;
+static const char *line_icon;
+static char line_text[96];
+static lv_event_cb_t act_cb;
+static int32_t strip_w = 343;
+
+static void open_screen(const ui_screen_t *s);
+
+static void frame_refresh(void);
+static lv_obj_t *off_stop;     // Shut down's STOP while shutting down
+static bool off_shown(void);
+
+static void back_event(lv_event_t *e)
+{
+    (void)e;
+    ui_back();
+}
+
+/* A tap on anything greyed round a popup closes it, as Back: the dimmed
+ * page, the greyed strip, the greyed header icons. Nothing is
+ * done and a keypad's entry is dropped, as with Cancel. The two questions
+ * that need an answer (the limit switch during a move, the saved position
+ * at start-up) stay until answered. */
+// Not in a question's first second, so the second tap of a double tap on
+// the button that opened it, landing outside its box, does not close it.
+// Cancel and Back still close it at once.
+#define ASK_GUARD_MS 1000
+static void dim_back(void)
+{
+    if (overlay_ask && lv_tick_elaps(ask_at) < ASK_GUARD_MS)
+        return;
+    if (overlay && !overlay_q)
+        ui_back();
+}
+
+static void dim_event(lv_event_t *e)
+{
+    (void)e;
+    dim_back();
+}
+
+static void home_event(lv_event_t *e)
+{
+    (void)e;
+    if (overlay) {
+        dim_back();   // greyed under a popup: the tap closes the popup, not Home
+        return;
+    }
+    ui_home();
+}
+
+void ui_back(void)
+{
+    if (overlay) {
+        ui_overlay_close();
+        frame_refresh();   // the strip and header ungreyed now
+    } else if (back_n)
+        open_screen(back_stack[--back_n]);
+    else if (cur != &ui_scr_home)
+        ui_home();
+}
+
+// Shut down: the power icon on Home asks first (shut_ask, below).
+static void shut_ask(void);
+// When Home last opened: the power icon sits where Home is on the other
+// pages, so a double tap on Home must not open Power options.
+static uint32_t home_at;
+#define PWR_GUARD_MS 1000
+
+static void pwr_event(lv_event_t *e)
+{
+    (void)e;
+    if (overlay) {
+        dim_back();   // greyed under a popup, as Home
+        return;
+    }
+    if (lv_tick_elaps(home_at) < PWR_GUARD_MS)
+        return;
+    if (valve_auto()) {   // greyed in AUTO
+        ui_msg("Stop AUTO first");
+        return;
+    }
+    shut_ask();
+}
+
+static void unsaved_event(lv_event_t *e)
+{
+    (void)e;
+    if (overlay) {
+        dim_back();   // greyed under a popup, as Home
+        return;
+    }
+    ui_unsaved_ask();
+}
+
+// The strip under a popup is greyed: a tap on it closes the popup.
+static void strip_event(lv_event_t *e)
+{
+    (void)e;
+    // A fault on the strip: its detail; under a popup the greyed strip
+    // closes the popup instead.
+    if (!overlay && !msg_until && valve_fault_count()) {
+        ui_fault_detail();
+        return;
+    }
+    // A warning on the strip: Events, where its checks are.
+    if (!overlay && !msg_until && line_kind == UI_STRIP_WARN && valve_warning() && cur != &ui_scr_faults) {
+        ui_open(&ui_scr_faults);
+        return;
+    }
+    dim_back();
+}
+
+// STOP says what it did, and ends a sensor capture. One for every STOP:
+// the button, the one on the shut-down screen and a second finger on either.
+static void stop_do(void)
+{
+    int left, secs;
+    bool shutting = valve_shutdown_progress(&left, &secs), was_auto = valve_auto();
+    ui_overlay_close();
+    bool cap = cal_capture_cancel();
+    valve_stop();
+    char t[64], v[16];
+    if (shutting)
+        lv_snprintf(t, sizeof t, "Shut down cancelled. Valve at %s %%", ui_fmt2(v, sizeof v, valve_pct_milli()));
+    else
+        lv_strlcpy(t, cap ? "Stopped. Capture cancelled" : was_auto ? "Stopped. AUTO ended" : "Stopped", sizeof t);
+    ui_note_icon(LV_SYMBOL_STOP, t);
+    frame_refresh();
+}
+
+static void stop_event(lv_event_t *e)
+{
+    (void)e;
+    stop_do();
+}
+
+static void ok_event(lv_event_t *e)
+{
+    (void)e;
+    msg_until = 0;
+    frame_refresh();   // clear now, not at the next 0.5 s refresh
+}
+
+static void act_event(lv_event_t *e)
+{
+    if (act_cb)
+        act_cb(e);
+}
+
+// Up and Down on Trend, Events and Help: a drawn 21 x 12 chevron with a
+// 3 px stroke (common HMI template), in the button's text colour so it
+// greys with the button. The font's arrows are 12 x 8.
+static void arrow_draw(lv_event_t *e)
+{
+    lv_obj_t *o = lv_event_get_target_obj(e);
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    bool up = lv_event_get_user_data(e) != NULL;
+    lv_draw_line_dsc_t d;
+    lv_draw_line_dsc_init(&d);
+    d.color = lv_obj_get_style_text_color(lv_obj_get_parent(o), LV_PART_MAIN);
+    d.width = 3;
+    d.round_start = d.round_end = 1;
+    int32_t x = a.x1, y0 = a.y1 + (up ? 10 : 2), y1 = a.y1 + (up ? 2 : 10);
+    d.p1.x = x + 2;  d.p1.y = y0; d.p2.x = x + 10; d.p2.y = y1;
+    lv_draw_line(lv_event_get_layer(e), &d);
+    d.p1.x = x + 18; d.p1.y = y0;
+    lv_draw_line(lv_event_get_layer(e), &d);
+}
+
+void ui_btn_arrow(lv_obj_t *b, bool up)
+{
+    lv_label_set_text(lv_obj_get_child(b, 0), "");
+    lv_obj_t *o = plain(b);
+    lv_obj_set_size(o, 21, 12);
+    lv_obj_align(o, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_event_cb(o, arrow_draw, LV_EVENT_DRAW_MAIN, up ? (void *)1 : NULL);
+}
+
+// The drawn icons, 16 x 16, in the object's text colour: the status line's
+// (the valve, the target) and the Menu's (those and the trend).
+// Which one is the object's user data.
+typedef enum { SHAPE_VALVE, SHAPE_TARGET, SHAPE_TREND, SHAPE_MOTOR, SHAPE_PID, SHAPE_GAUGE } shape_t;
+static shape_t shape;          // the strip's, to redraw it only on a change
+static lv_color_t shape_col;
+
+static void shape_draw(lv_event_t *e)
+{
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_obj_t *obj = lv_event_get_target_obj(e);
+    lv_area_t a;
+    lv_obj_get_coords(obj, &a);
+    int32_t x = a.x1, y = a.y1;
+    shape_t which = (shape_t)(intptr_t)lv_obj_get_user_data(obj);
+    lv_color_t shape_col = lv_obj_get_style_text_color(obj, LV_PART_MAIN);
+    lv_draw_rect_dsc_t r;
+    lv_draw_rect_dsc_init(&r);
+    r.bg_color = shape_col;
+    if (which == SHAPE_TREND) {
+        // A chart: axes along the left and bottom, the pressure line over them.
+        // 2 px axes, the weight of the other icons.
+        lv_area_t ax = { x, y, x + 1, y + 15 };
+        lv_draw_rect(layer, &r, &ax);
+        lv_area_t ay = { x, y + 14, x + 15, y + 15 };
+        lv_draw_rect(layer, &r, &ay);
+        lv_draw_line_dsc_t d;
+        lv_draw_line_dsc_init(&d);
+        d.color = shape_col;
+        d.width = 2;
+        d.round_start = d.round_end = 1;
+        static const int8_t px[5] = { 3, 6, 9, 11, 15 }, py[5] = { 12, 7, 10, 5, 2 };
+        for (int i = 0; i < 4; i++) {
+            d.p1.x = x + px[i];     d.p1.y = y + py[i];
+            d.p2.x = x + px[i + 1]; d.p2.y = y + py[i + 1];
+            lv_draw_line(layer, &d);
+        }
+    } else if (which == SHAPE_MOTOR || which == SHAPE_GAUGE) {
+        // Motor: a body, its end plate and the shaft. Gauge
+        // (Pressure sensor): a dial, a needle and its hub.
+        lv_draw_arc_dsc_t c;
+        lv_draw_arc_dsc_init(&c);
+        c.color = shape_col;
+        c.width = 2;
+        lv_draw_line_dsc_t d;
+        lv_draw_line_dsc_init(&d);
+        d.color = shape_col;
+        d.width = 2;
+        if (which == SHAPE_MOTOR) {
+            // The body, its end plate and the shaft; the body solid, as the
+            // other icons.
+            lv_draw_rect_dsc_t o;
+            lv_draw_rect_dsc_init(&o);
+            o.bg_color = shape_col;
+            o.radius = 2;
+            lv_area_t body = { x + 3, y + 3, x + 12, y + 12 };
+            lv_draw_rect(layer, &o, &body);
+            lv_area_t plate = { x, y + 3, x + 1, y + 12 };
+            lv_draw_rect(layer, &r, &plate);
+            lv_area_t sh = { x + 13, y + 7, x + 17, y + 8 };
+            lv_draw_rect(layer, &r, &sh);
+        } else {
+            c.center.x = x + 8; c.center.y = y + 10; c.radius = 8;
+            c.start_angle = 150; c.end_angle = 30;
+            c.rounded = 1;
+            lv_draw_arc(layer, &c);
+            d.round_start = d.round_end = 1;
+            d.p1.x = x + 8; d.p1.y = y + 10; d.p2.x = x + 12; d.p2.y = y + 4;
+            lv_draw_line(layer, &d);
+            r.radius = LV_RADIUS_CIRCLE;
+            lv_area_t hub = { x + 6, y + 8, x + 9, y + 11 };
+            lv_draw_rect(layer, &r, &hub);
+        }
+    } else if (which == SHAPE_PID) {
+        // PID: two sliders, the tuning symbol.
+        lv_area_t l1 = { x, y + 3, x + 15, y + 4 }, l2 = { x, y + 11, x + 15, y + 12 };
+        lv_draw_rect(layer, &r, &l1);
+        lv_draw_rect(layer, &r, &l2);
+        r.radius = LV_RADIUS_CIRCLE;
+        lv_area_t k1 = { x + 3, y + 1, x + 7, y + 6 }, k2 = { x + 9, y + 9, x + 13, y + 14 };
+        lv_draw_rect(layer, &r, &k1);
+        lv_draw_rect(layer, &r, &k2);
+    } else if (which == SHAPE_VALVE) {
+        // P&ID hand valve: two triangles tip to tip, stem and handle.
+        lv_draw_triangle_dsc_t t;
+        lv_draw_triangle_dsc_init(&t);
+        t.color = shape_col;
+        t.p[0].x = x + 1;  t.p[0].y = y + 5;  t.p[1].x = x + 1;  t.p[1].y = y + 15; t.p[2].x = x + 8; t.p[2].y = y + 10;
+        lv_draw_triangle(layer, &t);
+        t.p[0].x = x + 15; t.p[0].y = y + 5;  t.p[1].x = x + 15; t.p[1].y = y + 15; t.p[2].x = x + 8; t.p[2].y = y + 10;
+        lv_draw_triangle(layer, &t);
+        lv_area_t q = { x + 7, y + 2, x + 8, y + 10 };
+        lv_draw_rect(layer, &r, &q);
+        lv_area_t h = { x + 4, y + 1, x + 11, y + 2 };
+        lv_draw_rect(layer, &r, &h);
+    } else {
+        // Target: two rings and a centre dot.
+        r.radius = LV_RADIUS_CIRCLE;
+        r.bg_opa = LV_OPA_TRANSP;
+        r.border_color = shape_col;
+        r.border_width = 2;
+        lv_area_t o = { x, y, x + 15, y + 15 };
+        lv_draw_rect(layer, &r, &o);
+        lv_area_t i = { x + 4, y + 4, x + 11, y + 11 };
+        lv_draw_rect(layer, &r, &i);
+        r.bg_opa = LV_OPA_COVER;
+        r.border_width = 0;
+        lv_area_t d = { x + 7, y + 7, x + 8, y + 8 };
+        lv_draw_rect(layer, &r, &d);
+    }
+}
+
+
+// Which drawn icon a UI_ICON_ string names, -1 for a font symbol.
+static int shape_of(const char *icon)
+{
+    return !icon ? -1 : strcmp(icon, UI_ICON_VALVE) == 0 ? SHAPE_VALVE
+         : strcmp(icon, UI_ICON_TARGET) == 0 ? SHAPE_TARGET
+         : strcmp(icon, UI_ICON_TREND) == 0 ? SHAPE_TREND
+         : strcmp(icon, UI_ICON_MOTOR) == 0 ? SHAPE_MOTOR
+         : strcmp(icon, UI_ICON_PID) == 0 ? SHAPE_PID
+         : strcmp(icon, UI_ICON_GAUGE) == 0 ? SHAPE_GAUGE : -1;
+}
+
+void ui_btn_icon(lv_obj_t *b, const char *icon)
+{
+    // The Menu's tiles: the icon centred along the top, the label along the
+    // bottom, so every tile reads the same way.
+    int sh = shape_of(icon);
+    lv_obj_t *i;
+    if (sh >= 0) {
+        i = plain(b);
+        lv_obj_set_size(i, 16, 16);
+        lv_obj_set_user_data(i, (void *)(intptr_t)sh);
+        lv_obj_set_style_text_color(i, lv_obj_get_style_text_color(lv_obj_get_child(b, 0), 0), 0);
+        lv_obj_add_event_cb(i, shape_draw, LV_EVENT_DRAW_MAIN, NULL);
+    } else {
+        i = lv_label_create(b);
+        lv_obj_set_style_text_font(i, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(i, lv_obj_get_style_text_color(lv_obj_get_child(b, 0), 0), 0);
+        lv_label_set_text(i, icon);
+    }
+    lv_obj_add_flag(b, BTN_ICON);
+    lv_obj_align(i, LV_ALIGN_TOP_MID, 0, 5);
+    btn_layout(b);
+}
+
+// OK and the action: a column wide, so "Reset fault" has room, with the
+// height giving way to a border.
+#define STRIP_BTN_W 109
+#define SPARK_W 139
+
+static void build_frame(void)
+{
+    frame = plain(lv_layer_top());
+    lv_obj_set_size(frame, 480, 272);
+    lv_obj_add_flag(frame, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    hdr = plain(frame);
+    lv_obj_set_size(hdr, 480, 40);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(hdr, UI_TEXT, 0);
+    lv_obj_add_flag(hdr, LV_OBJ_FLAG_CLICKABLE);    // touches on the header stop here
+    // One header on every screen: the first slot is
+    // Home on every page and Power on Home, Back beside it, icons only,
+    // 44 px each, then the title from x 96 on the left, the unsaved icon
+    // and the mode panel. Back is hidden on Home (shown there only to close
+    // a popup); Home and Power are greyed under a popup.
+    home_btn = ui_btn(hdr, 0, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_HOME, home_event, NULL);
+    back_btn = ui_btn(hdr, HDR_BTN_W, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_LEFT, back_event, NULL);
+    // A touch in the 8 px gap under the header is the icon's, not the page's.
+    lv_obj_set_ext_click_area(hdr, 8);
+    lv_obj_set_ext_click_area(home_btn, 8);
+    lv_obj_set_ext_click_area(back_btn, 8);
+    // The fault rule runs the full width, over the icons (not clickable,
+    // so their touches still reach them).
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *l = lv_obj_get_child(i ? back_btn : home_btn, 0);
+        lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(l);
+    }
+    name_lbl = ui_label(hdr, HDR_TITLE_X, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_LEFT,
+                       "Pressure controller");
+    lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(name_lbl, lv_font_get_line_height(&ui_font_16));   // one line, dots if long
+    title_lbl = ui_label(hdr, HDR_TITLE_X, 11, 280, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_long_mode(title_lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_height(title_lbl, lv_font_get_line_height(&ui_font_16));
+    // The mode panel: the mode word on a flat block the header's full
+    // height, so it reads as part of the bar and not as a button. The same
+    // for every mode: from x 353, the right edge of the third column, to
+    // 480, the word centred over the fourth column (2 px right padding).
+    // Grey in MANUAL and the others, dark blue in AUTO, red with a fault;
+    // white lettering.
+    mode_lbl = ui_label(hdr, HDR_MODE_X, 0, 480 - HDR_MODE_X, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "");
+    lv_obj_set_style_pad_right(mode_lbl, 480 - HDR_MODE_X - 109 - 2 * (361 - HDR_MODE_X), 0);
+    lv_obj_set_height(mode_lbl, 40);
+    lv_obj_set_style_pad_top(mode_lbl, (40 - lv_font_get_line_height(&ui_font_16)) / 2, 0);
+    lv_obj_set_style_radius(mode_lbl, 0, 0);
+    lv_obj_set_style_bg_opa(mode_lbl, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(mode_lbl, UI_MODE_PANEL, 0);
+    // Unsaved settings: the save icon on every screen while a setting in
+    // use differs from the newest save (cfg_unsaved), left of the mode, in
+    // warning yellow. Opens Review and save.
+    unsaved_btn = ui_btn(hdr, 0, 6, 40, 28, UI_DARK, LV_SYMBOL_SAVE, unsaved_event, NULL);
+    lv_obj_t *ul = lv_obj_get_child(unsaved_btn, 0);
+    lv_obj_set_style_text_align(ul, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(ul);
+    lv_obj_set_style_radius(unsaved_btn, 4, 0);
+    lv_obj_set_style_border_side(unsaved_btn, LV_BORDER_SIDE_FULL, 0);
+    // A 2 px edge in warning yellow.
+    lv_obj_set_style_border_width(unsaved_btn, 2, 0);
+    lv_obj_set_style_border_color(unsaved_btn, UI_YELLOW, 0);
+    lv_obj_set_ext_click_area(unsaved_btn, 6);
+    lv_obj_add_flag(unsaved_btn, LV_OBJ_FLAG_HIDDEN);
+    // Shut down: the power icon, top left on Home, where Home is on the
+    // other pages; it asks Shut down or Restart.
+    pwr_btn = ui_btn(hdr, 0, 0, HDR_BTN_W, 40, UI_DARK, LV_SYMBOL_POWER, pwr_event, NULL);
+    lv_obj_set_ext_click_area(pwr_btn, 8);
+    lv_obj_t *pl = lv_obj_get_child(pwr_btn, 0);
+    lv_obj_set_style_text_align(pl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(pl);
+
+    strip = plain(frame);
+    lv_obj_set_pos(strip, 10, 216);
+    lv_obj_set_size(strip, 343, 48);
+    lv_obj_add_style(strip, &st_card, 0);
+    lv_obj_add_flag(strip, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(strip, strip_event, LV_EVENT_CLICKED, NULL);   // greyed under a popup: closes it
+    strip_icon = ui_label(strip, 12, 15, 0, &lv_font_montserrat_14, lv_color_white(), LV_TEXT_ALIGN_LEFT,
+                          LV_SYMBOL_WARNING);
+    // Drawn icons with no font glyph: the valve symbol and the target.
+    strip_shape = plain(strip);
+    lv_obj_set_size(strip_shape, 16, 16);
+    lv_obj_set_style_text_color(strip_shape, UI_MUTED, 0);
+    lv_obj_add_event_cb(strip_shape, shape_draw, LV_EVENT_DRAW_MAIN, NULL);
+    lv_obj_add_flag(strip_shape, LV_OBJ_FLAG_HIDDEN);
+    // Centred on the text's middle, not on the strip.
+    lv_obj_align(strip_icon, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_align(strip_shape, LV_ALIGN_LEFT_MID, 12, 0);
+    strip_text = ui_label(strip, 28, 0, 303, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_long_mode(strip_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_line_space(strip_text, 4, 0);
+    // The pressure sparkline on the right whenever the strip shows the
+    // status line (Home and the operator screens), always 139 px. The text
+    // beside it has 148 px and wraps to a second line.
+    strip_spark = ui_spark(strip, 343 - SPARK_W - 12, 6, SPARK_W, 36, false);
+    lv_obj_add_flag(strip_spark, LV_OBJ_FLAG_HIDDEN);
+    strip_ok = ui_btn(strip, 343 - STRIP_BTN_W - 4, 4, STRIP_BTN_W, 40, UI_SECONDARY, "OK", ok_event, NULL);   // as wide as the action
+    strip_act = ui_btn(strip, 343 - STRIP_BTN_W - 4, 4, STRIP_BTN_W, 40, UI_PRIMARY, "", act_event, NULL);
+
+    stop_btn = ui_btn(frame, 361, 216, 109, 48, UI_RED, "STOP", NULL, NULL);
+    lv_obj_set_style_text_font(lv_obj_get_child(stop_btn, 0), &ui_font_26, 0);
+    lv_obj_add_event_cb(stop_btn, stop_event, LV_EVENT_PRESSED, NULL);   // on press, not release
+    lv_obj_add_style(stop_btn, &st_stop_op, LV_STATE_USER_2);
+    lv_obj_add_style(stop_btn, &st_stop_op_pr, LV_STATE_USER_2 | LV_STATE_PRESSED);
+}
+
+
+static void show(lv_obj_t *o, bool on)
+{
+    if (on == !lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN))
+        return;
+    if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN);
+    else    lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+}
+
+// No full stop after a single phrase (common HMI template); two sentences
+// keep theirs.
+static void phrase(char *t)
+{
+    size_t n = strlen(t);
+    if (n > 1 && t[n - 1] == '.' && t[n - 2] != '.' && !strstr(t, ". "))
+        t[n - 1] = '\0';
+}
+
+// "mbar" in a shared text (events, refusals, the network lines) reads "mB"
+// on the screen, as the screens' own units.
+void ui_mb(char *t)
+{
+    for (char *p = strstr(t, "mbar"); p; p = strstr(p + 2, "mbar")) {
+        p[1] = 'B';
+        memmove(p + 2, p + 4, strlen(p + 4) + 1);
+    }
+}
+
+// "2026-10-24 14:02:05" in a shared text (the settings events) reads
+// "24/10/26 14:02" on the screen, as every other date there.
+void ui_dates(char *t)
+{
+    for (char *p = t; strlen(p) >= 19; p++) {
+        static const char form[] = "dddd-dd-dd dd:dd:dd";
+        int i = 0;
+        while (i < 19 && (form[i] == 'd' ? p[i] >= '0' && p[i] <= '9' : p[i] == form[i]))
+            i++;
+        if (i < 19)
+            continue;
+        char d[16];
+        ui_date(d, sizeof d, p);   // 14 characters
+        memcpy(p, d, 14);
+        memmove(p + 14, p + 19, strlen(p + 19) + 1);
+        p += 13;
+    }
+}
+
+// "1 step", "-1 step", "0 steps", "-120 steps".
+const char *ui_steps(char *buf, size_t n, int32_t steps)
+{
+    lv_snprintf(buf, n, "%ld step%s", (long)steps, steps == 1 || steps == -1 ? "" : "s");
+    return buf;
+}
+
+// A refusal's second part starts in lower case: "Not changed: stop AUTO
+// first", as "Not undone: wait for the valve to stop", even where the
+// reason is also a message of its own. A word in capitals (STOP, AUTO,
+// F-1) stays.
+static void colon_lower(char *t)
+{
+    for (char *p = strstr(t, ": "); p; p = strstr(p + 2, ": "))
+        if (p[2] >= 'A' && p[2] <= 'Z' && p[3] >= 'a' && p[3] <= 'z')
+            p[2] = (char)(p[2] - 'A' + 'a');
+}
+
+// The parts of a text between new lines and spaces, with "25.06 %" and
+// "11 mV/V" as one part.
+static bool unit_next(const char *s)
+{
+    static const char *const u[] = { "%", "mB", "mbar", "mV/V", "V", "s", "min", "st/s", "steps", "step", "turns", "h" };
+    for (unsigned i = 0; i < sizeof u / sizeof u[0]; i++) {
+        size_t n = strlen(u[i]);
+        if (strncmp(s, u[i], n) == 0 && (s[n] == '\0' || strchr(" .,:;)\n", s[n])))
+            return true;
+    }
+    return false;
+}
+
+void ui_wrap(char *t, const lv_font_t *font, int32_t w)
+{
+    char *ls = t, *lb = NULL;   // the line's start, its last space that may break
+    for (char *p = t;; p++) {
+        bool end = *p == '\0', nl = *p == '\n';
+        bool sp = *p == ' ' && !(p > t && p[-1] >= '0' && p[-1] <= '9' && unit_next(p + 1));
+        if (!end && !nl && !sp)
+            continue;
+        char c = *p;
+        *p = '\0';
+        lv_point_t sz;
+        lv_text_get_size(&sz, ls, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        *p = c;
+        if (sz.x > w && lb) {
+            *lb = '\n';
+            ls = lb + 1;
+            lb = NULL;
+        }
+        if (end)
+            break;
+        if (nl) {
+            ls = p + 1;
+            lb = NULL;
+        } else {
+            lb = p;
+        }
+    }
+}
+
+void ui_plain(char *t)
+{
+    for (char *p = strstr(t, " ("); p; p = strstr(p, " (")) {
+        char *e = strchr(p, ')');
+        if (!e)
+            break;
+        bool drop = strncmp(p + 2, "count ", 6) == 0 || strncmp(p + 2, "slot ", 5) == 0;
+        for (char *q = p; !drop && q < e - 6; q++)
+            drop = strncmp(q, " count ", 7) == 0;
+        if (drop)
+            memmove(p, e + 1, strlen(e + 1) + 1);
+        else
+            p = e;
+    }
+}
+
+static void msg_set(const char *text, bool refusal)
+{
+    msg_ok = true;
+    msg_plain = false;
+    msg_net = false;
+    lv_strlcpy(msg_text, text, sizeof msg_text);
+    // Refusal reasons shared with the link start in lower case there; on
+    // the screen every message starts with a capital.
+    if (msg_text[0] >= 'a' && msg_text[0] <= 'z')
+        msg_text[0] = (char)(msg_text[0] - 'a' + 'A');
+    if (refusal)
+        colon_lower(msg_text);
+    ui_mb(msg_text);
+    phrase(msg_text);
+    // With a fault latched the message is brief: the fault text is the one to read.
+    msg_until = lv_tick_get() + (valve_fault_count() ? 2000 : 5000);
+    if (!msg_until)
+        msg_until = 1;
+    ui_wake();   // a message or a network set is read at full brightness
+}
+
+void ui_msg(const char *text)
+{
+    msg_set(text, true);
+}
+
+void ui_net_note_drop(void)
+{
+    if (msg_net)
+        msg_until = 0;
+    msg_net = false;
+}
+
+void ui_msg_no_ok(const char *text)
+{
+    ui_msg(text);
+    msg_ok = false;
+}
+
+/* A confirmation or a network set: the plain line
+ * for 5 s, no triangle and no OK; the dark line is for refusals and
+ * warnings (ISA-101). */
+void ui_note(const char *text)
+{
+    ui_note_icon(LV_SYMBOL_OK, text);
+}
+
+/* With its own icon: every confirmation has one, the tick unless given. */
+void ui_note_icon(const char *icon, const char *text)
+{
+    msg_set(text, false);
+    msg_ok = false;
+    msg_plain = true;
+    msg_icon = icon;
+}
+
+void ui_strip_set(ui_strip_kind_t kind, const char *icon, const char *text)
+{
+    line_kind = kind;
+    line_icon = icon;
+    lv_strlcpy(line_text, text, sizeof line_text);
+    ui_mb(line_text);
+    phrase(line_text);
+}
+
+void ui_strip_action(const char *text, const char *small, lv_event_cb_t cb)
+{
+    act_cb = text ? cb : NULL;
+    if (text)
+        ui_btn_text(strip_act, text, small);
+}
+
+static void strip_draw(ui_strip_kind_t kind, const char *icon, const char *text, bool ok, bool act)
+{
+    static const uint32_t bg[] = { 0xFFFFFF, 0xE0E0E0, 0xFFFFFF, 0x3F3F3F, 0x000000 };
+    // Under a popup: one fixed grey whatever the kind or what is behind it
+    // (opacity let the dim of a pick list or confirm tint it blue).
+    bool dim = overlay != NULL;
+    lv_color_t dis_bg = UI_DIS_BG, dis_tx = UI_DIS_TX;
+    if (dim && lv_obj_get_style_bg_opa(overlay, 0) < LV_OPA_COVER) {
+        // A pick list or confirm dims the page; the strip is above that
+        // layer, so it takes the same dim to match the greyed buttons under it.
+        lv_color_t sh = lv_obj_get_style_bg_color(overlay, 0);
+        lv_opa_t o = lv_obj_get_style_bg_opa(overlay, 0);
+        dis_bg = lv_color_mix(sh, dis_bg, o);
+        dis_tx = lv_color_mix(sh, dis_tx, o);
+    }
+    lv_color_t b = dim ? dis_bg : lv_color_hex(bg[kind]);   // as a greyed button
+    if (!lv_color_eq(lv_obj_get_style_bg_color(strip, 0), b))
+        lv_obj_set_style_bg_color(strip, b, 0);
+    int32_t bw = dim ? 0 : kind == UI_STRIP_FAULT || kind == UI_STRIP_CAUTION ? 3 : kind == UI_STRIP_PROMPT ? 1 : 0;
+    lv_color_t bc = kind == UI_STRIP_FAULT ? UI_FAULT : kind == UI_STRIP_CAUTION ? UI_YELLOW : UI_WARN;
+    // A line that opens something when tapped (a fault its detail, a warning
+    // Events) darkens while pressed.
+    bool tap = !dim && !msg_until && (kind == UI_STRIP_FAULT
+               || (kind == UI_STRIP_WARN && valve_warning() && cur != &ui_scr_faults));
+    lv_color_t pc = !tap ? b : kind == UI_STRIP_FAULT ? lv_color_hex(0x3A3A3A) : lv_color_hex(0x6A6A6A);
+    if (!lv_color_eq(lv_obj_get_style_bg_color(strip, LV_STATE_PRESSED), pc))
+        lv_obj_set_style_bg_color(strip, pc, LV_STATE_PRESSED);
+    if (lv_obj_get_style_border_width(strip, 0) != bw || !lv_color_eq(lv_obj_get_style_border_color(strip, 0), bc)) {
+        lv_obj_set_style_border_width(strip, bw, 0);
+        lv_obj_set_style_pad_all(strip, -bw, 0);    // children keep their place
+        lv_obj_set_style_border_color(strip, bc, 0);
+    }
+    // By content: a literal from a file built at -O0 (motor_screen.c) is
+    // not merged with this file's, so == on the pointers can miss.
+    bool is_mode = icon && strcmp(icon, UI_ICON_MODE) == 0;
+    // The status line's icon, grey as the text: the loop
+    // while AUTO regulates, a target once Stable, an arrow while the valve
+    // moves, the valve symbol when it is idle in MANUAL.
+    if (kind >= UI_STRIP_CAUTION)
+        icon = LV_SYMBOL_WARNING;
+    else if (is_mode) {
+        if (valve_auto() && valve_regulation() == CTRL_REG_STABLE)
+            icon = UI_ICON_TARGET;
+        else if (valve_auto())
+            icon = LV_SYMBOL_LOOP;
+        else if (stepper3_busy())
+            icon = stepper3_target() > stepper3_position() ? LV_SYMBOL_UP : LV_SYMBOL_DOWN;
+        else
+            icon = UI_ICON_VALVE;
+    }
+    int sh = shape_of(icon);
+    const char *glyph = icon && sh < 0 ? icon : LV_SYMBOL_WARNING;
+    lv_color_t ic = dim ? dis_tx : kind == UI_STRIP_FAULT ? UI_FAULT
+                  : kind >= UI_STRIP_WARN ? lv_color_white() : kind == UI_STRIP_CAUTION ? UI_TEXT : UI_MUTED;
+    show(strip_icon, icon && sh < 0);
+    show(strip_shape, sh >= 0);
+    if (sh >= 0 && (sh != (int)shape || !lv_color_eq(ic, shape_col))) {
+        shape = (shape_t)sh;
+        shape_col = ic;
+        lv_obj_set_user_data(strip_shape, (void *)(intptr_t)sh);
+        lv_obj_set_style_text_color(strip_shape, ic, 0);
+        lv_obj_invalidate(strip_shape);
+    }
+    ui_set_text(strip_icon, glyph);
+    ui_set_color(strip_icon, ic);
+    // The font's symbols sit 1 px above the text's middle; the triangle
+    // (beside two lines) and the drawn icons do not.
+    int32_t dy = strcmp(glyph, LV_SYMBOL_WARNING) != 0 ? 1 : 0;
+    static int32_t dy_set;
+    if (dy != dy_set) {
+        dy_set = dy;
+        lv_obj_align(strip_icon, LV_ALIGN_LEFT_MID, 12, dy);
+    }
+
+    ui_set_color(strip_text, dim ? dis_tx : kind >= UI_STRIP_WARN ? lv_color_white()
+                             : kind == UI_STRIP_PROMPT ? lv_color_black() : UI_TEXT);
+    bool spark = kind == UI_STRIP_INFO && is_mode && !dim && !ok && !act && strip_w >= 300;
+    int32_t x = icon ? 36 : 12;
+    // The text to 8 px from the sparkline (148 px on Home), 7 from a
+    // button, 8 from the edge.
+    int32_t w = (spark ? strip_w - SPARK_W - 12 - 4 : act || ok ? strip_w - STRIP_BTN_W - 7 - bw : strip_w - 4) - x - 4;
+    if (lv_obj_get_width(strip) != strip_w) {
+        lv_obj_set_width(strip, strip_w);
+        lv_obj_set_x(strip_spark, strip_w - SPARK_W - 12);
+    }
+    // OK and the action keep 4 px from the edge inside a border, the
+    // fault's red border included.
+    static int32_t geo_w = -1, geo_b = -1;
+    if (geo_w != strip_w || geo_b != bw) {
+        geo_w = strip_w;
+        geo_b = bw;
+        // One width for OK and every action, border or not (109 px); only
+        // the height gives way to a border.
+        lv_obj_set_pos(strip_ok, strip_w - STRIP_BTN_W - 4 - bw, 4 + bw);
+        lv_obj_set_size(strip_ok, STRIP_BTN_W, 40 - 2 * bw);
+        lv_obj_set_pos(strip_act, strip_w - STRIP_BTN_W - 4 - bw, 4 + bw);
+        lv_obj_set_size(strip_act, STRIP_BTN_W, 40 - 2 * bw);
+    }
+    // Reset fault white with red lettering on the fault's black, not the
+    // blue of the other actions.
+    static int act_fault = -1;
+    if (act_fault != (kind == UI_STRIP_FAULT)) {
+        act_fault = kind == UI_STRIP_FAULT;
+        if (act_fault) {
+            lv_obj_remove_style(strip_act, &st_act, 0);
+            lv_obj_remove_style(strip_act, &st_act_pr, LV_STATE_PRESSED);
+            lv_obj_set_style_text_color(strip_act, UI_FAULT, 0);
+        } else {
+            lv_obj_remove_local_style_prop(strip_act, LV_STYLE_TEXT_COLOR, 0);
+            lv_obj_add_style(strip_act, &st_act, 0);
+            lv_obj_add_style(strip_act, &st_act_pr, LV_STATE_PRESSED);
+        }
+    }
+    lv_obj_t *act_small = btn_small(strip_act);   // "2 faults" under Reset fault
+    if (act_small && act_fault)
+        ui_set_color(act_small, UI_FAULT);
+    else if (act_small)
+        lv_obj_remove_local_style_prop(act_small, LV_STYLE_TEXT_COLOR, 0);
+    show(strip_spark, spark);
+    static uint32_t seen = UINT32_MAX;
+    if (spark && trend_seconds() != seen) {   // a new sample: redraw it
+        seen = trend_seconds();
+        lv_obj_invalidate(strip_spark);
+    }
+    // Aligned only when it moves: aligning on every refresh would redraw
+    // the text twice a refresh for nothing.
+    static int32_t text_x = -1;
+    if (text_x != x || lv_obj_get_width(strip_text) != w) {
+        text_x = x;
+        lv_obj_set_width(strip_text, w);
+        lv_obj_align(strip_text, LV_ALIGN_LEFT_MID, x, 0);
+    }
+    char wr[128];
+    lv_strlcpy(wr, text, sizeof wr);
+    ui_wrap(wr, &ui_font_12, w);
+    ui_set_text(strip_text, wr);
+    // Under a popup the strip stays, updating, greyed and without its buttons.
+    show(strip_ok, ok && !overlay);
+    show(strip_act, act && !overlay);
+
+}
+
+static int32_t text_w(const char *t)
+{
+    lv_point_t sz;
+    lv_text_get_size(&sz, t, &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return sz.x;
+}
+
+// Centre the title on the screen; when the mode word leaves no room for
+// that, centre it in the gap between Back and Home (or the edge, on Home)
+// and the mode word, and cut it with dots only if it is wider than the gap.
+static void title_fit(lv_obj_t *l, const char *text, int32_t left, int32_t right)
+{
+    int32_t w = text_w(text);
+    int32_t x = 240 - w / 2;
+    if (w > right - left)
+        w = right - left;
+    if (x < left || x + w > right)
+        x = left + (right - left - w) / 2;
+    lv_obj_set_pos(l, x, 11);
+    lv_obj_set_width(l, w + 1);
+}
+
+
+static void frame_refresh(void)
+{
+    const char *tag, *text;
+    int nf = valve_fault_count();
+    valve_mode_t m = valve_mode();
+
+    // Header: the same places on every screen (common HMI template): Power
+    // on Home and Home elsewhere in the first slot, Back hidden on Home, the
+    // first slot greyed under a popup.
+    bool home = cur == &ui_scr_home;
+    show(pwr_btn, home);
+    show(home_btn, !home);
+    show(back_btn, !home || overlay);
+    static int slot_dim = -1;
+    int sd = (overlay != NULL) | (valve_auto() ? 2 : 0);   // the power icon greyed in AUTO too
+    if (slot_dim != sd) {
+        slot_dim = sd;
+        lv_obj_set_style_text_color(lv_obj_get_child(pwr_btn, 0), slot_dim ? UI_IDLE : lv_color_white(), 0);
+        lv_obj_set_style_text_color(lv_obj_get_child(home_btn, 0), (slot_dim & 1) ? UI_IDLE : lv_color_white(), 0);
+    }
+    // Home's title stays under a question, so the header is never blank;
+    // a keypad's heading is its own title.
+    show(name_lbl, home && !kp_open);
+    const char *ttl = kp_open ? kp_head : cur->title;
+    show(title_lbl, !home || kp_open);
+    const char *mode_txt = nf ? "FAULT" : valve_mode_name();
+    // The panel's colours by kind: 0 MANUAL and the rest, 1 AUTO, 2 FAULT.
+    int kind = nf ? 2 : m == VALVE_AUTO ? 1 : 0;
+    static int badge_kind = -1;
+    if (kind != badge_kind) {
+        badge_kind = kind;
+        lv_obj_set_style_bg_color(mode_lbl, kind == 2 ? UI_FAULT : kind == 1 ? UI_MODE_AUTO : UI_MODE_PANEL, 0);
+        ui_set_color(mode_lbl, kind == 1 ? UI_MODE_AUTO_TEXT : lv_color_white());
+    }
+    const int32_t mx = HDR_MODE_X;
+    // Left of the mode panel: the unsaved icon.
+    bool uns = cfg_unsaved() > 0;
+    int32_t ux = mx - 48;
+    show(unsaved_btn, uns);
+    if (uns) {
+        if (lv_obj_get_x(unsaved_btn) != ux)
+            lv_obj_set_x(unsaved_btn, ux);
+        static int uns_dim = -1;
+        if (uns_dim != (overlay != NULL)) {
+            uns_dim = overlay != NULL;
+            ui_set_color(lv_obj_get_child(unsaved_btn, 0), uns_dim ? UI_IDLE : UI_YELLOW);
+            lv_obj_set_style_border_color(unsaved_btn, uns_dim ? UI_IDLE : UI_YELLOW, 0);
+        }
+    }
+    int32_t right = uns ? ux - 8 : mx - 8;
+    static int32_t fit_right;
+    static const char *fit_mode;
+    static char fit_title[40];
+    // Home's title: always "Pressure controller".
+    static bool titled;
+    bool renamed = !titled;
+    if (!titled) {
+        titled = true;
+        ui_set_text(name_lbl, "Pressure controller");
+    }
+    ui_set_text(mode_lbl, mode_txt);
+    if (renamed || mode_txt != fit_mode || ((!home || kp_open) && strcmp(ttl, fit_title) != 0) || right != fit_right) {
+        fit_mode = mode_txt;
+        fit_right = right;
+        if (!home || kp_open) {
+            lv_strlcpy(fit_title, ttl, sizeof fit_title);
+            ui_set_text(title_lbl, ttl);
+            lv_obj_set_width(title_lbl, right - HDR_TITLE_X);
+        }
+        lv_obj_set_width(name_lbl, right - HDR_TITLE_X);
+    }
+    bool op = !valve_stop_latches();
+    if (op != lv_obj_has_state(stop_btn, LV_STATE_USER_2)) {
+        if (op) lv_obj_add_state(stop_btn, LV_STATE_USER_2);
+        else    lv_obj_remove_state(stop_btn, LV_STATE_USER_2);
+    }
+    question_check();
+
+    // The screen's own line and Home's action, then the frame's priorities.
+    act_cb = NULL;
+    if (cur->refresh)
+        cur->refresh();
+    if (msg_until && (int32_t)(lv_tick_get() - msg_until) >= 0)
+        msg_until = 0;
+    // A new fault takes the strip at once: it ends a message, and closes the
+    // keypad (which hides the strip); the entry is lost, the fault is seen.
+    static int nf_seen;
+    if (nf > nf_seen) {
+        msg_until = 0;
+        if (kp_open)
+            ui_overlay_close();
+        ui_wake();   // a new fault lights a dimmed screen
+    }
+    nf_seen = nf;
+    static bool warn_seen;   // a new warning on the strip does too
+    if (valve_warning() && !warn_seen)
+        ui_wake();
+    warn_seen = valve_warning() != NULL;
+    // The keypad uses the strip's row; an empty line (Home, idle) hides it.
+    bool quiet = !msg_until && !nf && !stepper3_override() && !line_text[0];
+    show(strip, !(overlay && (kp_open || overlay_full)) && !quiet);
+    char buf[96];
+    if (msg_until) {
+        if (msg_plain)
+            strip_draw(UI_STRIP_INFO, msg_icon, msg_text, false, false);
+        else
+            strip_draw(UI_STRIP_WARN, NULL, msg_text, msg_ok, false);
+    } else if (valve_fault_first(&tag, &text)) {
+        if (nf > 1)
+            lv_snprintf(buf, sizeof buf, "%s %s (+%d)", tag, text, nf - 1);
+        else
+            lv_snprintf(buf, sizeof buf, "%s %s", tag, text);
+        // Reset fault on every screen, not only where the status line is.
+        // "Reset faults" with more than one: it resets every one it can.
+        ui_strip_action(nf > 1 ? "Reset faults" : "Reset fault", NULL, ui_reset_fault_event);
+        strip_draw(UI_STRIP_FAULT, NULL, buf, false, true);
+    } else if (stepper3_override()) {
+        // While the Limit override button is held (or MOT OVERRIDE armed it):
+        // no Cancel, releasing the button ends it. A white line with the
+        // triangle, easier to read than the dark one.
+        char ov[64], st[24];
+        // "Past the switch" only with the switch pressed; Open needs the
+        // override only above 100 %.
+        if (stepper3_busy() && stepper3_target() > stepper3_position())
+            lv_snprintf(ov, sizeof ov, "%s. Opening above 100 %%", ui_steps(st, sizeof st, stepper3_position()));
+        else if (stepper3_busy())
+            lv_snprintf(ov, sizeof ov, "%s. %s", ui_steps(st, sizeof st, stepper3_position()),
+                        limit_open_now() ? "Closing past the switch" : "Closing, limit switch overridden");
+        else
+            lv_strlcpy(ov, valve_calibrated() && stepper3_position() >= valve_pos_max()
+                           ? "Limit override held: press Close or Open" : "Limit override held: press Close", sizeof ov);
+        strip_draw(UI_STRIP_INFO, LV_SYMBOL_WARNING, ov, false, false);
+    } else {
+        strip_draw(line_kind, line_icon, line_text, false, act_cb != NULL);
+    }
+}
+
+// Set when a popup closes: the fast timer redraws the frame within 0.1 s,
+// so the strip and header lose their grey at once, not at the next 0.5 s
+// refresh (Back from a pick list, for one).
+static bool frame_due;
+
+void ui_refresh_soon(void) { frame_due = true; }
+
+/* What the network set: a set
+ * taken from the text port or Modbus is a NET event "Text port: ..." or
+ * "Modbus <peer>: ..."; the newest new one shows as a message, "Network:
+ * setpoint 5.0 mbar", as a plain line for 5 s. */
+static void net_tick(void)
+{
+    static uint32_t seen;
+    static bool started;
+    uint32_t total = valve_event_total();
+    if (!started) {   // what was logged before the screens came up is not news
+        started = true;
+        seen = total;
+        return;
+    }
+    if (total == seen)
+        return;
+    uint32_t d = total - seen;
+    seen = total;
+    for (uint32_t i = 0; i < d && i < 16; i++) {
+        uint64_t age;
+        const char *tag, *text;
+        if (!valve_event_get((int)i, &age, &tag, &text))
+            break;
+        if (strcmp(tag, "NET") != 0 || (strncmp(text, "Text port: ", 11) != 0 && strncmp(text, "Modbus ", 7) != 0))
+            continue;
+        const char *what = strstr(text, ": ");
+        if (strstr(text, " refused")) continue;   // nothing changed
+        if (!what)
+            continue;
+        // A setpoint outside AUTO is kept but not used: Start AUTO takes
+        // the pressure then, so the note does not read as "in use".
+        char t[96];
+        lv_snprintf(t, sizeof t, "Network: %s%s", what + 2,
+                    strncmp(what + 2, "setpoint", 8) == 0 && !valve_auto() ? ", not in use in MANUAL" : "");
+        ui_plain(t);
+        ui_note(t);
+        msg_net = true;
+        return;   // the newest
+    }
+}
+
+// A new fault, warning, limit question or mode redraws the strip (and asks
+// the question) at the next 100 ms tick, not the 0.5 s refresh.
+static void valve_watch(void)
+{
+    static int nf = -1, mode = -1;
+    static bool lim;
+    static char w[80];
+    int32_t q;
+    bool l = valve_question(&q);
+    const char *v = valve_warning();
+    int f = valve_fault_count(), m = (int)valve_mode();
+    if (f != nf || m != mode || l != lim || strncmp(v ? v : "", w, sizeof w - 1)) {
+        nf = f;
+        mode = m;
+        lim = l;
+        lv_snprintf(w, sizeof w, "%s", v ? v : "");
+        frame_due = true;
+    }
+}
+
+static void fast_timer(lv_timer_t *t)
+{
+    (void)t;
+    clk_poll();
+    net_tick();
+    valve_watch();
+    // STOP for any finger: a tap on STOP that LVGL does not follow (another
+    // contact on the glass) stops the valve as the button does.
+    // Shutting down, the STOP on the black screen; off, none.
+    lv_obj_t *sb = off_stop ? off_stop : stop_btn;
+    lv_area_t sa;
+    lv_obj_get_coords(sb, &sa);
+    if (off_shown() && !off_stop)
+        touch_watch(-1, -1, -1, -1);
+    else
+        touch_watch(sa.x1, sa.y1, sa.x2, sa.y2);
+    if (touch_watch_take() && !lv_obj_has_state(sb, LV_STATE_PRESSED))
+        stop_do();
+    // A homing has ended: how long it took and, homed again, where the
+    // switch came on the last homing's scale.
+    uint32_t took;
+    int32_t found;
+    int homed = valve_homed_take(&took, &found);
+    if (homed) {
+        char t[96], v[16];
+        if (homed == 2)
+            lv_snprintf(t, sizeof t, "Homed in %lu s. Switch at %s %% of the last homing",
+                        (unsigned long)took, ui_fmt1(v, sizeof v, found));
+        else
+            lv_snprintf(t, sizeof t, "Homed in %lu s", (unsigned long)took);
+        ui_note(t);
+    }
+    if (frame_due && !overlay) {
+        frame_due = false;
+        frame_refresh();
+    }
+    if (cur->fast)
+        cur->fast();
+    if (kp_open)
+        kp_side();             // the keypad's present value follows the valve
+}
+
+/* Untouched: a keypad or question closes after
+ * 60 s, as Cancel (not the start-up and limit switch questions, which need
+ * an answer); a page goes back to Home after 10 min, except Trend (watched
+ * from across the room). */
+#define IDLE_POPUP_MS 60000u
+#define IDLE_PAGE_MS  600000u
+
+static void idle_check(void)
+{
+    if (off_shown())
+        return;
+    uint32_t idle = lv_display_get_inactive_time(NULL);
+    if (overlay && !overlay_q && idle >= IDLE_POPUP_MS) {
+        ui_overlay_close();
+        return;
+    }
+    if (!overlay && cur != &ui_scr_home && cur != &ui_scr_trend && idle >= IDLE_PAGE_MS && !stepper3_override())
+        ui_home();
+}
+
+// Seconds since power-up, past the 49.7 day wrap of lv_tick_get: from
+// valve_ms, which does not wrap. For the Up time card.
+uint32_t ui_uptime_s(void)
+{
+    return (uint32_t)(valve_ms() / 1000);
+}
+
+static void refresh_timer(lv_timer_t *t)
+{
+    (void)t;
+    (void)ui_uptime_s();
+    idle_check();
+    frame_refresh();
+}
+
+/* --------------------------------------------------------------------------
+ * Screens
+ * ------------------------------------------------------------------------ */
+static lv_obj_t *new_screen(void)
+{
+    lv_obj_t *s = lv_obj_create(NULL);
+    lv_obj_remove_style_all(s);
+    lv_obj_remove_flag(s, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_opa(s, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s, UI_BG, 0);
+    lv_obj_set_style_text_font(s, &ui_font_16, 0);
+    lv_obj_set_style_text_color(s, UI_TEXT, 0);
+    return s;
+}
+
+void ui_open(const ui_screen_t *s)
+{
+    if (cur == s)   // e.g. the strip's sparkline tapped on Trend
+        return;
+    if (cur != &ui_scr_home && cur != s && back_n < (int)(sizeof back_stack / sizeof back_stack[0]))
+        back_stack[back_n++] = cur;
+    open_screen(s);
+}
+
+static void open_screen(const ui_screen_t *s)
+{
+    ui_overlay_close();
+    lv_obj_t *old = cur_scr;
+    lv_obj_t *scr = new_screen();
+    cur = s;
+    cur_scr = scr;
+    strip_w = 343;
+    s->build(scr);
+    lv_screen_load(scr);
+    if (old != home_scr)
+        lv_obj_delete(old);
+    msg_until = 0;
+    frame_refresh();
+}
+
+void ui_home(void)
+{
+    if (cur != &ui_scr_home)
+        home_at = lv_tick_get();
+    back_n = 0;
+    ui_overlay_close();
+    lv_obj_t *old = cur_scr;
+    cur = &ui_scr_home;
+    cur_scr = home_scr;
+    strip_w = 343;
+    lv_screen_load(home_scr);
+    if (old != home_scr) {
+        lv_obj_delete(old);
+    }
+    frame_refresh();
+}
+
+// Motor, its Jog tab first.
+void ui_service(void)
+{
+    ui_open(&ui_scr_motor);
+}
+
+bool ui_showing(const ui_screen_t *s) { return cur == s; }
+const char *ui_screen_title(void) { return cur->title; }
+
+/* --------------------------------------------------------------------------
+ * Overlays: keypad and confirm, over 0,40 480x232 (STOP stays on top)
+ * ------------------------------------------------------------------------ */
+bool ui_overlay_open(void) { return overlay != NULL; }
+
+void ui_overlay_close(void)
+{
+    if (overlay) {
+        lv_obj_delete(overlay);
+        overlay = NULL;
+        frame_due = true;
+    }
+    overlay_q = 0;
+    overlay_ask = false;
+    overlay_tv = false;
+    overlay_full = false;
+    kp_open = false;
+}
+
+lv_obj_t *ui_overlay_full(void)
+{
+    lv_obj_t *o = overlay_new();
+    overlay_full = true;
+    frame_refresh();           // the strip goes now, not at the next refresh
+    return o;
+}
+
+static lv_obj_t *overlay_new(void)
+{
+    ui_overlay_close();
+    overlay = plain(cur_scr);
+    lv_obj_set_pos(overlay, 0, 40);
+    lv_obj_set_size(overlay, 480, 232);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);   // nothing under it is touched
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(overlay, UI_BG, 0);
+    return overlay;
+}
+
+// A popup over the page, dimmed: a tap on the page (outside the box)
+// closes it (dim_back).
+static lv_obj_t *overlay_dim(void)
+{
+    lv_obj_t *o = overlay_new();
+    lv_obj_set_style_bg_color(o, lv_color_make(40, 50, 60), 0);
+    lv_obj_set_style_bg_opa(o, 140, 0);
+    lv_obj_add_event_cb(o, dim_event, LV_EVENT_CLICKED, NULL);
+    return o;
+}
+
+// The popup's box: a touch on it (its text, its edge) stays in it and
+// does not reach the dimmed page round it.
+static lv_obj_t *popup_box(lv_obj_t *o, int32_t x, int32_t y, int32_t w, int32_t h)
+{
+    lv_obj_t *box = ui_card(o, x, y, w, h);
+    lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    return box;
+}
+
+/* Keypad: a popup over the dimmed page, not a full screen, with the
+ * present value small so it is not taken for the entry. The box is 343 x 216 on columns 1
+ * to 3 (STOP stays beside it): title, range and present value in small
+ * text on the left, the entry in a blue-edged field on the right, then the
+ * keys, Cancel and Set. The header keeps the keypad's title and Home. */
+static void dialog_btn(lv_obj_t *box, int32_t x, int32_t y, int32_t w, int32_t h, const char *text,
+                       lv_event_cb_t cb, void *user);
+static struct {
+    char entry[10];
+    ui_kp_t k;
+    lv_obj_t *value, *title, *info, *err, *live;
+} kp;
+
+static const char *fmt_dec(char *buf, size_t n, int64_t v, int dec)
+{
+    return fixed_fmt(buf, n, v, dec);
+}
+
+// The entry's height in its field: centred (the field is 48 high with a
+// 2 px edge).
+static void kp_value_place(void)
+{
+    const lv_font_t *f = lv_obj_get_style_text_font(kp.value, 0);
+    int32_t lh = lv_font_get_line_height(f);
+    lv_obj_set_y(kp.value, (44 - lh) / 2);
+}
+
+// The present value line: "Valve now 0.00 %" from "Valve, %", "Now 0.8 mB"
+// from "Now, mB".
+static void kp_side(void)
+{
+    char v[16], name[24], t[48];
+    if (!kp.live || !kp.k.live_milli)
+        return;
+    if (kp.k.live_dec == 1) ui_fmt1(v, sizeof v, kp.k.live_milli());
+    else                    ui_fmt2(v, sizeof v, kp.k.live_milli());
+    lv_strlcpy(name, kp.k.live_label, sizeof name);
+    char *comma = strstr(name, ", ");
+    const char *unit = comma ? comma + 2 : "";
+    if (comma) *comma = '\0';
+    if (strcmp(name, "Now") == 0)
+        lv_snprintf(t, sizeof t, "Now %s%s%s", v, *unit ? " " : "", unit);
+    else
+        lv_snprintf(t, sizeof t, "%s now %s%s%s", name, v, *unit ? " " : "", unit);
+    ui_set_text(kp.live, t);
+}
+
+// Labels stacked from the top in order and centred together on the
+// entry field's middle (y 32 in the box); NULL entries are skipped.
+static void kp_centre(lv_obj_t *const *l, int n)
+{
+    int32_t h[3], total = 0;
+    for (int i = 0; i < n; i++) {
+        h[i] = 0;
+        if (!l[i]) continue;
+        lv_obj_update_layout(l[i]);
+        h[i] = lv_obj_get_height(l[i]);
+        total += h[i];
+    }
+    int32_t y = 32 - total / 2;
+    for (int i = 0; i < n; i++)
+        if (l[i]) {
+            lv_obj_set_y(l[i], y);
+            y += h[i];
+        }
+}
+
+static bool kp_keep;   // the line shown is a hint, not a refusal: the next key keeps the entry
+
+static void kp_show_err(const char *why)
+{
+    show(kp.title, why == NULL);
+    if (kp.live)
+        show(kp.live, why == NULL);
+    if (kp.info)
+        show(kp.info, why == NULL);
+    show(kp.err, why != NULL);
+    if (why) {
+        // A shared reason starts in lower case; on the screen with a
+        // capital, as ui_msg ("Wait for the valve to stop").
+        char t[128];
+        lv_strlcpy(t, why, sizeof t);
+        if (t[0] >= 'a' && t[0] <= 'z')
+            t[0] = (char)(t[0] - 'a' + 'A');
+        ui_set_text(kp.err, t);
+        kp_centre(&kp.err, 1);
+    }
+}
+
+// The entry in 10^-dec units; false if empty or too large.
+static bool kp_parse(int64_t *v)
+{
+    const char *s = kp.entry;
+    int64_t whole = 0, frac = 0;
+    bool neg = *s == '-';
+    if (neg) s++;
+    if (!*s)
+        return false;
+    while (*s >= '0' && *s <= '9')
+        whole = whole * 10 + (*s++ - '0');
+    if (*s == '.') {
+        s++;
+        for (int i = 0; i < kp.k.dec; i++) {
+            frac *= 10;
+            if (*s >= '0' && *s <= '9')
+                frac += *s++ - '0';
+        }
+    }
+    int64_t scale = 1;
+    for (int i = 0; i < kp.k.dec; i++)
+        scale *= 10;
+    *v = (neg ? -1 : 1) * (whole * scale + frac);
+    return true;
+}
+
+static void kp_key(lv_event_t *e)
+{
+    const char *k = lv_event_get_user_data(e);
+    size_t n = strlen(kp.entry);
+    char *dot = strchr(kp.entry, '.');
+    // After a refusal a figure starts a new entry (so "5" refused, then
+    // "0", is 0, not 50); backspace still edits the one refused.
+    if (!lv_obj_has_flag(kp.err, LV_OBJ_FLAG_HIDDEN) && !kp_keep && strcmp(k, "<") != 0 && strcmp(k, "set") != 0) {
+        kp.entry[0] = '\0';
+        n = 0;
+        dot = NULL;
+    }
+    kp_keep = false;
+    kp_show_err(NULL);
+    if (strcmp(k, "<") == 0) {
+        if (n) kp.entry[n - 1] = '\0';
+    } else if (strcmp(k, "set") == 0) {
+        int64_t v;
+        const char *why = NULL;
+        if (!kp_parse(&v)) {
+            ui_overlay_close();
+            return;
+        }
+        if (v < kp.k.min || v > kp.k.max) {
+            char a[16], b[16], t[48];
+            lv_snprintf(t, sizeof t, "Out of range: %s to %s", fmt_dec(a, sizeof a, kp.k.min, kp.k.dec),
+                        fmt_dec(b, sizeof b, kp.k.max, kp.k.dec));
+            kp_show_err(t);
+            return;
+        }
+        if (!kp.k.on_set((int32_t)v, &why)) {
+            kp_show_err(why ? why : "Refused");
+            return;
+        }
+        // on_set may have opened the next overlay (a pick list): leave it.
+        if (kp_open)
+            ui_overlay_close();
+        frame_refresh();
+        return;
+    } else if (n < sizeof kp.entry - 1) {
+        if (*k == '.') {
+            // The greyed dot of a whole-number keypad says so (8 . 5 is
+            // not 85); the entry stays.
+            if (kp.k.dec == 0) {
+                kp_show_err("Whole numbers only");
+                kp_keep = true;
+                return;
+            }
+            if (dot) return;
+            if (!n) { strcpy(kp.entry, "0"); n = 1; }
+        } else if (dot && (int)strlen(dot) > kp.k.dec) {
+            return;                           // no more decimals
+        } else if (n == 1 && kp.entry[0] == '0') {
+            n = 0;                            // no leading zero
+        }
+        kp.entry[n] = *k;
+        kp.entry[n + 1] = '\0';
+    }
+    // 26 px while the entry fits the field, then 16 px (serial numbers of
+    // 8 figures).
+    lv_point_t sz;
+    lv_text_get_size(&sz, kp.entry, &ui_num_26, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_style_text_font(kp.value, sz.x <= 125 ? &ui_num_26 : &ui_num_16, 0);
+    kp_value_place();
+    ui_set_text(kp.value, kp.entry);
+}
+
+static void kp_cancel(lv_event_t *e)
+{
+    (void)e;
+    ui_back();   // as the header's Back: the entry is dropped
+}
+
+void ui_keypad_ex(const ui_kp_t *k)
+{
+    lv_obj_t *o = overlay_dim();
+    memset(&kp, 0, sizeof kp);
+    kp.k = *k;
+    kp_open = true;
+    lv_strlcpy(kp_head, k->title ? k->title : "", sizeof kp_head);
+    char *comma = strstr(kp_head, ", ");
+    if (comma)
+        *comma = '\0';
+
+    // The page stays in view, dimmed, as under a question; a tap on it
+    // closes the keypad, as Cancel.
+    lv_obj_t *box = popup_box(o, 10, 6, 343, 220);
+    lv_obj_set_style_radius(box, 8, 0);
+
+    // Left: the title (16 px, 12 px if it is too long), then the present
+    // value and any info line, small; the lines centred together on the
+    // entry field's middle.
+    lv_point_t sz;
+    lv_text_get_size(&sz, k->title ? k->title : "", &ui_font_16, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    bool long_title = sz.x > 174;
+    kp.title = ui_label(box, 12, 0, 174, long_title ? &ui_font_12 : &ui_font_16, UI_TEXT,
+                        LV_TEXT_ALIGN_LEFT, k->title);
+    // Under the title the present value, then the info line, on every
+    // keypad.
+    if (k->live_label) {
+        kp.live = ui_label(box, 12, 0, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "");
+        kp_side();
+    } else if (k->side_text[0]) {
+        char t[64];
+        if (k->side_text[1])
+            lv_snprintf(t, sizeof t, "%s %s   %s %s", k->side_label[0], k->side_text[0], k->side_label[1], k->side_text[1]);
+        else
+            lv_snprintf(t, sizeof t, "%s %s", k->side_label[0], k->side_text[0]);
+        kp.live = ui_label(box, 12, 0, 174, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, t);
+    }
+    if (k->info && k->info[0])
+        kp.info = ui_label(box, 12, 0, 174, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, k->info);
+    lv_obj_t *lines[3] = { kp.title, kp.live, kp.info };
+    kp_centre(lines, 3);
+    // A refusal takes the place of the title and the lines under it.
+    kp.err = ui_label(box, 12, 6, 174, &ui_font_12, UI_FAULT, LV_TEXT_ALIGN_LEFT, "");
+    lv_label_set_long_mode(kp.err, LV_LABEL_LONG_WRAP);
+    lv_obj_add_flag(kp.err, LV_OBJ_FLAG_HIDDEN);
+
+    // Right: the entry, in a field with a blue edge, over the last two columns.
+    lv_obj_t *field = plain(box);
+    lv_obj_set_pos(field, 194, 8);
+    lv_obj_set_size(field, 141, 48);
+    lv_obj_set_style_radius(field, 4, 0);
+    lv_obj_set_style_border_width(field, 2, 0);
+    lv_obj_set_style_border_color(field, UI_BLUE, 0);
+    // No range shown: an entry out of range says so on Set.
+    kp.value = ui_label(field, 6, 9, 125, &ui_num_26, UI_TEXT, LV_TEXT_ALIGN_RIGHT, "");
+    kp_value_place();
+
+    // Keys: three rows of 44 and four columns of 56 with 8 between, then
+    // Cancel over Set in a column of 71.
+    static const char *const keys[3][4] = { { "7", "8", "9", "<" }, { "4", "5", "6", "0" }, { "1", "2", "3", "." } };
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 4; c++) {
+            const char *key = keys[r][c];
+            bool bs = *key == '<';
+            dialog_btn(box, 8 + c * 64, 64 + r * 52, 56, 44, bs ? LV_SYMBOL_BACKSPACE : key, kp_key, (void *)key);
+            lv_obj_t *b = lv_obj_get_child(box, -1);
+            if (bs)
+                lv_obj_set_style_text_font(lv_obj_get_child(b, 0), &lv_font_montserrat_14, 0);
+            if (*key == '.' && k->dec == 0)
+                ui_btn_enable(b, false);
+        }
+    dialog_btn(box, 264, 64, 71, 44, "Cancel", kp_cancel, NULL);
+    ui_btn(box, 264, 116, 71, 96, UI_PRIMARY, "Set", kp_key, (void *)"set");
+    frame_refresh();
+}
+
+static ui_keypad_set_t kp_v100_set;
+static bool kp_v100(int32_t v, const char **why) { return kp_v100_set(v, why); }
+
+void ui_keypad(const char *title, const char *info, int32_t min100, int32_t max100,
+               const char *side_label, int32_t (*side_milli)(void), ui_keypad_set_t on_set)
+{
+    kp_v100_set = on_set;
+    ui_kp_t k = { .title = title, .info = info, .dec = 2, .min = min100, .max = max100,
+                  .live_label = side_label, .live_milli = side_milli, .live_dec = 2, .on_set = kp_v100 };
+    ui_keypad_ex(&k);
+}
+
+// Pick list: a caption and up to six rows, the selected one dark. A tap
+// outside the list closes it (on the caption it does not).
+static void (*pick_cb)(int);
+
+static void pick_event(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    void (*f)(int) = pick_cb;
+    ui_overlay_close();
+    if (i >= 0 && f)
+        f(i);
+    frame_refresh();
+}
+
+void ui_pick(const char *title, const char *const *items, int n, int sel, void (*on_pick)(int i))
+{
+    lv_obj_t *o = overlay_dim();
+    pick_cb = on_pick;
+    if (n > 6)
+        n = 6;
+    // Rows 40 px, as other touch targets. Above
+    // the strip that leaves three rows: four items (sensor names are long)
+    // stay in one column at 37 px, five or six go in two columns.
+    int cols = n > 4 ? 2 : 1, rows = (n + cols - 1) / cols;
+    const int32_t PICK_ROW = rows > 3 ? 37 : 40;
+    int32_t iw = 343 / cols;
+    lv_obj_t *box = popup_box(o, 10, 4, 343, 24 + PICK_ROW * rows);
+    lv_obj_set_style_clip_corner(box, true, 0);
+    ui_label(box, 12, 4, 320, &ui_font_12, UI_MUTED, LV_TEXT_ALIGN_LEFT, title);
+    for (int i = 0; i < n; i++) {
+        lv_obj_t *it = plain(box);
+        lv_obj_set_pos(it, (i / rows) * iw, 24 + PICK_ROW * (i % rows));
+        lv_obj_set_size(it, i / rows ? 343 - iw : iw, PICK_ROW);
+        lv_obj_add_flag(it, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_bg_opa(it, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(it, i == sel ? lv_color_hex(0x3E4C59) : UI_CARD, 0);
+        lv_obj_set_style_bg_color(it, UI_TRACK, LV_STATE_PRESSED);
+        lv_obj_set_style_border_side(it, i / rows ? LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT : LV_BORDER_SIDE_TOP, 0);
+        lv_obj_set_style_border_width(it, 1, 0);
+        lv_obj_set_style_border_color(it, UI_BG, 0);
+        lv_obj_t *l = ui_label(it, 12, (PICK_ROW - 18) / 2, iw - 23, &ui_font_16, i == sel ? UI_CARD : UI_TEXT, LV_TEXT_ALIGN_LEFT, items[i]);
+        (void)l;
+        lv_obj_add_event_cb(it, pick_event, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+    }
+    frame_refresh();
+}
+
+// Confirm and question dialogs.
+static void (*confirm_ok)(void), (*confirm_cancel)(void), (*confirm_mid)(void), (*confirm_mid2)(void);
+
+static void confirm_event(lv_event_t *e)
+{
+    intptr_t k = (intptr_t)lv_event_get_user_data(e);   // 0 cancel, 1 OK, 2 middle, 3 second middle
+    void (*f)(void) = k == 1 ? confirm_ok : k == 2 ? confirm_mid : k == 3 ? confirm_mid2 : confirm_cancel;
+    ui_overlay_close();
+    if (f)
+        f();
+    frame_refresh();
+}
+
+void ui_ask(const char *text, const char *cancel, void (*on_cancel)(void), const char *ok, void (*on_ok)(void))
+{
+    ui_ask3(text, cancel, on_cancel, NULL, NULL, ok, on_ok);
+}
+
+void ui_ask3(const char *text, const char *cancel, void (*on_cancel)(void), const char *mid,
+             void (*on_mid)(void), const char *ok, void (*on_ok)(void))
+{
+    ui_ask4(text, cancel, on_cancel, mid, on_mid, NULL, NULL, ok, on_ok);
+}
+
+// A dialog's other buttons: filled with the page grey, so they read as
+// buttons on the white box (white on white is easy to miss).
+static void dialog_btn(lv_obj_t *box, int32_t x, int32_t y, int32_t w, int32_t h, const char *text,
+                       lv_event_cb_t cb, void *user)
+{
+    lv_obj_t *b = ui_btn(box, x, y, w, h, UI_SECONDARY, text, cb, user);
+    lv_obj_set_style_bg_color(b, UI_BG, 0);
+}
+
+void ui_ask4(const char *text, const char *cancel, void (*on_cancel)(void), const char *mid,
+             void (*on_mid)(void), const char *mid2, void (*on_mid2)(void), const char *ok, void (*on_ok)(void))
+{
+    lv_obj_t *o = overlay_dim();   // a tap round it closes it as Back, not as the left button
+    confirm_ok = on_ok;
+    confirm_cancel = on_cancel;
+    confirm_mid = on_mid;
+    confirm_mid2 = on_mid2;
+    // 16 px round the text and the buttons on every side and 8 between
+    // the buttons. Four buttons of 91 in 420 px; three of 130 in 438 (room
+    // for "Use 34.00 %"); two of 150 in 340.
+    int32_t bw = mid2 ? 420 : mid ? 438 : 340;
+    lv_obj_t *box = popup_box(o, (480 - bw) / 2, 0, bw, 100);
+    lv_obj_set_style_radius(box, 8, 0);
+    char wr[240];
+    lv_strlcpy(wr, text, sizeof wr);
+    ui_wrap(wr, &ui_font_16, bw - 32);
+    lv_obj_t *t = ui_label(box, 16, 16, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, wr);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
+    lv_obj_update_layout(t);
+    int32_t th = lv_obj_get_height(t);
+    if (th > 84) th = 84;
+    int32_t by = 16 + th + 10, h = by + 48 + 16;
+    lv_obj_set_height(t, th);
+    lv_obj_set_size(box, bw, h);
+    lv_obj_set_y(box, h < 168 ? (168 - h) / 2 : 0);
+    overlay_ask = true;
+    ask_at = lv_tick_get();
+    if (mid2) {
+        dialog_btn(box, 16, by, 91, 48, cancel, confirm_event, NULL);
+        dialog_btn(box, 115, by, 91, 48, mid, confirm_event, (void *)2);
+        dialog_btn(box, 214, by, 91, 48, mid2, confirm_event, (void *)3);
+        ui_btn(box, 313, by, 91, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
+    } else if (mid) {
+        dialog_btn(box, 16, by, 130, 48, cancel, confirm_event, NULL);
+        dialog_btn(box, 154, by, 130, 48, mid, confirm_event, (void *)2);
+        ui_btn(box, 292, by, 130, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
+    } else {
+        dialog_btn(box, 16, by, 150, 48, cancel, confirm_event, NULL);
+        ui_btn(box, 174, by, 150, 48, UI_PRIMARY, ok, confirm_event, (void *)1);
+    }
+    frame_refresh();
+}
+
+void ui_confirm(const char *text, const char *ok, void (*on_ok)(void))
+{
+    ui_ask(text, "Cancel", NULL, ok, on_ok);
+}
+
+/* The Power options question: a checkbox "Close the valve to 0 %", ticked
+ * each time it opens; untick it and the valve stays where it is. Not homed
+ * there is no 0 % to go to: no checkbox, and the question says the valve
+ * is not moved. */
+static bool shut_close = true;
+static lv_obj_t *shut_box;   // the checkbox's square
+
+static void shut_go(void)
+{
+    const char *why;
+    if (!valve_shutdown(shut_close, &why))
+        ui_msg(why);
+}
+
+static void shut_box_show(void)
+{
+    lv_obj_set_style_bg_color(shut_box, shut_close ? UI_BLUE : UI_CARD, 0);
+    lv_obj_set_style_border_color(shut_box, shut_close ? UI_BLUE : UI_MUTED, 0);
+    lv_obj_t *m = lv_obj_get_child(shut_box, 0);
+    if (shut_close) lv_obj_remove_flag(m, LV_OBJ_FLAG_HIDDEN);
+    else            lv_obj_add_flag(m, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void shut_check_event(lv_event_t *e)
+{
+    (void)e;
+    shut_close = !shut_close;
+    shut_box_show();
+}
+
+static void shut_ask(void)
+{
+    // Not homed: the same box, the tick row a line.
+    bool nh = !valve_calibrated();
+    // Homing: the row says why Shut down is grey.
+    bool homing = valve_mode() == VALVE_CALIBRATING;
+    // Set as %, Set as closed or the saved position: 0 % is where
+    // that put it, not the closed valve.
+    bool unv = valve_reference() == VALVE_REF_HAND || valve_reference() == VALVE_REF_SAVED;
+    shut_close = !nh;
+    lv_obj_t *o = overlay_dim();
+    overlay_ask = true;
+    ask_at = lv_tick_get();
+    confirm_ok = shut_go;
+    confirm_mid = ui_restart_now;   // Restart acts at once: no second question
+    confirm_cancel = confirm_mid2 = NULL;
+    const int32_t bw = 438, h = 16 + 22 + 6 + 44 + 8 + 48 + 16;   // as a three-button question
+    lv_obj_t *box = popup_box(o, (480 - bw) / 2, (168 - h) / 2, bw, h);
+    lv_obj_set_style_radius(box, 8, 0);
+    ui_label(box, 16, 16, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Power options");
+    // The whole row is the checkbox (a 44 px touch target).
+    lv_obj_t *row = plain(box);
+    lv_obj_set_pos(row, 8, 44);
+    lv_obj_set_size(row, bw - 16, 44);
+    if (nh || homing) {
+        ui_label(row, 8, 12, bw - 32, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT,
+                 homing ? "Homing in progress: STOP to cancel." : "Valve not homed: it remains in position.");
+        shut_box = NULL;
+    } else {
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_radius(row, 6, 0);
+    lv_obj_set_style_bg_color(row, UI_TRACK, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(row, shut_check_event, LV_EVENT_CLICKED, NULL);
+    shut_box = plain(row);
+    lv_obj_remove_flag(shut_box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_pos(shut_box, 8, 9);
+    lv_obj_set_size(shut_box, 26, 26);
+    lv_obj_set_style_radius(shut_box, 4, 0);
+    lv_obj_set_style_bg_opa(shut_box, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(shut_box, 2, 0);
+    lv_obj_t *m = lv_label_create(shut_box);
+    lv_label_set_text(m, LV_SYMBOL_OK);
+    lv_obj_set_style_text_color(m, lv_color_white(), 0);
+    lv_obj_set_style_text_font(m, &ui_font_16, 0);
+    lv_obj_center(m);
+    ui_label(row, 46, unv ? 3 : 12, bw - 70, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Close the valve on shut down");
+    if (unv)
+        ui_label(row, 46, 24, bw - 70, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, "Position unverified: 0 % may not be closed.");
+    shut_box_show();
+    }
+    int32_t by = 44 + 44 + 8;
+    dialog_btn(box, 16, by, 130, 48, "Cancel", confirm_event, NULL);
+    dialog_btn(box, 154, by, 130, 48, "Restart", confirm_event, (void *)2);
+    lv_obj_t *sd = ui_btn(box, 292, by, 130, 48, UI_PRIMARY, "Shut down", confirm_event, (void *)1);
+    if (homing)
+        ui_btn_enable(sd, false);
+    frame_refresh();
+}
+
+void ui_shutdown_ask(void)
+{
+    if (valve_auto()) {   // as the power icon
+        ui_msg("Stop AUTO first");
+        return;
+    }
+    shut_ask();
+}
+
+// Text page over the screen (Help). Header Back closes it, or a tap on the
+// greyed strip. No dragging (a
+// drag redraws the card every frame): small Up and Down
+// buttons on the right jump a page less one line, without animation.
+// On the grid: text card 343 x 160 over the page,
+// Up and Down 109 x 76 in the right column; the strip shows greyed.
+#define TV_W 343
+#define TV_H 160
+#define TV_BX 361
+#define TV_BW 109
+#define TV_STEP (TV_H - 38)   // a page less one line
+static lv_obj_t *tv_card, *tv_btn[2];
+
+static void tv_buttons(void)
+{
+    for (int i = 0; i < 2; i++) {
+        bool room = i ? lv_obj_get_scroll_bottom(tv_card) > 0 : lv_obj_get_scroll_top(tv_card) > 0;
+        ui_btn_enable(tv_btn[i], room);
+    }
+}
+
+static void tv_page(lv_event_t *e)
+{
+    if (ui_btn_disabled(e))
+        return;
+    int32_t dir = lv_event_get_user_data(e) ? 1 : -1;
+    int32_t room = dir > 0 ? lv_obj_get_scroll_bottom(tv_card) : lv_obj_get_scroll_top(tv_card);
+    int32_t d = room < TV_STEP ? room : TV_STEP;
+    if (d > 0)
+        lv_obj_scroll_by(tv_card, 0, -dir * d, LV_ANIM_OFF);
+    tv_buttons();
+}
+
+void ui_text_view(const char *title, const char *text)
+{
+    lv_obj_t *o = overlay_new();
+    // Not clickable, so a touch on the text does nothing; it still scrolls
+    // from the buttons and shows where it is with the scroll bar.
+    lv_obj_t *c = ui_card(o, 10, 8, TV_W, TV_H);
+    tv_card = c;
+    lv_obj_add_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                          LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_set_scroll_dir(c, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(c, LV_SCROLLBAR_MODE_ON);
+    lv_obj_set_style_width(c, 6, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(c, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(c, UI_IDLE, LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_right(c, 12, LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_ver(c, 12, LV_PART_SCROLLBAR);
+    lv_obj_set_style_pad_all(c, 12, 0);
+    lv_obj_set_style_pad_right(c, 24, 0);
+    lv_obj_t *t = ui_label(c, 0, 0, 0, &ui_font_16, UI_TEXT, LV_TEXT_ALIGN_LEFT, title);
+    t = ui_label(c, 0, 26, TV_W - 36, &ui_font_12, UI_TEXT, LV_TEXT_ALIGN_LEFT, text);
+    lv_label_set_long_mode(t, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_line_space(t, 3, 0);
+    // On press (not release); held, it repeats every 0.1 s after 0.4 s.
+    // Greyed at the top and the bottom.
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *b = ui_btn(o, TV_BX, i ? 92 : 8, TV_BW, 76, UI_SECONDARY, "", NULL, NULL);
+        ui_btn_arrow(b, !i);
+        lv_obj_add_event_cb(b, tv_page, LV_EVENT_PRESSED, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(b, tv_page, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)i);
+        tv_btn[i] = b;
+    }
+    lv_obj_update_layout(c);
+    tv_buttons();
+    overlay_tv = true;
+    frame_refresh();
+}
+
+// The limit switch pressed during a move: asks on every screen until answered.
+static void q_answer(bool zero)
+{
+    const char *why;
+    if (!valve_answer(zero, &why))
+        ui_msg(why);
+    else if (zero)
+        ui_note("Closed position set.");
+}
+static void q_zero(void) { q_answer(true); }
+static void q_skip(void) { q_answer(false); }
+
+// A saved valve position at start-up: offered, never taken without asking.
+static void sp_use(void)
+{
+    const char *why;
+    if (!valvepos_use(&why))
+        ui_msg(why);
+}
+// Home valve on the start-up question homes at once: that question is the
+// confirmation.
+static void sp_calibrate(void)
+{
+    valvepos_decline();
+    ui_home_valve();
+}
+
+static void question_check(void)
+{
+    if (off_shown())
+        return;   // OFF, shutting down or turning on: asked once Home is back
+    int32_t q;
+    bool lim = valve_question(&q);
+    bool saved = !lim && valvepos_offer(&q);
+    int want = lim ? 1 : saved ? 2 : 0;
+    // The press ended AUTO: known a pass after the question (far_check), so
+    // the question is asked again with it.
+    static bool q_auto;
+    if (overlay_q && (overlay_q != want || (want == 1 && q_auto != valve_question_auto()))) {
+        ui_overlay_close();
+    }
+    static bool asking;
+    // A keypad or confirm the operator opened stays; the question waits.
+    if (!want || overlay_q || asking || (want == 2 && overlay))
+        return;
+    static char t[240], ok[32];
+    char v[16];
+    asking = true;
+    ui_wake();   // the limit switch question or the saved position offer
+    if (want == 1) {
+        // What each answer does ("closed", not "seat": the switch is not
+        // necessarily at the seat).
+        q_auto = valve_question_auto();
+        lv_snprintf(t, sizeof t, "%s at %s %%.\nSkip: keep the current position.\n"
+                    "Set as closed: this becomes 0 %%.", q_auto ? "AUTO stopped: limit switch pressed" : "Limit switch pressed",
+                    ui_fmt2(v, sizeof v, valve_question_milli()));
+        ui_ask(t, "Skip", q_skip, "Set as closed", q_zero);
+    } else {
+        int32_t pm = valve_pos_max();
+        ui_fmt2(v, sizeof v, ((int64_t)q * 100000 + (q >= 0 ? pm / 2 : -pm / 2)) / pm);
+        // Switched off without Shut down: said first.
+        // In AUTO then: the setpoint.
+        char hb[48], sv[16];
+        int32_t sp;
+        // After Restart the position is not unknown: it is the one offered.
+        const char *head = valvepos_offer_unparked() ? "Power lost without shut down." : "Restarted.";
+        if (valvepos_offer_auto(&sp)) {
+            lv_snprintf(hb, sizeof hb, "Power lost in AUTO at %s mB.", ui_fmt1(sv, sizeof sv, sp));
+            head = hb;
+        }
+        int32_t off;
+        if (valvepos_offer_moving(&off)) {
+            // Saved during a move: up to 2 s of travel short (valvepos.c).
+            char e[16];
+            int64_t m = ((int64_t)off * 100000 + pm - 1) / pm;   // 0.001 %, rounded up to 0.1
+            ui_fmt1(e, sizeof e, (m + 99) / 100 * 100);
+            lv_snprintf(t, sizeof t, "%s\nValve was moving: last saved position %s %%, within \xC2\xB1%s %%.", head, v, e);
+        } else {
+            lv_snprintf(t, sizeof t, "%s\nLast saved position %s %%.", head, v);
+        }
+        // Home valve starts at once: what it does, and for how long.
+        size_t tl = strlen(t);
+        lv_snprintf(t + tl, sizeof t - tl, "\nHome valve closes the valve, up to %d min.", ui_home_minutes());
+        // Home valve, Set as % (the keypad), or the saved position, the
+        // filled one.
+        lv_snprintf(ok, sizeof ok, "Use %s %%", v);
+        ui_ask3(t, "Home valve", sp_calibrate, "Set as %", ui_set_position_ask, ok, sp_use);
+    }
+    asking = false;
+    overlay_q = want;
+}
+
+/* --------------------------------------------------------------------------
+ * Start-up, Shut down and OFF
+ * ------------------------------------------------------------------------ */
+/* Every start is OFF: from the first frame the OFF screen, black with a
+ * grey power symbol and "Double tap to turn on" (ui_splash draws it until
+ * ui_init puts the real one up). Turning on shows the logo on white
+ * (ui_img_logo.c from tools/images/, 270 x 136) with the rounded bar, which
+ * stutters on purpose, then Home. */
+#define SPL_BAR_X 130
+#define SPL_BAR_W 220
+#define OFF_TAP_MS 600
+// Light enough to see on black, still grey.
+#define OFF_GREY   lv_color_hex(0xA9B4C0)
+#define OFF_TEXT   lv_color_hex(0xD3D9E0)
+
+static lv_obj_t *splash_scr;
+
+// The start-up bar at y: a track with a thin blue-grey edge and a fill
+// from light to deep blue. Returns the fill.
+static lv_obj_t *bar_new(lv_obj_t *s, int32_t y, lv_color_t track)
+{
+    lv_obj_t *t = plain(s);
+    lv_obj_set_pos(t, SPL_BAR_X, y);
+    lv_obj_set_size(t, SPL_BAR_W, 14);
+    lv_obj_set_style_bg_opa(t, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(t, track, 0);
+    lv_obj_set_style_border_width(t, 1, 0);
+    lv_obj_set_style_border_color(t, lv_color_hex(0x8C9CB8), 0);
+    lv_obj_set_style_radius(t, LV_RADIUS_CIRCLE, 0);
+    lv_obj_t *f = plain(t);
+    lv_obj_set_pos(f, 0, 0);   // children start inside the edge
+    lv_obj_set_height(f, 12);
+    lv_obj_set_style_bg_opa(f, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(f, lv_color_hex(0x8FD8FF), 0);
+    lv_obj_set_style_bg_grad_color(f, lv_color_hex(0x0B5BC4), 0);
+    lv_obj_set_style_bg_grad_dir(f, LV_GRAD_DIR_HOR, 0);
+    lv_obj_set_style_radius(f, LV_RADIUS_CIRCLE, 0);
+    return f;
+}
+
+static void bar_set(lv_obj_t *f, int pct)
+{
+    int32_t w = (SPL_BAR_W - 2) * pct / 100;   // inside the 1 px edge
+    lv_obj_set_width(f, w < 12 ? 12 : w);
+    lv_obj_set_style_opa(f, pct > 0 ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+}
+
+const char *ui_fw_text(void)
+{
+    // "0.18.0, built 18/11/26" from the compiler's "Nov 18 2026" (DD/MM/YY).
+    static char t[32];
+    static const char months[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char *d = __DATE__;
+    int mon = 0;
+    for (int i = 0; i < 12; i++)
+        if (strncmp(d, months + 3 * i, 3) == 0)
+            mon = i + 1;
+    lv_snprintf(t, sizeof t, "%s, built %02d/%02d/%.2s", IPC_FW_VERSION, atoi(d + 4), mon, d + 9);
+    return t;
+}
+
+// The power symbol, drawn: an arc open at the top, a bar through the gap.
+static void power_icon(lv_obj_t *s, int32_t cx, int32_t cy, int32_t d, lv_color_t c)
+{
+    lv_obj_t *a = lv_arc_create(s);
+    lv_obj_remove_flag(a, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(a, d, d);
+    lv_obj_set_pos(a, cx - d / 2, cy - d / 2);
+    lv_arc_set_bg_angles(a, 305, 235);
+    lv_arc_set_angles(a, 0, 0);
+    lv_obj_set_style_arc_width(a, 6, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(a, c, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(a, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(a, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(a, 0, LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(a, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(a, 0, 0);
+    lv_obj_t *l = plain(s);
+    lv_obj_set_size(l, 6, d / 2 + 4);
+    lv_obj_set_pos(l, cx - 3, cy - d / 2 - 6);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(l, c, 0);
+    lv_obj_set_style_radius(l, 3, 0);
+}
+
+// The OFF look on s: black, the power symbol, the double tap line.
+static void off_draw(lv_obj_t *s)
+{
+    lv_obj_set_style_bg_color(s, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s, LV_OPA_COVER, 0);
+    power_icon(s, 240, 112, 64, OFF_GREY);
+    ui_label(s, 0, 176, 480, &ui_font_16, OFF_TEXT, LV_TEXT_ALIGN_CENTER, "Double tap to turn on");
+}
+
+void ui_splash(void)
+{
+    lv_obj_t *s = splash_scr = lv_screen_active();
+    lv_obj_remove_flag(s, LV_OBJ_FLAG_SCROLLABLE);
+    off_draw(s);
+    lv_refr_now(NULL);
+}
+
+/* Shut down and OFF: the screen looks shut down and is the power button.
+ * Shutting down: the whole screen black,
+ * "Closing valve", the bar filling as the valve goes to 0 %, the seconds
+ * left, STOP where it always is (cancels: MANUAL). OFF: as at start-up;
+ * two taps anywhere within OFF_TAP_MS turn it on (double tap), the
+ * logo and the stuttering bar, then Home. On lv_layer_sys, over the frame
+ * and any popup; follows valve_mode(). The backlight stays on (no dimming
+ * yet). */
+static lv_obj_t *off_scr, *off_fill, *off_txt;
+static lv_timer_t *on_tmr;    // turning on: the bar, every 30 ms
+static int off_kind;          // 0 none, 1 shutting down, 2 off, 3 turning on
+static int on_pct, on_hold;   // turning on: the bar, ticks left to pause
+static uint32_t on_seed;
+static uint32_t off_tap_ms;   // OFF: the first tap, 0 none
+static bool off_shown(void) { return off_kind != 0; }
+
+static void off_close(void)
+{
+    if (on_tmr) {
+        lv_timer_delete(on_tmr);
+        on_tmr = NULL;
+    }
+    if (off_scr)
+        lv_obj_delete(off_scr);
+    off_scr = off_fill = off_txt = off_stop = NULL;
+    off_kind = 0;
+    off_tap_ms = 0;
+    frame_due = true;
+}
+
+static lv_obj_t *off_layer(lv_color_t bg, int kind)
+{
+    if (off_scr)
+        lv_obj_delete(off_scr);
+    off_fill = off_txt = off_stop = NULL;
+    off_kind = kind;
+    lv_obj_t *o = plain(lv_layer_sys());
+    lv_obj_set_pos(o, 0, 0);
+    lv_obj_set_size(o, 480, 272);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(o, bg, 0);
+    lv_obj_add_flag(o, LV_OBJ_FLAG_CLICKABLE);   // nothing under it is touched
+    return off_scr = o;
+}
+
+static void off_stop_event(lv_event_t *e)
+{
+    (void)e;
+    stop_do();   // the shut down ends: MANUAL, the valve where it stopped, and the note says so
+}
+
+// Shutting down: "Closing valve" on black, a white bar filling
+// left to right as the valve closes, the seconds left, the plain STOP.
+static void off_show_closing(void)
+{
+    lv_obj_t *s = off_layer(lv_color_black(), 1);
+    ui_label(s, 0, 92, 480, &ui_font_16, lv_color_white(), LV_TEXT_ALIGN_CENTER, "Closing valve");
+    off_fill = bar_new(s, 124, lv_color_black());
+    lv_obj_t *t = lv_obj_get_parent(off_fill);
+    lv_obj_set_style_border_color(t, lv_color_white(), 0);
+    lv_obj_set_style_bg_color(off_fill, lv_color_white(), 0);
+    lv_obj_set_style_bg_grad_dir(off_fill, LV_GRAD_DIR_NONE, 0);
+    bar_set(off_fill, 0);
+    off_txt = ui_label(s, 0, 150, 480, &ui_font_12, lv_color_hex(0xD3D9E0), LV_TEXT_ALIGN_CENTER, "");
+    off_stop = ui_btn(s, 361, 216, 109, 48, UI_RED, "STOP", off_stop_event, NULL);
+    lv_obj_set_style_text_font(lv_obj_get_child(off_stop, 0), &ui_font_26, 0);
+    lv_obj_add_style(off_stop, &st_stop_op, LV_STATE_USER_2);
+    lv_obj_add_style(off_stop, &st_stop_op_pr, LV_STATE_USER_2 | LV_STATE_PRESSED);
+    lv_obj_add_state(off_stop, LV_STATE_USER_2);
+}
+
+// Turning on, every 30 ms: a tick pauses 90 to 360 ms (1 in 10), jumps 8 to
+// 17 % (2 in 10) or creeps 2 to 6 %; full, a 300 ms beat, then Home. About
+// 1.3 s, at most about 2.5 s.
+static void on_tick(lv_timer_t *t)
+{
+    (void)t;
+    if (on_hold > 0) {
+        on_hold--;
+        if (on_pct >= 100 && on_hold == 0)
+            off_close();
+        return;
+    }
+    uint32_t r = on_seed;
+    r ^= r << 13;
+    r ^= r >> 17;
+    r ^= r << 5;
+    on_seed = r;
+    switch (r % 10) {
+    case 0: on_hold = 3 + (int)((r >> 8) % 10); return;
+    case 1:
+    case 2: on_pct += 8 + (int)((r >> 8) % 10); break;
+    default: on_pct += 2 + (int)((r >> 8) % 5); break;
+    }
+    if (on_pct >= 100) {
+        on_pct = 100;
+        on_hold = 10;
+    }
+    bar_set(off_fill, on_pct);
+}
+
+static void off_show_on(void)
+{
+    lv_obj_t *s = off_layer(lv_color_white(), 3);
+    LV_IMAGE_DECLARE(ui_img_logo);
+    lv_obj_t *img = lv_image_create(s);
+    lv_image_set_src(img, &ui_img_logo);
+    lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 44);
+    off_fill = bar_new(s, 200, lv_color_hex(0xE6E8EC));
+    on_pct = on_hold = 0;
+    bar_set(off_fill, 0);
+    // Seeded from the clock so each turn-on looks different.
+    on_seed = lv_tick_get() | 1;
+    for (const char *c = rtclock_iso(); *c; c++)
+        on_seed = on_seed * 31 + (uint8_t)*c;
+    if (!on_seed)
+        on_seed = 1;
+    lv_obj_t *v = ui_label(s, 0, 252, 470, &ui_font_12, lv_color_hex(0x9AA6B4), LV_TEXT_ALIGN_RIGHT, "");
+    lv_label_set_text(v, ui_fw_text());
+    if (!on_tmr)
+        on_tmr = lv_timer_create(on_tick, 30, NULL);
+}
+
+// A tap on the OFF screen: the second within OFF_TAP_MS turns it on.
+static void off_tap(lv_event_t *e)
+{
+    (void)e;
+    uint32_t now = lv_tick_get();
+    if (!off_tap_ms || lv_tick_diff(now, off_tap_ms) > OFF_TAP_MS) {
+        off_tap_ms = now ? now : 1;
+        return;
+    }
+    off_tap_ms = 0;
+    const char *why;
+    if (valve_turn_on(&why))
+        off_show_on();
+}
+
+static void off_show_off(void)
+{
+    lv_obj_t *s = off_layer(lv_color_black(), 2);
+    lv_obj_add_event_cb(s, off_tap, LV_EVENT_PRESSED, NULL);
+    off_draw(s);
+    off_tap_ms = 0;
+}
+
+/* Backlight, dimmed to last longer (rated 20,000 to 40,000 h at full):
+ * - 10 % after 10 min with no touch. The touch that brightens it does
+ *   nothing else (it reaches no button) until the finger lifts, except on
+ *   STOP, which always stops. A new fault, a new warning, the limit switch
+ *   question, the saved position offer and any message or network set
+ *   brighten it too.
+ * - Off while OFF, 30 s after the last touch (or the power-up). A tap lights
+ *   it and counts as the first tap of the double tap.
+ * Full again on every touch. The level is the SSD1963's PWM. */
+#define BL_FULL    255
+#define BL_DIM     26                       // 10 %
+#define BL_IDLE_MS (10u * 60u * 1000u)      // no touch for 10 min: dim
+#define BL_OFF_MS  30000u                   // OFF: dark 30 s after the last touch
+void lv_port_disp_backlight(uint8_t level);   // driver/display_lvgl.c
+static uint8_t bl_level = BL_FULL;          // the board lights it at full (lv_port_disp_light)
+static bool bl_swallow;                     // the touch that brightened it: not passed on until lifted
+static lv_indev_read_cb_t bl_read_prev;
+
+static void bl_apply(void)
+{
+    uint32_t idle = lv_display_get_inactive_time(NULL);
+    uint8_t want = off_kind == 2 ? (idle < BL_OFF_MS ? BL_FULL : 0) : idle < BL_IDLE_MS ? BL_FULL : BL_DIM;
+    if (want != bl_level) {
+        bl_level = want;
+        lv_port_disp_backlight(want);
+    }
+}
+
+void ui_wake(void)
+{
+    if (off_kind == 2)
+        return;   // OFF: only a touch lights it
+    lv_display_trigger_activity(NULL);
+    bl_apply();
+}
+
+// Every touch reading: a press on the dimmed screen brightens it and is
+// held back from LVGL until the finger lifts, except on STOP.
+static void bl_read(lv_indev_t *in, lv_indev_data_t *d)
+{
+    bl_read_prev(in, d);
+    if (d->state != LV_INDEV_STATE_PRESSED) {
+        bl_swallow = false;
+        return;
+    }
+    bool stop = d->point.x >= 361 && d->point.x < 470 && d->point.y >= 216 && d->point.y < 264;
+    if (bl_level == BL_DIM && off_kind != 2 && !stop)
+        bl_swallow = true;
+    lv_display_trigger_activity(NULL);
+    bl_apply();
+    if (bl_swallow)
+        d->state = LV_INDEV_STATE_RELEASED;
+}
+
+static void off_timer(lv_timer_t *t)
+{
+    (void)t;
+    if (off_kind == 3)
+        return;   // turning on: on_tick closes it
+    valve_mode_t m = valve_mode();
+    int want = m == VALVE_SHUTDOWN ? 1 : m == VALVE_OFF ? 2 : 0;
+    if (want != off_kind) {
+        if (!off_kind) {
+            // Popups close and the screens go back to Home under it, where
+            // they come back on.
+            if (cur != &ui_scr_home)
+                ui_home();
+            ui_overlay_close();
+        }
+        if (want == 1)
+            off_show_closing();
+        else if (want == 2)
+            off_show_off();
+        else
+            off_close();   // STOP, or a shut down that stopped: the screens again
+    }
+    if (off_kind == 1) {
+        int left, secs;
+        if (valve_shutdown_progress(&left, &secs)) {
+            bar_set(off_fill, 100 - left);   // fills as the valve closes
+            char b[40];
+            if (secs >= 100)   // "1030 s left" at 16 st/s
+                lv_snprintf(b, sizeof b, "%d min %d s left", secs / 60, secs % 60);
+            else if (secs >= 0)
+                lv_snprintf(b, sizeof b, "%d s left", secs);
+            else
+                b[0] = 0;
+            ui_set_text(off_txt, b);
+        }
+    }
+    bl_apply();   // every 100 ms: dim, or dark while OFF
+}
+
+void ui_init(void)
+{
+    num_font(&ui_num_12, &ui_font_12);   // the Events times
+    num_font(&ui_num_16, &ui_font_16);
+    num_font(&ui_num_26, &ui_font_26);
+    num_font(&ui_num_40, &ui_font_40);
+    styles_init();
+    home_scr = new_screen();
+    cur_scr = home_scr;
+    ui_scr_home.build(home_scr);
+    build_frame();
+    lv_screen_load(home_scr);
+    if (splash_scr) {
+        lv_obj_delete(splash_scr);
+        splash_scr = NULL;
+    }
+    frame_refresh();
+    off_timer(NULL);   // OFF at start: its screen before Home is drawn
+    lv_timer_create(refresh_timer, 500, NULL);
+    lv_timer_create(fast_timer, 100, NULL);
+    lv_timer_create(off_timer, 100, NULL);
+    // Drags start after 3 px, not LVGL's 10, so Help follows the finger sooner.
+    for (lv_indev_t *in = lv_indev_get_next(NULL); in; in = lv_indev_get_next(in)) {
+        lv_indev_set_scroll_limit(in, 3);
+        if (!bl_read_prev && lv_indev_get_type(in) == LV_INDEV_TYPE_POINTER) {   // the touch screen
+            bl_read_prev = lv_indev_get_read_cb(in);
+            lv_indev_set_read_cb(in, bl_read);
+        }
+    }
+}
