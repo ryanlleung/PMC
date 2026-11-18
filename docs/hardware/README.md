@@ -13,7 +13,7 @@ MikroE publishes a schematic PDF on each board's product page. These are the fil
 | Mikromedia 4 for STM32 Capacitive | MIKROE-3618 | [`mikromedia-4-for-stm32-capacitive-schematic.pdf`](schematics/mikromedia-4-for-stm32-capacitive-schematic.pdf), manual [`mikromedia-4-stm32-capacitive-manual.pdf`](schematics/mikromedia-4-stm32-capacitive-manual.pdf) |
 | Mikromedia 4 Capacitive Shield | MIKROE-3631 | [`mikromedia-4-cap-mikrobus-shield-schematic.pdf`](schematics/mikromedia-4-cap-mikrobus-shield-schematic.pdf) |
 | Adapter Click | MIKROE-1432 | [`Adapter_click_v100_Schematic.pdf`](schematics/Adapter_click_v100_Schematic.pdf) |
-| Pressure 21 Click | Pressure 21 Click | [`Pressure_21_click_v100_Schematic.pdf`](schematics/Pressure_21_click_v100_Schematic.pdf) |
+| Pressure 21 Click | MIKROE-5274 | [`Pressure_21_click_v100_Schematic.pdf`](schematics/Pressure_21_click_v100_Schematic.pdf) |
 | Stepper 3 Click | MIKROE-2035 | [`stepper-3-click-schematic-v103.pdf`](schematics/stepper-3-click-schematic-v103.pdf) |
 | Boost 10 Click | MIKROE-6927 | [`boost-10-click-schematic.pdf`](schematics/boost-10-click-schematic.pdf) |
 | Power Monitor Click | MIKROE-4810 | [`power-monitor-click-v100-schematic.pdf`](schematics/power-monitor-click-v100-schematic.pdf) |
