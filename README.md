@@ -4,13 +4,13 @@ A pressure-based needle-valve controller for helium-flow cryostats.
 
 <img src="docs/screens/home-auto.png" width="480" alt="The Home screen in AUTO">
 
-Oxford Instruments cryostats (CF-10, CF-11, HM-2, AVM-1, AVM-2) draw helium through a needle valve driven by a geared stepper motor. The controller holds the pressure measured by a Druck transducer on the pumping line by moving that valve. It keeps the cryostat's existing transducer and valve.
+Oxford Instruments cryostats such as the CF-11 and CF-12 draw helium through a needle valve driven by a geared stepper motor. The controller holds the pressure measured by a Druck transducer on the pumping line by moving that valve. It keeps the cryostat's existing transducer and valve.
 
 Pressure is a rough proxy for the helium flow. The flow itself is not measured.
 
 ## At a glance
 
-| | |
+| Item | Detail |
 | --- | --- |
 | Controller | MikroE Mikromedia 4 (STM32F407ZG) with four Click boards. Bought modules only |
 | Operation | 4.3 in touchscreen: MANUAL (valve position in %) and AUTO (pressure held at a setpoint) |

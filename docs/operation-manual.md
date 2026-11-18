@@ -6,7 +6,7 @@ This manual covers day-to-day use of the iPC pressure controller: power-up, Shut
 
 | Field | Value |
 | --- | --- |
-| Equipment | iPC pressure-based needle-valve controller for helium-flow cryostats (CF-10, CF-11, HM-2, AVM-1, AVM-2) |
+| Equipment | iPC pressure-based needle-valve controller for helium-flow cryostats such as the CF-11 and CF-12 |
 | Hardware | MikroE Mikromedia 4 for STM32F4 with the Adapter, Pressure 21, Stepper 3, Boost 10 and Power Monitor Click boards; Druck UNIK 5000 15 psia transducer; geared unipolar stepper on the needle valve |
 | Firmware | 0.18.0 |
 | Sources | Firmware source in `firmware/`, `docs/firmware.md`, `docs/text-port-commands.md` and `docs/modbus-register-map.md` |
